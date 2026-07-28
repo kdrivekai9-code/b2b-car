@@ -1,0 +1,81 @@
+<%- include('../partials/header') %>
+<div class="page-head-row">
+  <div>
+    <h1 class="page-title">문의 상세 #<%= inquiry.id %></h1>
+    <p class="page-sub">등록일 <%= inquiry.created_at %> · 요청자 <%= inquiry.user_name || '-' %></p>
+  </div>
+  <div class="page-head-actions">
+    <a class="btn secondary" href="/inquiries">목록으로</a>
+    <% if (!inquiry.converted_order_id) { %>
+      <form method="POST" action="/inquiries/<%= inquiry.id %>/convert-order" style="display:inline;" onsubmit="return confirm('이 문의를 오더로 전환하시겠습니까?');">
+        <button class="btn" type="submit">오더로 전환</button>
+      </form>
+    <% } else { %>
+      <a class="btn" href="/orders/<%= inquiry.converted_order_id %>">전환된 오더 보기 (<%= inquiry.converted_oid || inquiry.converted_order_id %>)</a>
+    <% } %>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:10px;">
+  <div class="row">
+    <div class="field"><label>상태</label><div><b><%= inquiry.status %></b></div></div>
+    <div class="field"><label>카테고리</label><div><%= inquiry.category %></div></div>
+    <div class="field"><label>지사</label><div><%= inquiry.branch_name || '-' %></div></div>
+    <div class="field"><label>법인</label><div><%= inquiry.corporation_name || '-' %></div></div>
+  </div>
+  <form method="POST" action="/inquiries/<%= inquiry.id %>/status" class="row" style="align-items:flex-end; margin-top:8px;">
+    <div class="field">
+      <label>상태 변경</label>
+      <select name="status">
+        <% ['new','in_progress','waiting_customer','answered','converted_to_order','closed'].forEach(function(s){ %>
+          <option value="<%= s %>" <%= inquiry.status === s ? 'selected' : '' %>><%= s %></option>
+        <% }) %>
+      </select>
+    </div>
+    <div class="field" style="max-width:140px;"><button class="btn secondary" type="submit">저장</button></div>
+  </form>
+</div>
+
+<div class="card" style="margin-bottom:10px;">
+  <div class="section-title">문의 원문</div>
+  <p style="white-space:pre-wrap;line-height:1.7;"><%= inquiry.inquiry_text %></p>
+</div>
+
+<div class="card">
+  <div class="section-title">요금 문의 분석 정보</div>
+  <div class="row">
+    <div class="field"><label>원본 출발지</label><div><%= inquiry.origin_text || '-' %></div></div>
+    <div class="field"><label>원본 도착지</label><div><%= inquiry.destination_text || '-' %></div></div>
+    <div class="field"><label>차종</label><div><%= inquiry.vehicle_type || '-' %></div></div>
+  </div>
+  <div class="row">
+    <div class="field"><label>확정 출발지</label><div><%= inquiry.resolved_origin || '-' %></div></div>
+    <div class="field"><label>확정 도착지</label><div><%= inquiry.resolved_destination || '-' %></div></div>
+  </div>
+  <div class="row">
+    <div class="field"><label>예상 거리(km)</label><div><%= inquiry.estimated_distance_km != null ? inquiry.estimated_distance_km : '-' %></div></div>
+    <div class="field"><label>총 예상 요금</label><div><%= inquiry.estimated_fare != null ? formatMoney(inquiry.estimated_fare) : '-' %></div></div>
+    <div class="field"><label>도선료</label><div><%= inquiry.estimated_ferry_fare != null ? formatMoney(inquiry.estimated_ferry_fare) : '-' %></div></div>
+    <div class="field"><label>요금 기준</label><div><%= inquiry.fare_source || '-' %></div></div>
+  </div>
+  <div class="row">
+    <div class="field"><label>배편 필요 가능성</label><div><span class="badge <%= inquiry.has_ferry_leg ? 'red' : 'green' %>"><%= inquiry.has_ferry_leg ? '높음' : '없음' %></span></div></div>
+    <div class="field full">
+      <label>선박 구간</label>
+      <div>
+        <% if (ferryLegs && ferryLegs.length) { %>
+          <% ferryLegs.forEach(function(leg, idx){ %>
+            <div style="margin-bottom:6px;white-space:pre-wrap;line-height:1.6;">
+              <b><%= idx + 1 %>)</b>
+              출발항: <%= leg.fromPort || '확인중' %> / 도착항: <%= leg.toPort || '확인중' %>
+              <% if (leg.summary) { %> · <%= leg.summary %><% } %>
+            </div>
+          <% }) %>
+        <% } else { %>
+          -
+        <% } %>
+      </div>
+    </div>
+  </div>
+</div>
+<%- include('../partials/footer') %>

@@ -1,0 +1,21 @@
+<%- include('../partials/header') %>
+<div class="page-head-row">
+  <div>
+    <h1 class="page-title">FAQ 문의</h1>
+    <p class="page-sub">궁금하신 내용을 입력하시면 등록된 지식 항목 중 가장 관련 있는 답변을 찾아드립니다.</p>
+  </div>
+</div>
+
+<div class="card ai-chat-card faq-chat-card">
+  <div class="ai-chat-header">💬 FAQ 챗봇</div>
+  <div class="ai-chat-messages" id="faqMessages">
+    <div class="ai-chat-bubble ai-bot">안녕하세요! 탁송 관련 궁금하신 점을 입력해주세요.</div>
+  </div>
+  <div class="ai-chat-input-row">
+    <textarea id="faqQuestionInput" placeholder="예: 탁송 취소는 언제까지 가능한가요?" style="min-height:60px;"></textarea>
+    <button type="button" class="btn" id="faqAskBtn">질문하기</button>
+  </div>
+</div>
+
+<script src="/js/faq-chat.js"></script>
+<%- include('../partials/footer') %>

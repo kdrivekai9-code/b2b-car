@@ -1,0 +1,30 @@
+<%- include('../partials/header') %>
+<div class="page-head-row">
+  <div>
+    <h1 class="page-title">거점 별칭 관리</h1>
+    <p class="page-sub">AI 오더접수 시 주소 인식을 돕기 위한 장소명 동의어 사전입니다.</p>
+  </div>
+  <div class="page-head-actions">
+    <a class="btn" href="/location-aliases/new">+ 별칭 등록</a>
+  </div>
+</div>
+<div class="card">
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>거점명</th><th>지사</th><th>주소</th><th>별칭</th><th>관리</th></tr></thead>
+    <tbody>
+      <% if (aliases.length === 0) { %><tr><td colspan="5" class="empty">등록된 거점 별칭이 없습니다.</td></tr><% } %>
+      <% aliases.forEach(function(a){ %>
+        <tr>
+          <td><%= a.canonical_name %></td>
+          <td><%= a.branch_name %></td>
+          <td><%= a.address %></td>
+          <td><%= a.aliases || '-' %></td>
+          <td><a class="btn small secondary" href="/location-aliases/<%= a.id %>/edit">수정</a></td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+  </div>
+</div>
+<%- include('../partials/footer') %>

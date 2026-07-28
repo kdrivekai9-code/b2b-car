@@ -1,0 +1,23 @@
+<%- include('../partials/header') %>
+<div class="page-head-row">
+  <div>
+    <h1 class="page-title"><%= branch.name %> · 추가기능</h1>
+    <p class="page-sub">지사 단위의 부가 권한/기능을 설정하세요.</p>
+  </div>
+  <div class="page-head-actions">
+    <a class="btn secondary" href="/branches">지사 목록으로</a>
+    <button class="btn" type="submit" form="extraForm">저장</button>
+  </div>
+</div>
+<%- include('../partials/branch_tabs', { branch: branch, active: 'extra' }) %>
+
+<div class="card">
+  <form id="extraForm" method="POST" action="/branches/<%= branch.id %>/extra-settings">
+    <div class="section-title">🔒 사진 보기 권한 (기본: 전체 차단)</div>
+    <div class="row">
+      <div class="field"><label class="checkline"><input type="checkbox" name="client_can_view" value="1" <%= settings.client_can_view ? 'checked' : '' %>> 고객사(딜러)에게 사진 열람 허용</label></div>
+      <div class="field"><label class="checkline"><input type="checkbox" name="branch_manager_can_view" value="1" <%= settings.branch_manager_can_view ? 'checked' : '' %>> 지사장에게 사진 열람 허용</label></div>
+    </div>
+  </form>
+</div>
+<%- include('../partials/footer') %>

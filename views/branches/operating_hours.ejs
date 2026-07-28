@@ -1,0 +1,71 @@
+<%- include('../partials/header') %>
+<div class="page-head-row">
+  <div>
+    <h1 class="page-title"><%= branch.name %> · 운영시간 설정</h1>
+    <p class="page-sub">운영시간 외에는 오더 등록이 자동으로 차단됩니다. 설정하지 않으면 제한 없이 등록 가능합니다.</p>
+  </div>
+  <div class="page-head-actions">
+    <a class="btn secondary" href="/branches">지사 목록으로</a>
+    <button class="btn" type="submit" form="hoursForm">저장</button>
+  </div>
+</div>
+<%- include('../partials/branch_tabs', { branch: branch, active: 'hours' }) %>
+
+<div class="card">
+  <form id="hoursForm" method="POST" action="/branches/<%= branch.id %>/operating-hours">
+    <div class="section-title">🕒 평일 / 주말</div>
+    <div class="row">
+      <div class="field"><label>평일 오픈</label><input type="time" name="weekday_open" value="<%= hours.weekday.open_time || '' %>"></div>
+      <div class="field"><label>평일 마감</label><input type="time" name="weekday_close" value="<%= hours.weekday.close_time || '' %>"></div>
+      <div class="field"><label class="checkline" style="margin-top:24px;"><input type="checkbox" name="weekday_closed" <%= hours.weekday.is_closed ? 'checked' : '' %>> 평일 휴무</label></div>
+    </div>
+    <div class="row">
+      <div class="field"><label>주말 오픈</label><input type="time" name="weekend_open" value="<%= hours.weekend.open_time || '' %>"></div>
+      <div class="field"><label>주말 마감</label><input type="time" name="weekend_close" value="<%= hours.weekend.close_time || '' %>"></div>
+      <div class="field"><label class="checkline" style="margin-top:24px;"><input type="checkbox" name="weekend_closed" <%= hours.weekend.is_closed ? 'checked' : '' %>> 주말 휴무</label></div>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <div class="section-title">📅 일자별 예외 (임시휴무 · 특별 운영)</div>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>날짜</th><th>휴무</th><th>오픈</th><th>마감</th><th>메모</th><th>관리</th></tr></thead>
+    <tbody>
+      <% if (exceptions.length === 0) { %><tr><td colspan="6" class="empty">등록된 예외일이 없습니다.</td></tr><% } %>
+      <% exceptions.forEach(function(e){ %>
+        <tr>
+          <td><%= e.date %></td>
+          <td><%= e.is_closed ? '휴무' : '정상운영' %></td>
+          <td><%= e.open_time || '-' %></td>
+          <td><%= e.close_time || '-' %></td>
+          <td><%= e.note || '-' %></td>
+          <td>
+            <form method="POST" action="/branches/<%= branch.id %>/operating-hours/exceptions/<%= e.id %>/delete">
+              <button class="btn small secondary" type="submit">삭제</button>
+            </form>
+          </td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="section-title small">예외일 추가</div>
+  <form method="POST" action="/branches/<%= branch.id %>/operating-hours/exceptions">
+    <div class="row">
+      <div class="field"><label>날짜 *</label><input type="date" name="date" required></div>
+      <div class="field"><label class="checkline" style="margin-top:24px;"><input type="checkbox" name="is_closed" value="1" checked onchange="document.getElementById('excOpenClose').style.display=this.checked?'none':'flex'"> 휴무</label></div>
+    </div>
+    <div class="row" id="excOpenClose" style="display:none;">
+      <div class="field"><label>오픈</label><input type="time" name="open_time"></div>
+      <div class="field"><label>마감</label><input type="time" name="close_time"></div>
+    </div>
+    <div class="row">
+      <div class="field full"><label>메모 (선택)</label><input type="text" name="note" placeholder="예) 창립기념일 임시휴무"></div>
+    </div>
+    <button class="btn small" type="submit">예외일 추가</button>
+  </form>
+</div>
+<%- include('../partials/footer') %>

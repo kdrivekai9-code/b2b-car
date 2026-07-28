@@ -1,0 +1,20 @@
+<%- include('../partials/header') %>
+<div class="page-head-row">
+  <div>
+    <h1 class="page-title"><%= notice.title %></h1>
+    <p class="page-sub"><%= notice.author_name || '-' %> · <%= notice.created_at %></p>
+  </div>
+  <div class="page-head-actions">
+    <a class="btn secondary" href="/notices">&larr; 목록으로</a>
+    <% if (currentUser.role === 'admin') { %>
+      <a class="btn secondary" href="/notices/<%= notice.id %>/edit">수정</a>
+      <form method="POST" action="/notices/<%= notice.id %>/delete" onsubmit="return confirm('삭제하시겠습니까?');" style="display:inline;">
+        <button class="btn danger" type="submit">삭제</button>
+      </form>
+    <% } %>
+  </div>
+</div>
+<div class="card">
+  <p style="white-space:pre-wrap;line-height:1.7;font-size:14px;"><%= notice.content %></p>
+</div>
+<%- include('../partials/footer') %>

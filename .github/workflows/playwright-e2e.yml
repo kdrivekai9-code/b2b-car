@@ -1,0 +1,148 @@
+name: Playwright E2E
+
+on:
+  pull_request:
+    paths:
+      - 'tests/manual/**'
+      - 'public/js/**'
+      - 'routes/**'
+      - 'views/orders/**'
+      - 'lib/**'
+      - 'middleware/**'
+      - 'server.js'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/playwright-e2e.yml'
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: 'Preflight/E2E 대상 URL'
+        required: false
+        default: 'http://127.0.0.1:3000'
+      login_id_admin:
+        description: '관리자 로그인 ID'
+        required: false
+        default: 'admin'
+      login_id_branch_manager:
+        description: '지사장 로그인 ID'
+        required: false
+        default: 'seoul_manager'
+      login_id_client:
+        description: '고객사 로그인 ID'
+        required: false
+        default: 'seoulmotors'
+      login_password_admin:
+        description: '관리자 비밀번호(선택: 미입력 시 secret 우선)'
+        required: false
+        default: ''
+      login_password_branch_manager:
+        description: '지사장 비밀번호(선택: 미입력 시 secret 우선)'
+        required: false
+        default: ''
+      login_password_client:
+        description: '고객사 비밀번호(선택: 미입력 시 secret 우선)'
+        required: false
+        default: ''
+
+jobs:
+  e2e:
+    if: ${{ secrets.DATABASE_URL != '' }}
+    runs-on: ubuntu-latest
+    env:
+      NODE_ENV: test
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      SESSION_SECRET: ${{ secrets.SESSION_SECRET != '' && secrets.SESSION_SECRET || 'ci-session-secret' }}
+      PLAYWRIGHT_BROWSERS_PATH: .playwright-browsers
+      E2E_BASE_URL: http://127.0.0.1:3000
+      LOGIN_BASE_URL: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.base_url || 'http://127.0.0.1:3000' }}
+      LOGIN_ID_ADMIN: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_id_admin || 'admin' }}
+      LOGIN_ID_BRANCH_MANAGER: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_id_branch_manager || 'seoul_manager' }}
+      LOGIN_ID_CLIENT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_id_client || 'seoulmotors' }}
+      LOGIN_PASSWORD_ADMIN: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_password_admin != '' && github.event.inputs.login_password_admin || secrets.LOGIN_PASSWORD_ADMIN != '' && secrets.LOGIN_PASSWORD_ADMIN || 'Admin!2345' }}
+      LOGIN_PASSWORD_BRANCH_MANAGER: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_password_branch_manager != '' && github.event.inputs.login_password_branch_manager || secrets.LOGIN_PASSWORD_BRANCH_MANAGER != '' && secrets.LOGIN_PASSWORD_BRANCH_MANAGER || 'Manager!2345' }}
+      LOGIN_PASSWORD_CLIENT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_password_client != '' && github.event.inputs.login_password_client || secrets.LOGIN_PASSWORD_CLIENT != '' && secrets.LOGIN_PASSWORD_CLIENT || 'Client!2345' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Seed demo data
+        run: npm run seed
+
+      - name: Start server
+        run: |
+          npm start > server.log 2>&1 &
+          echo $! > server.pid
+
+      - name: Wait for server
+        run: |
+          for i in {1..60}; do
+            if curl -fsS http://127.0.0.1:3000/login > /dev/null; then
+              echo "Server is ready"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Server did not become ready in time"
+          cat server.log || true
+          exit 1
+
+      - name: Run preflight login gate
+        env:
+          PREFLIGHT_REPORT_PATH: artifacts/preflight-report.json
+          PREFLIGHT_SUMMARY_PATH: artifacts/preflight-summary.md
+        run: npm run check:preflight
+
+      - name: Run Playwright test
+        run: npm run e2e
+
+      - name: Upload server log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-log
+          path: server.log
+
+      - name: Upload preflight report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: preflight-report
+          path: artifacts/preflight-report.json
+          if-no-files-found: warn
+
+      - name: Upload preflight summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: preflight-summary
+          path: artifacts/preflight-summary.md
+          if-no-files-found: warn
+
+      - name: Stop server
+        if: always()
+        run: |
+          if [ -f server.pid ]; then
+            kill "$(cat server.pid)" || true
+          fi
+
+  e2e-skipped-no-db:
+    if: ${{ secrets.DATABASE_URL == '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Skip message
+        run: |
+          echo "DATABASE_URL secret is not configured."
+          echo "Playwright E2E job was skipped."

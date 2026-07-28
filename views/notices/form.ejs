@@ -1,0 +1,18 @@
+<%- include('../partials/header') %>
+<div class="page-head-row">
+  <div>
+    <h1 class="page-title"><%= title %></h1>
+    <p class="page-sub">시스템 공지 내용을 작성하세요.</p>
+  </div>
+  <div class="page-head-actions">
+    <a class="btn secondary" href="/notices">취소</a>
+    <button class="btn" type="submit" form="noticeForm">저장</button>
+  </div>
+</div>
+<div class="card">
+  <form id="noticeForm" method="POST" action="<%= mode === 'create' ? '/notices' : '/notices/' + notice.id %>">
+    <div class="field full"><label>제목 *</label><input type="text" name="title" value="<%= notice.title || '' %>" required></div>
+    <div class="field full"><label>내용 *</label><textarea name="content" required style="min-height:200px;"><%= notice.content || '' %></textarea></div>
+  </form>
+</div>
+<%- include('../partials/footer') %>

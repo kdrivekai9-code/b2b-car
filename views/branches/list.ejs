@@ -1,0 +1,38 @@
+<%- include('../partials/header') %>
+<div class="page-head-row">
+  <div>
+    <h1 class="page-title">지사 관리</h1>
+    <p class="page-sub">등록된 지사(가맹점/거래처) 목록을 관리합니다.</p>
+  </div>
+  <div class="page-head-actions">
+    <a class="btn" href="/branches/new">+ 지사 등록</a>
+  </div>
+</div>
+<%- include('../partials/branch_tabs', { active: 'list' }) %>
+<div class="card">
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>지사명</th><th>코드</th><th>대표번호</th><th>주소</th><th>담당자</th><th>상태</th><th>관리</th></tr></thead>
+    <tbody>
+      <% if (branches.length === 0) { %><tr><td colspan="7" class="empty">등록된 지사가 없습니다.</td></tr><% } %>
+      <% branches.forEach(function(b){ %>
+        <tr>
+          <td><%= b.name %></td>
+          <td><%= b.code %></td>
+          <td><%= b.main_phone || '-' %></td>
+          <td><%= b.address || '-' %></td>
+          <td><%= b.contact_name || '-' %></td>
+          <td><span class="badge <%= b.status === 'active' ? 'green' : 'gray' %>"><%= b.status === 'active' ? '활성' : '비활성' %></span></td>
+          <td>
+            <a class="btn small secondary" href="/branches/<%= b.id %>/edit">수정</a>
+            <form style="display:inline" method="POST" action="/branches/<%= b.id %>/toggle">
+              <button class="btn small secondary" type="submit"><%= b.status === 'active' ? '비활성화' : '활성화' %></button>
+            </form>
+          </td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+  </div>
+</div>
+<%- include('../partials/footer') %>

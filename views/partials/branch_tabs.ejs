@@ -1,0 +1,37 @@
+<%
+  const tabDefs = [
+    { key: 'basic', label: '기본 정보', path: 'edit' },
+    { key: 'payment', label: '결제방식 설정', path: 'payment-methods' },
+    { key: 'hours', label: '운영시간 설정', path: 'operating-hours' },
+    { key: 'fare', label: '요금표 설정', path: 'fare-rules' },
+    { key: 'status', label: '오더 상태 설정', path: 'order-status' },
+    { key: 'photo', label: '사진 업로드 안내', path: 'photo-settings' },
+    { key: 'extra', label: '추가기능', path: 'extra-settings' },
+  ];
+  const branchList = typeof branches !== 'undefined' ? branches : [];
+  const targetBranch = (typeof branch !== 'undefined' && branch && branch.id) ? branch : (branchList.length ? branchList[0] : null);
+  const activeDef = tabDefs.find(function (t) { return t.key === active; });
+  const switchPath = (activeDef && activeDef.path) ? activeDef.path : 'edit';
+%>
+<div class="tabs branch-tabs">
+  <a href="/branches" class="<%= active === 'list' ? 'active' : '' %>">지사 관리</a>
+  <% if (targetBranch) { %>
+    <% tabDefs.forEach(function (t) { %>
+      <a href="/branches/<%= targetBranch.id %>/<%= t.path %>" class="<%= active === t.key ? 'active' : '' %>"><%= t.label %></a>
+    <% }) %>
+  <% } %>
+  <% if (branchList.length > 1 && targetBranch) { %>
+    <select id="branchTabSwitch" class="branch-tab-switch">
+      <% branchList.forEach(function (b) { %>
+        <option value="<%= b.id %>" <%= String(targetBranch.id) === String(b.id) ? 'selected' : '' %>><%= b.name %></option>
+      <% }) %>
+    </select>
+  <% } %>
+</div>
+<% if (branchList.length > 1 && targetBranch) { %>
+  <script>
+    document.getElementById('branchTabSwitch').addEventListener('change', function () {
+      window.location.href = '/branches/' + this.value + '/<%= switchPath %>';
+    });
+  </script>
+<% } %>

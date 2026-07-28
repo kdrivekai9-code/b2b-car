@@ -1,0 +1,36 @@
+<%- include('../partials/header') %>
+<div class="page-head-row">
+  <div>
+    <h1 class="page-title">법인 관리</h1>
+    <p class="page-sub">지사에 소속된 법인 목록입니다.</p>
+  </div>
+  <div class="page-head-actions">
+    <a class="btn" href="/groups/new">+ 법인 등록</a>
+  </div>
+</div>
+<div class="card">
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>법인명</th><th>소속 지사</th><th>대표번호</th><th>사업자번호</th><th>등록일</th><th>관리</th></tr></thead>
+    <tbody>
+      <% if (groups.length === 0) { %><tr><td colspan="6" class="empty">등록된 법인이 없습니다.</td></tr><% } %>
+      <% groups.forEach(function(g){ %>
+        <tr>
+          <td><%= g.name %></td>
+          <td><%= g.branch_name %></td>
+          <td><%= g.main_phone || '-' %></td>
+          <td><%= g.business_registration_number || '-' %></td>
+          <td><%= g.created_at %></td>
+          <td>
+            <div class="table-actions">
+              <a class="btn small secondary" href="/groups/<%= g.id %>/edit">법인정보</a>
+              <a class="btn small" href="/groups/<%= g.id %>/users">사용자 리스트</a>
+            </div>
+          </td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+  </div>
+</div>
+<%- include('../partials/footer') %>

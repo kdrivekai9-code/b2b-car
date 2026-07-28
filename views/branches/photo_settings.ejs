@@ -1,0 +1,21 @@
+<%- include('../partials/header') %>
+<div class="page-head-row">
+  <div>
+    <h1 class="page-title"><%= branch.name %> · 사진 업로드 안내</h1>
+    <p class="page-sub">기사 사진 업로드 화면에 표시할 안내문구와 안내 이미지를 설정하세요.</p>
+  </div>
+  <div class="page-head-actions">
+    <a class="btn secondary" href="/branches">지사 목록으로</a>
+    <button class="btn" type="submit" form="photoForm">저장</button>
+  </div>
+</div>
+<%- include('../partials/branch_tabs', { branch: branch, active: 'photo' }) %>
+
+<div class="card">
+  <form id="photoForm" method="POST" action="/branches/<%= branch.id %>/photo-settings">
+    <div class="section-title">🖼 사진 업로드 안내</div>
+    <div class="field full"><label>안내 문구</label><textarea name="guide_text" placeholder="예) 차량 인도 시점 4방향 사진을 촬영해주세요."><%= settings.guide_text || '' %></textarea></div>
+    <div class="field full"><label>안내 이미지 URL</label><input type="text" name="guide_image_url" value="<%= settings.guide_image_url || '' %>" placeholder="https://..."></div>
+  </form>
+</div>
+<%- include('../partials/footer') %>

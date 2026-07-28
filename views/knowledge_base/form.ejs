@@ -1,0 +1,31 @@
+<%- include('../partials/header') %>
+<div class="page-head-row">
+  <div>
+    <h1 class="page-title"><%= title %></h1>
+    <p class="page-sub">질문·답변을 입력하면 저장 시 자동으로 임베딩이 생성됩니다.</p>
+  </div>
+  <div class="page-head-actions">
+    <a class="btn secondary" href="/knowledge-base">취소</a>
+    <button class="btn" type="submit" form="kbForm">저장</button>
+  </div>
+</div>
+
+<% if (typeof error !== 'undefined' && error) { %>
+  <div class="error-msg"><%= error %></div>
+<% } %>
+
+<div class="card">
+  <form id="kbForm" method="POST" action="<%= mode === 'create' ? '/knowledge-base' : '/knowledge-base/' + entry.id %>">
+    <div class="field">
+      <label>카테고리 <a href="/knowledge-base/categories" style="font-weight:normal;font-size:0.85em;">(카테고리 관리)</a></label>
+      <select name="category">
+        <% categories.forEach(function(c){ %>
+          <option value="<%= c.name %>" <%= entry.category === c.name ? 'selected' : '' %>><%= c.name %></option>
+        <% }) %>
+      </select>
+    </div>
+    <div class="field full"><label>질문 *</label><input type="text" name="question" required placeholder="예: 탁송 취소는 언제까지 가능한가요?" value="<%= entry.question || '' %>"></div>
+    <div class="field full"><label>답변 *</label><textarea name="answer" required placeholder="예: 기사 배정 전까지는 위약금 없이 취소 가능합니다." style="min-height:140px;"><%= entry.answer || '' %></textarea></div>
+  </form>
+</div>
+<%- include('../partials/footer') %>

@@ -1,0 +1,437 @@
+<%- include('../partials/header') %>
+<% const statusLabel = { bot: '봇 응대중', needs_agent: '상담원 호출', agent_active: '상담원 응대중', closed: '종료' }; %>
+<% const statusBadge = { bot: 'gray', needs_agent: 'red', agent_active: 'blue', closed: 'dark' }; %>
+<%
+function formatChatTime(raw) {
+  var m = String(raw || '').match(/(\d{1,2}):(\d{2})/);
+  if (!m) return '';
+  var h = Number(m[1]);
+  var mm = m[2];
+  var ampm = h < 12 ? '오전' : '오후';
+  var h12 = h % 12 || 12;
+  return ampm + ' ' + h12 + ':' + mm;
+}
+function readStateText(msg) {
+  if (!msg) return '';
+  if (msg.sender === 'user') return msg.read_by_agent_at ? '읽음' : '미읽음';
+  if (msg.sender === 'agent') return msg.read_by_user_at ? '읽음' : '미읽음';
+  return '';
+}
+%>
+
+<div class="page-head-row">
+  <div>
+    <h1 class="page-title">상담 #<%= session.id %> <span class="badge <%= statusBadge[session.status] || 'gray' %>"><%= statusLabel[session.status] || session.status %></span></h1>
+    <p class="page-sub">고객: <%= session.user_name || '-' %> (<%= session.user_role || '-' %>)<%= session.user_phone ? ' · ' + session.user_phone : '' %></p>
+  </div>
+  <div class="page-head-actions">
+    <a class="btn secondary" href="/chat/sessions">← 목록으로</a>
+    <a class="btn secondary" href="/orders/ai-intake">AI 접수 화면</a>
+  </div>
+</div>
+
+<% if (error) { %><div class="error-msg" style="margin-bottom:10px;"><%= error %></div><% } %>
+<% if (notice) { %><div class="success-msg" style="margin-bottom:10px;"><%= notice %></div><% } %>
+
+<div class="chat-workspace-grid">
+  <section class="card chat-workspace-chat">
+    <div class="session-meta">
+      <span>요청 기능: <b><%= session.requested_feature || '-' %></b></span>
+      <span>담당 상담원: <b id="assignedAgentLabel"><%= session.agent_name || '미배정' %></b></span>
+      <span>생성일시: <b><%= session.created_at %></b></span>
+      <span>최근 업데이트: <b><%= session.updated_at %></b></span>
+    </div>
+
+    <div class="session-meta" style="margin-top:-4px;">
+      <form method="POST" action="/chat/sessions/<%= session.id %>/assign-self" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <button class="btn small secondary" type="submit">내가 담당하기</button>
+      </form>
+      <form method="POST" action="/chat/sessions/<%= session.id %>/assign" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <label for="assign_agent_id" style="font-size:12px;color:var(--muted);">담당자 변경</label>
+        <select id="assign_agent_id" name="agent_id" required>
+          <option value="">상담원 선택</option>
+          <% agents.forEach(function(a){ %>
+            <option value="<%= a.id %>" <%= String(session.assigned_agent_id) === String(a.id) ? 'selected' : '' %>><%= a.name %></option>
+          <% }) %>
+        </select>
+        <button class="btn small secondary" type="submit">지정</button>
+      </form>
+    </div>
+
+    <div class="card chat-session-card" style="box-shadow:none;border-style:dashed;margin-bottom:0;">
+      <div class="ai-chat-messages" id="sessionMessages">
+        <% var senderLabel = { user: '고객', agent: '상담원', bot: 'AI', system: '시스템' }; %>
+        <% var senderClass = { user: 'ai-user', agent: 'ai-agent' }; %>
+        <% messages.forEach(function(m){ %>
+          <div class="ai-chat-bubble <%= senderClass[m.sender] || 'ai-bot' %>" data-id="<%= m.id %>">
+            <div class="bubble-meta">
+              <span class="bubble-label"><%= senderLabel[m.sender] || m.sender %></span>
+              <span class="bubble-time"><%= formatChatTime(m.created_at) %></span>
+              <% if (readStateText(m)) { %>
+                <span class="bubble-read <%= readStateText(m) === '미읽음' ? 'unread' : '' %>"><%= readStateText(m) %></span>
+              <% } %>
+            </div>
+            <%= m.message %>
+          </div>
+        <% }) %>
+      </div>
+    </div>
+
+    <% if (session.status !== 'closed') { %>
+    <form class="chat-reply-row" method="POST" action="/chat/sessions/<%= session.id %>/reply" id="agentReplyForm">
+      <textarea name="text" id="agentReplyText" placeholder="상담원으로 답변을 입력하세요... (Enter 전송 / Shift+Enter 줄바꿈)" required></textarea>
+      <button class="btn" type="submit" id="agentReplySendBtn">전송</button>
+    </form>
+    <div id="agentReplyError" class="chat-inline-error" style="display:none;"></div>
+    <div style="margin-top:10px;display:flex;gap:8px;" id="sessionActionButtons">
+      <form method="POST" action="/chat/sessions/<%= session.id %>/return-to-bot" id="returnToBotForm" style="<%= session.status === 'agent_active' ? '' : 'display:none;' %>">
+        <button class="btn small secondary" type="submit">봇에게 되돌리기</button>
+      </form>
+      <form method="POST" action="/chat/sessions/<%= session.id %>/close" onsubmit="return confirm('이 상담을 종료하시겠습니까?');">
+        <button class="btn small secondary" type="submit">상담 종료</button>
+      </form>
+    </div>
+    <% } %>
+  </section>
+
+  <section class="card chat-workspace-order">
+    <div class="chat-order-head">
+      <h2>접수 마무리</h2>
+      <p class="page-sub">접수 마무리 섹션은 상담관리 화면(카드 보기)으로 이동되었습니다.</p>
+      <a class="btn" href="/chat/sessions?view=card">상담관리에서 접수하기</a>
+    </div>
+  </section>
+</div>
+
+<script>
+(function () {
+  var messagesEl = document.getElementById('sessionMessages');
+  var lastId = <%- toScriptJson(messages.length ? messages[messages.length - 1].id : 0) %>;
+  var labelBySender = { user: '고객', bot: 'AI', agent: '상담원', system: '시스템' };
+  var classBySender = { user: 'ai-user', bot: 'ai-bot', agent: 'ai-agent', system: 'ai-bot' };
+  var currentUserName = <%- toScriptJson(currentUser.name) %>;
+
+  function formatChatTime(raw) {
+    var m = String(raw || '').match(/(\d{1,2}):(\d{2})/);
+    if (!m) return '';
+    var h = Number(m[1]);
+    var mm = m[2];
+    var ampm = h < 12 ? '오전' : '오후';
+    var h12 = h % 12 || 12;
+    return ampm + ' ' + h12 + ':' + mm;
+  }
+
+  function readStateText(msg) {
+    if (!msg) return '';
+    if (msg.sender === 'user') return msg.read_by_agent_at ? '읽음' : '미읽음';
+    if (msg.sender === 'agent') return msg.read_by_user_at ? '읽음' : '미읽음';
+    return '';
+  }
+
+  function appendMessage(m) {
+    if (!m || m.id <= lastId) return;
+    var div = document.createElement('div');
+    div.className = 'ai-chat-bubble ' + (classBySender[m.sender] || 'ai-bot');
+    div.dataset.id = m.id;
+
+    var meta = document.createElement('div');
+    meta.className = 'bubble-meta';
+
+    var labelSpan = document.createElement('span');
+    labelSpan.className = 'bubble-label';
+    labelSpan.textContent = labelBySender[m.sender] || m.sender;
+    meta.appendChild(labelSpan);
+
+    var timeText = formatChatTime(m.created_at);
+    if (timeText) {
+      var timeSpan = document.createElement('span');
+      timeSpan.className = 'bubble-time';
+      timeSpan.textContent = timeText;
+      meta.appendChild(timeSpan);
+    }
+
+    var readText = readStateText(m);
+    if (readText) {
+      var readSpan = document.createElement('span');
+      readSpan.className = 'bubble-read' + (readText === '미읽음' ? ' unread' : '');
+      readSpan.textContent = readText;
+      meta.appendChild(readSpan);
+    }
+
+    div.appendChild(meta);
+    div.appendChild(document.createTextNode(m.message));
+    messagesEl.appendChild(div);
+    lastId = m.id;
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  function catchUp() {
+    fetch('/chat/sessions/<%= session.id %>/poll?since=' + lastId)
+      .then(function (res) { return res.json(); })
+      .then(function (data) { (data.messages || []).forEach(appendMessage); })
+      .catch(function () {});
+  }
+
+  function markBubblesRead(bubbleClass) {
+    var spans = messagesEl.querySelectorAll('.ai-chat-bubble.' + bubbleClass + ' .bubble-read.unread');
+    spans.forEach(function (span) {
+      span.textContent = '읽음';
+      span.classList.remove('unread');
+    });
+  }
+
+  if (window.EventSource) {
+    var es = new EventSource('/chat/sessions/<%= session.id %>/stream');
+    es.onopen = catchUp;
+    es.onmessage = function (e) {
+      try {
+        var payload = JSON.parse(e.data);
+        if (payload && payload.type === 'read_receipt') {
+          markBubblesRead(payload.reader === 'agent' ? 'ai-user' : 'ai-agent');
+          return;
+        }
+        appendMessage(payload);
+      } catch (err) { /* noop */ }
+    };
+  }
+
+  var replyForm = document.getElementById('agentReplyForm');
+  var replyText = document.getElementById('agentReplyText');
+  var replySendBtn = document.getElementById('agentReplySendBtn');
+  var replyError = document.getElementById('agentReplyError');
+  var assignedAgentLabel = document.getElementById('assignedAgentLabel');
+  var returnToBotForm = document.getElementById('returnToBotForm');
+  var isSendingReply = false;
+
+  function setReplyError(text) {
+    if (!text) { replyError.style.display = 'none'; replyError.textContent = ''; return; }
+    replyError.textContent = text;
+    replyError.style.display = '';
+  }
+
+  function sendAgentReply() {
+    var text = replyText.value.trim();
+    if (!text || isSendingReply) return;
+    isSendingReply = true;
+    replySendBtn.disabled = true;
+    setReplyError('');
+
+    fetch('/chat/sessions/<%= session.id %>/reply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ text: text }),
+    })
+      .then(function (res) {
+        return res.json().catch(function () { return {}; }).then(function (data) {
+          if (!res.ok) throw new Error(data.error || '메시지 전송에 실패했습니다. 잠시 후 다시 시도해주세요.');
+          return data;
+        });
+      })
+      .then(function (data) {
+        if (data.message) appendMessage(data.message);
+        if (assignedAgentLabel) assignedAgentLabel.textContent = currentUserName;
+        if (returnToBotForm && data.status === 'agent_active') returnToBotForm.style.display = '';
+        replyText.value = '';
+      })
+      .catch(function (err) {
+        setReplyError((err && err.message) || '메시지 전송에 실패했습니다. 잠시 후 다시 시도해주세요.');
+      })
+      .finally(function () {
+        isSendingReply = false;
+        replySendBtn.disabled = false;
+      });
+  }
+
+  if (replyForm) {
+    replyForm.addEventListener('submit', function (e) {
+      e.preventDefault();
+      sendAgentReply();
+    });
+    replyText.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendAgentReply();
+      }
+    });
+  }
+
+  var waypointsWrap = document.getElementById('agentWaypointsWrap');
+  var addWaypointBtn = document.getElementById('agentAddWaypointBtn');
+  var waypointSeq = 0;
+
+  function geocode(query, onDone) {
+    fetch('/kakao/search?q=' + encodeURIComponent(query))
+      .then(function (res) { return res.json(); })
+      .then(function (data) { onDone(data.documents || []); })
+      .catch(function () { onDone([]); });
+  }
+
+  function mainAddressOf(r) { return r.road_address || r.jibun_address || ''; }
+  function resultLabel(r) {
+    if (r.type === 'place') {
+      var addr = mainAddressOf(r);
+      return r.place_name + (addr ? ' · ' + addr : '');
+    }
+    var main = mainAddressOf(r);
+    var sub = (r.road_address && r.jibun_address && r.road_address !== r.jibun_address) ? r.jibun_address : null;
+    return main + (sub ? ' (' + sub + ')' : '');
+  }
+
+  function renderAddressResults(resultsEl, inputEl, results) {
+    if (!resultsEl || !inputEl) return;
+    if (!results.length) {
+      resultsEl.innerHTML = '<div class="addr-result-item muted">검색 결과가 없습니다.</div>';
+      return;
+    }
+    resultsEl.innerHTML = '';
+    results.slice(0, 5).forEach(function (r) {
+      var item = document.createElement('div');
+      item.className = 'addr-result-item';
+      item.textContent = resultLabel(r);
+      item.addEventListener('click', function () {
+        inputEl.value = mainAddressOf(r);
+        resultsEl.innerHTML = '';
+      });
+      resultsEl.appendChild(item);
+    });
+  }
+
+  function searchAddressFor(targetInput, resultsEl) {
+    if (!targetInput || !resultsEl) return;
+    var q = String(targetInput.value || '').trim();
+    if (q.length < 2) {
+      resultsEl.innerHTML = '<div class="addr-result-item muted">두 글자 이상 입력해주세요.</div>';
+      return;
+    }
+    resultsEl.innerHTML = '<div class="addr-result-item muted">검색 중...</div>';
+    geocode(q, function (results) {
+      if (String(targetInput.value || '').trim() !== q) return;
+      renderAddressResults(resultsEl, targetInput, results);
+    });
+  }
+
+  function bindWaypointRemove(root) {
+    if (!root) return;
+    var btn = root.querySelector('.chat-waypoint-remove');
+    if (!btn) return;
+    btn.addEventListener('click', function () {
+      root.remove();
+    });
+  }
+
+  function createWaypointRow() {
+    waypointSeq += 1;
+    var key = 'agent_waypoint_' + waypointSeq;
+    var row = document.createElement('div');
+    row.className = 'chat-waypoint-item';
+    row.innerHTML =
+      '<div class="chat-waypoint-address-col">' +
+      '<div class="addr-input-row">' +
+      '<input type="text" name="waypoints[]" placeholder="경유지 주소" data-waypoint-address="1" id="' + key + '_address">' +
+      '<button type="button" class="btn small secondary chat-addr-search-btn" data-waypoint-search="1">🔍 검색</button>' +
+      '</div>' +
+      '<div class="addr-results"></div>' +
+      '</div>' +
+      '<input type="text" name="waypoint_contacts[]" placeholder="경유지 연락처 (선택)">' +
+      '<input type="text" name="waypoint_vehicle_numbers[]" placeholder="경유지 차량번호 (선택)">' +
+      '<input type="hidden" name="waypoint_details[]" value="">' +
+      '<button type="button" class="btn small secondary chat-waypoint-remove">삭제</button>';
+    bindWaypointRemove(row);
+    waypointsWrap.appendChild(row);
+  }
+
+  if (waypointsWrap) {
+    var items = waypointsWrap.querySelectorAll('.chat-waypoint-item');
+    items.forEach(bindWaypointRemove);
+  }
+  if (addWaypointBtn && waypointsWrap) {
+    addWaypointBtn.addEventListener('click', createWaypointRow);
+  }
+
+  function bindAddressSearchForButton(btn) {
+    if (!btn) return;
+    btn.addEventListener('click', function () {
+      var targetId = btn.getAttribute('data-target');
+      if (targetId) {
+        var input = document.getElementById(targetId);
+        var results = document.getElementById(targetId + '_results');
+        searchAddressFor(input, results);
+        return;
+      }
+      if (btn.getAttribute('data-waypoint-search') === '1') {
+        var row = btn.closest('.chat-waypoint-item');
+        if (!row) return;
+        var wpInput = row.querySelector('input[data-waypoint-address="1"]');
+        var wpResults = row.querySelector('.addr-results');
+        searchAddressFor(wpInput, wpResults);
+      }
+    });
+  }
+
+  var searchButtons = document.querySelectorAll('.chat-addr-search-btn');
+  searchButtons.forEach(bindAddressSearchForButton);
+
+  function bindAddressEnterSearch(input, button) {
+    if (!input || !button) return;
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        button.click();
+      }
+    });
+  }
+
+  bindAddressEnterSearch(document.getElementById('agent_origin_address'), document.querySelector('.chat-addr-search-btn[data-target="agent_origin_address"]'));
+  bindAddressEnterSearch(document.getElementById('agent_destination_address'), document.querySelector('.chat-addr-search-btn[data-target="agent_destination_address"]'));
+
+  if (waypointsWrap) {
+    waypointsWrap.querySelectorAll('.chat-waypoint-item').forEach(function (row) {
+      var input = row.querySelector('input[data-waypoint-address="1"]');
+      var btn = row.querySelector('.chat-addr-search-btn[data-waypoint-search="1"]');
+      bindAddressEnterSearch(input, btn);
+      if (btn) {
+        btn.dataset.bound = '1';
+      }
+    });
+
+    var observer = new MutationObserver(function (mutations) {
+      mutations.forEach(function (mutation) {
+        mutation.addedNodes.forEach(function (node) {
+          if (!(node instanceof HTMLElement)) return;
+          if (!node.classList.contains('chat-waypoint-item')) return;
+          var btn = node.querySelector('.chat-addr-search-btn[data-waypoint-search="1"]');
+          var input = node.querySelector('input[data-waypoint-address="1"]');
+          if (btn && btn.dataset.bound !== '1') {
+            bindAddressSearchForButton(btn);
+            btn.dataset.bound = '1';
+          }
+          bindAddressEnterSearch(input, btn);
+        });
+      });
+    });
+    observer.observe(waypointsWrap, { childList: true });
+  }
+
+  function normalizePhone(input) {
+    var digits = String(input.value || '').replace(/\D/g, '').slice(0, 11);
+    if (!digits) { input.value = ''; return; }
+    if (digits.length === 8) { input.value = digits.slice(0, 4) + '-' + digits.slice(4); return; }
+    if (digits.indexOf('02') === 0) {
+      if (digits.length <= 5) { input.value = digits.slice(0, 2) + '-' + digits.slice(2); return; }
+      if (digits.length <= 9) { input.value = digits.slice(0, 2) + '-' + digits.slice(2, 5) + '-' + digits.slice(5); return; }
+      input.value = digits.slice(0, 2) + '-' + digits.slice(2, 6) + '-' + digits.slice(6, 10);
+      return;
+    }
+    if (digits.length <= 6) { input.value = digits.slice(0, 3) + '-' + digits.slice(3); return; }
+    if (digits.length <= 10) { input.value = digits.slice(0, 3) + '-' + digits.slice(3, 6) + '-' + digits.slice(6); return; }
+    input.value = digits.slice(0, 3) + '-' + digits.slice(3, 7) + '-' + digits.slice(7, 11);
+  }
+
+  var phoneInputs = document.querySelectorAll('#agentOrderForm input[name="origin_contact"], #agentOrderForm input[name="destination_contact"], #agentOrderForm input[name="waypoint_contacts[]"]');
+  phoneInputs.forEach(function (input) {
+    input.addEventListener('input', function () { normalizePhone(input); });
+  });
+})();
+</script>
+
+<%- include('../partials/footer') %>

@@ -1,0 +1,44 @@
+<%- include('../partials/header') %>
+<div class="page-head-row">
+  <div>
+    <h1 class="page-title">법인 사용자 리스트</h1>
+    <p class="page-sub"><b><%= group.name %></b>에 등록된 사용자 목록입니다.</p>
+  </div>
+  <div class="page-head-actions">
+    <a class="btn secondary" href="/groups">법인 관리로</a>
+    <a class="btn secondary" href="/groups/<%= group.id %>/edit">법인정보</a>
+    <a class="btn" href="/users/new">+ 사용자 등록</a>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:10px;">
+  <div style="display:flex;gap:16px;flex-wrap:wrap;">
+    <div><b>소속 지사:</b> <%= group.branch_name || '-' %></div>
+    <div><b>대표번호:</b> <%= group.main_phone || '-' %></div>
+    <div><b>사업자번호:</b> <%= group.business_registration_number || '-' %></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>아이디</th><th>이름</th><th>역할</th><th>지사</th><th>연락처</th><th>상태</th><th>관리</th></tr></thead>
+      <tbody>
+        <% if (users.length === 0) { %><tr><td colspan="7" class="empty">해당 법인에 등록된 사용자가 없습니다.</td></tr><% } %>
+        <% const roleLabel = {admin:'관리자', branch_manager:'지사장', client:'클라이언트'}; %>
+        <% users.forEach(function(u){ %>
+          <tr>
+            <td><%= u.login_id %></td>
+            <td><%= u.name %></td>
+            <td><%= roleLabel[u.role] || u.role %></td>
+            <td><%= u.branch_name || '-' %></td>
+            <td><%= u.phone || '-' %></td>
+            <td><span class="badge <%= u.status === 'active' ? 'green' : 'gray' %>"><%= u.status === 'active' ? '활성' : '비활성' %></span></td>
+            <td><a class="btn small secondary" href="/users/<%= u.id %>/edit">수정</a></td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+</div>
+<%- include('../partials/footer') %>

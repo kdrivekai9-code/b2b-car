@@ -1,0 +1,439 @@
+<%- include('../partials/header') %>
+<div class="page-head-row chat-page-head">
+  <div>
+    <div class="chat-title-row">
+      <h1 class="page-title">상담 관리</h1>
+      <p class="page-sub chat-title-desc">AI 챗봇으로 들어온 대화를 모니터링하고, 상담원 연결이 필요한 세션에 직접 응대할 수 있습니다.</p>
+    </div>
+    <p class="page-sub chat-agent-status">
+      <% if (onlineAgents.length) { %>
+        <span class="badge green">🟢 접속 중인 상담원: <%= onlineAgents.join(', ') %></span>
+      <% } else { %>
+        <span class="badge gray">⚪ 접속 중인 상담원 없음</span>
+      <% } %>
+    </p>
+  </div>
+  <div class="page-head-actions">
+    <a class="btn secondary" href="/chat/guide">상담 운영안</a>
+    <a class="btn <%= view === 'list' ? '' : 'secondary' %>" href="/chat/sessions?view=list">리스트 보기</a>
+    <a class="btn <%= view === 'card' ? '' : 'secondary' %>" href="/chat/sessions?view=card">챗봇 카드 보기</a>
+  </div>
+</div>
+
+<% if (notice) { %><div class="success-msg"><%= notice %></div><% } %>
+<% if (error) { %><div class="error-msg"><%= error %></div><% } %>
+
+<% const statusLabel = { bot: '봇 응대중', needs_agent: '상담원 호출', agent_active: '상담원 응대중', closed: '종료' }; %>
+<% const statusBadge = { bot: 'gray', needs_agent: 'red', agent_active: 'blue', closed: 'dark' }; %>
+<%
+  const now = new Date();
+  const today = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+  const safeDefaultReservedDate = (typeof defaultReservedDate === 'undefined' || defaultReservedDate == null || defaultReservedDate === '') ? today : defaultReservedDate;
+  const safeDefaultReservedTime = (typeof defaultReservedTime === 'undefined' || defaultReservedTime == null) ? '' : defaultReservedTime;
+  const safeDefaultReservedYear = /^\d{4}-\d{2}-\d{2}$/.test(safeDefaultReservedDate) ? safeDefaultReservedDate.slice(0, 4) : String(now.getFullYear());
+  const safeDefaultReservedMonth = /^\d{4}-\d{2}-\d{2}$/.test(safeDefaultReservedDate) ? safeDefaultReservedDate.slice(5, 7) : String(now.getMonth() + 1).padStart(2, '0');
+  const safeDefaultReservedDay = /^\d{4}-\d{2}-\d{2}$/.test(safeDefaultReservedDate) ? safeDefaultReservedDate.slice(8, 10) : String(now.getDate()).padStart(2, '0');
+  const reservedHourDefault = /^\d{1,2}:\d{2}$/.test(safeDefaultReservedTime) ? safeDefaultReservedTime.split(':')[0].padStart(2, '0') : '09';
+  const reservedMinuteDefault = /^\d{1,2}:\d{2}$/.test(safeDefaultReservedTime) ? safeDefaultReservedTime.split(':')[1] : '00';
+  const safeBranches = (typeof branches !== 'undefined' && Array.isArray(branches)) ? branches : [];
+  const safeGroups = (typeof groups !== 'undefined' && Array.isArray(groups)) ? groups : [];
+  const safePaymentMethods = (typeof paymentMethods !== 'undefined' && Array.isArray(paymentMethods)) ? paymentMethods : [];
+%>
+<% if (view === 'card') { %>
+  <div class="chat-admin-layout" data-current-user-id="<%= currentUser.id %>" data-current-user-name="<%= currentUser.name %>">
+    <div class="card chat-admin-card-list">
+      <% if (sessions.length === 0) { %>
+        <div class="empty">진행 중인 상담 세션이 없습니다.</div>
+      <% } %>
+      <% sessions.forEach(function (s) { %>
+        <div class="session-card-row">
+          <button
+            type="button"
+            class="session-card-item <%= s.status === 'needs_agent' ? 'needs-agent' : '' %>"
+            data-session-id="<%= s.id %>"
+            data-session-status="<%= s.status %>"
+            data-status-label="<%= statusLabel[s.status] || s.status %>"
+            data-status-badge="<%= statusBadge[s.status] || 'gray' %>"
+            data-user-name="<%= s.user_name || '-' %>"
+            data-user-role="<%= s.user_role || '-' %>"
+            data-user-phone="<%= s.user_phone || '' %>"
+            data-requested-feature="<%= s.requested_feature || '' %>"
+            data-updated-at="<%= s.updated_at || '' %>"
+            data-assigned-agent-id="<%= s.assigned_agent_id || '' %>"
+            data-assigned-agent-name="<%= s.assigned_agent_name || '' %>"
+          >
+            <div class="session-card-head">
+              <strong>#<%= s.id %> · <%= s.user_name || '-' %></strong>
+              <span class="badge <%= statusBadge[s.status] || 'gray' %>"><%= statusLabel[s.status] || s.status %></span>
+            </div>
+            <div class="session-card-sub"><%= s.user_role || '-' %><%= s.user_phone ? (' · ' + s.user_phone) : '' %></div>
+            <div class="session-card-msg" title="<%= s.last_message || '' %>"><%= s.last_message || '최근 메시지 없음' %></div>
+            <div class="session-card-meta">메시지 <%= s.message_count %>개 · 업데이트 <%= s.updated_at %></div>
+            <div class="session-card-meta">담당: <%= s.assigned_agent_name || '미지정' %></div>
+          </button>
+          <form method="POST" action="/chat/sessions/<%= s.id %>/delete" onsubmit="return confirm('이 상담 세션을 삭제하시겠습니까?');" class="session-card-inline-delete">
+            <input type="hidden" name="view" value="card">
+            <button class="btn danger small session-card-delete-btn" type="submit" title="이 세션 삭제">삭제</button>
+          </form>
+        </div>
+      <% }) %>
+    </div>
+
+    <div class="card chat-admin-viewer">
+      <div class="chat-admin-viewer-shell">
+        <section class="chat-admin-conversation">
+          <div class="chat-admin-viewer-head" id="cardViewerHead">
+            <h2>세션을 선택하세요</h2>
+            <p class="page-sub">카드를 선택하면 해당 세션의 최근 대화를 불러옵니다. 전체 세션 메시지는 한 번에 로드하지 않습니다.</p>
+          </div>
+
+          <div class="card chat-session-card" style="box-shadow:none;border-style:dashed;">
+            <div class="ai-chat-messages" id="cardSessionMessages">
+              <div class="empty">왼쪽에서 상담 세션을 선택해주세요.</div>
+            </div>
+          </div>
+
+          <form class="chat-reply-row" id="cardReplyForm" style="display:none;" autocomplete="off">
+            <textarea id="cardReplyText" name="text" placeholder="상담원으로 답변을 입력하세요... (Enter 전송 / Shift+Enter 줄바꿈)" required></textarea>
+            <button class="btn" id="cardReplySendBtn" type="submit">전송</button>
+          </form>
+          <div id="cardReplyError" class="chat-inline-error" style="display:none;"></div>
+
+          <div class="chat-admin-viewer-actions" id="cardViewerActions" style="display:none;">
+            <button class="btn secondary small" type="button" id="assignSelfBtn">내가 담당하기</button>
+            <form method="POST" action="/chat/sessions/0/delete" id="cardDeleteForm" onsubmit="return confirm('이 상담 세션을 삭제하시겠습니까?');" style="display:inline;">
+              <input type="hidden" name="view" value="card">
+              <button class="btn danger small" type="submit" id="cardDeleteBtn">삭제</button>
+            </form>
+            <button class="btn secondary small" type="button" id="loadOlderMessagesBtn">이전 메시지 더 보기</button>
+            <a class="btn small" id="openSessionDetailLink" href="#">상세 페이지 열기</a>
+          </div>
+        </section>
+
+        <section class="chat-admin-intake">
+          <div class="chat-order-head">
+            <h2>접수 마무리</h2>
+          </div>
+
+          <form id="cardOrderForm" method="POST" action="/orders" class="chat-order-form chat-admin-order-form">
+            <input type="hidden" id="card_chat_session_id" name="chat_session_id" value="">
+
+            <div class="row">
+              <div class="field">
+                <label>지사 선택 <span class="required-mark" aria-hidden="true">*</span></label>
+                <select id="card_branch_id" name="branch_id" required>
+                  <option value="">선택하세요</option>
+                  <% safeBranches.forEach(function (b) { %>
+                    <option value="<%= b.id %>"><%= b.name %></option>
+                  <% }) %>
+                </select>
+              </div>
+              <div class="field">
+                <label>요청 법인(고객사)</label>
+                <select id="card_requester_group_id" name="requester_group_id">
+                  <option value="">선택 안 함</option>
+                  <% safeGroups.forEach(function (g) { %>
+                    <option value="<%= g.id %>"><%= g.name %></option>
+                  <% }) %>
+                </select>
+              </div>
+            </div>
+
+            <div class="inline-duo" style="margin-bottom:8px; align-items:center;">
+              <label class="checkline"><input type="radio" name="reservation_basis" id="card_reservation_basis_pickup" value="pickup" checked> 출발지 픽업시간 기준</label>
+              <label class="checkline"><input type="radio" name="reservation_basis" id="card_reservation_basis_delivery" value="delivery"> 도착지 인도시간 기준</label>
+            </div>
+
+            <div class="row">
+              <div class="field">
+                <label id="card_reservation_datetime_label">예약일시 <span class="required-mark" aria-hidden="true">*</span></label>
+                <div class="inline-duo reservation-date-row">
+                  <% const cardYearBase = now.getFullYear(); %>
+                  <select id="card_reserved_date_year" required class="date-select" aria-label="예약 연도">
+                    <% for (let y = cardYearBase - 1; y <= cardYearBase + 3; y++) { const yy = String(y); %>
+                      <option value="<%= yy %>" <%= safeDefaultReservedYear === yy ? 'selected' : '' %>><%= yy %>년</option>
+                    <% } %>
+                  </select>
+                  <select id="card_reserved_date_month" required class="date-select" aria-label="예약 월">
+                    <% for (let m = 1; m <= 12; m += 1) { const mm = String(m).padStart(2, '0'); %>
+                      <option value="<%= mm %>" <%= safeDefaultReservedMonth === mm ? 'selected' : '' %>><%= mm %>월</option>
+                    <% } %>
+                  </select>
+                  <select id="card_reserved_date_day" required class="date-select" aria-label="예약 일">
+                    <% for (let d = 1; d <= 31; d += 1) { const dd = String(d).padStart(2, '0'); %>
+                      <option value="<%= dd %>" <%= safeDefaultReservedDay === dd ? 'selected' : '' %>><%= dd %>일</option>
+                    <% } %>
+                  </select>
+                </div>
+                <input type="hidden" id="card_reserved_date" name="reserved_date" required value="<%= safeDefaultReservedDate %>">
+              </div>
+              <div class="field">
+                <label>예약 시간 <span class="required-mark" aria-hidden="true">*</span></label>
+                <input type="hidden" id="card_reserved_time" name="reserved_time" value="<%= safeDefaultReservedTime %>">
+                <input type="hidden" id="card_pickup_reserved_date" name="pickup_reserved_date" value="">
+                <input type="hidden" id="card_pickup_reserved_time" name="pickup_reserved_time" value="">
+                <div class="time-inline-row">
+                  <div class="time-inline-cell">
+                    <select id="card_reserved_time_hour" aria-label="예약 시간 시">
+                      <% for (let h = 0; h < 24; h += 1) { const hh = String(h).padStart(2, '0'); %>
+                        <option value="<%= hh %>" <%= reservedHourDefault === hh ? 'selected' : '' %>><%= hh %>시</option>
+                      <% } %>
+                    </select>
+                  </div>
+                  <div class="time-inline-cell">
+                    <select id="card_reserved_time_minute" aria-label="예약 시간 분">
+                      <% for (let m = 0; m < 60; m += 1) { const mm = String(m).padStart(2, '0'); %>
+                        <option value="<%= mm %>" <%= reservedMinuteDefault === mm ? 'selected' : '' %>><%= mm %>분</option>
+                      <% } %>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="field full">
+              <label>출발지 주소 <span class="required-mark" aria-hidden="true">*</span></label>
+              <div class="addr-input-row">
+                <input type="text" id="card_origin_address" name="origin_address" required placeholder="도로명/지번/상호">
+                <button type="button" class="btn small secondary card-addr-search-btn" data-target="card_origin_address">🔍 검색</button>
+              </div>
+              <div id="card_origin_address_results" class="addr-results"></div>
+            </div>
+
+            <div class="field full">
+              <label>출발지 상세주소</label>
+              <input type="text" id="card_origin_detail_address" name="origin_detail_address" placeholder="건물명, 동/호수, 주차위치">
+            </div>
+
+            <div class="row">
+              <div class="field">
+                <label>출발지 연락처 <span class="required-mark" aria-hidden="true">*</span></label>
+                <input type="text" id="card_origin_contact" name="origin_contact" required placeholder="010-0000-0000">
+              </div>
+            </div>
+
+            <div id="card_pickup_preview_block" class="card-reservation-summary" style="display:none;">
+              <div class="card-reservation-summary-title">도착지 인도시간 기준 자동 계산</div>
+              <div class="card-reservation-summary-main">
+                <span class="label">예상 픽업시간</span>
+                <strong id="card_pickup_preview_value">-</strong>
+              </div>
+              <div id="card_delivery_route_formula" class="card-reservation-summary-sub">(경로탐색 : -)</div>
+            </div>
+
+            <div class="row">
+              <div class="field">
+                <label>차종 (선택)</label>
+                <input type="text" id="card_vehicle_type" name="vehicle_type" placeholder="예: 카니발, 1톤">
+              </div>
+              <div class="field">
+                <label>출발지 차량번호 (선택)</label>
+                <input type="text" id="card_vehicle_number" name="vehicle_number" placeholder="예: 12가3456">
+              </div>
+            </div>
+
+            <div class="field full" style="margin-top:4px;">
+              <div class="chat-order-waypoint-head">
+                <button type="button" class="btn small secondary" id="cardAddWaypointBtn">+ 경유지 추가</button>
+              </div>
+              <div id="cardWaypointsWrap" class="chat-waypoint-list"></div>
+            </div>
+
+            <div class="field full">
+              <label>도착지 주소 <span class="required-mark" aria-hidden="true">*</span></label>
+              <div class="addr-input-row">
+                <input type="text" id="card_destination_address" name="destination_address" required placeholder="도로명/지번/상호">
+                <button type="button" class="btn small secondary card-addr-search-btn" data-target="card_destination_address">🔍 검색</button>
+              </div>
+              <div id="card_destination_address_results" class="addr-results"></div>
+            </div>
+
+            <div class="field full">
+              <label>도착지 상세주소</label>
+              <input type="text" id="card_destination_detail_address" name="destination_detail_address" placeholder="건물명, 동/호수, 주차위치">
+            </div>
+
+            <div class="field">
+              <label>도착지 연락처 <span class="required-mark" aria-hidden="true">*</span></label>
+              <input type="text" id="card_destination_contact" name="destination_contact" required placeholder="010-0000-0000">
+            </div>
+
+            <div class="field full">
+              <label>메모</label>
+              <textarea id="card_memo_customer" name="memo_customer" placeholder="요청사항, 차량 상태, 전달 메모"></textarea>
+            </div>
+
+            <div class="row">
+              <div class="field">
+                <label>결제방식</label>
+                <select id="card_payment_method_id" name="payment_method_id">
+                  <option value="">선택 안 함</option>
+                  <% safePaymentMethods.forEach(function (pm) { %>
+                    <option value="<%= pm.id %>"><%= pm.name %></option>
+                  <% }) %>
+                </select>
+              </div>
+              <div class="field">
+                <label>요금(원)</label>
+                <input type="number" id="card_fare_amount" name="fare_amount" min="0" step="1000" placeholder="0">
+              </div>
+            </div>
+
+            <div class="chat-order-actions">
+              <div class="field" style="margin:0;min-width:220px;">
+                <label style="margin:0 0 6px;">등록 후 상담 상태</label>
+                <select id="card_chat_session_transition" name="chat_session_transition">
+                  <option value="agent_active" selected>상담 계속 진행</option>
+                  <option value="closed">상담 종료</option>
+                </select>
+              </div>
+              <button class="btn" type="submit">오더 등록</button>
+            </div>
+          </form>
+        </section>
+      </div>
+    </div>
+  </div>
+<% } else { %>
+  <div class="card">
+    <div class="table-wrap">
+    <table>
+      <thead><tr><th>번호</th><th>고객</th><th>상태</th><th>담당자</th><th>요청 기능</th><th>최근 메시지</th><th>메시지 수</th><th>업데이트</th><th>관리</th></tr></thead>
+      <tbody>
+        <% if (sessions.length === 0) { %><tr><td colspan="9" class="empty">진행 중인 상담 세션이 없습니다.</td></tr><% } %>
+        <% sessions.forEach(function(s){ %>
+          <tr class="<%= s.status === 'needs_agent' ? 'session-row-needs-agent' : '' %>" data-session-row-id="<%= s.id %>">
+            <td>#<%= s.id %></td>
+            <td><%= s.user_name || '-' %> <span style="color:var(--muted);">(<%= s.user_role || '-' %>)</span></td>
+            <td><span class="badge <%= statusBadge[s.status] || 'gray' %>"><%= statusLabel[s.status] || s.status %></span></td>
+            <td><%= s.assigned_agent_name || '미지정' %></td>
+            <td><%= s.requested_feature || '-' %></td>
+            <td title="<%= s.last_message || '' %>"><%= s.last_message || '-' %></td>
+            <td><%= s.message_count %></td>
+            <td><%= s.updated_at %></td>
+            <td>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                <a class="btn small secondary" href="/chat/sessions/<%= s.id %>">보기</a>
+                <form method="POST" action="/chat/sessions/<%= s.id %>/delete" onsubmit="return confirm('이 상담 세션을 삭제하시겠습니까?');" style="display:inline;" class="js-session-delete-form" data-session-id="<%= s.id %>">
+                  <input type="hidden" name="view" value="list">
+                  <button class="btn small danger" type="submit">삭제</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+    </div>
+  </div>
+<% } %>
+<% if (view === 'card') { %>
+  <script src="/js/chat-session-cards.js"></script>
+<% } else { %>
+  <script>
+  (function () {
+    // 자동 리로드는 뷰 전환 반복 시 체감 지연/리로드 충돌을 만들 수 있어,
+    // 신호를 받으면 "새 업데이트" 버튼만 노출하고 사용자가 원할 때만 새로고침한다.
+    var refreshBtn = null;
+
+    function showRefreshButton() {
+      if (refreshBtn) return;
+      refreshBtn = document.createElement('button');
+      refreshBtn.type = 'button';
+      refreshBtn.className = 'btn';
+      refreshBtn.textContent = '새 상담 업데이트 보기';
+      refreshBtn.style.position = 'fixed';
+      refreshBtn.style.right = '20px';
+      refreshBtn.style.bottom = '20px';
+      refreshBtn.style.zIndex = '1000';
+      refreshBtn.addEventListener('click', function () { location.reload(); });
+      document.body.appendChild(refreshBtn);
+    }
+
+    function showToast(message, isError) {
+      var toast = document.createElement('div');
+      toast.className = 'toast';
+      if (isError) {
+        toast.style.background = '#b91c1c';
+      }
+      toast.textContent = message;
+      document.body.appendChild(toast);
+      setTimeout(function () { toast.classList.add('toast-hide'); }, 1400);
+      setTimeout(function () { toast.remove(); }, 2000);
+    }
+
+    function ensureEmptyRow() {
+      var tbody = document.querySelector('tbody');
+      if (!tbody) return;
+      if (tbody.querySelectorAll('tr[data-session-row-id]').length > 0) return;
+      var empty = document.createElement('tr');
+      empty.innerHTML = '<td colspan="9" class="empty">진행 중인 상담 세션이 없습니다.</td>';
+      tbody.appendChild(empty);
+    }
+
+    var deleting = {};
+    document.querySelectorAll('.js-session-delete-form').forEach(function (form) {
+      form.addEventListener('submit', function (event) {
+        event.preventDefault();
+        if (!confirm('이 상담 세션을 삭제하시겠습니까?')) return;
+
+        var sessionId = String(form.dataset.sessionId || '');
+        if (!sessionId || deleting[sessionId]) return;
+        deleting[sessionId] = true;
+
+        var button = form.querySelector('button[type="submit"]');
+        if (button) {
+          button.disabled = true;
+          button.textContent = '삭제중...';
+        }
+
+        var body = new URLSearchParams(new FormData(form));
+        body.set('ajax', '1');
+        fetch(form.action, {
+          method: 'POST',
+          headers: {
+            'Accept': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest',
+            'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+          },
+          body: body.toString(),
+        })
+          .then(function (res) {
+            return res.json().catch(function () { return {}; }).then(function (json) {
+              if (!res.ok) {
+                throw new Error(json.error || '삭제 처리 중 오류가 발생했습니다.');
+              }
+              return json;
+            });
+          })
+          .then(function () {
+            var row = form.closest('tr[data-session-row-id]');
+            if (row) row.remove();
+            ensureEmptyRow();
+            showToast('상담 세션이 삭제되었습니다.');
+          })
+          .catch(function (error) {
+            showToast(error.message || '삭제 처리 중 오류가 발생했습니다.', true);
+            if (button) {
+              button.disabled = false;
+              button.textContent = '삭제';
+            }
+          })
+          .finally(function () {
+            deleting[sessionId] = false;
+          });
+      });
+    });
+
+    // 별도 SSE 연결을 새로 열지 않고, 헤더에서 이미 상시 유지 중인 agent-presence 연결이
+    // 상담 목록이 바뀔 때마다 쏘아주는 이벤트를 그대로 재사용한다(연결 수를 늘리지 않기 위함 —
+    // 로컬 개발환경의 브라우저 호스트당 동시연결 제한 때문에 뷰 전환을 반복하면 리스트보기 로딩이
+    // 지연되는 문제가 있었다).
+    window.addEventListener('agent-needs-count', function (e) {
+      if (e.detail && e.detail.initial) return;
+      showRefreshButton();
+    });
+  })();
+  </script>
+<% } %>
+<%- include('../partials/footer') %>

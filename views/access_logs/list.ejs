@@ -1,0 +1,48 @@
+<%- include('../partials/header') %>
+<div class="page-head-row">
+  <div>
+    <h1 class="page-title">접속기록</h1>
+    <p class="page-sub">사용자 로그인과 시스템 수행업무 기록을 최근 1,000건까지 조회합니다.</p>
+  </div>
+  <span class="page-heading-meta">총 <%= logs.length %>건</span>
+</div>
+
+<form class="filters card" method="GET" action="/access-logs">
+  <div class="field"><label for="logAccount">계정</label><input id="logAccount" name="account" value="<%= filters.account %>" placeholder="로그인 아이디"></div>
+  <div class="field">
+    <label for="logEventType">기록 유형</label>
+    <select id="logEventType" name="event_type">
+      <option value="">전체</option>
+      <% [['LOGIN_SUCCESS','로그인 성공'],['LOGIN_FAILURE','로그인 실패'],['LOGIN_BLOCKED','중복 로그인(기존 세션 로그아웃)'],['LOGIN_RATE_LIMITED','무차별 대입 차단'],['LOGOUT','로그아웃'],['ACCESS','업무 수행']].forEach(function(item){ %>
+        <option value="<%= item[0] %>" <%= filters.event_type === item[0] ? 'selected' : '' %>><%= item[1] %></option>
+      <% }) %>
+    </select>
+  </div>
+  <div class="field"><label for="logFrom">시작일</label><input id="logFrom" type="date" name="from" value="<%= filters.from %>"></div>
+  <div class="field"><label for="logTo">종료일</label><input id="logTo" type="date" name="to" value="<%= filters.to %>"></div>
+  <div class="field"><button class="btn" type="submit">조회</button></div>
+  <div class="field"><a class="btn secondary" href="/access-logs">초기화</a></div>
+</form>
+
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>접속일시</th><th>계정</th><th>IP</th><th>유형</th><th>수행업무</th><th>정보주체 정보</th><th>결과</th></tr></thead>
+      <tbody>
+        <% if (logs.length === 0) { %><tr><td colspan="7" class="empty">조건에 맞는 접속기록이 없습니다.</td></tr><% } %>
+        <% logs.forEach(function(log){ %>
+          <tr>
+            <td><%= log.accessed_at %></td>
+            <td><b><%= log.account %></b></td>
+            <td><%= log.ip_address %></td>
+            <td><%= log.event_type %></td>
+            <td><%= log.work_detail %></td>
+            <td><%= log.subject_info || '-' %></td>
+            <td><span class="badge <%= log.success ? 'green' : 'red' %>"><%= log.success ? '성공' : '실패' %></span></td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+</div>
+<%- include('../partials/footer') %>

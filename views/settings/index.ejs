@@ -1,0 +1,39 @@
+<%- include('../partials/header') %>
+<div class="page-head-row">
+  <div>
+    <h1 class="page-title">설정</h1>
+    <p class="page-sub">시스템 전역 설정을 관리합니다.</p>
+  </div>
+</div>
+
+<div class="card">
+  <div class="section-title">💳 결제방식 마스터 관리</div>
+  <p class="page-sub" style="margin-top:-6px;">여기서 등록/비활성화한 결제수단이 지사별 결제방식 설정(지사 관리 &gt; 결제방식 설정)에서 노출 대상으로 선택 가능해집니다.</p>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>이름</th><th>상태</th><th>관리</th></tr></thead>
+    <tbody>
+      <% paymentMethods.forEach(function(pm){ %>
+        <tr>
+          <td><%= pm.name %></td>
+          <td><span class="badge <%= pm.is_active ? 'green' : 'gray' %>"><%= pm.is_active ? '활성' : '비활성' %></span></td>
+          <td>
+            <form method="POST" action="/settings/payment-methods/<%= pm.id %>/toggle" style="display:inline;">
+              <button class="btn small secondary" type="submit"><%= pm.is_active ? '비활성화' : '활성화' %></button>
+            </form>
+          </td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="section-title small">결제수단 추가</div>
+  <form method="POST" action="/settings/payment-methods">
+    <div class="row">
+      <div class="field"><label>이름 *</label><input type="text" name="name" required placeholder="예: 간편결제"></div>
+      <div class="field" style="justify-content:flex-end;"><button class="btn small" type="submit" style="margin-top:auto;">추가</button></div>
+    </div>
+  </form>
+</div>
+<%- include('../partials/footer') %>

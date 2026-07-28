@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title><%= title %> · B2B-CAR</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<% var roleLabel = currentUser ? ({admin:'관리자', branch_manager:'지사장', client:'고객사'})[currentUser.role] : ''; %>
+<% var gradeLabel = (currentUser && currentUser.role === 'client' && currentUser.grade) ? ' · ' + ({leader:'법인 담당(리더)', member:'법인 담당(일반)'})[currentUser.grade] : ''; %>
+<% var isTopNavLayout = (typeof layoutMode !== 'undefined' && layoutMode === 'top-nav'); %>
+<div class="app <%= isTopNavLayout ? 'app-top-nav' : '' %>">
+  <aside class="sidebar <%= isTopNavLayout ? 'sidebar-top-nav' : '' %>" id="appSidebar" <%= isTopNavLayout ? 'data-layout-mode="top-nav"' : '' %>>
+    <button type="button" class="sidebar-toggle" id="sidebarToggle" title="사이드바 접기/펼치기">☰</button>
+    <div class="brand">
+      <span class="brand-icon">🚚</span>
+      <span class="brand-text">B2B-CAR<small>탁송 B2B 통합·운영 플랫폼</small></span>
+    </div>
+    <% if (currentUser) { %>
+      <div class="brand-user">
+        <div class="brand-user-name" title="<%= currentUser.name %>님 (<%= currentUser.login_id %>) · <%= roleLabel %><%= gradeLabel %>"><%= currentUser.name %>님<span class="brand-user-loginid"> (<%= currentUser.login_id %>)</span></div>
+        <div class="brand-user-actions">
+          <button class="btn secondary small" id="pushToggleBtn" type="button" title="알림 받기">🔕 알림 받기</button>
+          <form action="/logout" method="POST"><button class="btn secondary small" type="submit" title="로그아웃">🚪 로그아웃</button></form>
+        </div>
+      </div>
+    <% } %>
+    <nav>
+      <a href="/" class="<%= path === '/' ? 'active' : '' %>" title="대시보드"><span class="nav-icon">📊</span><span class="nav-label">대시보드</span></a>
+      <a href="/orders" class="<%= (path.startsWith('/orders') && !path.startsWith('/orders/ai-intake')) ? 'active' : '' %>" title="오더 리스트"><span class="nav-icon">📋</span><span class="nav-label">오더 리스트</span></a>
+      <a href="/orders/ai-intake" class="<%= path.startsWith('/orders/ai-intake') ? 'active' : '' %>" title="AI 챗봇"><span class="nav-icon">🤖</span><span class="nav-label">AI 챗봇</span></a>
+      <a href="/notices" class="<%= path.startsWith('/notices') ? 'active' : '' %>" title="공지사항"><span class="nav-icon">📢</span><span class="nav-label">공지사항</span></a>
+      <a href="/push/settings" class="<%= path.startsWith('/push') ? 'active' : '' %>" title="오더 알림 설정"><span class="nav-icon">🔔</span><span class="nav-label">오더 알림 설정</span></a>
+      <a href="/faq" class="<%= path.startsWith('/faq') ? 'active' : '' %>" title="FAQ 문의"><span class="nav-icon">💬</span><span class="nav-label">FAQ 문의</span></a>
+      <% if (currentUser && (currentUser.role === 'admin' || currentUser.role === 'branch_manager')) { %>
+        <a href="/inquiries" class="<%= path.startsWith('/inquiries') ? 'active' : '' %>" title="문의 관리"><span class="nav-icon">📝</span><span class="nav-label">문의 관리</span></a>
+      <% } %>
+      <% if (currentUser && currentUser.role === 'admin') { %>
+        <a href="/branches" class="<%= path.startsWith('/branches') ? 'active' : '' %>" title="지사 관리"><span class="nav-icon">🏢</span><span class="nav-label">지사 관리</span></a>
+        <a href="/groups" class="<%= path.startsWith('/groups') ? 'active' : '' %>" title="법인 관리"><span class="nav-icon">👥</span><span class="nav-label">법인 관리</span></a>
+        <a href="/users" class="<%= path.startsWith('/users') ? 'active' : '' %>" title="사용자 관리"><span class="nav-icon">🧑‍💼</span><span class="nav-label">사용자 관리</span></a>
+        <a href="/drivers" class="<%= path.startsWith('/drivers') ? 'active' : '' %>" title="기사 관리"><span class="nav-icon">🚙</span><span class="nav-label">기사 관리</span></a>
+        <a href="/location-aliases" class="<%= path.startsWith('/location-aliases') ? 'active' : '' %>" title="거점 별칭 관리"><span class="nav-icon">📍</span><span class="nav-label">거점 별칭 관리</span></a>
+        <a href="/knowledge-base" class="<%= path.startsWith('/knowledge-base') ? 'active' : '' %>" title="지식관리"><span class="nav-icon">📚</span><span class="nav-label">지식관리</span></a>
+        <a href="/chat/sessions" class="<%= path.startsWith('/chat/sessions') ? 'active' : '' %>" title="상담 관리"><span class="nav-icon">🎧</span><span class="nav-label">상담 관리</span><span class="nav-badge" id="agentCallBadge" style="display:none"></span></a>
+        <a href="/chat/guide" class="<%= path.startsWith('/chat/guide') ? 'active' : '' %>" title="상담 운영안"><span class="nav-icon">🧭</span><span class="nav-label">상담 운영안</span></a>
+        <a href="/access-logs" class="<%= path.startsWith('/access-logs') ? 'active' : '' %>" title="접속기록"><span class="nav-icon">🛡️</span><span class="nav-label">접속기록</span></a>
+        <a href="/settings" class="<%= path.startsWith('/settings') ? 'active' : '' %>" title="설정"><span class="nav-icon">⚙️</span><span class="nav-label">설정</span></a>
+      <% } %>
+    </nav>
+    <% if (!isTopNavLayout) { %>
+      <div class="sidebar-resize-handle" id="sidebarResizeHandle"></div>
+    <% } %>
+  </aside>
+  <div class="main">
+    <script src="/js/push.js" defer></script>
+    <% if (currentUser && currentUser.role === 'admin') { %>
+      <script src="/js/agent-alert-sound.js" defer></script>
+      <script src="/js/agent-browser-notify.js" defer></script>
+      <script src="/js/agent-notification-center.js" defer></script>
+      <script src="/js/agent-presence.js" defer></script>
+    <% } %>
+    <div class="content">

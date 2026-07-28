@@ -1,0 +1,30 @@
+<%- include('../partials/header') %>
+<div class="page-head-row">
+  <div>
+    <h1 class="page-title">공지사항</h1>
+    <p class="page-sub">시스템 공지를 확인합니다.</p>
+  </div>
+  <% if (currentUser.role === 'admin') { %>
+  <div class="page-head-actions">
+    <a class="btn" href="/notices/new">+ 공지 등록</a>
+  </div>
+  <% } %>
+</div>
+<div class="card">
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>제목</th><th>작성자</th><th>등록일</th></tr></thead>
+    <tbody>
+      <% if (notices.length === 0) { %><tr><td colspan="3" class="empty">등록된 공지사항이 없습니다.</td></tr><% } %>
+      <% notices.forEach(function(n){ %>
+        <tr onclick="location.href='/notices/<%= n.id %>'" style="cursor:pointer;">
+          <td><a href="/notices/<%= n.id %>"><%= n.title %></a></td>
+          <td><%= n.author_name || '-' %></td>
+          <td><%= n.created_at %></td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+  </div>
+</div>
+<%- include('../partials/footer') %>

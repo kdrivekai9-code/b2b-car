@@ -1,0 +1,120 @@
+<%- include('../partials/header') %>
+<div class="page-head-row">
+  <div>
+    <h1 class="page-title">오더 상세 · <%= order.oid %></h1>
+    <p class="page-sub">
+      <span class="badge <%= statusColor(order.status) %>"><%= order.status %></span>
+      &nbsp; <%= order.branch_name %> · <%= order.group_name || '-' %> · 등록일시 <%= order.created_at %>
+    </p>
+  </div>
+  <div class="page-head-actions">
+    <a class="btn secondary" href="/orders">&larr; 오더 리스트로</a>
+  </div>
+</div>
+
+<div class="detail-grid" style="margin-top:18px;">
+  <div class="card">
+    <h2>📍 이동 경로</h2>
+    <div class="kv"><span class="k">출발지</span><span><%= order.origin_address %></span></div>
+    <div class="kv"><span class="k">출발지 연락처</span><span><%= order.origin_contact || '-' %></span></div>
+    <% waypoints.forEach(function(w, i){ %>
+    <% var wLabel = '경유지' + (waypoints.length > 1 ? (' ' + (i + 1)) : ''); %>
+    <div class="kv"><span class="k"><%= wLabel %></span><span><%= w.address %></span></div>
+    <% if (w.contact_phone || w.vehicle_number) { %>
+    <div class="kv"><span class="k"><%= wLabel %> 연락처</span><span><%= w.contact_phone || '-' %></span></div>
+    <div class="kv"><span class="k"><%= wLabel %> 차량번호</span><span><%= w.vehicle_number || '-' %></span></div>
+    <% } %>
+    <% }) %>
+    <div class="kv"><span class="k">도착지</span><span><%= order.destination_address %></span></div>
+    <div class="kv"><span class="k">도착지 연락처</span><span><%= order.destination_contact || '-' %></span></div>
+    <div class="kv"><span class="k">차종 / 차량번호</span><span><%= [order.vehicle_type, order.vehicle_number].filter(Boolean).join(' / ') || '-' %></span></div>
+    <div class="kv"><span class="k">예약일시</span><span><%= order.reserved_date %> <%= order.reserved_time %></span></div>
+    <div class="kv"><span class="k">결제방식</span><span><%= order.payment_method_name || '-' %></span></div>
+    <div class="kv"><span class="k">요금</span><span><%= formatMoney(order.fare_amount) %></span></div>
+    <div class="kv"><span class="k">도선료</span><span><%= formatMoney(order.ferry_fare_amount || 0) %></span></div>
+    <div class="kv"><span class="k">배정 기사</span><span><%= order.driver_name || '미배정' %></span></div>
+
+    <div class="section-title">메모</div>
+    <div class="kv"><span class="k">고객사 메모</span><span><%= order.memo_customer || '작성된 메모가 없습니다.' %></span></div>
+    <div class="kv"><span class="k">관리자 메모</span><span><%= order.memo_admin || '작성된 메모가 없습니다.' %></span></div>
+
+    <% if (canViewPhotos) { %>
+    <div class="section-title">📷 기사 업로드 사진</div>
+    <% if (photos.length === 0) { %>
+      <p class="page-sub" style="margin:0;">업로드된 사진이 없습니다.</p>
+    <% } else { %>
+      <div class="upload-gallery">
+        <% photos.forEach(function(p){ %>
+          <a href="<%= p.url %>" target="_blank"><img src="<%= p.url %>" alt="업로드된 사진"></a>
+        <% }) %>
+      </div>
+    <% } %>
+    <% } %>
+  </div>
+
+  <div>
+    <% if (currentUser.role !== 'client') { %>
+    <div class="card">
+      <h2>상태 변경</h2>
+      <form method="POST" action="/orders/<%= order.id %>/status">
+        <div class="row">
+          <div class="field">
+            <label>새 상태</label>
+            <select name="status">
+              <% ORDER_STATUSES.forEach(function(s){ %>
+                <option value="<%= s %>" <%= order.status === s ? 'selected' : '' %>><%= s %></option>
+              <% }) %>
+            </select>
+          </div>
+        </div>
+        <div class="row"><div class="field full"><label>사유/메모 (선택)</label><input type="text" name="note" placeholder="변경 사유"></div></div>
+        <button class="btn" type="submit">상태 변경 저장</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>🧑‍✈️ 기사 배정</h2>
+      <form method="POST" action="/orders/<%= order.id %>/driver">
+        <div class="row">
+          <div class="field">
+            <label>기사 선택</label>
+            <select name="driver_id">
+              <option value="">미배정</option>
+              <% drivers.forEach(function(d){ %>
+                <option value="<%= d.id %>" <%= String(order.assigned_driver_id) === String(d.id) ? 'selected' : '' %>><%= d.name %> (<%= d.phone || '연락처 없음' %>)</option>
+              <% }) %>
+            </select>
+          </div>
+        </div>
+        <button class="btn" type="submit">배정 저장</button>
+      </form>
+      <div class="section-title small">사진 업로드 링크(기사 전달용, 로그인 불필요)</div>
+      <input type="text" class="photo-link-input" readonly value="<%= baseUrl %>/upload/<%= order.photo_upload_token %>" onclick="this.select()">
+    </div>
+
+    <div class="card">
+      <h2>요금 / 관리자 메모 수정</h2>
+      <form method="POST" action="/orders/<%= order.id %>/fare">
+        <div class="row">
+          <div class="field"><label>요금(원)</label><input type="number" name="fare_amount" value="<%= order.fare_amount %>" min="0" step="1000"></div>
+        </div>
+        <div class="row"><div class="field full"><label>관리자 메모(내부용)</label><textarea name="memo_admin"><%= order.memo_admin || '' %></textarea></div></div>
+        <button class="btn" type="submit">저장</button>
+      </form>
+    </div>
+    <% } %>
+
+    <div class="card">
+      <h2>변경 이력</h2>
+      <ul class="timeline">
+        <% history.forEach(function(h){ %>
+          <li>
+            <b><%= h.old_status ? (h.old_status + ' → ' + h.new_status) : ('최초 등록: ' + h.new_status) %></b>
+            <div class="meta"><%= h.actor_name || '시스템' %> · <%= h.created_at %><% if (h.note) { %> · <%= h.note %><% } %></div>
+          </li>
+        <% }) %>
+      </ul>
+    </div>
+  </div>
+</div>
+<%- include('../partials/footer') %>

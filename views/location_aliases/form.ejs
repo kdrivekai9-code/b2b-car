@@ -1,0 +1,34 @@
+<%- include('../partials/header') %>
+<div class="page-head-row">
+  <div>
+    <h1 class="page-title"><%= title %></h1>
+    <p class="page-sub">반복 방문지의 여러 표기를 하나의 표준 주소로 매핑합니다.</p>
+  </div>
+  <div class="page-head-actions">
+    <a class="btn secondary" href="/location-aliases">취소</a>
+    <button class="btn" type="submit" form="aliasForm">저장</button>
+  </div>
+</div>
+<div class="card">
+  <form id="aliasForm" method="POST" action="<%= mode === 'create' ? '/location-aliases' : '/location-aliases/' + alias.id %>">
+    <div class="row">
+      <div class="field">
+        <label>소속 지사 *</label>
+        <select name="branch_id" required>
+          <option value="">선택하세요</option>
+          <% branches.forEach(function(b){ %>
+            <option value="<%= b.id %>" <%= String(alias.branch_id) === String(b.id) ? 'selected' : '' %>><%= b.name %></option>
+          <% }) %>
+        </select>
+      </div>
+      <div class="field"><label>거점명 *</label><input type="text" name="canonical_name" value="<%= alias.canonical_name || '' %>" required placeholder="예: OO경매장"></div>
+    </div>
+    <div class="row">
+      <div class="field full"><label>표준 주소 *</label><input type="text" name="address" value="<%= alias.address || '' %>" required></div>
+    </div>
+    <div class="row">
+      <div class="field full"><label>별칭 (콤마로 구분)</label><input type="text" name="aliases" value="<%= alias.aliases || '' %>" placeholder="예: OO경매, OO옥션, OO중고차경매장"></div>
+    </div>
+  </form>
+</div>
+<%- include('../partials/footer') %>

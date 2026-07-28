@@ -1,0 +1,16 @@
+node_modules/
+data/
+*.log
+.env
+supabase/.temp/
+.vercel
+.env*
+.DS_Store
+.npm-cache/
+.playwright-browsers/
+test-results/
+scratch_*.js
+server.pid
+.vscode/
+.claude/
+artifacts/*.local.*

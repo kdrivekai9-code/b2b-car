@@ -1,0 +1,272 @@
+<%- include('../partials/header') %>
+<div class="page-head-row page-heading">
+  <div>
+    <h1 class="page-title">오더 등록</h1>
+  </div>
+  <div class="page-heading-meta">필수 항목부터 입력해 주세요</div>
+</div>
+
+<% if (typeof error !== 'undefined' && error) { %>
+  <div class="error-msg"><%= error %></div>
+<% } %>
+
+<%
+  const formNow = new Date();
+  const formYearBase = formNow.getFullYear();
+  const formReservedDate = order.reserved_date || '';
+  const formReservedYear = /^\d{4}-\d{2}-\d{2}$/.test(formReservedDate) ? formReservedDate.slice(0, 4) : String(formYearBase);
+  const formReservedMonth = /^\d{4}-\d{2}-\d{2}$/.test(formReservedDate) ? formReservedDate.slice(5, 7) : String(formNow.getMonth() + 1).padStart(2, '0');
+  const formReservedDay = /^\d{4}-\d{2}-\d{2}$/.test(formReservedDate) ? formReservedDate.slice(8, 10) : String(formNow.getDate()).padStart(2, '0');
+%>
+
+<form id="orderForm" class="order-form" method="POST" action="/orders" data-my-phone="<%= currentUser.phone || '' %>" data-my-role="<%= currentUser.role %>">
+  <div class="order-grid">
+
+    <section class="card order-panel route-panel">
+      <div class="panel-title">
+        <div class="panel-icon">01</div>
+        <div><h2>이동 경로</h2><p>출발지와 도착지의 주소 및 연락처를 입력하세요.</p></div>
+      </div>
+
+      <div class="route-stop origin-stop">
+        <div class="route-stop-title"><span class="route-marker">출발</span></div>
+        <div class="field full">
+          <label>출발지 주소 <span class="required-mark" aria-hidden="true">*</span></label>
+        <div class="addr-input-row">
+          <input type="text" class="addr-input" id="origin_address" name="origin_address" required placeholder="도로명, 지번 또는 상호명으로 검색" value="<%= order.origin_address || '' %>">
+          <button type="button" class="btn small secondary addr-search-btn" data-target="origin_address">🔍 검색</button>
+        </div>
+        <div id="origin_address_results" class="addr-results"></div>
+        <input type="text" class="addr-detail-input" id="origin_detail_address" name="origin_detail_address" placeholder="상세주소 입력 (건물명, 동/호수)" <%= order.origin_detail_address ? '' : 'disabled' %> value="<%= order.origin_detail_address || '' %>">
+        <div class="addr-tools">
+          <label class="checkline"><input type="checkbox" class="direct-input-toggle" data-target="origin_address"> 직접 입력 (주소 검색 안됨)</label>
+          <button type="button" class="btn small secondary registered-addr-btn" data-target="origin_address">등록주소</button>
+        </div>
+        </div>
+        <div class="field">
+          <label>출발지 연락처 <span class="required-mark" aria-hidden="true">*</span></label>
+          <input type="text" class="phone-input" id="origin_contact" name="origin_contact" required placeholder="010-0000-0000" value="<%= order.origin_contact || '' %>">
+          <label class="checkline"><input type="checkbox" id="sameAsMyPhone"> 요청자(본인) 연락처와 동일</label>
+        </div>
+      </div>
+
+      <div id="waypointsWrap"></div>
+      <button type="button" class="btn small secondary add-waypoint-btn" id="addWaypointBtn">+ 경유지 추가</button>
+
+      <div class="route-stop destination-stop">
+        <div class="route-stop-title"><span class="route-marker">도착</span></div>
+        <div class="field full">
+          <label>도착지 주소 <span class="required-mark" aria-hidden="true">*</span></label>
+        <div class="addr-input-row">
+          <input type="text" class="addr-input" id="destination_address" name="destination_address" required placeholder="도로명, 지번 또는 상호명으로 검색" value="<%= order.destination_address || '' %>">
+          <button type="button" class="btn small secondary addr-search-btn" data-target="destination_address">🔍 검색</button>
+        </div>
+        <div id="destination_address_results" class="addr-results"></div>
+        <input type="text" class="addr-detail-input" id="destination_detail_address" name="destination_detail_address" placeholder="상세주소 입력 (건물명, 동/호수)" <%= order.destination_detail_address ? '' : 'disabled' %> value="<%= order.destination_detail_address || '' %>">
+        <div class="addr-tools">
+          <label class="checkline"><input type="checkbox" class="direct-input-toggle" data-target="destination_address"> 직접 입력 (주소 검색 안됨)</label>
+          <button type="button" class="btn small secondary registered-addr-btn" data-target="destination_address">등록주소</button>
+        </div>
+        </div>
+        <div class="field">
+          <label>도착지 연락처 <span class="required-mark" aria-hidden="true">*</span></label>
+          <input type="text" class="phone-input" id="destination_contact" name="destination_contact" required placeholder="010-0000-0000" value="<%= order.destination_contact || '' %>">
+          <label class="checkline"><input type="checkbox" id="sameAsOriginContact"> 출발지 연락처와 동일</label>
+        </div>
+      </div>
+    </section>
+
+    <section class="card order-panel">
+      <div class="panel-title">
+        <div class="panel-icon">02</div>
+        <div><h2>운행 및 요청 정보</h2><p>예약 일정, 귀속 정보, 요금 및 요청 메모를 확인하세요.</p></div>
+      </div>
+      <div class="section-title small">운행 일정</div>
+      <div class="schedule-stop">
+        <div class="field full">
+          <label id="reservationDateTimeLabel">예약일시 <span class="required-mark" aria-hidden="true">*</span></label>
+          <div class="inline-duo" style="margin-bottom:8px; align-items:center;">
+            <label class="checkline"><input type="radio" name="reservation_basis" id="reservation_basis_pickup" value="pickup" <%= order.reservation_basis === 'delivery' ? '' : 'checked' %>> 출발지 픽업시간 기준</label>
+            <label class="checkline"><input type="radio" name="reservation_basis" id="reservation_basis_delivery" value="delivery" <%= order.reservation_basis === 'delivery' ? 'checked' : '' %>> 도착지 인도시간 기준</label>
+          </div>
+          <div class="inline-duo reservation-datetime-row">
+            <div class="inline-duo reservation-date-row">
+              <select id="reserved_date_year" required class="date-select" aria-label="예약 연도">
+                <% for (let y = formYearBase - 1; y <= formYearBase + 3; y++) { const yy = String(y); %>
+                  <option value="<%= yy %>" <%= formReservedYear === yy ? 'selected' : '' %>><%= yy %>년</option>
+                <% } %>
+              </select>
+              <select id="reserved_date_month" required class="date-select" aria-label="예약 월">
+                <% for (let m = 1; m <= 12; m++) { const mm = String(m).padStart(2, '0'); %>
+                  <option value="<%= mm %>" <%= formReservedMonth === mm ? 'selected' : '' %>><%= mm %>월</option>
+                <% } %>
+              </select>
+              <select id="reserved_date_day" required class="date-select" aria-label="예약 일">
+                <% for (let d = 1; d <= 31; d++) { const dd = String(d).padStart(2, '0'); %>
+                  <option value="<%= dd %>" <%= formReservedDay === dd ? 'selected' : '' %>><%= dd %>일</option>
+                <% } %>
+              </select>
+            </div>
+            <select name="reserved_time_hour" id="reserved_time_hour" required class="time-select">
+              <% for (let h = 0; h < 24; h++) { %>
+                <% const hh = String(h).padStart(2, '0'); %>
+                <option value="<%= hh %>" <%= (order.reserved_time || '').slice(0, 2) === hh ? 'selected' : '' %>><%= hh %>시</option>
+              <% } %>
+            </select>
+            <select name="reserved_time_minute" id="reserved_time_minute" required class="time-select">
+              <% ['00', '10', '20', '30', '40', '50'].forEach(function (mm) { %>
+                <option value="<%= mm %>" <%= (order.reserved_time || '').slice(3, 5) === mm ? 'selected' : '' %>><%= mm %>분</option>
+              <% }) %>
+            </select>
+            <input type="hidden" name="reserved_date" id="reserved_date" required value="<%= order.reserved_date || '' %>">
+            <input type="hidden" name="reserved_time" id="reserved_time" value="<%= order.reserved_time || '' %>">
+            <input type="hidden" name="pickup_reserved_date" id="pickup_reserved_date" value="<%= order.pickup_reserved_date || '' %>">
+            <input type="hidden" name="pickup_reserved_time" id="pickup_reserved_time" value="<%= order.pickup_reserved_time || '' %>">
+          </div>
+        </div>
+        <div class="field full">
+          <div id="pickupPreviewBlock" style="display:none; margin-bottom:8px;">
+            <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; font-size:12px; line-height:1.5; color:var(--muted); font-weight:600;">
+              <span>출발지 픽업시간 <span class="required-mark" aria-hidden="true">*</span></span>
+              <span id="pickupPreviewValue">-</span>
+              <span id="deliveryRouteFormulaPreview" style="font-size:10px; color:var(--muted); font-weight:500;">(경로탐색 : -)</span>
+            </div>
+          </div>
+          <label>차종 / 출발지 차량번호 (선택)</label>
+          <div class="inline-duo">
+            <input type="text" id="vehicle_type" name="vehicle_type" placeholder="예: 카니발, 그랜저, 1톤" value="<%= order.vehicle_type || '' %>">
+            <input type="text" name="vehicle_number" placeholder="예: 12가3456" value="<%= order.vehicle_number || '' %>">
+          </div>
+        </div>
+      </div>
+
+      <div class="section-title small">결제 및 요금</div>
+      <div class="field full">
+        <label>결제방식 / 요금(원)</label>
+        <div class="inline-duo">
+          <select name="payment_method_id" id="payment_method_id">
+            <option value="">선택 안 함</option>
+            <% paymentMethods.forEach(function(pm){ %>
+              <option value="<%= pm.id %>" <%= (String(order.payment_method_id) === String(pm.id)) || (!order.payment_method_id && pm.is_default) ? 'selected' : '' %>><%= pm.name %></option>
+            <% }) %>
+          </select>
+          <input type="number" id="fare_amount" name="fare_amount" min="0" step="1000" placeholder="0" value="<%= order.fare_amount || '' %>">
+          <input type="hidden" id="ferry_fare_amount" name="ferry_fare_amount" value="<%= order.ferry_fare_amount || 0 %>">
+        </div>
+        <p class="fare-calc-hint" id="fareCalcHint">경로 확정 시 지사의 구간요금 설정에 따라 자동 계산됩니다.</p>
+      </div>
+
+      <div class="section-title small">귀속 정보</div>
+      <% if (currentUser.role === 'admin') { %>
+      <div class="field">
+        <label>지사 선택 <span class="required-mark" aria-hidden="true">*</span></label>
+        <select name="branch_id" id="branch_id" required>
+          <option value="">선택하세요</option>
+          <% branches.forEach(function(b){ %>
+            <option value="<%= b.id %>" <%= String(order.branch_id) === String(b.id) ? 'selected' : '' %>><%= b.name %></option>
+          <% }) %>
+        </select>
+      </div>
+      <% } else { %>
+        <input type="hidden" id="branch_id" name="branch_id" value="<%= defaultBranch %>">
+      <% } %>
+      <% if (currentUser.role !== 'client') { %>
+      <div class="field">
+        <label>요청 법인(고객사)</label>
+        <select name="requester_group_id">
+          <option value="">선택 안 함</option>
+          <% groups.forEach(function(g){ %>
+            <option value="<%= g.id %>"><%= g.name %></option>
+          <% }) %>
+        </select>
+      </div>
+      <% } %>
+
+      <div class="section-title small">요청 메모</div>
+      <div class="field full"><textarea name="memo_customer" placeholder="예) 사고 이력 안내&#10;예) 스크래치 등 차량 관련 내용"><%= order.memo_customer || '' %></textarea></div>
+
+      <div class="order-form-actions">
+        <a class="btn secondary" href="/orders">취소</a>
+        <button class="btn" type="submit" form="orderForm">오더 등록</button>
+      </div>
+    </section>
+
+    <aside class="card map-card order-map-panel">
+      <div class="panel-title compact">
+        <div class="panel-icon">03</div>
+        <div><h2>경로 미리보기</h2><p>입력한 주소를 바탕으로 경로를 확인합니다.</p></div>
+        <button type="button" class="btn small secondary" id="mapShowAllBtn">전체 경로 보기</button>
+      </div>
+      <p class="map-hint">각 지점의 '지도보기'를 누르면 해당 위치만, 두 지점 이상 입력되면 전체 경로가 표시됩니다.</p>
+      <div class="map-legend" id="mapLegend">
+        <div class="map-legend-row" data-slot="origin">
+          <span class="dot origin"></span><b>출발</b>
+          <span id="originPreview" class="map-legend-addr">주소를 입력하세요</span>
+          <button type="button" class="btn small secondary map-view-btn" data-slot="origin">지도보기</button>
+        </div>
+        <div class="map-legend-row" data-slot="destination" id="destLegendRow">
+          <span class="dot dest"></span><b>도착</b>
+          <span id="destinationPreview" class="map-legend-addr">주소를 입력하세요</span>
+          <button type="button" class="btn small secondary map-view-btn" data-slot="destination">지도보기</button>
+        </div>
+      </div>
+      <div id="mapDistanceInfo" class="map-distance-info" style="display:none;">
+        <div class="route-search-header">
+          <div class="section-title small" style="margin:0;">🧭 경로탐색 <span id="routeDurationFormulaHeader" style="font-weight:400;color:var(--muted);"></span></div>
+          <select id="routePrioritySelect" class="route-priority-select">
+            <option value="RECOMMEND">추천</option>
+            <option value="TIME">최단시간</option>
+            <option value="DISTANCE">최단거리</option>
+            <option value="FREE">무료도로</option>
+          </select>
+        </div>
+        <div class="route-summary-grid">
+          <div class="route-summary-item"><div class="label">총거리</div><div class="value" id="routeTotalDistance">-</div></div>
+          <div class="route-summary-item"><div class="label">예상소요시간</div><div class="value" id="routeTotalDuration">-</div></div>
+          <div class="route-summary-item"><div class="label">예상톨비</div><div class="value" id="routeTollFare">-</div></div>
+        </div>
+        <div id="routeDurationBasis" class="fare-calc-hint" style="margin:8px 0 0;">소요시간 기준: -</div>
+        <div class="section-title small" style="margin:12px 0 6px;">구간별 상세</div>
+        <div id="mapDistanceList"></div>
+      </div>
+      <div id="orderMap" class="order-map"></div>
+    </aside>
+
+  </div>
+</form>
+
+<div id="registeredAddrModal" class="modal-overlay" style="display:none;">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3>등록 주소</h3>
+      <button type="button" class="modal-close" id="registeredAddrClose">✕</button>
+    </div>
+    <div id="registeredAddrList" class="registered-address-list"></div>
+    <button type="button" class="btn small secondary" id="registeredAddrManageToggle" style="margin-top:10px;">등록주소 관리 (추가/수정/삭제)</button>
+    <div id="registeredAddrManage" style="display:none;margin-top:12px;">
+      <div id="registeredAddrManageList"></div>
+      <div class="section-title small">새 주소 등록</div>
+      <div class="row">
+        <div class="field"><label>이름</label><input type="text" id="regAddrNewLabel" placeholder="예: 강남 인수 거점"></div>
+      </div>
+      <div class="field full">
+        <label>주소</label>
+        <div class="addr-input-row">
+          <input type="text" class="addr-input" id="regAddrNewAddress" placeholder="도로명, 지번 또는 상호명으로 검색">
+          <button type="button" class="btn small secondary addr-search-btn" data-target="regAddrNewAddress">🔍 검색</button>
+        </div>
+        <div id="regAddrNewAddress_results" class="addr-results"></div>
+      </div>
+      <button type="button" class="btn small" id="regAddrAddBtn">추가</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  window.__prefillWaypoints = <%- toScriptJson(order.waypoints || []) %>;
+  window.__favorites = <%- toScriptJson(favorites || []) %>;
+</script>
+<script src="//dapi.kakao.com/v2/maps/sdk.js?appkey=<%= kakaoJsKey %>"></script>
+<script src="/js/order-form.js"></script>
+
+<%- include('../partials/footer') %>

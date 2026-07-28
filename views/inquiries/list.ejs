@@ -1,0 +1,73 @@
+<%- include('../partials/header') %>
+<div class="page-head-row">
+  <div>
+    <h1 class="page-title">문의 관리</h1>
+    <p class="page-sub">챗봇 문의 접수 내역을 조회하고 오더 전환까지 관리합니다.</p>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:10px;">
+  <form method="GET" action="/inquiries" class="row" style="align-items:flex-end;">
+    <div class="field">
+      <label>상태</label>
+      <select name="status">
+        <option value="">전체</option>
+        <% ['new','in_progress','waiting_customer','answered','converted_to_order','closed'].forEach(function(s){ %>
+          <option value="<%= s %>" <%= filters.status === s ? 'selected' : '' %>><%= s %></option>
+        <% }) %>
+      </select>
+    </div>
+    <div class="field">
+      <label>카테고리</label>
+      <select name="category">
+        <option value="">전체</option>
+        <option value="fare" <%= filters.category === 'fare' ? 'selected' : '' %>>fare</option>
+        <option value="general" <%= filters.category === 'general' ? 'selected' : '' %>>general</option>
+      </select>
+    </div>
+    <div class="field full">
+      <label>검색</label>
+      <input type="text" name="q" value="<%= filters.q %>" placeholder="문의/출발지/도착지 검색">
+    </div>
+    <div class="field" style="max-width:120px;">
+      <button class="btn" type="submit">조회</button>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>상태</th>
+          <th>카테고리</th>
+          <th>요청자</th>
+          <th>지사</th>
+          <th>법인</th>
+          <th>배편</th>
+          <th>문의 요약</th>
+          <th>등록일</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% if (!inquiries.length) { %><tr><td colspan="9" class="empty">등록된 문의가 없습니다.</td></tr><% } %>
+        <% inquiries.forEach(function(i){ %>
+          <tr onclick="location.href='/inquiries/<%= i.id %>'" style="cursor:pointer;">
+            <td><a href="/inquiries/<%= i.id %>"><%= i.id %></a></td>
+            <td><%= i.status %></td>
+            <td><%= i.category %></td>
+            <td><%= i.user_name || '-' %></td>
+            <td><%= i.branch_name || '-' %></td>
+            <td><%= i.corporation_name || '-' %></td>
+            <td><span class="badge <%= i.has_ferry_leg ? 'red' : 'green' %>"><%= i.has_ferry_leg ? '필요' : '없음' %></span></td>
+            <td><%= (i.inquiry_text || '').length > 40 ? i.inquiry_text.slice(0, 40) + '…' : (i.inquiry_text || '-') %></td>
+            <td><%= i.created_at %></td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+</div>
+<%- include('../partials/footer') %>

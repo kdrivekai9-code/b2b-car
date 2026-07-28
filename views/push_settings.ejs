@@ -1,0 +1,138 @@
+<%- include('partials/header') %>
+<div class="page-head-row">
+  <div>
+    <h1 class="page-title">오더 알림 설정</h1>
+    <p class="page-sub">이 브라우저(기기)에서 받을 알림 이벤트를 설정하세요. 본인이 등록/수정한 오더는 본인에게 알림이 표시되지 않습니다.</p>
+  </div>
+</div>
+
+<div class="card">
+  <div id="pushStatus" class="page-sub">알림 구독 상태를 확인 중...</div>
+
+  <div class="section-title small">알림 받을 이벤트</div>
+  <div class="row">
+    <div class="field"><label class="checkline"><input type="checkbox" id="notifyOrderEvents" checked> 오더 등록/수정 알림</label></div>
+    <div class="field"><label class="checkline"><input type="checkbox" id="notifyDriverAssign" checked> 기사 배정 알림</label></div>
+    <% if (currentUser.role === 'admin') { %>
+    <div class="field"><label class="checkline"><input type="checkbox" id="notifyAgentCall" checked> 상담원 호출 알림 (AI 챗봇)</label></div>
+    <% } %>
+  </div>
+
+  <% if (currentUser.role === 'admin') { %>
+  <div class="section-title small">상담원 호출 알림음 (이 브라우저)</div>
+  <p class="page-sub" style="margin-top:-6px;">사이드바 배지가 뜰 때 이 브라우저 탭에서 재생되는 알림음입니다. 웹 푸시와는 별개로, 로그인해 있는 동안 어느 페이지에서나 적용됩니다. 이 브라우저에만 저장됩니다.</p>
+  <div class="row">
+    <div class="field"><label class="checkline"><input type="checkbox" id="agentSoundEnabled"> 알림음 켜기</label></div>
+    <div class="field">
+      <label>소리 종류</label>
+      <select id="agentSoundTone">
+        <option value="beep">비프음</option>
+        <option value="chime">차임벨</option>
+        <option value="urgent">긴급(3연타)</option>
+      </select>
+    </div>
+    <div class="field" style="align-self:flex-end;">
+      <button class="btn secondary small" type="button" id="agentSoundPreviewBtn">🔊 미리듣기</button>
+    </div>
+  </div>
+
+  <div class="section-title small">브라우저 알림 (백그라운드에서도 표시)</div>
+  <p class="page-sub" style="margin-top:-6px;">이 브라우저 탭이 백그라운드에 있거나 다른 창에 가려져 있어도, 상담원 호출이 오면 OS 알림창으로 띄웁니다.</p>
+  <div class="row">
+    <div class="field" id="browserNotifyPermRow" style="display:none;">
+      <button class="btn small" type="button" id="browserNotifyPermBtn">🔔 브라우저 알림 허용하기</button>
+    </div>
+    <div class="field" id="browserNotifyToggleRow" style="display:none;">
+      <label class="checkline"><input type="checkbox" id="browserNotifyEnabled"> 브라우저 알림 켜기</label>
+    </div>
+    <div class="field" id="browserNotifyDeniedRow" style="display:none;">
+      <span class="page-sub" style="margin:0;">브라우저 설정에서 알림이 차단되어 있습니다. 주소창 왼쪽의 사이트 설정에서 알림을 허용해주세요.</span>
+    </div>
+  </div>
+  <% } %>
+
+  <% if (branches.length) { %>
+  <div class="section-title small">지사 범위</div>
+  <div class="field">
+    <select id="branchScope">
+      <option value="">전체 지사</option>
+      <% branches.forEach(function(b){ %><option value="<%= b.id %>"><%= b.name %></option><% }) %>
+    </select>
+  </div>
+  <% } %>
+
+  <div style="margin-top:18px;display:flex;gap:8px;">
+    <button class="btn" id="pushSubscribeBtn">알림 켜기 / 설정 저장</button>
+    <button class="btn secondary" id="pushUnsubscribeBtn">알림 끄기</button>
+  </div>
+</div>
+
+<% if (currentUser.role === 'admin') { %>
+<script>
+(function () {
+  var enabledEl = document.getElementById('agentSoundEnabled');
+  var toneEl = document.getElementById('agentSoundTone');
+  var previewBtn = document.getElementById('agentSoundPreviewBtn');
+  if (!enabledEl || !window.AgentAlertSound) return;
+  enabledEl.checked = window.AgentAlertSound.isEnabled();
+  toneEl.value = window.AgentAlertSound.getTone();
+  enabledEl.addEventListener('change', function () { window.AgentAlertSound.setEnabled(enabledEl.checked); });
+  toneEl.addEventListener('change', function () { window.AgentAlertSound.setTone(toneEl.value); });
+  previewBtn.addEventListener('click', function () { window.AgentAlertSound.play(toneEl.value); });
+})();
+(function () {
+  var api = window.AgentBrowserNotify;
+  var permRow = document.getElementById('browserNotifyPermRow');
+  var permBtn = document.getElementById('browserNotifyPermBtn');
+  var toggleRow = document.getElementById('browserNotifyToggleRow');
+  var toggleEl = document.getElementById('browserNotifyEnabled');
+  var deniedRow = document.getElementById('browserNotifyDeniedRow');
+  if (!api || !permRow) return;
+
+  function refresh() {
+    var perm = api.permission();
+    permRow.style.display = perm === 'default' ? '' : 'none';
+    toggleRow.style.display = perm === 'granted' ? '' : 'none';
+    deniedRow.style.display = perm === 'denied' ? '' : 'none';
+    if (perm === 'granted') toggleEl.checked = api.isEnabled();
+  }
+  refresh();
+
+  permBtn.addEventListener('click', function () {
+    api.requestPermission().then(refresh);
+  });
+  toggleEl.addEventListener('change', function () { api.setEnabled(toggleEl.checked); });
+})();
+</script><% } %>
+<script>
+(async function () {
+  var statusEl = document.getElementById('pushStatus');
+  async function refreshStatus() {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+      statusEl.textContent = '이 브라우저는 푸시 알림을 지원하지 않습니다.';
+      return;
+    }
+    var sub = await window.__push.getSubscription();
+    statusEl.textContent = sub ? '✅ 이 브라우저는 알림을 받도록 설정되어 있습니다.' : '이 브라우저는 아직 알림을 받지 않습니다.';
+  }
+  await refreshStatus();
+
+  document.getElementById('pushSubscribeBtn').addEventListener('click', async function () {
+    var notifyAgentCallEl = document.getElementById('notifyAgentCall');
+    var prefs = {
+      notify_order_events: document.getElementById('notifyOrderEvents').checked,
+      notify_driver_assign: document.getElementById('notifyDriverAssign').checked,
+      notify_agent_call: notifyAgentCallEl ? notifyAgentCallEl.checked : true,
+    };
+    var branchScope = document.getElementById('branchScope');
+    if (branchScope) prefs.branch_id = branchScope.value || null;
+    await window.__push.subscribe(prefs);
+    await refreshStatus();
+  });
+  document.getElementById('pushUnsubscribeBtn').addEventListener('click', async function () {
+    await window.__push.unsubscribe();
+    await refreshStatus();
+  });
+})();
+</script>
+<%- include('partials/footer') %>

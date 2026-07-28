@@ -1,0 +1,177 @@
+require('dotenv').config();
+const express = require('express');
+const session = require('express-session');
+const pgSession = require('connect-pg-simple')(session);
+const methodOverride = require('method-override');
+const path = require('path');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+
+const { pool } = require('./db');
+const { STATUS_COLORS } = require('./config');
+const authRoutes = require('./routes/auth');
+const dashboardRoutes = require('./routes/dashboard');
+const branchRoutes = require('./routes/branches');
+const groupRoutes = require('./routes/groups');
+const userRoutes = require('./routes/users');
+const orderRoutes = require('./routes/orders');
+const favoriteRoutes = require('./routes/favorites');
+const noticeRoutes = require('./routes/notices');
+const locationAliasRoutes = require('./routes/locationAliases');
+const settingsRoutes = require('./routes/settings');
+const driverRoutes = require('./routes/drivers');
+const photoUploadRoutes = require('./routes/photoUpload');
+const pushRoutes = require('./routes/push');
+const kakaoRoutes = require('./routes/kakao');
+const knowledgeBaseRoutes = require('./routes/knowledgeBase');
+const faqRoutes = require('./routes/faq');
+const chatRoutes = require('./routes/chat');
+const inquiryRoutes = require('./routes/inquiries');
+const accessLogRoutes = require('./routes/accessLogs');
+const { accessLogMiddleware, getClientIp, writeAccessLog } = require('./lib/accessLog');
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+const isProduction = process.env.NODE_ENV === 'production';
+
+if (isProduction && (!process.env.SESSION_SECRET || process.env.SESSION_SECRET === 'b2b-car-dev-secret-change-me')) {
+  throw new Error('SESSION_SECRET 환경변수를 운영용 값으로 반드시 설정하세요.');
+}
+
+app.set('view engine', 'ejs');
+app.set('views', path.join(__dirname, 'views'));
+app.set('trust proxy', 1); // 리버스 프록시(Render/Fly/Heroku 등) 뒤에서 secure 쿠키가 동작하도록
+
+// 보안 헤더 — X-Powered-By 제거(스택 지문 노출 방지), 클릭재킹/MIME 스니핑 방지 등.
+// CSP는 기존 뷰 전반에 인라인 <script>가 이미 많아 그대로 켜면 대부분 깨지므로(별도의 nonce
+// 리팩터링이 필요한 더 큰 작업) 이번 패스에서는 끄고, 카카오 지도 SDK 등 외부 스크립트 로드가
+// crossOriginEmbedderPolicy에 막히지 않도록 그것도 끈다 — 나머지 보호(hidePoweredBy, 프레임 차단,
+// 콘텐츠 타입 스니핑 방지, Referrer-Policy, HSTS 등)는 기본값 그대로 적용된다.
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginEmbedderPolicy: false,
+}));
+
+// robots.txt는 정직한 크롤러만 지켜주므로, 응답 헤더로도 색인/수집 거부 의사를 명시한다
+// (로그인 없이는 실제 데이터를 볼 수 없는 내부 도구라 검색/AI 학습 대상이 될 이유가 없다).
+app.use((req, res, next) => {
+  res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive, nosnippet');
+  next();
+});
+
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
+app.use(methodOverride('_method'));
+app.use(express.static(path.join(__dirname, 'public')));
+
+app.use(session({
+  // disableTouch: express-session은 세션 데이터가 안 바뀐 요청에도 store.touch()를 매번 호출한다.
+  // rolling:true라 매 응답에 Set-Cookie는 계속 나가지만(브라우저 쿠키 만료는 정상적으로 계속 연장됨),
+  // DB의 session 테이블까지 매 요청마다 UPDATE할 필요는 없다 — requireAuth가 lastSeenAt을 디바운스해서
+  // 데이터가 실제로 바뀔 때만(수십 초에 한 번) session.save()로 expire까지 같이 갱신해주기 때문에 안전하다.
+  store: new pgSession({ pool, tableName: 'session', createTableIfMissing: true, disableTouch: true }),
+  secret: process.env.SESSION_SECRET || 'b2b-car-dev-secret-change-me',
+  resave: false,
+  saveUninitialized: false,
+  rolling: true,
+  cookie: {
+    maxAge: 1000 * 60 * 30,
+    secure: isProduction,
+    httpOnly: true, // express-session 기본값이지만, 감사 시 명확히 드러나도록 명시(자바스크립트로 세션 쿠키 접근 차단)
+    sameSite: 'lax', // 대부분의 브라우저에서 크로스사이트 POST에 쿠키가 안 실려서 CSRF의 실질적 완화책이 됨
+  },
+}));
+
+// req.session이 준비된 뒤에 등록해야 한다 — 이전에는 session() 미들웨어보다 먼저 등록돼 있어서
+// req.session이 아직 없는 시점에 실행되는 바람에, 로그인/로그아웃(routes/auth.js의 직접 기록)을
+// 제외한 일반 "접속기록"(상담 관리 조회/응답 등 ACCESS 이벤트)이 단 한 건도 기록되지 않고 있었다.
+app.use(accessLogMiddleware);
+
+// 모든 뷰에서 공통으로 사용할 값
+app.use((req, res, next) => {
+  res.locals.currentUser = req.session.user || null;
+  res.locals.statusColor = (s) => STATUS_COLORS[s] || 'gray';
+  res.locals.formatMoney = (n) => (Number(n) || 0).toLocaleString('ko-KR') + '원';
+  res.locals.path = req.path;
+  // 뷰에서 서버 데이터를 <script> 블록 안에 JSON.stringify로 그대로 심는 곳들이 있는데(예: AI 챗봇
+  // 대화 이력 복원), 그 데이터 안에 사용자가 입력한 텍스트가 리터럴로 "</script>"를 포함하면 그
+  // 자리에서 태그가 끊겨 뒤에 임의의 스크립트가 주입될 수 있다(저장형 XSS). "<"를 유니코드
+  // 이스케이프로 바꿔서 태그가 절대 끊기지 않게 하는 안전한 버전 — <script> 안에 데이터를 심을
+  // 때는 반드시 이 함수를 통해서만 JSON.stringify해야 한다.
+  res.locals.toScriptJson = (obj) => JSON.stringify(obj).replace(/</g, '\\u003c');
+  next();
+});
+
+// 로그인 시도 무차별 대입 공격 방지 — IP당 15분에 10회로 제한.
+// 차단이 실제로 발동하면 관리자가 "접속기록"(/access-logs) 메뉴에서 볼 수 있도록 남긴다 —
+// 이 요청은 routes/auth.js까지 가지도 못하고 여기서 끊기므로, 거기 로그인 실패 로그와는 별개로
+// 여기서 직접 기록해야 한다.
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res /*, next, options */) => {
+    writeAccessLog({
+      account: (req.body && req.body.login_id) || '(unknown)',
+      eventType: 'LOGIN_RATE_LIMITED',
+      workDetail: '로그인 무차별 대입 차단',
+      ipAddress: getClientIp(req),
+      userAgent: req.get('user-agent') || null,
+      success: false,
+    }).catch((e) => console.error('로그인 차단 기록 실패:', e.message));
+    res.status(429).render('login', { title: '로그인', error: '너무 많은 로그인 시도가 있었습니다. 잠시 후 다시 시도해주세요.' });
+  },
+});
+// GET /login(폼 조회)은 세지 않는다 — 실제 위협은 비밀번호를 대입하는 POST뿐이고,
+// GET까지 같이 세면 로그인 페이지를 몇 번 새로고침한 정상 사용자도 금방 한도에 걸린다.
+app.post('/login', loginLimiter);
+
+// 로그인 없이 접근하는 기사 사진 업로드 페이지는 '/'에 마운트된(내부적으로 모든 경로를 가로채는)
+// authRoutes/dashboardRoutes보다 반드시 먼저 등록해야 requireAuth에 걸리지 않는다.
+app.use('/upload', photoUploadRoutes);
+
+app.use('/', authRoutes);
+app.use('/', dashboardRoutes);
+app.use('/branches', branchRoutes);
+app.use('/groups', groupRoutes);
+app.use('/users', userRoutes);
+app.use('/orders', orderRoutes);
+app.use('/favorites', favoriteRoutes);
+app.use('/notices', noticeRoutes);
+app.use('/location-aliases', locationAliasRoutes);
+app.use('/settings', settingsRoutes);
+app.use('/drivers', driverRoutes);
+app.use('/push', pushRoutes);
+app.use('/kakao', kakaoRoutes);
+app.use('/knowledge-base', knowledgeBaseRoutes);
+app.use('/faq', faqRoutes);
+app.use('/chat', chatRoutes);
+app.use('/inquiries', inquiryRoutes);
+app.use('/access-logs', accessLogRoutes);
+
+app.use((req, res) => {
+  res.status(404).render('404', { title: '페이지를 찾을 수 없음' });
+});
+
+app.use((err, req, res, next) => {
+  console.error(err);
+  // 운영 환경에서는 원본 에러 메시지(내부 구현/DB 세부사항이 드러날 수 있음)를 그대로 보여주지
+  // 않는다 — 로그에는 남기되, 사용자에게는 일반 메시지만 노출한다.
+  const message = isProduction ? '서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요.' : '서버 오류가 발생했습니다: ' + err.message;
+  // fetch(X-Requested-With: fetch)로 온 AJAX 요청은 클라이언트가 응답을 항상 res.json()으로
+  // 파싱한다 — 여기서 순수 텍스트를 그대로 보내면 "JSON이 아니다"라는 파싱 에러가 실제 에러
+  // 메시지 대신 사용자에게 노출되는 문제가 있었다(AI 챗봇 오더 등록에서 실제로 겪음).
+  const wantsJson = req.xhr || req.get('X-Requested-With') === 'fetch' || (req.get('accept') || '').indexOf('application/json') >= 0;
+  if (wantsJson) return res.status(500).json({ error: message });
+  res.status(500).send(message);
+});
+
+// Vercel 등 서버리스 환경에서는 핸들러(app)만 내보내고 listen은 호출하지 않는다.
+if (!process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`B2B-CAR 서버가 http://localhost:${PORT} 에서 실행 중입니다.`);
+  });
+}
+
+module.exports = app;

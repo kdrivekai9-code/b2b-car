@@ -1,0 +1,45 @@
+<%- include('../partials/header') %>
+<div class="page-head-row">
+  <div>
+    <h1 class="page-title">사용자 관리</h1>
+    <p class="page-sub">시스템 사용자 계정을 관리합니다.</p>
+  </div>
+  <div class="page-head-actions">
+    <a class="btn" href="/users/new">+ 사용자 등록</a>
+  </div>
+</div>
+<div class="card">
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>아이디</th><th>이름</th><th>역할</th><th>지사</th><th>법인</th><th>등급</th><th>연락처</th><th>상태</th><th>접속</th><th>관리</th></tr></thead>
+    <tbody>
+      <% if (users.length === 0) { %><tr><td colspan="10" class="empty">등록된 사용자가 없습니다.</td></tr><% } %>
+      <% const roleLabel = {admin:'관리자', branch_manager:'지사장', client:'클라이언트'}; %>
+      <% users.forEach(function(u){ %>
+        <tr>
+          <td><%= u.login_id %></td>
+          <td><%= u.name %></td>
+          <td><%= roleLabel[u.role] || u.role %></td>
+          <td><%= u.branch_name || '-' %></td>
+          <td><%= u.group_name || '-' %></td>
+          <td><%= u.grade === 'leader' ? '법인 담당(리더)' : (u.grade === 'member' ? '법인 담당(일반)' : '-') %></td>
+          <td><%= u.phone || '-' %></td>
+          <td><span class="badge <%= u.status === 'active' ? 'green' : 'gray' %>"><%= u.status === 'active' ? '활성' : '비활성' %></span></td>
+          <td><span class="badge <%= u.is_logged_in ? 'blue' : 'gray' %>"><%= u.is_logged_in ? '로그인 중' : '오프라인' %></span></td>
+          <td>
+            <div class="table-actions">
+              <a class="btn small secondary" href="/users/<%= u.id %>/edit">수정</a>
+              <% if (u.is_logged_in) { %>
+                <form method="POST" action="/users/<%= u.id %>/revoke-session" onsubmit="return confirm('이 계정의 현재 접속을 종료할까요?');">
+                  <button class="btn small danger" type="submit">강제 로그아웃</button>
+                </form>
+              <% } %>
+            </div>
+          </td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+  </div>
+</div>
+<%- include('../partials/footer') %>

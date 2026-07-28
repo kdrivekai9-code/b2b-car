@@ -1,0 +1,36 @@
+<%- include('../partials/header') %>
+<div class="page-head-row">
+  <div>
+    <h1 class="page-title">지식관리</h1>
+    <p class="page-sub">FAQ 챗봇이 답변에 활용하는 지식 항목입니다. 저장 시 자동으로 임베딩(Vertex AI)이 생성됩니다.</p>
+  </div>
+  <div class="page-head-actions">
+    <a class="btn secondary" href="/knowledge-base/categories">카테고리 관리</a>
+    <a class="btn" href="/knowledge-base/new">+ 지식 항목 등록</a>
+  </div>
+</div>
+<div class="card">
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>카테고리</th><th>질문</th><th>답변</th><th>등록일시</th><th>관리</th></tr></thead>
+    <tbody>
+      <% if (entries.length === 0) { %><tr><td colspan="5" class="empty">등록된 지식 항목이 없습니다.</td></tr><% } %>
+      <% entries.forEach(function(e){ %>
+        <tr>
+          <td><span class="badge gray"><%= e.category %></span></td>
+          <td><%= e.question %></td>
+          <td title="<%= e.answer %>"><%= e.answer.length > 60 ? e.answer.slice(0, 60) + '…' : e.answer %></td>
+          <td><%= e.created_at %></td>
+          <td>
+            <a class="btn small secondary" href="/knowledge-base/<%= e.id %>/edit">수정</a>
+            <form style="display:inline" method="POST" action="/knowledge-base/<%= e.id %>/delete" onsubmit="return confirm('삭제하시겠습니까?');">
+              <button class="btn small secondary" type="submit">삭제</button>
+            </form>
+          </td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+  </div>
+</div>
+<%- include('../partials/footer') %>

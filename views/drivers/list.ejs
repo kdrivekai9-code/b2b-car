@@ -1,0 +1,35 @@
+<%- include('../partials/header') %>
+<div class="page-head-row">
+  <div>
+    <h1 class="page-title">기사 관리</h1>
+    <p class="page-sub">오더 배정 및 사진 업로드 권한과 연결되는 기사(드라이버) 목록입니다.</p>
+  </div>
+  <div class="page-head-actions">
+    <a class="btn" href="/drivers/new">+ 기사 등록</a>
+  </div>
+</div>
+<div class="card">
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>이름</th><th>지사</th><th>연락처</th><th>상태</th><th>관리</th></tr></thead>
+    <tbody>
+      <% if (drivers.length === 0) { %><tr><td colspan="5" class="empty">등록된 기사가 없습니다.</td></tr><% } %>
+      <% drivers.forEach(function(d){ %>
+        <tr>
+          <td><%= d.name %></td>
+          <td><%= d.branch_name %></td>
+          <td><%= d.phone || '-' %></td>
+          <td><span class="badge <%= d.status === 'active' ? 'green' : 'gray' %>"><%= d.status === 'active' ? '활성' : '비활성' %></span></td>
+          <td>
+            <a class="btn small secondary" href="/drivers/<%= d.id %>/edit">수정</a>
+            <form style="display:inline" method="POST" action="/drivers/<%= d.id %>/toggle">
+              <button class="btn small secondary" type="submit"><%= d.status === 'active' ? '비활성화' : '활성화' %></button>
+            </form>
+          </td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+  </div>
+</div>
+<%- include('../partials/footer') %>

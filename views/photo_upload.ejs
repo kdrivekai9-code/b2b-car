@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title><%= title %> · B2B-CAR</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="upload-wrap">
+  <div class="upload-card">
+    <h1>🚚 기사 사진 업로드</h1>
+    <% if (!order) { %>
+      <p class="error-msg">잘못된 링크이거나 만료된 오더입니다.</p>
+    <% } else { %>
+      <p class="upload-order-oid">오더번호 <b><%= order.oid %></b></p>
+
+      <% if (guide && guide.guide_image_url) { %>
+        <img src="<%= guide.guide_image_url %>" alt="안내 이미지" class="upload-guide-image">
+      <% } %>
+      <% if (guide && guide.guide_text) { %>
+        <div class="upload-guide-text"><%= guide.guide_text %></div>
+      <% } else { %>
+        <div class="upload-guide-text">차량 인도/회수 시점의 사진을 촬영하여 업로드해주세요.</div>
+      <% } %>
+
+      <form method="POST" action="/upload/<%= order.photo_upload_token %>" enctype="multipart/form-data" class="upload-form">
+        <input type="file" name="photo" accept="image/*" capture="environment" required>
+        <button class="btn" type="submit">사진 업로드</button>
+      </form>
+
+      <% if (photos.length > 0) { %>
+        <div class="upload-gallery">
+          <% photos.forEach(function(p){ %>
+            <a href="<%= p.url %>" target="_blank"><img src="<%= p.url %>" alt="업로드된 사진"></a>
+          <% }) %>
+        </div>
+      <% } %>
+    <% } %>
+  </div>
+</div>
+</body>
+</html>

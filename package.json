@@ -1,0 +1,39 @@
+{
+  "name": "b2b-car",
+  "version": "0.1.0",
+  "description": "탁송 B2B 통합·운영 플랫폼 - Phase 1 MVP (사용자/지사/그룹 CRUD, 오더 관리, 기본 대시보드)",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "dev:watch": "node --watch server.js",
+    "seed": "node seed.js",
+    "check:login": "node scripts/check-login.js",
+    "check:login:all": "node scripts/check-login-all.js",
+    "check:preflight": "PREFLIGHT_RETRY_ON_429=true PREFLIGHT_MAX_RETRIES=1 PREFLIGHT_RETRY_BASE_MS=1000 PREFLIGHT_RETRY_MAX_MS=900000 npm run check:login:all",
+    "e2e": "PLAYWRIGHT_BROWSERS_PATH=.playwright-browsers E2E_BASE_URL=http://127.0.0.1:3000 npx playwright test tests/manual --reporter=line"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.110.7",
+    "bcryptjs": "^2.4.3",
+    "connect-pg-simple": "^10.0.0",
+    "dayjs": "^1.11.10",
+    "dotenv": "^16.4.5",
+    "ejs": "^3.1.10",
+    "express": "^4.19.2",
+    "express-rate-limit": "^8.6.0",
+    "express-session": "^1.18.0",
+    "helmet": "^8.3.0",
+    "method-override": "^3.0.0",
+    "multer": "^2.2.0",
+    "pg": "^8.13.0",
+    "web-push": "^3.6.7"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.0"
+  }
+}
