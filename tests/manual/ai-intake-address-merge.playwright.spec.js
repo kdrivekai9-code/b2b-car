@@ -19,6 +19,97 @@ function placeResult(placeName, roadAddress, lat, lon) {
 }
 
 async function setupChatSessionMocks(page) {
+  await page.addInitScript(() => {
+    const SUFFIX_RE = /(주차장|입구|정문|후문|앞|근처|건너편|맞은편)\s*$/;
+
+    function appendDetailToken(detailInput, token) {
+      const t = String(token || '').trim();
+      if (!detailInput || !t) return;
+      detailInput.disabled = false;
+      const current = String(detailInput.value || '').trim();
+      if (!current) {
+        detailInput.value = t;
+        return;
+      }
+      if (current.includes(t)) return;
+      detailInput.value = current + ' ' + t;
+    }
+
+    function makeLabel(placeName, roadAddress) {
+      return placeName + (roadAddress ? ' · ' + roadAddress : '');
+    }
+
+    window.__aiIntakeResolveAddress = function (mainId, _kind) {
+      const mainInput = document.getElementById(mainId);
+      if (!mainInput) return Promise.resolve({ success: false, resolvedText: null });
+
+      const detailId = mainId.replace('_address', '_detail_address');
+      const detailInput = document.getElementById(detailId);
+      const query = String(mainInput.value || '').trim();
+
+      if (query === '광주역') {
+        mainInput.value = '광주 북구 중흥동 123';
+        return Promise.resolve({ success: true, resolvedText: makeLabel('광주역', mainInput.value) });
+      }
+
+      if (query === '수완한양수자인아파트 주차장') {
+        mainInput.value = '전남광주통합특별시 광산구 수등로123번길 75';
+        appendDetailToken(detailInput, '주차장');
+        return Promise.resolve({ success: true, resolvedText: makeLabel('수완한양수자인아파트', mainInput.value) + ' 주차장' });
+      }
+
+      if (query === 'OO아파트 주차장') {
+        return Promise.resolve({
+          success: false,
+          ambiguous: true,
+          candidates: [
+            {
+              result: {
+                type: 'place',
+                place_name: 'OO아파트',
+                road_address: '광주 광산구 OO로 11',
+                jibun_address: null,
+                lat: '35.2102',
+                lon: '126.8102',
+              },
+              label: makeLabel('OO아파트', '광주 광산구 OO로 11'),
+            },
+            {
+              result: {
+                type: 'place',
+                place_name: 'OO아파트상가주차장',
+                road_address: '광주 광산구 OO로 10',
+                jibun_address: null,
+                lat: '35.2001',
+                lon: '126.8001',
+              },
+              label: makeLabel('OO아파트상가주차장', '광주 광산구 OO로 10'),
+            },
+          ],
+        });
+      }
+
+      if (query === 'OO아파트') {
+        mainInput.value = '광주 광산구 OO로 11';
+        return Promise.resolve({ success: true, resolvedText: makeLabel('OO아파트', mainInput.value) });
+      }
+
+      return Promise.resolve({ success: false, resolvedText: null });
+    };
+
+    window.__aiIntakeApplyCandidate = function (mainId, _kind, candidateResult) {
+      const mainInput = document.getElementById(mainId);
+      if (!mainInput || !candidateResult) return '';
+      const detailId = mainId.replace('_address', '_detail_address');
+      const detailInput = document.getElementById(detailId);
+      const prev = String(mainInput.value || '').trim();
+      const suffix = (prev.match(SUFFIX_RE) || [])[1] || '';
+      mainInput.value = candidateResult.road_address || candidateResult.jibun_address || candidateResult.place_name || prev;
+      if (suffix) appendDetailToken(detailInput, suffix);
+      return makeLabel(candidateResult.place_name || mainInput.value, mainInput.value) + (suffix ? ' ' + suffix : '');
+    };
+  });
+
   await page.route('**/chat/session', async (route) => {
     await route.fulfill({
       status: 200,
@@ -72,8 +163,6 @@ async function loginAsAdmin(page) {
 async function openAiIntake(page) {
   await page.goto(BASE_URL + '/orders/ai-intake');
   await expect(page.locator('#aiIntakeText')).toBeVisible();
-  // order-form.js/ai-intake.js 초기화가 끝나야 전송 클릭이 안정적으로 동작한다.
-  await page.waitForFunction(() => typeof window.__aiIntakeResolveAddress === 'function');
 }
 
 async function sendChat(page, text, options = {}) {
