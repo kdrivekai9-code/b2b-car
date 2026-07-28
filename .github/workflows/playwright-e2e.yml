@@ -46,7 +46,6 @@ on:
 
 jobs:
   e2e:
-    if: ${{ secrets.DATABASE_URL != '' }}
     runs-on: ubuntu-latest
     env:
       NODE_ENV: test
@@ -64,29 +63,36 @@ jobs:
 
     steps:
       - name: Checkout
+        if: ${{ env.DATABASE_URL != '' }}
         uses: actions/checkout@v4
 
       - name: Setup Node.js
+        if: ${{ env.DATABASE_URL != '' }}
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
 
       - name: Install dependencies
+        if: ${{ env.DATABASE_URL != '' }}
         run: npm ci
 
       - name: Install Playwright browsers
+        if: ${{ env.DATABASE_URL != '' }}
         run: npx playwright install --with-deps chromium
 
       - name: Seed demo data
+        if: ${{ env.DATABASE_URL != '' }}
         run: npm run seed
 
       - name: Start server
+        if: ${{ env.DATABASE_URL != '' }}
         run: |
           npm start > server.log 2>&1 &
           echo $! > server.pid
 
       - name: Wait for server
+        if: ${{ env.DATABASE_URL != '' }}
         run: |
           for i in {1..60}; do
             if curl -fsS http://127.0.0.1:3000/login > /dev/null; then
@@ -100,23 +106,25 @@ jobs:
           exit 1
 
       - name: Run preflight login gate
+        if: ${{ env.DATABASE_URL != '' }}
         env:
           PREFLIGHT_REPORT_PATH: artifacts/preflight-report.json
           PREFLIGHT_SUMMARY_PATH: artifacts/preflight-summary.md
         run: npm run check:preflight
 
       - name: Run Playwright test
+        if: ${{ env.DATABASE_URL != '' }}
         run: npm run e2e
 
       - name: Upload server log on failure
-        if: failure()
+        if: ${{ failure() && env.DATABASE_URL != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: server-log
           path: server.log
 
       - name: Upload preflight report
-        if: always()
+        if: ${{ always() && env.DATABASE_URL != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: preflight-report
@@ -124,7 +132,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload preflight summary
-        if: always()
+        if: ${{ always() && env.DATABASE_URL != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: preflight-summary
@@ -132,17 +140,14 @@ jobs:
           if-no-files-found: warn
 
       - name: Stop server
-        if: always()
+        if: ${{ always() && env.DATABASE_URL != '' }}
         run: |
           if [ -f server.pid ]; then
             kill "$(cat server.pid)" || true
           fi
 
-  e2e-skipped-no-db:
-    if: ${{ secrets.DATABASE_URL == '' }}
-    runs-on: ubuntu-latest
-    steps:
       - name: Skip message
+        if: ${{ env.DATABASE_URL == '' }}
         run: |
           echo "DATABASE_URL secret is not configured."
           echo "Playwright E2E job was skipped."
