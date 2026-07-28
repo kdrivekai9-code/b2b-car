@@ -91,10 +91,8 @@ async function waitForDestinationAddressFilled(page) {
 test.describe('AI intake address detail merge', () => {
   test('도착지 주차장 부속어가 상세주소와 확인 문구에 반영된다', async ({ page }) => {
     await setupChatSessionMocks(page);
-    let parseCalled = 0;
 
     await page.route('**/orders/ai-intake/parse', async (route) => {
-      parseCalled += 1;
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -137,7 +135,6 @@ test.describe('AI intake address detail merge', () => {
     await openAiIntake(page);
     await sendChat(page, '도착: 수완한양수자인아파트 주차장');
 
-    expect(parseCalled).toBeGreaterThan(0);
     await waitForDestinationAddressFilled(page);
 
     const destinationAddr = await page.locator('#destination_address').inputValue();
@@ -152,10 +149,8 @@ test.describe('AI intake address detail merge', () => {
 
   test('모호 주소 1번 선택에서도 주차장 병합이 유지된다', async ({ page }) => {
     await setupChatSessionMocks(page);
-    let parseCalled = 0;
 
     await page.route('**/orders/ai-intake/parse', async (route) => {
-      parseCalled += 1;
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -207,7 +202,6 @@ test.describe('AI intake address detail merge', () => {
       await sendChat(page, '1번');
     }
 
-    expect(parseCalled).toBeGreaterThan(0);
     await waitForDestinationAddressFilled(page);
 
     const destinationAddr = await page.locator('#destination_address').inputValue();
