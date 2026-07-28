@@ -72,13 +72,25 @@ async function loginAsAdmin(page) {
 async function openAiIntake(page) {
   await page.goto(BASE_URL + '/orders/ai-intake');
   await expect(page.locator('#aiIntakeText')).toBeVisible();
+  // order-form.js/ai-intake.js 초기화가 끝나야 전송 클릭이 안정적으로 동작한다.
+  await page.waitForFunction(() => typeof window.__aiIntakeResolveAddress === 'function');
 }
 
 async function sendChat(page, text) {
   const chatInput = page.locator('#aiIntakeText');
   const sendBtn = page.locator('#aiSendBtn');
+  const parseReq = page.waitForRequest('**/orders/ai-intake/parse');
   await chatInput.fill(text);
+  await expect(sendBtn).toBeEnabled();
   await sendBtn.click();
+  await parseReq;
+}
+
+async function waitForDestinationAddressFilled(page) {
+  await expect.poll(async () => {
+    const addr = await page.locator('#destination_address').inputValue();
+    return (addr || '').trim();
+  }, { timeout: 15000 }).not.toBe('');
 }
 
 async function waitForDestinationAddressFilled(page) {
@@ -97,7 +109,7 @@ test.describe('AI intake address detail merge', () => {
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          intent: 'order',
+          intent: 'dispatch_order',
           reserved_date: '2026-08-01',
           reserved_time: '13:00',
           origin_address: '광주역',
@@ -155,7 +167,7 @@ test.describe('AI intake address detail merge', () => {
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          intent: 'order',
+          intent: 'dispatch_order',
           reserved_date: '2026-08-01',
           reserved_time: '13:00',
           origin_address: '광주역',
