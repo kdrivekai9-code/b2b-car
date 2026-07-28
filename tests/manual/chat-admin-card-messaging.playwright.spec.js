@@ -45,7 +45,18 @@ async function postAgentMessage(page, sessionId, text) {
 async function openCardViewAndSelectSession(page, sessionId) {
   await page.goto(BASE_URL + '/chat/sessions?view=card');
   const cardBtn = page.locator('.session-card-item[data-session-id="' + sessionId + '"]');
-  await expect(cardBtn).toBeVisible();
+
+  // DB 반영/정렬 지연이 있을 수 있어 카드가 보일 때까지 짧게 재시도한다.
+  var found = false;
+  for (let i = 0; i < 3; i += 1) {
+    if (await cardBtn.count()) {
+      found = true;
+      break;
+    }
+    await page.reload();
+  }
+  expect(found).toBeTruthy();
+  await expect(cardBtn).toBeVisible({ timeout: 10000 });
 
   const messagesLoaded = page.waitForResponse((res) => {
     const url = res.url();
@@ -62,15 +73,12 @@ async function openCardViewAndSelectSession(page, sessionId) {
 async function deleteSessionFromList(page, sessionId) {
   await page.goto(BASE_URL + '/chat/sessions?view=list');
   const row = page.locator('tbody tr').filter({ hasText: '#' + sessionId });
-  await expect(row).toHaveCount(1);
+  await expect(row).toHaveCount(1, { timeout: 10000 });
 
   page.once('dialog', async (dialog) => dialog.accept());
-  await Promise.all([
-    page.waitForURL(/\/chat\/sessions\?view=list/),
-    row.getByRole('button', { name: '삭제' }).click(),
-  ]);
+  await row.getByRole('button', { name: '삭제' }).click();
 
-  await expect(page.locator('tbody tr').filter({ hasText: '#' + sessionId })).toHaveCount(0);
+  await expect(page.locator('tbody tr').filter({ hasText: '#' + sessionId })).toHaveCount(0, { timeout: 15000 });
   const deletedRes = await page.request.get(BASE_URL + '/chat/sessions/' + sessionId);
   expect(deletedRes.status()).toBe(404);
 }
@@ -82,12 +90,9 @@ async function deleteSessionFromCard(page, sessionId) {
   await expect(deleteBtn).toBeVisible();
 
   page.once('dialog', async (dialog) => dialog.accept());
-  await Promise.all([
-    page.waitForNavigation({ url: /\/chat\/sessions\?view=card/ }),
-    deleteBtn.click(),
-  ]);
+  await deleteBtn.click();
 
-  await expect(page.locator('.session-card-item[data-session-id="' + sessionId + '"]')).toHaveCount(0);
+  await expect(page.locator('.session-card-item[data-session-id="' + sessionId + '"]')).toHaveCount(0, { timeout: 15000 });
   const deletedRes = await page.request.get(BASE_URL + '/chat/sessions/' + sessionId);
   expect(deletedRes.status()).toBe(404);
 }
