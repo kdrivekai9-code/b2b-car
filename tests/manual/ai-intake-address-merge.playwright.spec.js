@@ -93,13 +93,6 @@ async function waitForDestinationAddressFilled(page) {
   }, { timeout: 15000 }).not.toBe('');
 }
 
-async function waitForDestinationAddressFilled(page) {
-  await expect.poll(async () => {
-    const addr = await page.locator('#destination_address').inputValue();
-    return (addr || '').trim();
-  }, { timeout: 15000 }).not.toBe('');
-}
-
 test.describe('AI intake address detail merge', () => {
   test('도착지 주차장 부속어가 상세주소와 확인 문구에 반영된다', async ({ page }) => {
     await setupChatSessionMocks(page);
