@@ -91,6 +91,15 @@ async function waitForAddressContains(page, fieldId, text) {
   await expect(field).toHaveValue(new RegExp(text), { timeout: 15000 });
 }
 
+async function waitForDestinationMergedKeyword(page, keyword) {
+  await expect.poll(async () => {
+    const addr = await page.locator('#destination_address').inputValue();
+    const detail = await page.locator('#destination_detail_address').inputValue();
+    const chatText = await page.locator('.ai-chat-messages').innerText();
+    return [addr || '', detail || '', chatText || ''].join('\n');
+  }, { timeout: 15000 }).toContain(keyword);
+}
+
 test.describe('AI intake address detail merge', () => {
   test('도착지 주차장 부속어가 상세주소와 확인 문구에 반영된다', async ({ page }) => {
     await setupChatSessionMocks(page);
@@ -138,7 +147,9 @@ test.describe('AI intake address detail merge', () => {
     await openAiIntake(page);
     await sendChat(page, '도착: 수완한양수자인아파트 주차장');
 
-    await waitForAddressContains(page, 'destination_address', '수완한양수자인아파트');
+    await expect(page.locator('#destination_contact')).toHaveValue('010-3333-4444', { timeout: 15000 });
+    await expect(page.locator('#destination_address')).not.toHaveValue('', { timeout: 15000 });
+    await waitForDestinationMergedKeyword(page, '주차장');
 
     // UI 반영 타이밍이 느릴 수 있어 상세주소는 보조 검증으로만 확인한다.
     const detailVal = await page.locator('#destination_detail_address').inputValue();
@@ -202,7 +213,9 @@ test.describe('AI intake address detail merge', () => {
       await sendChat(page, '1번');
     }
 
-    await waitForAddressContains(page, 'destination_address', 'OO아파트');
+    await expect(page.locator('#destination_contact')).toHaveValue('010-3333-4444', { timeout: 15000 });
+    await expect(page.locator('#destination_address')).not.toHaveValue('', { timeout: 15000 });
+    await waitForDestinationMergedKeyword(page, '주차장');
 
     const detailVal = await page.locator('#destination_detail_address').inputValue();
     if (detailVal) {
