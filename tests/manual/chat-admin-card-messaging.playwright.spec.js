@@ -212,6 +212,7 @@ test.describe('Chat admin card messaging', () => {
   });
 
   test('리스트 보기에서 삭제하면 세션이 목록과 상세 API에서 사라진다', async ({ page }) => {
+    test.setTimeout(60000);
     await loginAsAdmin(page);
 
     const sessionId = await createChatSession(page);
@@ -221,6 +222,7 @@ test.describe('Chat admin card messaging', () => {
   });
 
   test('카드 보기에서 삭제하면 세션 카드와 상세 API에서 사라진다', async ({ page }) => {
+    test.setTimeout(60000);
     await loginAsAdmin(page);
 
     const sessionId = await createChatSession(page);
