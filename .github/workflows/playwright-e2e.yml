@@ -126,14 +126,14 @@ jobs:
 
       - name: Upload server log on failure
         if: ${{ failure() && env.DATABASE_URL != '' }}
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: server-log
           path: server.log
 
       - name: Upload preflight report
         if: ${{ always() && env.DATABASE_URL != '' }}
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: preflight-report
           path: artifacts/preflight-report.json
@@ -141,7 +141,7 @@ jobs:
 
       - name: Upload preflight summary
         if: ${{ always() && env.DATABASE_URL != '' }}
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: preflight-summary
           path: artifacts/preflight-summary.md
