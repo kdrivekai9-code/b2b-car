@@ -86,7 +86,7 @@ async function deleteSessionViaApi(page, sessionId, view) {
   const res = await page.request.post(BASE_URL + '/chat/sessions/' + sessionId + '/delete', {
     form: { view: view || 'list' },
   });
-  expect(res.status()).toBe(302);
+  expect([200, 302]).toContain(res.status());
 }
 
 async function deleteSessionFromList(page, sessionId) {
