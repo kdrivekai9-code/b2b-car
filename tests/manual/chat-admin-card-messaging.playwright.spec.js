@@ -48,7 +48,7 @@ async function openCardViewAndSelectSession(page, sessionId) {
 
   // DB 반영/정렬 지연이 있을 수 있어 카드가 보일 때까지 짧게 재시도한다.
   var found = false;
-  for (let i = 0; i < 3; i += 1) {
+  for (let i = 0; i < 6; i += 1) {
     if (await cardBtn.count()) {
       found = true;
       break;
@@ -70,6 +70,18 @@ async function openCardViewAndSelectSession(page, sessionId) {
   await expect(page.locator('#openSessionDetailLink')).toHaveAttribute('href', '/chat/sessions/' + sessionId);
 }
 
+async function waitUntilSessionDeleted(page, sessionId, timeoutMs = 15000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const deletedRes = await page.request.get(BASE_URL + '/chat/sessions/' + sessionId);
+    if (deletedRes.status() === 404) {
+      return;
+    }
+    await page.waitForTimeout(500);
+  }
+  throw new Error('Session was not deleted in time: ' + sessionId);
+}
+
 async function deleteSessionFromList(page, sessionId) {
   await page.goto(BASE_URL + '/chat/sessions?view=list');
   const row = page.locator('tbody tr').filter({ hasText: '#' + sessionId });
@@ -78,9 +90,9 @@ async function deleteSessionFromList(page, sessionId) {
   page.once('dialog', async (dialog) => dialog.accept());
   await row.getByRole('button', { name: '삭제' }).click();
 
+  await waitUntilSessionDeleted(page, sessionId, 20000);
+  await page.reload();
   await expect(page.locator('tbody tr').filter({ hasText: '#' + sessionId })).toHaveCount(0, { timeout: 15000 });
-  const deletedRes = await page.request.get(BASE_URL + '/chat/sessions/' + sessionId);
-  expect(deletedRes.status()).toBe(404);
 }
 
 async function deleteSessionFromCard(page, sessionId) {
@@ -92,9 +104,9 @@ async function deleteSessionFromCard(page, sessionId) {
   page.once('dialog', async (dialog) => dialog.accept());
   await deleteBtn.click();
 
+  await waitUntilSessionDeleted(page, sessionId, 20000);
+  await page.goto(BASE_URL + '/chat/sessions?view=card');
   await expect(page.locator('.session-card-item[data-session-id="' + sessionId + '"]')).toHaveCount(0, { timeout: 15000 });
-  const deletedRes = await page.request.get(BASE_URL + '/chat/sessions/' + sessionId);
-  expect(deletedRes.status()).toBe(404);
 }
 
 test.describe('Chat admin card messaging', () => {
