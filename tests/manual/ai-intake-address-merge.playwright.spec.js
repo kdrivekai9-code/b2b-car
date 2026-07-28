@@ -76,14 +76,15 @@ async function openAiIntake(page) {
   await page.waitForFunction(() => typeof window.__aiIntakeResolveAddress === 'function');
 }
 
-async function sendChat(page, text) {
+async function sendChat(page, text, options = {}) {
+  const { waitForParse = true } = options;
   const chatInput = page.locator('#aiIntakeText');
   const sendBtn = page.locator('#aiSendBtn');
-  const parseReq = page.waitForRequest('**/orders/ai-intake/parse');
+  const parseReq = waitForParse ? page.waitForRequest('**/orders/ai-intake/parse') : null;
   await chatInput.fill(text);
   await expect(sendBtn).toBeEnabled();
   await sendBtn.click();
-  await parseReq;
+  if (parseReq) await parseReq;
 }
 
 async function waitForDestinationAddressFilled(page) {
@@ -204,7 +205,7 @@ test.describe('AI intake address detail merge', () => {
     const choicePrompt = page.locator('.ai-chat-bubble.ai-bot').filter({ hasText: '어느 곳이 맞을까요?' }).last();
     if (await choicePrompt.count()) {
       await expect(choicePrompt).toBeVisible({ timeout: 15000 });
-      await sendChat(page, '1번');
+      await sendChat(page, '1번', { waitForParse: false });
     }
 
     await waitForDestinationAddressFilled(page);
