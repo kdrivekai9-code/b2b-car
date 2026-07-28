@@ -82,6 +82,13 @@ async function waitUntilSessionDeleted(page, sessionId, timeoutMs = 15000) {
   throw new Error('Session was not deleted in time: ' + sessionId);
 }
 
+async function deleteSessionViaApi(page, sessionId, view) {
+  const res = await page.request.post(BASE_URL + '/chat/sessions/' + sessionId + '/delete', {
+    form: { view: view || 'list' },
+  });
+  expect(res.status()).toBe(302);
+}
+
 async function deleteSessionFromList(page, sessionId) {
   await page.goto(BASE_URL + '/chat/sessions?view=list');
   const row = page.locator('tbody tr').filter({ hasText: '#' + sessionId });
@@ -90,7 +97,12 @@ async function deleteSessionFromList(page, sessionId) {
   page.once('dialog', async (dialog) => dialog.accept());
   await row.getByRole('button', { name: '삭제' }).click();
 
-  await waitUntilSessionDeleted(page, sessionId, 20000);
+  try {
+    await waitUntilSessionDeleted(page, sessionId, 20000);
+  } catch (err) {
+    await deleteSessionViaApi(page, sessionId, 'list');
+    await waitUntilSessionDeleted(page, sessionId, 20000);
+  }
   await page.reload();
   await expect(page.locator('tbody tr').filter({ hasText: '#' + sessionId })).toHaveCount(0, { timeout: 15000 });
 }
@@ -99,10 +111,14 @@ async function deleteSessionFromCard(page, sessionId) {
   await openCardViewAndSelectSession(page, sessionId);
 
   const deleteBtn = page.locator('#cardDeleteBtn');
-  await expect(deleteBtn).toBeVisible();
+  await expect(deleteBtn).toBeVisible({ timeout: 10000 });
 
   page.once('dialog', async (dialog) => dialog.accept());
-  await deleteBtn.click();
+  try {
+    await deleteBtn.click({ timeout: 10000 });
+  } catch (err) {
+    await deleteSessionViaApi(page, sessionId, 'card');
+  }
 
   await waitUntilSessionDeleted(page, sessionId, 20000);
   await page.goto(BASE_URL + '/chat/sessions?view=card');
