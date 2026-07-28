@@ -49,6 +49,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       NODE_ENV: test
+      NODE_OPTIONS: --dns-result-order=ipv4first
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       SESSION_SECRET: ${{ secrets.SESSION_SECRET != '' && secrets.SESSION_SECRET || 'ci-session-secret' }}
       PLAYWRIGHT_BROWSERS_PATH: .playwright-browsers
@@ -76,6 +77,11 @@ jobs:
       - name: Install dependencies
         if: ${{ env.DATABASE_URL != '' }}
         run: npm ci
+
+      - name: Print DATABASE_URL host/port (safe)
+        if: ${{ env.DATABASE_URL != '' }}
+        run: |
+          node -e "const u=new URL(process.env.DATABASE_URL); console.log('DB host:', u.hostname); console.log('DB port:', u.port || '(default)'); console.log('DB uses pooler:', u.hostname.includes('pooler.supabase.com'));"
 
       - name: Install Playwright browsers
         if: ${{ env.DATABASE_URL != '' }}
