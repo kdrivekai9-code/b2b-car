@@ -86,9 +86,9 @@ async function waitForDestinationDetailContains(page, text) {
   await expect(detail).toHaveValue(new RegExp(text), { timeout: 15000 });
 }
 
-async function waitForBotMessageContains(page, text) {
-  const botMsg = page.locator('.ai-chat-bubble.ai-bot').filter({ hasText: text }).last();
-  await expect(botMsg).toBeVisible({ timeout: 15000 });
+async function waitForAddressContains(page, fieldId, text) {
+  const field = page.locator('#' + fieldId);
+  await expect(field).toHaveValue(new RegExp(text), { timeout: 15000 });
 }
 
 test.describe('AI intake address detail merge', () => {
@@ -138,8 +138,7 @@ test.describe('AI intake address detail merge', () => {
     await openAiIntake(page);
     await sendChat(page, '도착: 수완한양수자인아파트 주차장');
 
-    await waitForBotMessageContains(page, '도착지 주소는');
-    await waitForBotMessageContains(page, '주차장');
+    await waitForAddressContains(page, 'destination_address', '수완한양수자인아파트');
 
     // UI 반영 타이밍이 느릴 수 있어 상세주소는 보조 검증으로만 확인한다.
     const detailVal = await page.locator('#destination_detail_address').inputValue();
@@ -198,14 +197,12 @@ test.describe('AI intake address detail merge', () => {
     await sendChat(page, '도착: OO아파트 주차장');
 
     const choicePrompt = page.locator('.ai-chat-bubble.ai-bot').filter({ hasText: '어느 곳이 맞을까요?' }).last();
-    const promptCount = await choicePrompt.count();
-    if (promptCount > 0) {
+    if (await choicePrompt.count()) {
       await expect(choicePrompt).toBeVisible({ timeout: 15000 });
       await sendChat(page, '1번');
     }
 
-    await waitForBotMessageContains(page, '도착지 주소는');
-    await waitForBotMessageContains(page, '주차장');
+    await waitForAddressContains(page, 'destination_address', 'OO아파트');
 
     const detailVal = await page.locator('#destination_detail_address').inputValue();
     if (detailVal) {
