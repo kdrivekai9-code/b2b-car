@@ -9,6 +9,7 @@ supabase/.temp/
 .npm-cache/
 .playwright-browsers/
 test-results/
+.github-run-*/
 scratch_*.js
 server.pid
 .vscode/
