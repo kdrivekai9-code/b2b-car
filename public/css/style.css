@@ -335,15 +335,18 @@ form .field.full{flex-basis:100%;}
 .ai-chat-search-row input{width:100%;}
 .ai-chat-recent-label{font-size:11px;font-weight:700;color:var(--muted);padding:10px 10px 4px;text-transform:uppercase;letter-spacing:.02em;flex-shrink:0;}
 .ai-chat-recent-list{overflow-y:auto;flex:1;min-height:0;}
-.ai-chat-recent-item{display:block;width:100%;border:none;background:none;padding:8px 10px;font:inherit;font-size:12.5px;color:var(--text);text-align:left;cursor:pointer;border-radius:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.ai-chat-recent-item{display:flex;align-items:center;gap:8px;width:100%;border:none;background:none;padding:8px 10px;font:inherit;font-size:12.5px;color:var(--text);text-align:left;cursor:pointer;border-radius:8px;}
 .ai-chat-recent-item:hover{background:var(--tint);}
 .ai-chat-recent-item.active{background:var(--tint);color:var(--navy);font-weight:700;}
+.ai-chat-recent-summary{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.ai-chat-recent-date{flex:0 0 auto;font-size:10px;color:var(--muted);font-weight:600;letter-spacing:.01em;}
 .ai-chat-recent-empty,.ai-chat-recent-loading{padding:10px;font-size:12px;color:var(--muted);}
 .ai-chat-messages{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:10px;margin-bottom:10px;}
 .ai-chat-bubble{padding:10px 14px;border-radius:14px;font-size:13px;max-width:92%;white-space:pre-wrap;line-height:1.5;box-shadow:var(--shadow-sm);}
 .ai-chat-bubble.ai-bot{background:#f1f5f9;color:var(--text);align-self:flex-start;border-bottom-left-radius:4px;}
 .ai-chat-bubble.ai-user{background:linear-gradient(135deg,var(--blue),var(--navy2));color:#fff;align-self:flex-end;border-bottom-right-radius:4px;box-shadow:0 2px 8px rgba(52,104,192,.3);}
 .ai-chat-bubble.ai-agent{background:linear-gradient(135deg,#16a34a,#0d7a3a);color:#fff;align-self:flex-start;border-bottom-left-radius:4px;box-shadow:0 2px 8px rgba(22,163,74,.3);}
+.ai-chat-bubble.ai-user{display:flex;align-items:flex-start;gap:7px;}
 .ai-chat-bubble.ai-thinking{opacity:.65;font-style:italic;animation:aiThinkingPulse 1.4s ease-in-out infinite;}
 @keyframes aiThinkingPulse{0%,100%{opacity:.45;}50%{opacity:.8;}}
 .ai-chat-inline-status{display:inline-flex;align-items:center;gap:6px;align-self:flex-start;color:var(--muted);font-size:11px;line-height:1.4;padding:0;margin:2px 0 6px;}
@@ -354,6 +357,8 @@ form .field.full{flex-basis:100%;}
 .ai-chat-bubble .bubble-meta{display:flex;align-items:center;gap:6px;margin-bottom:4px;}
 .ai-chat-bubble .bubble-label{display:block;font-size:10px;font-weight:700;opacity:.78;text-transform:uppercase;letter-spacing:.03em;}
 .ai-chat-bubble .bubble-time{font-size:10px;opacity:.72;}
+.ai-chat-bubble .bubble-time-inline{display:inline-block;font-size:10px;opacity:.78;line-height:1.2;white-space:nowrap;margin-top:2px;}
+.ai-chat-bubble .bubble-time-footer{display:block;font-size:10px;opacity:.72;line-height:1.2;text-align:right;margin-top:5px;}
 .ai-chat-bubble .bubble-read{margin-left:auto;font-size:10px;opacity:.78;}
 .ai-chat-bubble .bubble-read.unread{opacity:.62;}
 
@@ -450,7 +455,7 @@ form .field.full{flex-basis:100%;}
 .ai-quick-reply-chip:hover{background:var(--blue);color:#fff;}
 
 .ai-chat-input-row{position:relative;display:flex;flex-direction:column;}
-.ai-chat-input-row textarea{min-height:120px;resize:vertical;font-family:inherit;font-size:13px;padding:10px 90px 42px 12px;border:1px solid var(--border);border-radius:12px;background:#fff;}
+.ai-chat-input-row textarea{min-height:64px;resize:vertical;font-family:inherit;font-size:13px;padding:10px 90px 42px 12px;border:1px solid var(--border);border-radius:12px;background:#fff;}
 .ai-send-btn{position:absolute;right:10px;bottom:10px;display:grid;place-items:center;width:30px;height:30px;padding:0;border:0;border-radius:50%;background:#151922;color:#fff;font-family:inherit;font-size:20px;font-weight:700;line-height:1;cursor:pointer;transition:var(--transition);}
 .ai-send-btn:hover:not(:disabled){transform:translateY(-1px);background:#000;box-shadow:0 4px 10px rgba(15,23,42,.25);}
 .ai-send-btn:active:not(:disabled){transform:translateY(0);}
@@ -460,6 +465,7 @@ form .field.full{flex-basis:100%;}
 .ai-favorite-btn:disabled{opacity:.4;cursor:default;}
 
 .requester-badge{font-size:12px;color:var(--muted);background:#f8fafc;border:1px solid var(--border);padding:4px 10px;border-radius:6px;white-space:nowrap;}
+.order-type-badge{font-size:12px;font-weight:600;color:var(--purple);}
 .confirm-badge{display:none;font-size:11px;font-weight:600;color:var(--green);margin-left:8px;vertical-align:middle;}
 .confirm-badge.visible{display:inline;}
 .fare-calc-hint{font-size:11px;color:var(--muted);margin:4px 0 0;}

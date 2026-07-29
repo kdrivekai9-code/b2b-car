@@ -23,6 +23,23 @@
   var aiConnectionTextEl = document.getElementById('aiChatConnectionText');
   if (!textarea || !sendBtn || !messages) return;
 
+  var CHAT_INPUT_COLLAPSED_HEIGHT = 64;
+  var CHAT_INPUT_MAX_HEIGHT = 180;
+
+  function scrollMessagesToBottom() {
+    messages.scrollTop = messages.scrollHeight;
+  }
+
+  function collapseChatInput() {
+    textarea.style.height = CHAT_INPUT_COLLAPSED_HEIGHT + 'px';
+  }
+
+  function autoResizeChatInput() {
+    textarea.style.height = 'auto';
+    var next = Math.max(CHAT_INPUT_COLLAPSED_HEIGHT, Math.min(textarea.scrollHeight, CHAT_INPUT_MAX_HEIGHT));
+    textarea.style.height = next + 'px';
+  }
+
   var REQUIRED_FIELDS = [
     { id: 'origin_address', label: '출발지 주소', type: 'address', kind: 'origin', question: '차량을 픽업할 출발지 주소를 알려주세요.' },
     { id: 'origin_contact', label: '출발지 연락처', type: 'phone', question: '출발지 담당자 연락처를 알려주세요. (예: 010-1234-5678)' },
@@ -63,6 +80,9 @@
   var vehicleNumberResolved = false;
   // "추가 요청사항" 질문도 마찬가지 이유로 별도 추적한다(응답이 "없음"이면 memo가 계속 빈 채로 남는다).
   var additionalRequestResolved = false;
+  // 이번 대화에서 오더유형(탁송/대리/일일기사)이 몇 번째 메시지에서 정해졌는지와 무관하게 한 번만
+  // 안내하기 위한 추적 — 확정되면 우측 "오더 접수 내용" 패널 옆에도 배지로 표시한다.
+  var confirmedOrderType = null;
   // 검증 실패/못 알아들음이 연속으로 쌓이면(형식 오류, 주소 검색 실패, "1번/2번으로 답해주세요" 반복 등)
   // 사용자가 답답해할 가능성이 높다고 보고 상담원 연결을 먼저 제안한다. 뭔가 하나라도 성공하면 초기화된다.
   var troubleStreak = 0;
@@ -85,10 +105,24 @@
   var fareProgressEl = null;
   var fareInquiryDraft = null;
   var fareInquiryPendingField = null;
+  var lastAnnouncedMemoText = '';
   var ORDER_INTENTS = { dispatch_order: true, proxy_order: true, daily_driver_order: true };
-
+  var ORDER_INTENT_LABELS = {
+    dispatch_order: '탁송 오더접수',
+    proxy_order: '대리 오더접수',
+    daily_driver_order: '일일기사 접수',
+  };
   function isOrderIntent(intent) {
     return !!ORDER_INTENTS[String(intent || '')];
+  }
+
+  function updateOrderTypeBadge(intent) {
+    var badge = document.getElementById('orderTypeBadge');
+    if (!badge) return;
+    var label = ORDER_INTENT_LABELS[intent];
+    if (!label) { badge.style.display = 'none'; return; }
+    badge.textContent = '(' + label + ')';
+    badge.style.display = '';
   }
 
   function setAiConnectionStatus(state) {
@@ -134,7 +168,7 @@
 
   function appendTextWithAutoBold(container, text) {
     var raw = String(text == null ? '' : text);
-    var re = /'[^'\n]+'|\d{1,3}(?:,\d{3})*원|\d+(?:\.\d+)?km/g;
+    var re = /\*\*[^*\n]+\*\*|'[^'\n]+'|\d{1,3}(?:,\d{3})*원|\d+(?:\.\d+)?km/g;
     var last = 0;
     var match;
     while ((match = re.exec(raw)) !== null) {
@@ -143,7 +177,7 @@
         container.appendChild(document.createTextNode(raw.slice(last, index)));
       }
       var strong = document.createElement('strong');
-      strong.textContent = match[0];
+      strong.textContent = match[0].indexOf('**') === 0 ? match[0].slice(2, -2) : match[0];
       container.appendChild(strong);
       last = index + match[0].length;
     }
@@ -152,22 +186,103 @@
     }
   }
 
-  function addBubble(text, who) {
+  function parseKstDateTime(raw) {
+    if (!raw) return null;
+    if (raw instanceof Date) return raw;
+    var s = String(raw).trim();
+    var m = s.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::\d{2})?$/);
+    if (!m) {
+      var d = new Date(s);
+      return isNaN(d.getTime()) ? null : d;
+    }
+    return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]), 0);
+  }
+
+  function pad2(n) {
+    return String(n).padStart(2, '0');
+  }
+
+  function formatBubbleTime(raw) {
+    var d = parseKstDateTime(raw) || new Date();
+    var hour = d.getHours();
+    var minute = d.getMinutes();
+    var ampm = hour < 12 ? '오전' : '오후';
+    var hour12 = hour % 12 || 12;
+    return ampm + ' ' + pad2(hour12) + ':' + pad2(minute);
+  }
+
+  function formatRecentDateTime(raw) {
+    var d = parseKstDateTime(raw);
+    if (!d) return '';
+    return pad2(d.getMonth() + 1) + '.' + pad2(d.getDate());
+  }
+
+  function streamPlainText(container, text, onDone) {
+    var raw = String(text == null ? '' : text);
+    if (!raw) {
+      if (typeof onDone === 'function') onDone();
+      return;
+    }
+    var idx = 0;
+    var step = Math.max(1, Math.ceil(raw.length / 120));
+    (function tick() {
+      idx = Math.min(raw.length, idx + step);
+      container.textContent = raw.slice(0, idx);
+      scrollMessagesToBottom();
+      if (idx >= raw.length) {
+        if (typeof onDone === 'function') onDone();
+        return;
+      }
+      setTimeout(tick, 14);
+    })();
+  }
+
+  function addBubble(text, who, createdAt) {
     var div = document.createElement('div');
     div.className = 'ai-chat-bubble ' + (who === 'user' ? 'ai-user' : (who === 'agent' ? 'ai-agent' : 'ai-bot'));
+    var timeText = formatBubbleTime(createdAt);
+
     if (who === 'agent') {
       var label = document.createElement('span');
       label.className = 'bubble-label';
       label.textContent = '상담원';
       div.appendChild(label);
-      div.appendChild(document.createTextNode(text));
+      var agentBody = document.createElement('div');
+      agentBody.textContent = text;
+      div.appendChild(agentBody);
+
+      var agentTime = document.createElement('div');
+      agentTime.className = 'bubble-time bubble-time-footer';
+      agentTime.textContent = timeText;
+      div.appendChild(agentTime);
     } else if (who === 'bot') {
-      appendTextWithAutoBold(div, text);
+      var botBody = document.createElement('div');
+      var rawText = String(text == null ? '' : text);
+      streamPlainText(botBody, rawText, function () {
+        botBody.textContent = '';
+        appendTextWithAutoBold(botBody, rawText);
+        collapseChatInput();
+        scrollMessagesToBottom();
+      });
+      div.appendChild(botBody);
+
+      var botTime = document.createElement('div');
+      botTime.className = 'bubble-time bubble-time-footer';
+      botTime.textContent = timeText;
+      div.appendChild(botTime);
     } else {
-      div.textContent = text;
+      var userTime = document.createElement('span');
+      userTime.className = 'bubble-time bubble-time-inline';
+      userTime.textContent = timeText;
+      div.appendChild(userTime);
+
+      var userText = document.createElement('span');
+      userText.textContent = text;
+      div.appendChild(userText);
     }
     messages.appendChild(div);
-    messages.scrollTop = messages.scrollHeight;
+    if (who !== 'user') collapseChatInput();
+    scrollMessagesToBottom();
   }
 
   function ensureFareProgressLine() {
@@ -181,7 +296,7 @@
     row.appendChild(spinner);
     row.appendChild(text);
     messages.appendChild(row);
-    messages.scrollTop = messages.scrollHeight;
+    scrollMessagesToBottom();
     fareProgressEl = row;
     return row;
   }
@@ -191,7 +306,7 @@
     var textEl = row.querySelector('.ai-chat-inline-status-text');
     if (textEl) textEl.textContent = step + '/4 ' + text;
     row.classList.remove('done');
-    messages.scrollTop = messages.scrollHeight;
+    scrollMessagesToBottom();
   }
 
   function finishFareProgressLine(text) {
@@ -220,13 +335,20 @@
   function addAddressChangeBubble(label, oldName, newName) {
     var div = document.createElement('div');
     div.className = 'ai-chat-bubble ai-bot';
-    div.appendChild(document.createTextNode(label + '는 ' + oldName + ' → '));
+    var textWrap = document.createElement('div');
+    textWrap.appendChild(document.createTextNode(label + '는 ' + oldName + ' → '));
     var b = document.createElement('b');
     b.textContent = newName;
-    div.appendChild(b);
-    div.appendChild(document.createTextNode('(으)로 확인했습니다.'));
+    textWrap.appendChild(b);
+    textWrap.appendChild(document.createTextNode('(으)로 확인했습니다.'));
+    div.appendChild(textWrap);
+    var timeEl = document.createElement('div');
+    timeEl.className = 'bubble-time bubble-time-footer';
+    timeEl.textContent = formatBubbleTime(null);
+    div.appendChild(timeEl);
     messages.appendChild(div);
-    messages.scrollTop = messages.scrollHeight;
+    collapseChatInput();
+    scrollMessagesToBottom();
   }
 
   // 출발지/도착지 연락처를 물어보는 순간에만, 굳이 타이핑하지 않아도 되는 값(본인 연락처,
@@ -297,7 +419,7 @@
     thinkingBubbleEl.className = 'ai-chat-bubble ai-bot ai-thinking';
     thinkingBubbleEl.textContent = '확인하고 있어요...';
     messages.appendChild(thinkingBubbleEl);
-    messages.scrollTop = messages.scrollHeight;
+    scrollMessagesToBottom();
   }
   function hideThinkingBubble() {
     if (thinkingBubbleEl && thinkingBubbleEl.parentNode) thinkingBubbleEl.remove();
@@ -354,6 +476,41 @@
     var hour12 = hour % 12 || 12;
     var minuteText = minute ? ' ' + minute + '분' : '';
     return Number(dParts[1]) + '월 ' + Number(dParts[2]) + '일 ' + WEEKDAY_KO[dt.getDay()] + '요일 ' + ampm + ' ' + hour12 + '시' + minuteText;
+  }
+
+  function detectReservationBasisFromText(text) {
+    var raw = String(text || '');
+    var hasPickup = /(픽업|출발)/.test(raw);
+    var hasDelivery = /(도착요망|도착|인도)/.test(raw);
+    if (hasPickup) return 'pickup';
+    if (hasDelivery) return 'delivery';
+    return null;
+  }
+
+  function applyReservationBasisByText(text) {
+    var basis = detectReservationBasisFromText(text);
+    if (!basis) return;
+    var pickupRadio = document.getElementById('reservation_basis_pickup');
+    var deliveryRadio = document.getElementById('reservation_basis_delivery');
+    if (!pickupRadio || !deliveryRadio) return;
+    var target = basis === 'delivery' ? deliveryRadio : pickupRadio;
+    target.checked = true;
+    target.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  function formatPickupExpectedTimeText() {
+    var dateEl = document.getElementById('pickup_reserved_date');
+    var timeEl = document.getElementById('pickup_reserved_time');
+    var dateText = dateEl ? String(dateEl.value || '').trim() : '';
+    var timeText = timeEl ? String(timeEl.value || '').trim() : '';
+    if (!dateText || !timeText) return null;
+    var hm = timeText.match(/^(\d{2}):(\d{2})$/);
+    if (!hm) return null;
+    var hour = Number(hm[1]);
+    var minute = Number(hm[2]);
+    var ampm = hour < 12 ? '오전' : '오후';
+    var hour12 = hour % 12 || 12;
+    return ampm + ' ' + hour12 + '시 ' + pad2(minute) + ' 분';
   }
 
   // 주소/상호 입력을 실제 카카오 검색으로 확정 — 성공하면 확인 말풍선, 실패하면 그 항목만 비우고 재요청 말풍선.
@@ -678,6 +835,45 @@
   }
 
   var lastFareGuideKey = null;
+  var deferredFareGuideTimer = null;
+  var deferredFareGuideNoticeShown = false;
+
+  function clearDeferredFareGuideTimer() {
+    if (deferredFareGuideTimer) {
+      clearInterval(deferredFareGuideTimer);
+      deferredFareGuideTimer = null;
+    }
+  }
+
+  function scheduleDeferredFareGuide() {
+    if (!val('origin_address') || !val('destination_address')) return;
+    if (!deferredFareGuideNoticeShown) {
+      deferredFareGuideNoticeShown = true;
+      var waitingText = '경로탐색이 완료되는 즉시 요금을 안내해드릴게요.';
+      addBubble(waitingText, 'bot');
+      logBotMessage({ logText: waitingText, needsAgent: false, requestedFeature: null });
+    }
+    if (deferredFareGuideTimer) return;
+    deferredFareGuideTimer = setInterval(function () {
+      if (!val('origin_address') || !val('destination_address')) {
+        clearDeferredFareGuideTimer();
+        deferredFareGuideNoticeShown = false;
+        return;
+      }
+      if (!isRouteDistanceFinal()) return;
+
+      clearDeferredFareGuideTimer();
+      announceFareGuideFromDb().then(function (fareGuideText) {
+        if (!fareGuideText) {
+          deferredFareGuideNoticeShown = false;
+          return;
+        }
+        deferredFareGuideNoticeShown = false;
+        logBotMessage({ logText: fareGuideText, needsAgent: false, requestedFeature: null });
+      });
+    }, 900);
+  }
+
   function parseRouteDistanceKm() {
     var el = document.getElementById('routeTotalDistance');
     if (!el) return null;
@@ -689,101 +885,157 @@
     return Number.isFinite(km) ? km : null;
   }
 
+  // 총거리와 함께 계산되는 예상소요시간(order-form.js가 "1시간 20분"/"30분" 형식으로 채워둔 값)을
+  // 요금 안내 문장에 그대로 붙여쓴다.
+  function parseRouteDurationText() {
+    var el = document.getElementById('routeTotalDuration');
+    if (!el) return null;
+    var text = String(el.textContent || '').trim();
+    if (!text || text === '-') return null;
+    return text;
+  }
+
+  // "예상요금은 약 X원이며, (거리 Ykm, 예상소요시간 Z)" 형태의 뒷부분(거리/소요시간)을 만든다.
+  function buildFareDistanceDurationSuffix(distanceKm, vehicleText) {
+    var durationText = parseRouteDurationText();
+    if (durationText) return ' (거리 ' + distanceKm.toFixed(1) + 'km' + vehicleText + ', 예상소요시간 ' + durationText + ')';
+    return ' (거리 ' + distanceKm.toFixed(1) + 'km' + vehicleText + ')';
+  }
+
+  function normalizeFareGuideText(text) {
+    return String(text || '').replace(/^\s*요금문의\s*안내\s*:\s*/i, '').trim();
+  }
+
+  // refreshMapView()(order-form.js)는 직선거리로 먼저 즉시 표시한 뒤, 카카오모빌리티 실제 도로 경로
+  // 응답이 오면 그 값으로 다시 덮어쓴다 — 이 최종 반영 시점을 기다리지 않고 요금을 조회하면 우측
+  // 패널(최종 도로거리 기준)과 챗봇 안내(직선거리 기준) 금액이 서로 달라질 수 있다. order-form.js가
+  // renderRouteSummary()에서 함께 남겨두는 전역 플래그로 최종 확정 여부를 판단한다(ai_intake.ejs에는
+  // form.ejs의 routeDurationBasis 문구 엘리먼트가 없어 DOM 텍스트로는 판단할 수 없다).
+  function isRouteDistanceFinal() {
+    return window.__aiIntakeRouteFinal === true;
+  }
+
+  function waitForFinalRouteDistance(timeoutMs) {
+    var maxMs = Number(timeoutMs || 12000);
+    var startedAt = Date.now();
+    return new Promise(function (resolve) {
+      (function check() {
+        var km = parseRouteDistanceKm();
+        if (Number.isFinite(km) && km > 0 && isRouteDistanceFinal()) {
+          resolve(km);
+          return;
+        }
+        if (Date.now() - startedAt >= maxMs) {
+          resolve(null);
+          return;
+        }
+        setTimeout(check, 250);
+      })();
+    });
+  }
+
   // 챗봇 입력으로 출발/도착지가 확정되면 현재 계산된 거리값을 기준으로 요금표 DB를 조회해 안내한다.
   // 같은 경로(지사+거리)에서 같은 안내를 반복 노출하지 않도록 key를 저장해 중복을 막는다.
   function announceFareGuideFromDb(options) {
     var opts = options || {};
     var origin = val('origin_address');
     var destination = val('destination_address');
-    var branchId = val('branch_id');
-    var vehicleType = val('vehicle_type') || opts.vehicleType || '';
-    var routeMeta = opts.routeMeta || window.__aiIntakeRouteMeta || null;
     if (!origin || !destination) return Promise.resolve(null);
 
-    var distanceKm = parseRouteDistanceKm();
-    if (!Number.isFinite(distanceKm) || distanceKm <= 0) return Promise.resolve(null);
+    return waitForFinalRouteDistance(20000).then(function (distanceKm) {
+      if (!Number.isFinite(distanceKm) || distanceKm <= 0) return null;
 
-    var key = (branchId || 'fallback') + '|' + distanceKm.toFixed(1);
-    if (key === lastFareGuideKey) return Promise.resolve(null);
+      var branchId = val('branch_id');
+      var vehicleType = val('vehicle_type') || opts.vehicleType || '';
+      // 실시간 페리/도선 정보도 실제 경로 응답이 온 뒤에야 최종 확정되므로, 호출 시점 스냅샷 대신
+      // 지금 이 시점의 전역 값을 다시 읽는다.
+      var routeMeta = window.__aiIntakeRouteMeta || opts.routeMeta || null;
 
-    var qs = new URLSearchParams();
-    if (branchId) qs.set('branch_id', branchId);
-    qs.set('distance_km', distanceKm.toFixed(2));
-    if (vehicleType) qs.set('vehicle_type', vehicleType);
-    if (val('reserved_date')) qs.set('reserved_date', val('reserved_date'));
-    if (routeMeta) {
-      qs.set('has_ferry_leg', routeMeta.hasFerryLeg ? '1' : '0');
-      qs.set('route_meta_json', JSON.stringify(routeMeta));
-    }
+      var key = (branchId || 'fallback') + '|' + distanceKm.toFixed(1);
+      if (key === lastFareGuideKey) return null;
 
-    return fetch('/orders/fare-preview?' + qs.toString())
-      .then(function (res) { return res.json(); })
-      .then(function (data) {
-        var role = String((document.getElementById('orderForm') || {}).dataset.myRole || '');
-        if (data && data.representativeConfigMissing && role === 'admin') {
-          addBubble('관리자 안내: 대표요금제 컬럼이 DB에 반영되지 않아, 일반 fallback 규칙으로 계산했습니다. 마이그레이션을 적용해주세요.', 'bot');
-        }
+      var qs = new URLSearchParams();
+      if (branchId) qs.set('branch_id', branchId);
+      qs.set('distance_km', distanceKm.toFixed(2));
+      if (vehicleType) qs.set('vehicle_type', vehicleType);
+      if (val('reserved_date')) qs.set('reserved_date', val('reserved_date'));
+      if (routeMeta) {
+        qs.set('has_ferry_leg', routeMeta.hasFerryLeg ? '1' : '0');
+        qs.set('route_meta_json', JSON.stringify(routeMeta));
+      }
 
-        if (!data || !data.enabled) {
-          var manualMsg = '등록된 법인/지사 구간요금이 없어 요금 자동 안내가 어렵습니다. 상담원이 확인 후 안내드리겠습니다.';
-          addBubble(manualMsg, 'bot');
+      return fetch('/orders/fare-preview?' + qs.toString())
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+          var role = String((document.getElementById('orderForm') || {}).dataset.myRole || '');
+          if (data && data.representativeConfigMissing && role === 'admin') {
+            addBubble('관리자 안내: 대표요금제 컬럼이 DB에 반영되지 않아, 일반 fallback 규칙으로 계산했습니다. 마이그레이션을 적용해주세요.', 'bot');
+          }
+
+          if (!data || !data.enabled) {
+            var manualMsg = '등록된 법인/지사 구간요금이 없어 요금 자동 안내가 어렵습니다. 상담원이 확인 후 안내드리겠습니다.';
+            addBubble(manualMsg, 'bot');
+            lastFareGuideKey = key;
+            if (opts.returnPayload) {
+              return {
+                text: manualMsg,
+                distanceKm: distanceKm,
+                fare: null,
+                resolvedOrigin: origin,
+                resolvedDestination: destination,
+                fareSource: 'none',
+                fallbackUsed: false,
+              };
+            }
+            return manualMsg;
+          }
+
+          var baseFare = Number(data.baseFare || 0);
+          var ferryFare = Number(data.ferryFare || 0);
+          var totalFare = Number(data.totalFare || data.fare || 0);
+          var amount = totalFare.toLocaleString('ko-KR');
+          var adminAreaOnly = !!opts.adminAreaOnly;
+          var vehicleText = opts.vehicleType ? (' (' + opts.vehicleType + ' 기준)') : '';
+          var msg;
+          if (data.ferryNeedVehicleType) {
+            msg = '현재 경로 기준 구간요금은 약 ' + baseFare.toLocaleString('ko-KR') + '원입니다. 도선료 계산을 위해 차종을 알려주세요.';
+          } else if (data.ferryApplied && ferryFare > 0) {
+            msg = adminAreaOnly
+              ? ('출발지 ' + origin + '에서 도착지 ' + destination + ' 기준으로 구간요금 ' + baseFare.toLocaleString('ko-KR') + '원 + 도선료 ' + ferryFare.toLocaleString('ko-KR') + '원 = 총 ' + amount + '원입니다.')
+              : ('현재 경로 기준 예상요금은 구간요금 ' + baseFare.toLocaleString('ko-KR') + '원 + 도선료 ' + ferryFare.toLocaleString('ko-KR') + '원 = 총 ' + amount + '원이며,' + buildFareDistanceDurationSuffix(distanceKm, vehicleText));
+          } else {
+            msg = adminAreaOnly
+              ? ('출발지 ' + origin + '에서 도착지 ' + destination + ' 기준으로 요금은 ' + amount + '원입니다.')
+              : ('현재 경로 기준 예상요금은 약 ' + amount + '원이며,' + buildFareDistanceDurationSuffix(distanceKm, vehicleText));
+          }
+
+          if (data.fallbackUsed) {
+            msg += ' 등록된 법인/지사 요금표가 없어 기본 구간 요금제를 참고했습니다.';
+          }
+
+          msg = normalizeFareGuideText(msg);
+          addBubble(msg, 'bot');
           lastFareGuideKey = key;
+          deferredFareGuideNoticeShown = false;
+          clearDeferredFareGuideTimer();
           if (opts.returnPayload) {
             return {
-              text: manualMsg,
+              text: msg,
               distanceKm: distanceKm,
-              fare: null,
+              fare: totalFare,
+              totalFare: totalFare,
+              baseFare: baseFare,
+              ferryFare: ferryFare,
               resolvedOrigin: origin,
               resolvedDestination: destination,
-              fareSource: 'none',
-              fallbackUsed: false,
+              fareSource: data.fallbackUsed ? 'fallback_default' : 'branch',
+              fallbackUsed: !!data.fallbackUsed,
             };
           }
-          return manualMsg;
-        }
-
-        var baseFare = Number(data.baseFare || 0);
-        var ferryFare = Number(data.ferryFare || 0);
-        var totalFare = Number(data.totalFare || data.fare || 0);
-        var amount = totalFare.toLocaleString('ko-KR');
-        var adminAreaOnly = !!opts.adminAreaOnly;
-        var vehicleText = opts.vehicleType ? (' (' + opts.vehicleType + ' 기준)') : '';
-        var msg;
-        if (data.ferryNeedVehicleType) {
-          msg = '요금문의 안내: 현재 경로 기준 구간요금은 약 ' + baseFare.toLocaleString('ko-KR') + '원입니다. 도선료 계산을 위해 차종을 알려주세요.';
-        } else if (data.ferryApplied && ferryFare > 0) {
-          msg = adminAreaOnly
-            ? ('출발지 ' + origin + '에서 도착지 ' + destination + ' 기준으로 구간요금 ' + baseFare.toLocaleString('ko-KR') + '원 + 도선료 ' + ferryFare.toLocaleString('ko-KR') + '원 = 총 ' + amount + '원입니다.')
-            : ('요금문의 안내: 현재 경로 기준 예상요금은 구간요금 ' + baseFare.toLocaleString('ko-KR') + '원 + 도선료 ' + ferryFare.toLocaleString('ko-KR') + '원 = 총 ' + amount + '원입니다. (거리 ' + distanceKm.toFixed(1) + 'km' + vehicleText + ')');
-        } else {
-          msg = adminAreaOnly
-            ? ('출발지 ' + origin + '에서 도착지 ' + destination + ' 기준으로 요금은 ' + amount + '원입니다.')
-            : ('요금문의 안내: 현재 경로 기준 예상요금은 약 ' + amount + '원입니다. (거리 ' + distanceKm.toFixed(1) + 'km' + vehicleText + ')');
-        }
-
-        if (data.fallbackUsed) {
-          msg += ' 등록된 법인/지사 요금표가 없어 기본 구간 요금제를 참고했습니다.';
-        }
-
-        addBubble(msg, 'bot');
-        lastFareGuideKey = key;
-        if (opts.returnPayload) {
-          return {
-            text: msg,
-            distanceKm: distanceKm,
-            fare: totalFare,
-            totalFare: totalFare,
-            baseFare: baseFare,
-            ferryFare: ferryFare,
-            resolvedOrigin: origin,
-            resolvedDestination: destination,
-            fareSource: data.fallbackUsed ? 'fallback_default' : 'branch',
-            fallbackUsed: !!data.fallbackUsed,
-          };
-        }
-        return msg;
-      })
-      .catch(function () { return null; });
+          return msg;
+        })
+        .catch(function () { return null; });
+    });
   }
 
   function handleFareInquiryFlowFromText(routeInfo) {
@@ -843,7 +1095,7 @@
 
         updateFareProgressLine(3, '경로 거리 계산 중입니다...');
         return Promise.resolve()
-          .then(function () { return waitForDistanceKm(12000); })
+          .then(function () { return waitForFinalRouteDistance(20000); })
           .then(function (km) {
             if (!Number.isFinite(km) || km <= 0) {
               clearFareProgressLine();
@@ -957,6 +1209,7 @@
       reservedDateTimeConfirmed: reservedDateTimeConfirmed,
       vehicleNumberResolved: vehicleNumberResolved,
       additionalRequestResolved: additionalRequestResolved,
+      confirmedOrderType: confirmedOrderType,
     };
   }
   function restoreDraftState(draft) {
@@ -974,6 +1227,8 @@
     reservedDateTimeConfirmed = !!draft.reservedDateTimeConfirmed;
     vehicleNumberResolved = !!draft.vehicleNumberResolved;
     additionalRequestResolved = !!draft.additionalRequestResolved;
+    confirmedOrderType = draft.confirmedOrderType || null;
+    updateOrderTypeBadge(confirmedOrderType);
     // choose_address_candidate(후보 목록을 저장하지 않음)와 offer_agent(제안 직전 상태를 저장하지
     // 않음)는 복원할 수 없다 — 어중간하게 그 단계로 복원하면 다음 답변을 처리하다 오류가 나므로
     // 안전하게 되돌린다. pendingField는 그대로 살아있어서(offer_agent 진입 시 지우지 않음) 대부분
@@ -1080,28 +1335,60 @@
     return { logText: q, needsAgent: false, requestedFeature: null };
   }
 
-  function handleOrderIntent(data) {
+  function handleOrderIntent(data, sourceText) {
     var dateTimeChanged = !!(data.reserved_date || data.reserved_time);
+    // 오더유형(탁송/대리/일일기사)은 대화당 한 번만 판별해 알려준다 — 이미 확정된 뒤에는
+    // 후속 메시지에서 intent가 다시 와도(예: 필드 하나씩 추가 입력) 재안내하지 않는다.
+    var newOrderType = (isOrderIntent(data.intent) && !confirmedOrderType) ? data.intent : null;
+    if (newOrderType) {
+      confirmedOrderType = newOrderType;
+      updateOrderTypeBadge(newOrderType);
+    }
+
     setField('reserved_date', data.reserved_date);
     setField('reserved_time', data.reserved_time ? roundToTenMinutes(data.reserved_time) : data.reserved_time);
     syncReservedTimeSelectsFromHidden();
+    if (dateTimeChanged) applyReservationBasisByText(sourceText);
     setField('memo_customer', data.memo_customer);
     setField('vehicle_type', data.vehicle_type || data.vehicleType || null);
     if (data.origin_detail_address) setField('origin_detail_address', data.origin_detail_address);
     if (data.destination_detail_address) setField('destination_detail_address', data.destination_detail_address);
 
-    if (dateTimeChanged) {
-      reservedDateTimeConfirmed = true;
-      var formattedDateTime = formatReservedDateTime(val('reserved_date'), val('reserved_time'));
-      if (formattedDateTime) addBubble('예약일시는 ' + formattedDateTime + '(으)로 확인했습니다.', 'bot');
-    }
-
+    // 오더유형 안내(및 그와 함께 온 예약일시)와 요청사항 확인은 다른 필드들과 마찬가지로
+    // runValidationChain에 태워서, 분석되는 순서대로 하나씩 말풍선이 나타나게 한다(한꺼번에 표시 X).
     var tasks = [];
 
-    if (data.origin_address) {
-      document.getElementById('origin_address').value = data.origin_address;
-      tasks.push(function () { return validateAddressField('origin_address', '출발지 주소'); });
+    if (dateTimeChanged) {
+      reservedDateTimeConfirmed = true;
+      tasks.push(function () {
+        var formattedDateTime = formatReservedDateTime(val('reserved_date'), val('reserved_time'));
+        if (formattedDateTime) {
+          var pickupExpected = formatPickupExpectedTimeText();
+          var dtMsg = pickupExpected
+            ? ('예약일시는 **' + formattedDateTime + '** 도착이며\n출발지 픽업예상시간은 ' + pickupExpected + '입니다.')
+            : ('예약일시는 **' + formattedDateTime + '** 도착이며\n출발지 픽업예상시간은 경로 확정 후 계산됩니다.');
+          if (newOrderType) dtMsg += '\n"' + ORDER_INTENT_LABELS[newOrderType] + '"로 확인되었습니다.';
+          addBubble(dtMsg, 'bot');
+        }
+        return null;
+      });
+    } else if (newOrderType) {
+      tasks.push(function () {
+        addBubble('오더유형은 "' + ORDER_INTENT_LABELS[newOrderType] + '"로 확인되었습니다.', 'bot');
+        return null;
+      });
     }
+
+    var resolvedMemo = val('memo_customer');
+    if (resolvedMemo && resolvedMemo !== lastAnnouncedMemoText) {
+      tasks.push(function () {
+        additionalRequestResolved = true;
+        lastAnnouncedMemoText = resolvedMemo;
+        addBubble('요청사항은 \'' + resolvedMemo + '\'입니다.', 'bot');
+        return null;
+      });
+    }
+
     if (data.origin_contact) {
       document.getElementById('origin_contact').value = data.origin_contact;
       tasks.push(function () { return validatePhoneField('origin_contact', '출발지 연락처'); });
@@ -1114,6 +1401,15 @@
           return ok;
         });
       });
+    }
+    if (data.destination_contact) {
+      document.getElementById('destination_contact').value = data.destination_contact;
+      tasks.push(function () { return validatePhoneField('destination_contact', '도착지 연락처'); });
+    }
+
+    if (data.origin_address) {
+      document.getElementById('origin_address').value = data.origin_address;
+      tasks.push(function () { return validateAddressField('origin_address', '출발지 주소'); });
     }
 
     (data.waypoints || []).forEach(function (wp) {
@@ -1140,24 +1436,27 @@
       document.getElementById('destination_address').value = data.destination_address;
       tasks.push(function () { return validateAddressField('destination_address', '도착지 주소'); });
     }
-    if (data.destination_contact) {
-      document.getElementById('destination_contact').value = data.destination_contact;
-      tasks.push(function () { return validatePhoneField('destination_contact', '도착지 연락처'); });
-    }
 
     // 질문에 답을 기다리고 있었는데 이 메시지에서 채울 수 있는 필드를 하나도 못 찾은 경우(예: 전혀
     // 관계없는 말, 알아볼 수 없는 텍스트) — 형식 오류처럼 명시적인 실패 말풍선이 뜨지 않아 다른
     // 검증 함수들의 noteTrouble()로는 잡히지 않으므로 여기서 직접 집계한다.
-    if (!tasks.length && !dateTimeChanged && pendingField) noteTrouble();
+    if (!tasks.length && pendingField) noteTrouble();
 
     return runValidationChain(tasks).then(function (results) {
       var ambiguousList = results.filter(function (r) { return r && r.ambiguous; });
       if (ambiguousList.length) return startDisambiguation(ambiguousList);
-      return announceFareGuideFromDb().then(function (fareGuideText) {
-        var doneText = proceedAfterCollecting();
-        var mergedText = [fareGuideText, doneText].filter(Boolean).join('\n');
-        return { logText: mergedText || null, needsAgent: false, requestedFeature: null };
-      });
+
+      var doneText = proceedAfterCollecting();
+      if (val('origin_address') && val('destination_address')) {
+        announceFareGuideFromDb().then(function (fareGuideText) {
+          if (fareGuideText) {
+            logBotMessage({ logText: fareGuideText, needsAgent: false, requestedFeature: null });
+            return;
+          }
+          scheduleDeferredFareGuide();
+        });
+      }
+      return { logText: doneText || null, needsAgent: false, requestedFeature: null };
     });
   }
 
@@ -1419,8 +1718,10 @@
     var trimmed = text.trim();
     if (ADDITIONAL_REQUEST_NONE_RE.test(trimmed)) {
       document.getElementById('memo_customer').value = '';
+      lastAnnouncedMemoText = '';
     } else {
       document.getElementById('memo_customer').value = trimmed;
+      lastAnnouncedMemoText = trimmed;
       addBubble('요청사항을 \'' + trimmed + '\'(으)로 확인했습니다.', 'bot');
     }
     additionalRequestResolved = true;
@@ -1577,7 +1878,7 @@
               : !!data[field.id]
           );
           if (!hasValue) { askAgain(); return; }
-          return handleOrderIntent(data).then(function (result) { logBotMessage(result); });
+          return handleOrderIntent(data, text).then(function (result) { logBotMessage(result); });
         })
         .catch(function () { hideThinkingBubble(); askAgain(); });
     }
@@ -1742,9 +2043,9 @@
     if (existing.messages && existing.messages.length > 0) messages.innerHTML = '';
     (existing.messages || []).forEach(function (m) {
       if (m.id > lastPolledId) lastPolledId = m.id;
-      if (m.sender === 'agent') addBubble(m.message, 'agent');
-      else if (m.sender === 'user') addBubble(m.message, 'user');
-      else addBubble(m.message, 'bot'); // 'bot' | 'system'
+      if (m.sender === 'agent') addBubble(m.message, 'agent', m.created_at);
+      else if (m.sender === 'user') addBubble(m.message, 'user', m.created_at);
+      else addBubble(m.message, 'bot', m.created_at); // 'bot' | 'system'
     });
     restoreDraftState(existing.draft);
     startStreaming();
@@ -1770,6 +2071,7 @@
     if (!text || sendBtn.disabled) return;
     addBubble(text, 'user');
     textarea.value = '';
+    collapseChatInput();
     sendBtn.dataset.processing = '1';
     updateSendButton();
 
@@ -1911,7 +2213,7 @@
           maybeOfferForFrustration();
           return;
         }
-        handleOrderIntent(data).then(function (result) { logBotMessage(result); });
+        handleOrderIntent(data, text).then(function (result) { logBotMessage(result); });
       })
       .catch(function (err) {
         hideThinkingBubble();
@@ -1945,7 +2247,10 @@
       extractAndProcess();
     }
   });
-  textarea.addEventListener('input', updateSendButton);
+  textarea.addEventListener('input', function () {
+    autoResizeChatInput();
+    updateSendButton();
+  });
   textarea.addEventListener('keydown', function (e) {
     if (e.key === 'Enter' && !e.shiftKey) {
       // 한글 IME 조합 중 Enter는 먼저 조합 확정에 사용된다.
@@ -1959,6 +2264,7 @@
       extractAndProcess();
     }
   });
+  collapseChatInput();
   updateSendButton();
   checkAiConnectionHealth();
   setInterval(checkAiConnectionHealth, 45000);
@@ -1995,7 +2301,17 @@
       var btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'ai-chat-recent-item' + (String(s.id) === String(sessionId) ? ' active' : '');
-      btn.textContent = s.summary;
+      var summary = document.createElement('span');
+      summary.className = 'ai-chat-recent-summary';
+      summary.textContent = s.summary;
+      summary.title = s.summary;
+
+      var dt = document.createElement('span');
+      dt.className = 'ai-chat-recent-date';
+      dt.textContent = formatRecentDateTime(s.updatedAt);
+
+      btn.appendChild(summary);
+      btn.appendChild(dt);
       btn.title = s.summary;
       btn.addEventListener('click', function () {
         window.location.href = '/orders/ai-intake?session=' + encodeURIComponent(s.id);

@@ -60,3 +60,13 @@
 - 자동 preflight 게이트: `npm run check:preflight` (다중 계정 로그인 + 기본 헬스체크) 통과 확인
 - CI 연동: `.github/workflows/playwright-e2e.yml`에서 E2E 전 preflight 수행 및 결과 아티팩트(`preflight-report`) 업로드
 - 최신 로컬 preflight 통과: 2026-07-27T14:52:57.845Z (`pass=true`, retries 적용 후 3계정 모두 302)
+- GitHub Actions workflow_dispatch 실행 확인: `30322277805` 성공, 다만 `DATABASE_URL` secret 미설정으로 e2e job은 skip 처리됨
+
+## CI 재실행 체크리스트
+- `DATABASE_URL` repository secret 등록
+- `SESSION_SECRET` repository secret 등록
+- `LOGIN_PASSWORD_ADMIN` repository secret 등록
+- `LOGIN_PASSWORD_BRANCH_MANAGER` repository secret 등록
+- `LOGIN_PASSWORD_CLIENT` repository secret 등록
+- 위 값 등록 후 `gh workflow run .github/workflows/playwright-e2e.yml -R kdrivekai9-code/b2b-car` 다시 실행
+- 실행 후 `gh run view <run-id>`와 artifact(`preflight-report`, `preflight-summary`) 확인

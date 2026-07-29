@@ -79,6 +79,21 @@ workflow_dispatch로 수동 실행 시에는 대상 URL/계정 ID를 입력값�
 
 workflow_dispatch에서 비밀번호를 직접 입력할 수도 있으나, 기본 권장 경로는 repository secret(`LOGIN_PASSWORD_ADMIN`, `LOGIN_PASSWORD_BRANCH_MANAGER`, `LOGIN_PASSWORD_CLIENT`)입니다.
 
+GitHub Actions에서 E2E를 실제로 돌리려면 아래 secrets가 필요합니다.
+
+- `DATABASE_URL`: Supabase 연결 문자열
+- `SESSION_SECRET`: 세션 암호화용 운영 값
+- `LOGIN_PASSWORD_ADMIN`: 관리자 비밀번호
+- `LOGIN_PASSWORD_BRANCH_MANAGER`: 지사장 비밀번호
+- `LOGIN_PASSWORD_CLIENT`: 고객사 비밀번호
+
+재실행 순서:
+
+1. GitHub repository secrets에 위 값을 등록
+2. `gh workflow run .github/workflows/playwright-e2e.yml -R kdrivekai9-code/b2b-car`
+3. `gh run view <run-id>`로 상태 확인
+4. `preflight-report` / `preflight-summary` artifact 확인
+
 - 계정/비밀번호를 바꿔 테스트할 때:
 
 ```bash

@@ -148,7 +148,7 @@ router.get('/ai-intake', asyncHandler(async (req, res) => {
   let existingDraft = null;
   if (existingSession) {
     existingMessages = await db.all(
-      `SELECT id, sender, message FROM chat_messages WHERE session_id = ? ORDER BY id ASC`,
+      `SELECT id, sender, message, created_at FROM chat_messages WHERE session_id = ? ORDER BY id ASC`,
       [existingSession.id]
     );
     if (existingSession.draft_json) {
@@ -371,7 +371,7 @@ router.post('/ai-intake/parse', asyncHandler(async (req, res) => {
 router.get('/ai-intake/health', asyncHandler(async (req, res) => {
   const now = Date.now();
   if (aiHealthCache.ok !== null && (now - aiHealthCache.checkedAt) < AI_HEALTH_CACHE_MS) {
-    return res.status(aiHealthCache.ok ? 200 : 503).json({
+    return res.status(200).json({
       ok: aiHealthCache.ok,
       checkedAt: aiHealthCache.checkedAt,
       error: aiHealthCache.error,
@@ -386,7 +386,7 @@ router.get('/ai-intake/health', asyncHandler(async (req, res) => {
   } catch (e) {
     const errorMessage = e && e.message ? e.message : 'AI 연결 점검 실패';
     aiHealthCache = { ok: false, checkedAt: now, error: errorMessage };
-    return res.status(503).json({ ok: false, checkedAt: now, error: errorMessage, cached: false });
+    return res.status(200).json({ ok: false, checkedAt: now, error: errorMessage, cached: false });
   }
 }));
 

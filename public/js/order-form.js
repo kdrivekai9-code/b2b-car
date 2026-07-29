@@ -614,6 +614,10 @@
     document.getElementById('routeTollFare').textContent = (tollFare !== null && tollFare !== undefined)
       ? (Number(tollFare) === 0 ? '무료' : Number(tollFare).toLocaleString('ko-KR') + '원')
       : '-';
+    // 직선거리 임시값인지 실제 도로 경로 확정값인지는 routeDurationBasis 문구가 있는 form.ejs
+    // 화면에서만 사람이 읽을 수 있다 — ai_intake.ejs에는 그 엘리먼트가 없으므로, 어느 화면에서든
+    // 챗봇(ai-intake.js)이 최종 확정 여부를 판단할 수 있도록 전역 플래그로도 남겨둔다.
+    window.__aiIntakeRouteFinal = !!(routeTimingMeta && (routeTimingMeta.mode === 'future' || routeTimingMeta.mode === 'current'));
     var basisEl = document.getElementById('routeDurationBasis');
     if (basisEl) {
       if (routeTimingMeta && routeTimingMeta.mode === 'future') {
@@ -1022,6 +1026,14 @@
     return !!a && !!b && a.lat === b.lat && a.lon === b.lon;
   }
 
+  function extractDetailHintFromQuery(query) {
+    var raw = String(query || '').trim();
+    if (!raw) return '';
+    var parts = raw.split(',');
+    if (parts.length >= 2) return parts.slice(1).join(' ').trim();
+    return '';
+  }
+
   // AI 접수 화면에서 파싱된 주소를 검색 결과 1순위로 자동 확정할 때 사용 (일반 오더 등록 화면에서는 미사용)
   // 챗봇이 확인 메시지를 띄울 수 있도록 { success, resolvedText } 형태로 결과를 돌려준다.
   // 검색어가 모호한 경우(위 GENERIC_LOCATION_SUFFIX)이면서 실제로 결과가 갈리면
@@ -1032,11 +1044,13 @@
     var detailInput = document.getElementById(detailIdFor(mainId));
     var slot = (kind === 'waypoint') ? mainId.replace('_address', '') : (kind === 'origin' ? 'origin' : 'destination');
     var query = mainInput.value.trim();
+    var detailHint = extractDetailHintFromQuery(query);
 
     function confirmWith(best, detailToken, meta) {
       if (!best) return { success: false, resolvedText: null };
       applyResult(best, mainInput, detailInput, slot, kind, document.getElementById(slot + 'Preview'));
       if (detailToken) appendDetailToken(detailInput, detailToken);
+      if (detailHint) appendDetailToken(detailInput, detailHint);
       return {
         success: true,
         resolvedText: buildResolvedText(resultLabel(best), detailInput ? detailInput.value : ''),
