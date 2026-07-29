@@ -249,6 +249,34 @@ function normalizeGeminiOrderFields(parsed) {
   };
 }
 
+// 오더유형(탁송/일일기사/대리) 판별은 LLM의 의미 판단보다 아래 결정적 규칙을 우선한다 — 실무 기준상
+// 탁송은 항상 "차량 인수증"/"성능점검기록부" 같은 서류 언급이 함께 오고, 일일기사는 8시간 이상 장시간·
+// 왕복 근무를, 대리는 예약일시 없이 즉시 요청되는 경우가 대부분이라 이 편이 LLM 분류보다 안정적이다.
+const DISPATCH_WORDING_RE = /탁송|인수증|성능\s*점검\s*기록부|점검\s*기록부/;
+const DAILY_DRIVER_WORDING_RE = /일일\s*기사|왕복/;
+
+function hasLongDurationWording(text) {
+  const re = /([0-9]+)\s*시간/g;
+  let m;
+  while ((m = re.exec(text))) {
+    if (Number(m[1]) >= 8) return true;
+  }
+  return false;
+}
+
+// fields는 normalizeGeminiOrderFields()/parseIntakeText()가 이미 계산해둔 reserved_date/reserved_time을 쓴다.
+// 탁송 서류 문구는 예약일시 유무와 무관하게 최우선 신호다(예약일시를 안 적고 차량만 지금 보내는
+// 탁송 요청도 흔함) — 이 경우 시간은 classifyOrderIntentByRule 호출부가 현재 시각으로 채운다.
+// 규칙으로 판별되지 않으면(예약일시는 있는데 탁송/일일기사 신호가 전혀 없음) null을 돌려줘 호출부가
+// Gemini의 intent(또는 기본값 dispatch_order)로 대체하게 한다.
+function classifyOrderIntentByRule(text, fields) {
+  if (DISPATCH_WORDING_RE.test(text)) return 'dispatch_order';
+  const hasReservation = !!(fields.reserved_date || fields.reserved_time);
+  if (!hasReservation) return 'proxy_order';
+  if (DAILY_DRIVER_WORDING_RE.test(text) || hasLongDurationWording(text)) return 'daily_driver_order';
+  return null;
+}
+
 // 인사말은 의미 검색에 필요한 정보가 없어 어떤 지식 항목과도 우연히 유사해질 수 있다.
 // 이 경우 RAG와 의도 분류를 건너뛰고 대화 시작 안내를 반환한다.
 function isGreeting(text) {
@@ -326,7 +354,15 @@ router.post('/ai-intake/parse', asyncHandler(async (req, res) => {
   }
 
   const fields = geminiResult ? normalizeGeminiOrderFields(geminiResult) : parseIntakeText(text);
-  const intent = (geminiResult && ORDER_INTENTS.has(geminiResult.intent)) ? geminiResult.intent : 'dispatch_order';
+  const fallbackIntent = (geminiResult && ORDER_INTENTS.has(geminiResult.intent)) ? geminiResult.intent : 'dispatch_order';
+  const intent = classifyOrderIntentByRule(text, fields) || fallbackIntent;
+  // 탁송 서류 문구만으로 판별된 경우 예약일시가 비어 있을 수 있다(언제 보낼지 안 적고 지금 바로
+  // 보내는 차량인 경우) — 이때는 사용자에게 다시 묻지 않고 현재 시각으로 채운다.
+  if (intent === 'dispatch_order' && !fields.reserved_date && !fields.reserved_time) {
+    const now = defaultReservedDateTime();
+    fields.reserved_date = now.reserved_date;
+    fields.reserved_time = now.reserved_time;
+  }
   res.json({ intent, ...fields, seemsFrustrated });
 }));
 
@@ -392,6 +428,15 @@ function combineAddress(main, detail) {
   main = (main || '').trim();
   detail = (detail || '').trim();
   return detail ? (main + ' ' + detail) : main;
+}
+
+function toPositiveIntOrNull(value) {
+  if (value == null) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n <= 0) return null;
+  return n;
 }
 
 function normalizeChatTransition(raw) {
@@ -471,11 +516,12 @@ router.post('/', asyncHandler(async (req, res) => {
   const effectiveReservedDate = String(pickup_reserved_date || reserved_date || '').trim();
   const effectiveReservedTime = String(pickup_reserved_time || reserved_time || '').trim();
 
-  const finalBranch = scope.branch_id || branch_id;
-  const finalGroup = scope.group_id || requester_group_id || null;
+  const finalBranch = toPositiveIntOrNull(scope.branch_id || branch_id);
+  const finalGroup = toPositiveIntOrNull(scope.group_id || requester_group_id);
 
   let formError = null;
-  if (!String(origin_contact || '').trim()) formError = '출발지 연락처를 입력해주세요.';
+  if (!finalBranch) formError = '지사를 선택해주세요.';
+  else if (!String(origin_contact || '').trim()) formError = '출발지 연락처를 입력해주세요.';
   else if (!String(destination_contact || '').trim()) formError = '도착지 연락처를 입력해주세요.';
   else {
     const hoursCheck = await checkOperatingHours(finalBranch, effectiveReservedDate, effectiveReservedTime);
@@ -506,17 +552,37 @@ router.post('/', asyncHandler(async (req, res) => {
   const finalDestinationAddress = combineAddress(destination_address, destination_detail_address);
 
   const tempOid = 'PENDING-' + Date.now();
-  const inserted = await db.run(`
-    INSERT INTO orders (oid, branch_id, requester_group_id, origin_address, origin_address_detail, origin_contact,
-      destination_address, destination_address_detail, destination_contact, vehicle_number,
-      vehicle_type, reserved_date, reserved_time, payment_method_id, fare_amount, ferry_fare_amount, status, memo_customer, created_by)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '오더등록', ?, ?)
-    RETURNING id
-  `, [
-    tempOid, finalBranch, finalGroup, finalOriginAddress, origin_detail_address || null, origin_contact || null,
-    finalDestinationAddress, destination_detail_address || null, destination_contact || null, splitVehicle.vehicleNumber,
-    splitVehicle.vehicleType, effectiveReservedDate, effectiveReservedTime, payment_method_id || null, Number(fare_amount) || 0, Number(ferry_fare_amount) || 0, memo_customer || null, u.id,
-  ]);
+  let inserted;
+  try {
+    inserted = await db.run(`
+      INSERT INTO orders (oid, branch_id, requester_group_id, origin_address, origin_address_detail, origin_contact,
+        destination_address, destination_address_detail, destination_contact, vehicle_number,
+        vehicle_type, reserved_date, reserved_time, payment_method_id, fare_amount, ferry_fare_amount, status, memo_customer, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '오더등록', ?, ?)
+      RETURNING id
+    `, [
+      tempOid, finalBranch, finalGroup, finalOriginAddress, origin_detail_address || null, origin_contact || null,
+      finalDestinationAddress, destination_detail_address || null, destination_contact || null, splitVehicle.vehicleNumber,
+      splitVehicle.vehicleType, effectiveReservedDate, effectiveReservedTime, payment_method_id || null, Number(fare_amount) || 0, Number(ferry_fare_amount) || 0, memo_customer || null, u.id,
+    ]);
+  } catch (e) {
+    const msg = String((e && e.message) || '');
+    const missingCompatColumns = e && e.code === '42703' && /(vehicle_type|ferry_fare_amount)/.test(msg);
+    if (!missingCompatColumns) throw e;
+
+    // 구버전 DB(마이그레이션 미적용)에서는 vehicle_type/ferry_fare_amount 없이 저장해도 기본 흐름을 유지한다.
+    inserted = await db.run(`
+      INSERT INTO orders (oid, branch_id, requester_group_id, origin_address, origin_address_detail, origin_contact,
+        destination_address, destination_address_detail, destination_contact, vehicle_number,
+        reserved_date, reserved_time, payment_method_id, fare_amount, status, memo_customer, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '오더등록', ?, ?)
+      RETURNING id
+    `, [
+      tempOid, finalBranch, finalGroup, finalOriginAddress, origin_detail_address || null, origin_contact || null,
+      finalDestinationAddress, destination_detail_address || null, destination_contact || null, splitVehicle.vehicleNumber,
+      effectiveReservedDate, effectiveReservedTime, payment_method_id || null, Number(fare_amount) || 0, memo_customer || null, u.id,
+    ]);
+  }
 
   const newId = Number(inserted.lastInsertRowid);
   const oid = 'OID' + (1000 + newId);
@@ -666,10 +732,36 @@ router.post('/:id/fare', asyncHandler(async (req, res) => {
   const order = await loadOrderInScope(req, res);
   if (!order) return;
   const { fare_amount, ferry_fare_amount, memo_admin, vehicle_type } = req.body;
-  await db.run(
-    `UPDATE orders SET fare_amount = ?, ferry_fare_amount = ?, vehicle_type = COALESCE(?, vehicle_type), memo_admin = ?, updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') WHERE id = ?`,
-    [Number(fare_amount) || 0, Number(ferry_fare_amount) || 0, vehicle_type || null, memo_admin || null, req.params.id]
-  );
+  try {
+    await db.run(
+      `UPDATE orders SET fare_amount = ?, ferry_fare_amount = ?, vehicle_type = COALESCE(?, vehicle_type), memo_admin = ?, updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') WHERE id = ?`,
+      [Number(fare_amount) || 0, Number(ferry_fare_amount) || 0, vehicle_type || null, memo_admin || null, req.params.id]
+    );
+  } catch (e) {
+    const msg = String((e && e.message) || '');
+    if (!(e && e.code === '42703')) throw e;
+
+    const missingVehicleType = /vehicle_type/.test(msg);
+    const missingFerryFare = /ferry_fare_amount/.test(msg);
+    if (!missingVehicleType && !missingFerryFare) throw e;
+
+    if (missingVehicleType && missingFerryFare) {
+      await db.run(
+        `UPDATE orders SET fare_amount = ?, memo_admin = ?, updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') WHERE id = ?`,
+        [Number(fare_amount) || 0, memo_admin || null, req.params.id]
+      );
+    } else if (missingVehicleType) {
+      await db.run(
+        `UPDATE orders SET fare_amount = ?, ferry_fare_amount = ?, memo_admin = ?, updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') WHERE id = ?`,
+        [Number(fare_amount) || 0, Number(ferry_fare_amount) || 0, memo_admin || null, req.params.id]
+      );
+    } else {
+      await db.run(
+        `UPDATE orders SET fare_amount = ?, vehicle_type = COALESCE(?, vehicle_type), memo_admin = ?, updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') WHERE id = ?`,
+        [Number(fare_amount) || 0, vehicle_type || null, memo_admin || null, req.params.id]
+      );
+    }
+  }
   res.redirect('/orders/' + req.params.id);
 }));
 
