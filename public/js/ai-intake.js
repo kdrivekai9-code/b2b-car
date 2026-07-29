@@ -1799,6 +1799,42 @@
       });
   }
 
+  function precheckOrderForm() {
+    var form = document.getElementById('orderForm');
+    if (!form) return Promise.resolve({ ok: false, error: '오더 등록 폼을 찾을 수 없습니다.' });
+    var params = new URLSearchParams(new FormData(form));
+    return fetch('/orders/ai-intake/submit-precheck', {
+      method: 'POST',
+      headers: { 'X-Requested-With': 'fetch', 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params,
+    })
+      .then(function (res) {
+        if (res.status === 404) {
+          // 배포 전파 지연/캐시로 precheck 라우트가 아직 없는 서버를 만났을 때,
+          // 등록 자체를 막지 않고 기존 최종 등록 검증으로 폴백한다.
+          return { ok: true, skipped: true };
+        }
+        var contentType = String(res.headers.get('content-type') || '').toLowerCase();
+        var isJson = contentType.indexOf('application/json') >= 0;
+        if (!isJson) {
+          if (res.status === 401 || res.redirected) {
+            return { ok: false, error: '로그인 세션이 만료되었습니다. 다시 로그인해주세요.' };
+          }
+          return { ok: false, error: '등록 가능 여부 확인 응답 형식이 올바르지 않습니다. (HTTP ' + res.status + ')' };
+        }
+        return res.json().catch(function () { return {}; }).then(function (data) {
+          if (res.ok && data && data.ok) return { ok: true };
+          if (res.status === 401) {
+            return { ok: false, error: (data && (data.error || data.message)) || '로그인 세션이 만료되었습니다. 다시 로그인해주세요.' };
+          }
+          return { ok: false, error: (data && (data.error || data.message)) || ('등록 가능 여부를 확인하지 못했습니다. (HTTP ' + res.status + ')') };
+        });
+      })
+      .catch(function () {
+        return { ok: false, error: '등록 가능 여부를 확인하지 못했습니다. 네트워크 상태를 확인해주세요.' };
+      });
+  }
+
   // 로컬 키워드로 판단이 애매할 때 쓰는 폴백 — 확인/수정/후보선택 단계 각각에서 방금 무엇을 물었는지와
   // 사용자의 답변을 Gemini에게 보내 분류받는다. 실패하면 'unclear'로 처리해 기존 안내 문구로 대체한다.
   function classifyPhaseReplyFallback(text, phaseName, candidateLabels) {
@@ -1821,10 +1857,20 @@
 
   function confirmAndSubmit() {
     noteProgress();
-    var okText = '접수를 등록하겠습니다.';
-    addBubble(okText, 'bot');
-    logBotMessage({ logText: okText, needsAgent: false, requestedFeature: null });
-    setTimeout(submitOrderForm, 400);
+    precheckOrderForm().then(function (result) {
+      if (!result.ok) {
+        var failText = '오더 등록에 실패했습니다. (' + result.error + ') 다시 확인 후 시도해주세요.';
+        addBubble(failText, 'bot');
+        logBotMessage({ logText: failText, needsAgent: false, requestedFeature: null });
+        phase = 'confirming';
+        return;
+      }
+
+      var okText = '접수를 등록하겠습니다.';
+      addBubble(okText, 'bot');
+      logBotMessage({ logText: okText, needsAgent: false, requestedFeature: null });
+      setTimeout(submitOrderForm, 400);
+    });
   }
 
   function handleConfirmingPhase(text) {

@@ -1026,12 +1026,121 @@
     return !!a && !!b && a.lat === b.lat && a.lon === b.lon;
   }
 
+  function normalizeSearchText(text) {
+    return String(text || '')
+      .toLowerCase()
+      .replace(/[()\[\],.·]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function tokenizeSearchText(text) {
+    return normalizeSearchText(text)
+      .split(' ')
+      .map(function (token) { return token.trim(); })
+      .filter(function (token) { return token.length >= 2; });
+  }
+
+  function scoreAddressCandidateMatch(query, result) {
+    var tokens = tokenizeSearchText(query);
+    if (!tokens.length || !result) return { matched: 0, total: tokens.length, ratio: 0 };
+
+    var haystack = normalizeSearchText([
+      result.place_name || '',
+      result.road_address || '',
+      result.jibun_address || '',
+    ].join(' '));
+
+    var matched = 0;
+    tokens.forEach(function (token) {
+      if (haystack.indexOf(token) !== -1) matched += 1;
+    });
+
+    return {
+      matched: matched,
+      total: tokens.length,
+      ratio: tokens.length ? (matched / tokens.length) : 0,
+    };
+  }
+
+  function shouldAutoConfirmPrimaryCandidate(query, primary, secondary) {
+    if (!primary) return false;
+    if (!secondary) return true;
+
+    var primaryScore = scoreAddressCandidateMatch(query, primary);
+    var secondaryScore = scoreAddressCandidateMatch(query, secondary);
+
+    if (primaryScore.matched >= 2 && primaryScore.ratio >= 0.75 && secondaryScore.ratio < primaryScore.ratio) {
+      return true;
+    }
+    if (primary.type === 'address' && primaryScore.ratio >= 0.6 && secondary.type === 'place' && primaryScore.matched > secondaryScore.matched) {
+      return true;
+    }
+    return false;
+  }
+
   function extractDetailHintFromQuery(query) {
     var raw = String(query || '').trim();
     if (!raw) return '';
     var parts = raw.split(',');
     if (parts.length >= 2) return parts.slice(1).join(' ').trim();
     return '';
+  }
+
+  function looksLikeDetailToken(text) {
+    var t = String(text || '').trim();
+    if (!t) return false;
+    if (t.length > 60) return false;
+    if (/(\d+층|\d+호|\d+동|지하\s*\d+|B\d+|정문|후문|입구|주차장|상가|오피스텔|아파트|타워|센터|빌딩)/i.test(t)) return true;
+    // 상세주소는 보통 전체 행정주소(시/군/구/로/길)보다는 보조 식별자라서, 행정주소 토큰만 있는 경우는 제외한다.
+    if (!/(시|군|구|로|길|번길)/.test(t) && /[가-힣A-Za-z0-9]/.test(t)) return true;
+    return false;
+  }
+
+  function removeKnownToken(base, token) {
+    var text = String(base || '');
+    var key = String(token || '').trim();
+    if (!text || !key) return text;
+    // place_name · 도로명주소 형태의 라벨을 그대로 치환해도 되도록, 원문 그대로 한 번 지운다.
+    text = text.replace(key, ' ');
+    // 가운데 공백/구두점 차이로 exact match가 안 되는 경우를 위해 공백을 느슨하게 한 번 더 시도한다.
+    var escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    var relaxed = escaped.replace(/\s+/g, '\\s*');
+    try {
+      text = text.replace(new RegExp(relaxed, 'gi'), ' ');
+    } catch (e) {
+      // 정규식 실패 시 원문 치환 결과만 사용한다.
+    }
+    return text;
+  }
+
+  function extractDetailHintFromResolved(query, best) {
+    var raw = String(query || '').trim();
+    if (!raw || !best) return extractDetailHintFromQuery(raw);
+
+    var detailByComma = extractDetailHintFromQuery(raw);
+    if (detailByComma) return detailByComma;
+
+    var remained = raw;
+    var tokens = [
+      resultLabel(best),
+      mainAddressOf(best),
+      best.place_name || '',
+      best.road_address || '',
+      best.jibun_address || '',
+    ].filter(Boolean);
+
+    tokens.forEach(function (token) {
+      remained = removeKnownToken(remained, token);
+    });
+
+    remained = remained
+      .replace(/[()\[\]]/g, ' ')
+      .replace(/[·]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    return looksLikeDetailToken(remained) ? remained : '';
   }
 
   // AI 접수 화면에서 파싱된 주소를 검색 결과 1순위로 자동 확정할 때 사용 (일반 오더 등록 화면에서는 미사용)
@@ -1044,11 +1153,11 @@
     var detailInput = document.getElementById(detailIdFor(mainId));
     var slot = (kind === 'waypoint') ? mainId.replace('_address', '') : (kind === 'origin' ? 'origin' : 'destination');
     var query = mainInput.value.trim();
-    var detailHint = extractDetailHintFromQuery(query);
 
     function confirmWith(best, detailToken, meta) {
       if (!best) return { success: false, resolvedText: null };
       applyResult(best, mainInput, detailInput, slot, kind, document.getElementById(slot + 'Preview'));
+      var detailHint = extractDetailHintFromResolved(query, best);
       if (detailToken) appendDetailToken(detailInput, detailToken);
       if (detailHint) appendDetailToken(detailInput, detailHint);
       return {
@@ -1127,6 +1236,10 @@
         if (!fullTop && !strippedTop) { resolve({ success: false, resolvedText: null }); return; }
         if (!strippedTop || sameSpot(fullTop, strippedTop)) { resolve(confirmWith(fullTop, genericSuffix, fullMeta)); return; }
         if (!fullTop) { resolve(confirmWith(strippedTop, genericSuffix, strippedMeta)); return; }
+        if (shouldAutoConfirmPrimaryCandidate(stripped, strippedTop, fullTop)) {
+          resolve(confirmWith(strippedTop, genericSuffix, strippedMeta));
+          return;
+        }
         // 핵심 지명(부속어 제거)만으로 검색한 결과가 대체로 더 신뢰할 만해서 1번으로 먼저 보여준다.
         resolve({
           success: false,
@@ -1148,9 +1261,12 @@
     if (!mainInput) return null;
     var detailInput = document.getElementById(detailIdFor(mainId));
     var slot = (kind === 'waypoint') ? mainId.replace('_address', '') : (kind === 'origin' ? 'origin' : 'destination');
+    var query = mainInput.value;
     var genericSuffix = extractGenericSuffix(mainInput.value);
     applyResult(candidateResult, mainInput, detailInput, slot, kind, document.getElementById(slot + 'Preview'));
+    var detailHint = extractDetailHintFromResolved(query, candidateResult);
     if (genericSuffix) appendDetailToken(detailInput, genericSuffix);
+    if (detailHint) appendDetailToken(detailInput, detailHint);
     return buildResolvedText(resultLabel(candidateResult), detailInput ? detailInput.value : '');
   };
 

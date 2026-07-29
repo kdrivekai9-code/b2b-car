@@ -9,6 +9,10 @@ const ABSOLUTE_TIMEOUT_MS = 8 * 60 * 60 * 1000;
 // 정확도면 충분하므로, 이 간격 이상 지났을 때만 갱신한다(그래야 실제 저장이 그만큼 뜸해진다).
 const LAST_SEEN_UPDATE_INTERVAL_MS = 60 * 1000;
 
+function isFetchRequest(req) {
+  return req.get('X-Requested-With') === 'fetch';
+}
+
 function isAiIntakeRequest(req) {
   return String(req.path || '').indexOf('/ai-intake') === 0;
 }
@@ -85,6 +89,14 @@ async function requireAuth(req, res, next) {
   try {
     const problem = await getSessionProblem(req);
     if (problem) {
+      if (isFetchRequest(req)) {
+        if (problem.reason === 'session_missing' || problem.reason === 'replaced') {
+          return req.session.destroy(() => res.status(401).json({ error: problem.message, reason: problem.reason }));
+        }
+        await clearUserActiveSession(req);
+        return req.session.destroy(() => res.status(401).json({ error: problem.message, reason: problem.reason }));
+      }
+
       if (problem.reason === 'session_missing') return res.redirect('/login');
       if (problem.reason === 'replaced') {
         return req.session.destroy(() => res.redirect('/login?expired=1&reason=replaced'));

@@ -293,6 +293,19 @@ form .field.full{flex-basis:100%;}
 .ai-intake-grid .section-title{margin-top:0;}
 .ai-intake-grid .section-title.small{font-size:13px;margin:18px 0 8px;}
 .ai-intake-side{display:flex;flex-direction:column;gap:14px;}
+
+/* 데스크톱에서 AI 인테이크 4개 패널(좌측/중앙/우상단/우하단)을 각각 독립 스크롤로 분리한다. */
+@media (min-width:1301px){
+  .ai-intake-grid{align-items:stretch;}
+  .ai-intake-grid > .card,.ai-intake-side{min-height:0;}
+  .ai-chat-card{position:sticky;top:12px;}
+  .ai-intake-scroll-panel{height:calc(100vh - 120px);overflow-y:auto;overscroll-behavior:contain;}
+  .ai-intake-order-card{padding-right:16px;}
+  .ai-intake-side{height:calc(100vh - 120px);min-height:0;}
+  .ai-intake-fare-card,.ai-intake-map-card{height:calc((100vh - 120px - 14px) / 2);overflow-y:auto;overscroll-behavior:contain;}
+  .ai-chat-card.ai-intake-scroll-panel{overflow:hidden;}
+}
+
 @media (max-width:1300px){ .ai-intake-grid{grid-template-columns:1fr;} }
 
 .ai-intake-section{background:#fafbfd;border:1px solid var(--border);border-radius:var(--radius);padding:10px 14px 6px;margin-bottom:10px;}

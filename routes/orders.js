@@ -26,6 +26,36 @@ function defaultReservedDateTime() {
   };
 }
 
+function getEffectiveOrderSchedule(body) {
+  return {
+    reservedDate: String(body.pickup_reserved_date || body.reserved_date || '').trim(),
+    reservedTime: String(body.pickup_reserved_time || body.reserved_time || '').trim(),
+  };
+}
+
+function getCurrentOperatingMoment() {
+  const now = kstNow();
+  const pad = (n) => String(n).padStart(2, '0');
+  return {
+    date: `${now.getUTCFullYear()}-${pad(now.getUTCMonth() + 1)}-${pad(now.getUTCDate())}`,
+    time: `${pad(now.getUTCHours())}:${pad(now.getUTCMinutes())}`,
+  };
+}
+
+async function getCurrentOperatingMomentFromDb() {
+  try {
+    const row = await db.get(
+      "SELECT to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD') AS date, to_char(now() at time zone 'Asia/Seoul', 'HH24:MI') AS time"
+    );
+    if (row && row.date && row.time) {
+      return { date: String(row.date), time: String(row.time) };
+    }
+  } catch (e) {
+    console.error('DB 현재시각 조회 실패, 로컬 시각으로 폴백:', e.message);
+  }
+  return getCurrentOperatingMoment();
+}
+
 const router = express.Router();
 router.use((req, res, next) => {
   if (req.path === '/ai-intake/health') return next();
@@ -173,6 +203,23 @@ router.post('/ai-intake/activity', asyncHandler(async (req, res) => {
   req.session.aiLastInputAt = Date.now();
   req.session.lastSeenAt = req.session.aiLastInputAt;
   res.json({ ok: true, touchedAt: req.session.aiLastInputAt });
+}));
+
+router.post('/ai-intake/submit-precheck', asyncHandler(async (req, res) => {
+  const scope = scopeFilter(req);
+  const finalBranch = toPositiveIntOrNull(scope.branch_id || req.body.branch_id);
+
+  if (!finalBranch) {
+    return res.status(400).json({ error: '지사를 선택해주세요.' });
+  }
+
+  const currentMoment = await getCurrentOperatingMomentFromDb();
+  const hoursCheck = await checkOperatingHours(finalBranch, currentMoment.date, currentMoment.time);
+  if (!hoursCheck.allowed) {
+    return res.status(400).json({ error: hoursCheck.reason });
+  }
+
+  res.json({ ok: true });
 }));
 
 router.post('/ai-intake/sessions/:id/delete', asyncHandler(async (req, res) => {
@@ -559,13 +606,13 @@ router.post('/', asyncHandler(async (req, res) => {
 
   const finalBranch = toPositiveIntOrNull(scope.branch_id || branch_id);
   const finalGroup = toPositiveIntOrNull(scope.group_id || requester_group_id);
-
   let formError = null;
   if (!finalBranch) formError = '지사를 선택해주세요.';
   else if (!String(origin_contact || '').trim()) formError = '출발지 연락처를 입력해주세요.';
   else if (!String(destination_contact || '').trim()) formError = '도착지 연락처를 입력해주세요.';
   else {
-    const hoursCheck = await checkOperatingHours(finalBranch, effectiveReservedDate, effectiveReservedTime);
+    const currentMoment = await getCurrentOperatingMomentFromDb();
+    const hoursCheck = await checkOperatingHours(finalBranch, currentMoment.date, currentMoment.time);
     if (!hoursCheck.allowed) formError = hoursCheck.reason;
   }
 

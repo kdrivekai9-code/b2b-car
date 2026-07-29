@@ -21,7 +21,7 @@
 <form id="orderForm" method="POST" action="/orders" data-my-phone="<%= currentUser.phone || '' %>" data-my-role="<%= currentUser.role %>">
   <div class="ai-intake-grid">
 
-    <div class="card ai-chat-card">
+    <div class="card ai-chat-card ai-intake-scroll-panel">
       <div class="ai-chat-header">
         <button type="button" class="ai-chat-menu-btn" id="aiChatMenuBtn" aria-haspopup="true" aria-expanded="false">
           <span class="hamburger-icon"><span></span><span></span></span>
@@ -52,7 +52,7 @@
       </div>
     </div>
 
-    <div class="card">
+    <div class="card ai-intake-order-card ai-intake-scroll-panel">
       <div class="page-head-row" style="margin-bottom:8px;">
         <div class="section-title" style="margin:0;">📋 오더 접수 내용 <span id="orderTypeBadge" class="order-type-badge" style="display:none;"></span></div>
         <span class="requester-badge">요청자: <%= currentUser.name %> <%= currentUser.phone || '' %></span>
@@ -200,7 +200,7 @@
     </div>
 
     <div class="ai-intake-side">
-      <div class="card">
+      <div class="card ai-intake-fare-card">
         <div class="section-title">💳 요금 및 결제방식</div>
         <div class="row">
           <div class="field">
@@ -221,7 +221,7 @@
         <p class="fare-calc-hint" id="fareCalcHint">경로 확정 시 지사의 구간요금 설정에 따라 자동 계산됩니다.</p>
       </div>
 
-      <div class="card map-card">
+      <div class="card map-card ai-intake-map-card">
         <div class="page-head-row" style="margin-bottom:8px;">
           <div class="section-title" style="margin:0;">🗺 경로 미리보기</div>
           <button type="button" class="btn small secondary" id="mapShowAllBtn">전체 경로 보기</button>
