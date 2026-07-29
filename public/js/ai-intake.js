@@ -237,6 +237,25 @@
     })();
   }
 
+  // 시간 표시는 말풍선(배경색이 있는 박스) 안쪽이 아니라 바깥쪽에 붙인다 — 말풍선 div와 별개로
+  // .ai-chat-row 래퍼에 형제 엘리먼트로 넣는다. user는 말풍선 왼쪽에, bot/agent는 말풍선 아래쪽에 둔다.
+  function appendBubbleRow(bubbleDiv, who, timeText) {
+    var row = document.createElement('div');
+    row.className = 'ai-chat-row ' + (who === 'user' ? 'ai-row-user' : 'ai-row-start');
+    var timeEl = document.createElement('span');
+    timeEl.className = 'bubble-time';
+    timeEl.textContent = timeText;
+    if (who === 'user') {
+      row.appendChild(timeEl);
+      row.appendChild(bubbleDiv);
+    } else {
+      row.appendChild(bubbleDiv);
+      row.appendChild(timeEl);
+    }
+    messages.appendChild(row);
+    return row;
+  }
+
   function addBubble(text, who, createdAt) {
     var div = document.createElement('div');
     div.className = 'ai-chat-bubble ' + (who === 'user' ? 'ai-user' : (who === 'agent' ? 'ai-agent' : 'ai-bot'));
@@ -250,11 +269,6 @@
       var agentBody = document.createElement('div');
       agentBody.textContent = text;
       div.appendChild(agentBody);
-
-      var agentTime = document.createElement('div');
-      agentTime.className = 'bubble-time bubble-time-footer';
-      agentTime.textContent = timeText;
-      div.appendChild(agentTime);
     } else if (who === 'bot') {
       var botBody = document.createElement('div');
       var rawText = String(text == null ? '' : text);
@@ -265,22 +279,12 @@
         scrollMessagesToBottom();
       });
       div.appendChild(botBody);
-
-      var botTime = document.createElement('div');
-      botTime.className = 'bubble-time bubble-time-footer';
-      botTime.textContent = timeText;
-      div.appendChild(botTime);
     } else {
-      var userTime = document.createElement('span');
-      userTime.className = 'bubble-time bubble-time-inline';
-      userTime.textContent = timeText;
-      div.appendChild(userTime);
-
       var userText = document.createElement('span');
       userText.textContent = text;
       div.appendChild(userText);
     }
-    messages.appendChild(div);
+    appendBubbleRow(div, who, timeText);
     if (who !== 'user') collapseChatInput();
     scrollMessagesToBottom();
   }
@@ -342,11 +346,7 @@
     textWrap.appendChild(b);
     textWrap.appendChild(document.createTextNode('(으)로 확인했습니다.'));
     div.appendChild(textWrap);
-    var timeEl = document.createElement('div');
-    timeEl.className = 'bubble-time bubble-time-footer';
-    timeEl.textContent = formatBubbleTime(null);
-    div.appendChild(timeEl);
-    messages.appendChild(div);
+    appendBubbleRow(div, 'bot', formatBubbleTime(null));
     collapseChatInput();
     scrollMessagesToBottom();
   }
