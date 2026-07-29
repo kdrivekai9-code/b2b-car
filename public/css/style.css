@@ -52,17 +52,17 @@ a:hover{text-decoration:underline;}
 .app.app-top-nav .sidebar nav a{margin:0;border-radius:9px;padding:8px 10px;gap:6px;}
 .app.app-top-nav .sidebar nav a.active{box-shadow:inset 0 -2px 0 #5b9bf0;background:rgba(255,255,255,.14);}
 .app.app-top-nav .main{width:100%;}
-.app.app-top-nav .content{max-width:none;padding:20px 20px 30px;}
+.app.app-top-nav .content{max-width:none;padding:8px 20px 30px;}
 
 .main{flex:1;min-width:0;}
-.content{max-width:1800px;padding:36px clamp(20px,3vw,48px) 52px;margin:0 auto;}
+.content{max-width:1800px;padding:12px clamp(20px,3vw,48px) 52px;margin:0 auto;}
 
 h1.page-title{font-size:28px;margin:0 0 4px;color:#111a31;letter-spacing:-.018em;font-weight:800;line-height:1.25;}
 p.page-sub{color:var(--muted);margin:0 0 20px;font-size:13px;line-height:1.6;}
 .page-heading{padding:4px 0 18px;border-bottom:1px solid var(--border);margin-bottom:24px;}
 /* 오더 등록 화면: 부제목을 없앤 만큼 위 여백도 함께 줄여서 입력 폼이 화면에 더 들어오게 한다.
    .page-head-row의 margin-bottom(20px)보다 우선하도록 클래스 두 개를 함께 지정해 명시도를 높였다. */
-.page-head-row.page-heading{padding:0 0 10px;margin-bottom:12px;}
+.page-head-row.page-heading{padding:0 0 6px;margin-bottom:6px;}
 .page-heading-meta{align-self:center;padding:7px 12px;border:1px solid #dbe7f8;border-radius:999px;background:#f6f9ff;color:#43658e;font-size:12px;font-weight:700;white-space:nowrap;}
 
 .card{background:var(--card);border:1px solid #e3e7ef;border-radius:var(--radius);padding:24px;margin-bottom:22px;box-shadow:var(--shadow-sm);transition:var(--transition);}
@@ -227,7 +227,7 @@ form .field.full{flex-basis:100%;}
 .kv{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px dashed var(--border);font-size:13px;}
 .kv .k{color:var(--muted);}
 
-.page-head-row{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:20px;}
+.page-head-row{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:8px;}
 .page-head-row .page-title,.page-head-row .page-sub{margin:0;}
 .page-head-row .page-sub{margin-top:4px;}
 .page-head-actions{display:flex;gap:8px;flex-shrink:0;}
@@ -237,7 +237,7 @@ form .field.full{flex-basis:100%;}
   .kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr));}
 }
 @media (max-width:720px){
-  .content{padding:22px 14px 40px;}
+  .content{padding:10px 14px 40px;}
   h1.page-title{font-size:23px;}
   .page-head-row{flex-direction:column;align-items:stretch;}
   .page-head-actions{flex-wrap:wrap;}
@@ -553,7 +553,7 @@ form .field.full{flex-basis:100%;}
 .upload-gallery img{width:100%;height:80px;object-fit:cover;border-radius:6px;border:1px solid var(--border);}
 
 @media (max-width:900px){
-  .content{padding:22px 16px 40px;}
+  .content{padding:10px 16px 40px;}
   .app{flex-direction:column;}
   .sidebar{position:sticky;top:0;z-index:30;width:100%;padding:10px 0 8px;box-shadow:0 2px 10px rgba(0,0,0,.12);}
   .sidebar-toggle,.sidebar-resize-handle{display:none;}
@@ -584,7 +584,7 @@ form .field.full{flex-basis:100%;}
   .app.app-top-nav .sidebar .brand{display:none;}
   .app.app-top-nav .brand-user{display:none;}
   .app.app-top-nav .sidebar nav a{min-width:66px;flex-direction:column;font-size:11px;padding:7px 6px;}
-  .app.app-top-nav .content{padding:18px 12px 30px;}
+  .app.app-top-nav .content{padding:8px 12px 30px;}
 }
 
 @media (min-width:901px){
