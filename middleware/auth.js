@@ -9,8 +9,47 @@ const ABSOLUTE_TIMEOUT_MS = 8 * 60 * 60 * 1000;
 // 정확도면 충분하므로, 이 간격 이상 지났을 때만 갱신한다(그래야 실제 저장이 그만큼 뜸해진다).
 const LAST_SEEN_UPDATE_INTERVAL_MS = 60 * 1000;
 
+function isAiIntakeRequest(req) {
+  return String(req.path || '').indexOf('/ai-intake') === 0;
+}
+
 function hashSessionToken(token) {
   return crypto.createHash('sha256').update(String(token || '')).digest('hex');
+}
+
+async function getSessionProblem(req) {
+  if (!req.session?.user) {
+    return { reason: 'session_missing', message: '로그인이 필요합니다. 다시 로그인해주세요.' };
+  }
+
+  const now = Date.now();
+  if (!req.session.authIssuedAt) req.session.authIssuedAt = now;
+  if (!req.session.lastSeenAt) req.session.lastSeenAt = now;
+
+  const issuedAt = Number(req.session.authIssuedAt || 0);
+  const idleAnchor = isAiIntakeRequest(req)
+    ? Number(req.session.aiLastInputAt || req.session.lastSeenAt || 0)
+    : Number(req.session.lastSeenAt || 0);
+
+  if (issuedAt > 0 && now - issuedAt > ABSOLUTE_TIMEOUT_MS) {
+    return { reason: 'absolute', message: '장시간 사용하지 않아 세션이 만료되었습니다. 다시 로그인해주세요.' };
+  }
+  if (idleAnchor > 0 && now - idleAnchor > IDLE_TIMEOUT_MS) {
+    return { reason: 'idle', message: '세션이 만료되었습니다. 다시 로그인해주세요.' };
+  }
+
+  const tokenHash = hashSessionToken(req.session.authToken);
+  const activeUser = await db.get(
+    `SELECT id FROM users
+     WHERE id = ? AND status = 'active' AND active_session_hash = ?
+       AND active_session_expires_at > now()`,
+    [req.session.user.id, tokenHash]
+  );
+  if (!activeUser) {
+    return { reason: 'replaced', message: '다른 곳에서 로그인되어 종료되었습니다.' };
+  }
+
+  return null;
 }
 
 async function clearUserActiveSession(req) {
@@ -43,34 +82,18 @@ async function destroyWithReason(req, res, reason, eventType, workDetail) {
 }
 
 async function requireAuth(req, res, next) {
-  if (!req.session.user) return res.redirect('/login');
   try {
+    const problem = await getSessionProblem(req);
+    if (problem) {
+      if (problem.reason === 'session_missing') return res.redirect('/login');
+      if (problem.reason === 'replaced') {
+        return req.session.destroy(() => res.redirect('/login?expired=1&reason=replaced'));
+      }
+      return destroyWithReason(req, res, problem.reason, problem.reason === 'absolute' ? 'SESSION_EXPIRED_ABSOLUTE' : 'SESSION_EXPIRED_IDLE', problem.message);
+    }
+
     const now = Date.now();
-    if (!req.session.authIssuedAt) req.session.authIssuedAt = now;
-    if (!req.session.lastSeenAt) req.session.lastSeenAt = now;
-
-    const issuedAt = Number(req.session.authIssuedAt || 0);
-    const lastSeenAt = Number(req.session.lastSeenAt || 0);
-
-    if (issuedAt > 0 && now - issuedAt > ABSOLUTE_TIMEOUT_MS) {
-      return destroyWithReason(req, res, 'absolute', 'SESSION_EXPIRED_ABSOLUTE', '최대 로그인 시간(8시간) 만료');
-    }
-    if (lastSeenAt > 0 && now - lastSeenAt > IDLE_TIMEOUT_MS) {
-      return destroyWithReason(req, res, 'idle', 'SESSION_EXPIRED_IDLE', '무활동 30분 세션 만료');
-    }
-
-    const tokenHash = hashSessionToken(req.session.authToken);
-    const activeUser = await db.get(
-      `SELECT id FROM users
-       WHERE id = ? AND status = 'active' AND active_session_hash = ?
-         AND active_session_expires_at > now()`,
-      [req.session.user.id, tokenHash]
-    );
-    if (!activeUser) {
-      return req.session.destroy(() => res.redirect('/login?expired=1&reason=replaced'));
-    }
-
-    if (now - lastSeenAt > LAST_SEEN_UPDATE_INTERVAL_MS) {
+    if (now - Number(req.session.lastSeenAt || 0) > LAST_SEEN_UPDATE_INTERVAL_MS) {
       req.session.lastSeenAt = now;
     }
     next();
@@ -97,4 +120,4 @@ function scopeFilter(req) {
   return {};
 }
 
-module.exports = { hashSessionToken, requireAuth, requireRole, scopeFilter };
+module.exports = { hashSessionToken, requireAuth, requireRole, scopeFilter, getSessionProblem, isAiIntakeRequest };

@@ -6,6 +6,7 @@ create table if not exists chat_sessions (
   status text not null default 'bot',
   assigned_agent_id integer references users(id),
   requested_feature text,
+  user_hidden_at text,
   created_at text not null default to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS'),
   updated_at text not null default to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS')
 );

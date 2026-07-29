@@ -1,6 +1,6 @@
 const express = require('express');
 const db = require('../db');
-const { requireAuth, scopeFilter } = require('../middleware/auth');
+const { requireAuth, scopeFilter, getSessionProblem } = require('../middleware/auth');
 const asyncHandler = require('../middleware/asyncHandler');
 const { ORDER_STATUSES } = require('../config');
 const { getEffectivePaymentMethods, getEffectiveStatuses, checkOperatingHours, calculateFareWithFerry } = require('../lib/branchPolicy');
@@ -27,7 +27,10 @@ function defaultReservedDateTime() {
 }
 
 const router = express.Router();
-router.use(requireAuth);
+router.use((req, res, next) => {
+  if (req.path === '/ai-intake/health') return next();
+  return requireAuth(req, res, next);
+});
 
 const AI_HEALTH_CACHE_MS = 60000;
 let aiHealthCache = { ok: null, checkedAt: 0, error: null };
@@ -134,13 +137,13 @@ router.get('/ai-intake', asyncHandler(async (req, res) => {
     db.all('SELECT * FROM favorite_addresses WHERE user_id = ? ORDER BY id DESC', [req.session.user.id]),
     requestedSessionId
       ? db.get(
-          `SELECT id, status, draft_json FROM chat_sessions WHERE id = ? AND user_id = ?`,
+          `SELECT id, status, draft_json FROM chat_sessions WHERE id = ? AND user_id = ? AND user_hidden_at IS NULL`,
           [requestedSessionId, req.session.user.id]
         )
       // 다른 메뉴로 이동했다 돌아와도 대화가 이어지도록, 아직 닫히지 않은 최근 세션이 있으면 그대로 재사용한다.
       // 클라이언트 저장소(localStorage 등)에 의존하지 않고 서버가 로그인 세션만으로 판단한다.
       : db.get(
-          `SELECT id, status, draft_json FROM chat_sessions WHERE user_id = ? AND status != 'closed' ORDER BY created_at DESC LIMIT 1`,
+          `SELECT id, status, draft_json FROM chat_sessions WHERE user_id = ? AND status != 'closed' AND user_hidden_at IS NULL ORDER BY created_at DESC LIMIT 1`,
           [req.session.user.id]
         ),
   ]);
@@ -156,12 +159,42 @@ router.get('/ai-intake', asyncHandler(async (req, res) => {
     }
   }
 
+  req.session.aiLastInputAt = Date.now();
+
   res.render('orders/ai_intake', {
     title: 'AI 챗봇', order: defaultReservedDateTime(), branches, groups, paymentMethods, favorites, mode: 'create', error: null,
     defaultBranch: scope.branch_id || '', defaultGroup: scope.group_id || '',
     kakaoJsKey: process.env.KAKAO_JS_KEY || '',
     existingSession, existingMessages, existingDraft,
   });
+}));
+
+router.post('/ai-intake/activity', asyncHandler(async (req, res) => {
+  req.session.aiLastInputAt = Date.now();
+  req.session.lastSeenAt = req.session.aiLastInputAt;
+  res.json({ ok: true, touchedAt: req.session.aiLastInputAt });
+}));
+
+router.post('/ai-intake/sessions/:id/delete', asyncHandler(async (req, res) => {
+  const sessionId = Number(req.params.id);
+  if (!Number.isInteger(sessionId) || sessionId <= 0) {
+    return res.status(400).json({ error: '유효하지 않은 세션 ID입니다.' });
+  }
+
+  const session = await db.get('SELECT id, user_id, user_hidden_at FROM chat_sessions WHERE id = ?', [sessionId]);
+  if (!session || Number(session.user_id) !== Number(req.session.user.id)) {
+    return res.status(404).json({ error: '세션을 찾을 수 없습니다.' });
+  }
+  if (!session.user_hidden_at) {
+    await db.run(
+      `UPDATE chat_sessions
+       SET user_hidden_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS'),
+           updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS')
+       WHERE id = ?`,
+      [sessionId]
+    );
+  }
+  res.json({ ok: true, id: sessionId });
 }));
 
 // 세션의 draft_json(출발지 장소명/차량번호)이나, 그마저 없으면 첫 사용자 메시지 한 줄로
@@ -183,16 +216,17 @@ function summarizeChatSession(draftJsonText, firstUserMessage) {
   return '(내용 없음)';
 }
 
-// 햄버거 메뉴 "최근 항목" 목록 — 15개씩 커서(id) 기반 페이지네이션, 검색어(q)가 있으면
+// 햄버거 메뉴 "최근 항목" 목록 — 10개씩 커서(id) 기반 페이지네이션, 검색어(q)가 있으면
 // 요약 대상(출발지/차량번호)이나 사용자 메시지에 포함된 것만 필터링한다.
 router.get('/ai-intake/sessions', asyncHandler(async (req, res) => {
-  const PAGE_SIZE = 15;
+  const PAGE_SIZE = 10;
   const before = Number(req.query.before) || null;
   const q = (req.query.q || '').trim();
   const rows = await db.all(
     `SELECT id, status, draft_json, updated_at
      FROM chat_sessions
      WHERE user_id = ?
+       AND user_hidden_at IS NULL
        AND (?::int IS NULL OR id < ?::int)
        AND (
          ?::text = '' OR
@@ -370,10 +404,17 @@ router.post('/ai-intake/parse', asyncHandler(async (req, res) => {
 // 페이지에서 짧은 주기로 조회하므로 최근 결과를 60초 캐시해 외부 API 호출을 줄인다.
 router.get('/ai-intake/health', asyncHandler(async (req, res) => {
   const now = Date.now();
+  const sessionProblem = await getSessionProblem(req);
+  if (sessionProblem) {
+    return res.status(200).json({ ok: false, checkedAt: now, reason: sessionProblem.reason, message: sessionProblem.message, cached: false });
+  }
+
   if (aiHealthCache.ok !== null && (now - aiHealthCache.checkedAt) < AI_HEALTH_CACHE_MS) {
     return res.status(200).json({
       ok: aiHealthCache.ok,
       checkedAt: aiHealthCache.checkedAt,
+      reason: aiHealthCache.reason,
+      message: aiHealthCache.message,
       error: aiHealthCache.error,
       cached: true,
     });
@@ -381,12 +422,12 @@ router.get('/ai-intake/health', asyncHandler(async (req, res) => {
 
   try {
     await classifyAndExtract('AI 연결 상태 점검 요청', null);
-    aiHealthCache = { ok: true, checkedAt: now, error: null };
+    aiHealthCache = { ok: true, checkedAt: now, reason: null, message: null, error: null };
     return res.json({ ok: true, checkedAt: now, cached: false });
   } catch (e) {
-    const errorMessage = e && e.message ? e.message : 'AI 연결 점검 실패';
-    aiHealthCache = { ok: false, checkedAt: now, error: errorMessage };
-    return res.status(200).json({ ok: false, checkedAt: now, error: errorMessage, cached: false });
+    const errorMessage = e && e.message ? e.message : 'AI 서버 응답이 지연되고 있습니다.';
+    aiHealthCache = { ok: false, checkedAt: now, reason: 'ai_server', message: 'AI 서버 응답이 지연되고 있습니다.', error: errorMessage };
+    return res.status(200).json({ ok: false, checkedAt: now, reason: 'ai_server', message: 'AI 서버 응답이 지연되고 있습니다.', error: errorMessage, cached: false });
   }
 }));
 

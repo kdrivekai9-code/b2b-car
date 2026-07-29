@@ -106,6 +106,17 @@
   var fareInquiryDraft = null;
   var fareInquiryPendingField = null;
   var lastAnnouncedMemoText = '';
+  var lastAiActivityPingAt = 0;
+  var AI_ACTIVITY_PING_INTERVAL_MS = 15000;
+  var AI_HEALTH_POLL_INTERVAL_MS = 60000;
+  var AI_HEALTH_REASON_MESSAGES = {
+    session_missing: '로그인이 필요합니다. 다시 로그인해주세요.',
+    idle: '세션이 만료되었습니다. 다시 로그인해주세요.',
+    absolute: '장시간 사용하지 않아 세션이 만료되었습니다.',
+    replaced: '다른 곳에서 로그인되어 종료되었습니다.',
+    ai_server: 'AI 서버 응답이 지연되고 있습니다.',
+    ai_unavailable: 'AI 서버에 일시적인 문제가 있습니다.',
+  };
   var ORDER_INTENTS = { dispatch_order: true, proxy_order: true, daily_driver_order: true };
   var ORDER_INTENT_LABELS = {
     dispatch_order: '탁송 오더접수',
@@ -125,20 +136,36 @@
     badge.style.display = '';
   }
 
-  function setAiConnectionStatus(state) {
+  function setAiConnectionStatus(state, detail) {
     if (!aiConnectionEl || !aiConnectionTextEl) return;
     aiConnectionEl.classList.remove('online', 'offline');
+    aiConnectionEl.removeAttribute('title');
     if (state === 'online') {
       aiConnectionEl.classList.add('online');
       aiConnectionTextEl.textContent = 'AI 연결 정상';
+      aiConnectionEl.title = 'AI 연결 정상';
       return;
     }
     if (state === 'offline') {
       aiConnectionEl.classList.add('offline');
+      var reasonText = detail && detail.message ? detail.message : 'AI 연결 실패';
       aiConnectionTextEl.textContent = 'AI 연결 실패';
+      aiConnectionEl.title = reasonText;
+      aiConnectionEl.setAttribute('aria-label', 'AI 연결 실패: ' + reasonText);
       return;
     }
     aiConnectionTextEl.textContent = 'AI 연결 확인중';
+    aiConnectionEl.title = 'AI 연결 확인중';
+  }
+
+  function touchAiActivity(force) {
+    var now = Date.now();
+    if (!force && now - lastAiActivityPingAt < AI_ACTIVITY_PING_INTERVAL_MS) return;
+    lastAiActivityPingAt = now;
+    fetch('/orders/ai-intake/activity', {
+      method: 'POST',
+      headers: { 'X-Requested-With': 'fetch' },
+    }).catch(function () {});
   }
 
   function checkAiConnectionHealth() {
@@ -151,12 +178,18 @@
       .then(function (res) {
         return res.json().catch(function () { return { ok: false }; }).then(function (data) {
           var ok = !!(res.ok && data && data.ok);
-          setAiConnectionStatus(ok ? 'online' : 'offline');
+          if (ok) {
+            setAiConnectionStatus('online');
+            return true;
+          }
+          var reason = data && data.reason ? String(data.reason) : 'ai_unavailable';
+          var message = data && data.message ? String(data.message) : (AI_HEALTH_REASON_MESSAGES[reason] || AI_HEALTH_REASON_MESSAGES.ai_unavailable);
+          setAiConnectionStatus('offline', { reason: reason, message: message });
           return ok;
         });
       })
       .catch(function () {
-        setAiConnectionStatus('offline');
+        setAiConnectionStatus('offline', { reason: 'ai_unavailable', message: AI_HEALTH_REASON_MESSAGES.ai_unavailable });
         return false;
       });
   }
@@ -214,7 +247,7 @@
   function formatRecentDateTime(raw) {
     var d = parseKstDateTime(raw);
     if (!d) return '';
-    return pad2(d.getMonth() + 1) + '.' + pad2(d.getDate());
+    return String(d.getMonth() + 1) + '.' + String(d.getDate());
   }
 
   function streamPlainText(container, text, onDone) {
@@ -2070,6 +2103,7 @@
     var text = textarea.value.trim();
     if (!text || sendBtn.disabled) return;
     addBubble(text, 'user');
+    touchAiActivity(true);
     textarea.value = '';
     collapseChatInput();
     sendBtn.dataset.processing = '1';
@@ -2250,6 +2284,7 @@
   textarea.addEventListener('input', function () {
     autoResizeChatInput();
     updateSendButton();
+    touchAiActivity(false);
   });
   textarea.addEventListener('keydown', function (e) {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -2267,7 +2302,7 @@
   collapseChatInput();
   updateSendButton();
   checkAiConnectionHealth();
-  setInterval(checkAiConnectionHealth, 45000);
+  setInterval(checkAiConnectionHealth, AI_HEALTH_POLL_INTERVAL_MS);
 
   // ---------- 햄버거 메뉴(새 채팅 / 검색 / 최근 항목) ----------
   (function wireChatHistoryMenu() {
@@ -2298,23 +2333,68 @@
     }
 
     function renderRecentItem(s) {
-      var btn = document.createElement('button');
-      btn.type = 'button';
+      var btn = document.createElement('div');
       btn.className = 'ai-chat-recent-item' + (String(s.id) === String(sessionId) ? ' active' : '');
+      btn.setAttribute('role', 'button');
+      btn.setAttribute('tabindex', '0');
       var summary = document.createElement('span');
       summary.className = 'ai-chat-recent-summary';
       summary.textContent = s.summary;
       summary.title = s.summary;
 
+      var meta = document.createElement('span');
+      meta.className = 'ai-chat-recent-meta';
+
       var dt = document.createElement('span');
       dt.className = 'ai-chat-recent-date';
       dt.textContent = formatRecentDateTime(s.updatedAt);
 
+      var del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'ai-chat-recent-delete';
+      del.textContent = '×';
+      del.title = '최근 항목에서 숨기기';
+      del.setAttribute('aria-label', '최근 항목에서 숨기기');
+      del.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!window.confirm('이 항목을 최근 목록에서 숨기겠습니까?')) return;
+        del.disabled = true;
+        fetch('/orders/ai-intake/sessions/' + encodeURIComponent(s.id) + '/delete', {
+          method: 'POST',
+          headers: { 'X-Requested-With': 'fetch' },
+        })
+          .then(function (res) { return res.json().catch(function () { return {}; }).then(function (data) {
+            if (!res.ok) throw new Error((data && data.error) || '삭제에 실패했습니다.');
+            return data;
+          }); })
+          .then(function () {
+            if (String(s.id) === String(sessionId)) {
+              window.location.href = '/orders/ai-intake';
+              return;
+            }
+            loadRecentSessions(true);
+          })
+          .catch(function (err) {
+            del.disabled = false;
+            alert(err.message || '삭제에 실패했습니다.');
+          });
+      });
+
+      meta.appendChild(dt);
+      meta.appendChild(del);
+
       btn.appendChild(summary);
-      btn.appendChild(dt);
+      btn.appendChild(meta);
       btn.title = s.summary;
       btn.addEventListener('click', function () {
         window.location.href = '/orders/ai-intake?session=' + encodeURIComponent(s.id);
+      });
+      btn.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          window.location.href = '/orders/ai-intake?session=' + encodeURIComponent(s.id);
+        }
       });
       return btn;
     }

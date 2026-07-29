@@ -59,6 +59,10 @@ async function loadOwnedSession(req, res) {
   }
   const session = await db.get('SELECT * FROM chat_sessions WHERE id = ?', [sessionId]);
   if (!session) { res.status(404).json({ error: '세션을 찾을 수 없습니다.' }); return null; }
+  if (req.session.user.role !== 'admin' && session.user_hidden_at) {
+    res.status(404).json({ error: '세션을 찾을 수 없습니다.' });
+    return null;
+  }
   if (session.user_id !== req.session.user.id && req.session.user.role !== 'admin') {
     res.status(403).json({ error: '접근 권한이 없습니다.' });
     return null;
