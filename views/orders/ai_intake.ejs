@@ -113,6 +113,7 @@
           <div class="addr-input-row">
             <input type="text" class="addr-input" id="origin_address" name="origin_address" required placeholder="도로명, 지번 또는 상호명으로 검색" value="<%= order.origin_address || '' %>">
             <button type="button" class="btn small secondary addr-search-btn" data-target="origin_address">🔍 검색</button>
+            <button type="button" class="btn small secondary map-view-btn" data-slot="origin" title="지도보기">🗺 지도보기</button>
           </div>
           <div id="origin_address_results" class="addr-results"></div>
           <input type="text" class="addr-detail-input" id="origin_detail_address" name="origin_detail_address" placeholder="상세주소 입력 (건물명, 동/호수)" <%= order.origin_detail_address ? '' : 'disabled' %> value="<%= order.origin_detail_address || '' %>">
@@ -149,6 +150,7 @@
           <div class="addr-input-row">
             <input type="text" class="addr-input" id="destination_address" name="destination_address" required placeholder="도로명, 지번 또는 상호명으로 검색" value="<%= order.destination_address || '' %>">
             <button type="button" class="btn small secondary addr-search-btn" data-target="destination_address">🔍 검색</button>
+            <button type="button" class="btn small secondary map-view-btn" data-slot="destination" title="지도보기">🗺 지도보기</button>
           </div>
           <div id="destination_address_results" class="addr-results"></div>
           <input type="text" class="addr-detail-input" id="destination_detail_address" name="destination_detail_address" placeholder="상세주소 입력 (건물명, 동/호수)" <%= order.destination_detail_address ? '' : 'disabled' %> value="<%= order.destination_detail_address || '' %>">
@@ -203,7 +205,7 @@
     <div class="ai-intake-side">
       <div class="card ai-intake-fare-card">
         <div class="section-title">💳 요금 및 결제방식</div>
-        <div class="row">
+        <div class="row fare-payment-row">
           <div class="field">
             <label>요금(원)</label>
             <input type="number" id="fare_amount" name="fare_amount" min="0" step="1000" placeholder="0" value="<%= order.fare_amount || '' %>">
@@ -219,26 +221,13 @@
           </div>
         </div>
           <input type="hidden" id="ferry_fare_amount" name="ferry_fare_amount" value="<%= order.ferry_fare_amount || 0 %>">
-        <p class="fare-calc-hint" id="fareCalcHint">경로 확정 시 지사의 구간요금 설정에 따라 자동 계산됩니다.</p>
+        <p class="fare-calc-hint" id="fareCalcHint" style="display:none;"></p>
       </div>
 
       <div class="card map-card ai-intake-map-card">
         <div class="page-head-row" style="margin-bottom:8px;">
           <div class="section-title" style="margin:0;">🗺 경로 미리보기</div>
           <button type="button" class="btn small secondary" id="mapShowAllBtn">전체 경로 보기</button>
-        </div>
-        <p class="map-hint">각 지점의 '지도보기'를 누르면 해당 위치만, 두 지점 이상 입력되면 전체 경로가 표시됩니다.</p>
-        <div class="map-legend" id="mapLegend">
-          <div class="map-legend-row" data-slot="origin">
-            <span class="dot origin"></span><b>출발</b>
-            <span id="originPreview" class="map-legend-addr">주소를 입력하세요</span>
-            <button type="button" class="btn small secondary map-view-btn" data-slot="origin">지도보기</button>
-          </div>
-          <div class="map-legend-row" data-slot="destination" id="destLegendRow">
-            <span class="dot dest"></span><b>도착</b>
-            <span id="destinationPreview" class="map-legend-addr">주소를 입력하세요</span>
-            <button type="button" class="btn small secondary map-view-btn" data-slot="destination">지도보기</button>
-          </div>
         </div>
         <div id="mapDistanceInfo" class="map-distance-info" style="display:none;">
           <div class="route-search-header">

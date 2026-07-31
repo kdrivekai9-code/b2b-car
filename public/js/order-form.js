@@ -245,11 +245,18 @@
         '<div class="field"><label>경유지 차량번호 (선택)</label><input type="text" id="' + id + '_vehicle_number" name="waypoint_vehicle_numbers[]" placeholder="예: 12가3456"></div>' +
         '</div>'
       : '';
+    // 지도보기를 어떻게 배치할지는 화면마다 다르다 — #destLegendRow(경로 미리보기의 출발/도착
+    // 목록)가 있는 화면(예: 오더 등록)은 기존처럼 그 목록에 경유 행을 추가하고, 없는 화면(AI
+    // 챗봇 — 목록을 없애고 각 입력칸 옆에 지도보기 버튼을 바로 붙이기로 바꿨다)은 주소 입력줄에
+    // 인라인 버튼을 넣는다.
+    var destLegendRow = document.getElementById('destLegendRow');
+    var hasLegend = !!destLegendRow;
     row.innerHTML =
       '<label>경유지 주소 <span class="confirm-badge" id="' + id + 'ConfirmBadge">✓ 지도확정</span></label>' +
       '<div class="addr-input-row">' +
       '<input type="text" class="addr-input" id="' + id + '_address" name="waypoints[]" placeholder="경유지 주소">' +
       '<button type="button" class="btn small secondary addr-search-btn" data-target="' + id + '_address">🔍 검색</button>' +
+      (hasLegend ? '' : '<button type="button" class="btn small secondary map-view-btn" data-slot="' + id + '" title="지도보기">🗺 지도보기</button>') +
       '<button type="button" class="btn small secondary remove-waypoint-btn">삭제</button>' +
       '</div>' +
       '<div id="' + id + '_address_results" class="addr-results"></div>' +
@@ -259,22 +266,27 @@
     waypointsWrap.appendChild(row);
     row.querySelectorAll('.phone-input').forEach(wirePhoneInput);
 
-    var legendRow = document.createElement('div');
-    legendRow.className = 'map-legend-row';
-    legendRow.dataset.slot = id;
-    legendRow.innerHTML =
-      '<span class="dot waypoint"></span><b>경유</b>' +
-      '<span id="' + id + 'Preview" class="map-legend-addr">주소를 입력하세요</span>' +
-      '<button type="button" class="btn small secondary map-view-btn" data-slot="' + id + '">지도보기</button>';
-    var destLegendRow = document.getElementById('destLegendRow');
-    destLegendRow.parentNode.insertBefore(legendRow, destLegendRow);
-    wireMapViewBtn(legendRow.querySelector('.map-view-btn'));
+    var legendRow = null;
+    if (hasLegend) {
+      legendRow = document.createElement('div');
+      legendRow.className = 'map-legend-row';
+      legendRow.dataset.slot = id;
+      legendRow.innerHTML =
+        '<span class="dot waypoint"></span><b>경유</b>' +
+        '<span id="' + id + 'Preview" class="map-legend-addr">주소를 입력하세요</span>' +
+        '<button type="button" class="btn small secondary map-view-btn" data-slot="' + id + '">지도보기</button>';
+      destLegendRow.parentNode.insertBefore(legendRow, destLegendRow);
+      wireMapViewBtn(legendRow.querySelector('.map-view-btn'));
+    } else {
+      var inlineMapBtn = row.querySelector('.map-view-btn');
+      if (inlineMapBtn) wireMapViewBtn(inlineMapBtn);
+    }
 
     var input = row.querySelector('input.addr-input');
     row.querySelector('.remove-waypoint-btn').addEventListener('click', function () {
       removeMarker(id);
       row.remove();
-      legendRow.remove();
+      if (legendRow) legendRow.remove();
     });
     wireAddressField(id, 'waypoint');
   }

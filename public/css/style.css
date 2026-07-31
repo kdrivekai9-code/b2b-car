@@ -303,8 +303,10 @@ form .field.full{flex-basis:100%;}
   .ai-intake-order-card{padding-right:16px;}
   .ai-intake-side{height:calc(100vh - 120px);min-height:0;}
   .ai-intake-fare-card{flex:0 0 auto;height:auto;overflow-y:visible;}
+  .ai-intake-fare-card .fare-payment-row{flex-wrap:nowrap;gap:8px;}
+  .ai-intake-fare-card .fare-payment-row .field{min-width:0;}
   .ai-intake-map-card{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;}
-  .ai-chat-card.ai-intake-scroll-panel{overflow:hidden;}
+  .ai-chat-card.ai-intake-scroll-panel{overflow:hidden;height:calc(100vh - 120px);}
 }
 
 @media (max-width:1300px){ .ai-intake-grid{grid-template-columns:1fr;} }
