@@ -2419,21 +2419,32 @@
       del.type = 'button';
       del.className = 'ai-chat-recent-delete';
       del.textContent = '×';
-      del.title = '최근 항목에서 숨기기';
-      del.setAttribute('aria-label', '최근 항목에서 숨기기');
+      del.title = '삭제';
+      del.setAttribute('aria-label', '삭제');
       del.addEventListener('click', function (e) {
         e.preventDefault();
         e.stopPropagation();
-        if (!window.confirm('이 항목을 최근 목록에서 숨기겠습니까?')) return;
+        // 실제로는 DB에서 지우지 않고 이 사용자 화면(최근 목록)에서만 숨긴다(user_hidden_at) —
+        // 문구는 사용자에게 익숙한 "삭제"로 보여주되 동작은 그대로 소프트 삭제를 유지한다.
+        if (!window.confirm('이 항목을 삭제하시겠습니까?')) return;
         del.disabled = true;
         fetch('/orders/ai-intake/sessions/' + encodeURIComponent(s.id) + '/delete', {
           method: 'POST',
           headers: { 'X-Requested-With': 'fetch' },
         })
-          .then(function (res) { return res.json().catch(function () { return {}; }).then(function (data) {
-            if (!res.ok) throw new Error((data && data.error) || '삭제에 실패했습니다.');
-            return data;
-          }); })
+          .then(function (res) {
+            return res.text().then(function (raw) {
+              var data = {};
+              try { data = raw ? JSON.parse(raw) : {}; } catch (e) { /* 서버가 JSON이 아닌 응답(플랫폼 타임아웃 등)을 준 경우 */ }
+              if (!res.ok) {
+                // 원인을 알 수 없는 일반 문구 대신, 실제 상태 코드/응답을 함께 보여준다 — 다음에
+                // 같은 문제가 재현되면 무엇이 실패했는지 바로 알 수 있어야 한다.
+                var detail = (data && data.error) || (raw ? raw.slice(0, 200) : ('상태 코드 ' + res.status));
+                throw new Error(detail);
+              }
+              return data;
+            });
+          })
           .then(function () {
             if (String(s.id) === String(sessionId)) {
               window.location.href = '/orders/ai-intake';
@@ -2443,7 +2454,7 @@
           })
           .catch(function (err) {
             del.disabled = false;
-            alert(err.message || '삭제에 실패했습니다.');
+            alert('삭제에 실패했습니다: ' + (err && err.message ? err.message : '알 수 없는 오류'));
           });
       });
 

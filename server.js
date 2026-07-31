@@ -151,6 +151,11 @@ app.use('/inquiries', inquiryRoutes);
 app.use('/access-logs', accessLogRoutes);
 
 app.use((req, res) => {
+  // fetch(X-Requested-With: fetch)로 온 AJAX 요청에 HTML 404 페이지를 그대로 돌려주면
+  // 클라이언트가 res.json() 파싱에 실패해 실제 원인("경로 없음") 대신 뭉뚱그린 일반 에러
+  // 메시지만 보게 된다 — 아래 500 핸들러와 동일한 기준으로 JSON 요청은 JSON으로 응답한다.
+  const wantsJson = req.xhr || req.get('X-Requested-With') === 'fetch' || (req.get('accept') || '').indexOf('application/json') >= 0;
+  if (wantsJson) return res.status(404).json({ error: '요청하신 경로를 찾을 수 없습니다.' });
   res.status(404).render('404', { title: '페이지를 찾을 수 없음' });
 });
 
