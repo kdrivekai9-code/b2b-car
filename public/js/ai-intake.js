@@ -579,9 +579,13 @@
       if (status.type === 'no_result' && !shownNoResult) {
         shownNoResult = true;
         sayBot(originalInput + ' 검색결과가 없습니다.');
+        // 재검색어를 Gemini에게 물어보는 동안 화면에 아무 변화가 없으면 멈춘 것처럼 보여
+        // 새로고침/이탈하는 경우가 있었다 — retry_start가 올 때까지 대기 중임을 알려준다.
+        showThinkingBubble();
       }
       if (status.type === 'retry_start' && !shownRetryStart) {
         shownRetryStart = true;
+        hideThinkingBubble();
         if (status.correctedQuery) sayBot(status.correctedQuery + '로 다시 검색하겠습니다.');
       }
       if (status.type === 'retry_attempt' && status.correctedQuery) {
@@ -595,6 +599,9 @@
       }
     }) : Promise.resolve({ success: false });
     return task.then(function (r) {
+      // retry_start 없이 곧바로 끝나는 경로(교정어를 못 찾아 실패 등)에서도 "확인하고 있어요"가
+      // 화면에 남아있지 않도록 정리한다.
+      hideThinkingBubble();
       if (r && r.ambiguous) {
         return { success: false, ambiguous: true, fieldId: id, label: label, candidates: r.candidates };
       }
