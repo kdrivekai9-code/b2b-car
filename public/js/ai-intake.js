@@ -1057,6 +1057,7 @@
       if (branchId) qs.set('branch_id', branchId);
       qs.set('distance_km', distanceKm.toFixed(2));
       if (vehicleType) qs.set('vehicle_type', vehicleType);
+      if (origin) qs.set('origin_address', origin);
       if (val('reserved_date')) qs.set('reserved_date', val('reserved_date'));
       if (routeMeta) {
         qs.set('has_ferry_leg', routeMeta.hasFerryLeg ? '1' : '0');
@@ -1178,6 +1179,7 @@
     qs.set('distance_km', Math.max(0, distanceKm).toFixed(2));
     qs.set('has_ferry_leg', hasFerryLeg ? '1' : '0');
     if (vehicleType) qs.set('vehicle_type', vehicleType);
+    if (val('origin_address')) qs.set('origin_address', val('origin_address'));
     if (val('reserved_date')) qs.set('reserved_date', val('reserved_date'));
     return fetch('/orders/fare-preview?' + qs.toString())
       .then(function (res) { return res.json(); })

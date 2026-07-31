@@ -502,6 +502,7 @@ router.get('/fare-preview', asyncHandler(async (req, res) => {
   if (!Number.isFinite(distanceKm)) return res.json({ enabled: false });
   const result = await calculateFareWithFerry(branchId, distanceKm, {
     vehicleType: req.query.vehicle_type || req.query.vehicleType || '',
+    originAddress: req.query.origin_address || req.query.originAddress || '',
     hasFerryLeg: req.query.has_ferry_leg === '1' || req.query.has_ferry_leg === 'true',
     reservedDate: req.query.reserved_date || null,
     dayType: req.query.day_type || req.query.dayType || '',

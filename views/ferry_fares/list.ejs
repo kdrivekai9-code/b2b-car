@@ -1,0 +1,57 @@
+<%- include('../partials/header') %>
+<div class="page-head-row">
+  <div>
+    <h1 class="page-title">도선료 관리</h1>
+    <p class="page-sub">경로에 도선(페리) 구간이 포함된 오더의 요금을 계산할 때 쓰는 차종별 선적비용표입니다. 차종란은 쉼표(,)로 구분된 별칭 여러 개를 한 번에 넣을 수 있습니다.</p>
+  </div>
+  <div class="page-head-actions">
+    <button class="btn" type="submit" form="ferryFareForm">저장</button>
+  </div>
+</div>
+
+<form id="ferryFareForm" method="POST" action="/ferry-fares">
+  <div class="card">
+    <div class="section-title">🚢 노선별 차량 선적비용</div>
+    <div class="table-wrap">
+    <table id="ferryFareTable">
+      <thead>
+        <tr>
+          <th style="width:110px;">노선코드</th>
+          <th style="width:110px;">선박명</th>
+          <th>차종(별칭, 쉼표로 구분)</th>
+          <th style="width:110px;">평일요금(원)</th>
+          <th style="width:110px;">휴일요금(원)</th>
+          <th style="width:80px;">정렬순서</th>
+          <th style="width:60px;">사용</th>
+          <th style="width:160px;">출처명</th>
+          <th style="width:160px;">출처URL</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="ferryFareBody">
+        <% rules.forEach(function(r, i){ %>
+          <tr>
+            <td><input type="text" name="route_code" value="<%= r.route_code %>" required></td>
+            <td><input type="text" name="ship_name" value="<%= r.ship_name || '' %>"></td>
+            <td><textarea name="vehicle_label" rows="2" required><%= r.vehicle_label %></textarea></td>
+            <td><input type="number" name="weekday_fare" value="<%= r.weekday_fare %>" min="0" step="100"></td>
+            <td><input type="number" name="holiday_fare" value="<%= r.holiday_fare %>" min="0" step="100"></td>
+            <td><input type="number" name="sort_order" value="<%= r.sort_order || (i + 1) %>" min="1" step="1"></td>
+            <td style="text-align:center;"><input type="checkbox" name="is_active" value="<%= i %>" <%= r.is_active ? 'checked' : '' %>></td>
+            <td><input type="text" name="source_title" value="<%= r.source_title || '' %>"></td>
+            <td><input type="text" name="source_url" value="<%= r.source_url || '' %>"></td>
+            <td><button type="button" class="btn small secondary remove-row-btn">삭제</button></td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+    </div>
+    <button type="button" class="btn small secondary" id="addFerryFareBtn" style="margin-top:10px;">+ 차종 추가</button>
+  </div>
+</form>
+
+<% if (typeof saved !== 'undefined' && saved) { %>
+  <div class="toast" id="ferryFareSavedToast">저장되었습니다.</div>
+<% } %>
+<script src="/js/ferry-fares.js"></script>
+<%- include('../partials/footer') %>

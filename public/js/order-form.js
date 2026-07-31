@@ -650,10 +650,12 @@
     var fareReservedDate = (isDeliveryReservationBasis() && pickupReservedDateInput && pickupReservedDateInput.value)
       ? pickupReservedDateInput.value
       : (reservedDateInput && reservedDateInput.value ? reservedDateInput.value : '');
+    var originAddressInput = document.getElementById('origin_address');
     var params = new URLSearchParams();
     if (branchId) params.set('branch_id', branchId);
     if (Number.isFinite(totalKm)) params.set('distance_km', String(totalKm.toFixed(2)));
     if (vehicleType) params.set('vehicle_type', vehicleType);
+    if (originAddressInput && originAddressInput.value.trim()) params.set('origin_address', originAddressInput.value.trim());
     if (fareReservedDate) params.set('reserved_date', fareReservedDate);
     if (routeMeta) {
       params.set('has_ferry_leg', routeMeta.hasFerryLeg ? '1' : '0');
