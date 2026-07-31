@@ -106,7 +106,11 @@
   var fareProgressEl = null;
   var fareInquiryDraft = null;
   var fareInquiryPendingField = null;
+  // 도선료 계산에 차종이 필요해 요금문의 흐름이 멈춘 경우, 다음 메시지를 그 답으로 보고 이어가기
+  // 위한 대기 상태 — { origin, destination }.
+  var pendingFareVehicleTypeRoute = null;
   var lastAnnouncedMemoText = '';
+  var lastAnnouncedBillingMemoText = '';
   var lastAiActivityPingAt = 0;
   var AI_ACTIVITY_PING_INTERVAL_MS = 15000;
   var AI_HEALTH_POLL_INTERVAL_MS = 60000;
@@ -526,6 +530,16 @@
 
   function detectReservationBasisFromText(text) {
     var raw = String(text || '');
+    // 전체 텍스트에는 "[출발지]" 같은 무관한 섹션 헤더가 항상 있어 "출발"이 늘 매칭되므로,
+    // 그걸로 판단하면 "일시 : 07/27 18시 30분 도착"처럼 실제로는 도착지 인도시간 기준인
+    // 경우까지 항상 픽업 기준으로 오판된다. "일시" 라인만 좁혀서 그 안의 표현으로 판단한다.
+    var timeLineMatch = raw.match(/일시[^\n]*/);
+    if (timeLineMatch) {
+      var line = timeLineMatch[0];
+      if (/(도착요망|도착|인도)/.test(line)) return 'delivery';
+      if (/픽업/.test(line)) return 'pickup';
+      return null;
+    }
     var hasPickup = /(픽업|출발)/.test(raw);
     var hasDelivery = /(도착요망|도착|인도)/.test(raw);
     if (hasPickup) return 'pickup';
@@ -826,6 +840,20 @@
     return true;
   }
 
+  // 도선료 계산을 위해 차종을 물어보고 멈춰있던 요금문의를, 다음 메시지(차종 답변)를 받아
+  // 배편 정보/경유지 질문까지 이어서 진행한다.
+  function handleFareVehicleTypePendingReply(text) {
+    if (!pendingFareVehicleTypeRoute) return false;
+    var route = pendingFareVehicleTypeRoute;
+    pendingFareVehicleTypeRoute = null;
+    handleFareInquiryFlowFromText({
+      origin: route.origin,
+      destination: route.destination,
+      vehicleType: String(text || '').trim(),
+    }).then(function () { return null; });
+    return true;
+  }
+
   function isAdministrativeAreaName(name) {
     var q = String(name || '').trim();
     if (!q) return false;
@@ -853,8 +881,8 @@
     });
   }
 
-  function stageBotMessage(text) {
-    addBubble(text, 'bot');
+  function stageBotMessage(text, isQuestion) {
+    addBubble(text, 'bot', null, isQuestion);
     return logBotMessage({ logText: text, needsAgent: false, requestedFeature: null });
   }
 
@@ -1061,10 +1089,44 @@
           var amount = totalFare.toLocaleString('ko-KR');
           var adminAreaOnly = !!opts.adminAreaOnly;
           var vehicleText = opts.vehicleType ? (' (' + opts.vehicleType + ' 기준)') : '';
-          var msg;
+
+          // 도선료 계산에 차종이 필요하면, 구간요금 안내(정보)와 차종 질문을 한 말풍선에 합쳐
+          // 보여주지 않는다 — 합쳐서 보여주면 사용자가 답하기도 전에 다음 안내(배편 정보,
+          // 경유지 질문)까지 같은 턴에 쏟아지는 문제가 있었다. 여기서 질문까지 남기고 halt
+          // 신호를 돌려줘서, 호출부(handleFareInquiryFlowFromText)가 답을 받을 때까지 멈추게 한다.
           if (data.ferryNeedVehicleType) {
-            msg = '현재 경로 기준 구간요금은 약 ' + baseFare.toLocaleString('ko-KR') + '원입니다. 도선료 계산을 위해 차종을 알려주세요.';
-          } else if (data.ferryApplied && ferryFare > 0) {
+            var fareInfoMsg = normalizeFareGuideText('현재 경로 기준 구간요금은 약 ' + baseFare.toLocaleString('ko-KR') + '원입니다.');
+            addBubble(fareInfoMsg, 'bot');
+            logBotMessage({ logText: fareInfoMsg, needsAgent: false, requestedFeature: null });
+            var vehicleQuestionText = '도선료 계산을 위해 차종을 알려주세요. 예: 카니발, 그랜저, 1톤';
+            addBubble(vehicleQuestionText, 'bot', null, true);
+            logBotMessage({ logText: vehicleQuestionText, needsAgent: false, requestedFeature: null });
+            // lastFareGuideKey는 일부러 갱신하지 않는다 — 아직 최종 요금을 안내한 게 아니라 차종을
+            // 물어본 것뿐이라, 여기서 키를 찍어두면 사용자가 차종을 답해 흐름이 재개될 때(같은
+            // origin/destination/거리라 key가 동일) dedup에 막혀 "이미 안내했음" 취급되어 요금을
+            // 다시 조회하지 못하고 오류로 빠진다.
+            deferredFareGuideNoticeShown = false;
+            clearDeferredFareGuideTimer();
+            if (opts.returnPayload) {
+              return {
+                text: fareInfoMsg,
+                distanceKm: distanceKm,
+                fare: totalFare,
+                totalFare: totalFare,
+                baseFare: baseFare,
+                ferryFare: ferryFare,
+                resolvedOrigin: origin,
+                resolvedDestination: destination,
+                fareSource: data.fallbackUsed ? 'fallback_default' : 'branch',
+                fallbackUsed: !!data.fallbackUsed,
+                ferryNeedVehicleType: true,
+              };
+            }
+            return false;
+          }
+
+          var msg;
+          if (data.ferryApplied && ferryFare > 0) {
             msg = adminAreaOnly
               ? ('출발지 ' + origin + '에서 도착지 ' + destination + ' 기준으로 구간요금 ' + baseFare.toLocaleString('ko-KR') + '원 + 도선료 ' + ferryFare.toLocaleString('ko-KR') + '원 = 총 ' + amount + '원입니다.')
               : ('현재 경로 기준 예상요금은 구간요금 ' + baseFare.toLocaleString('ko-KR') + '원 + 도선료 ' + ferryFare.toLocaleString('ko-KR') + '원 = 총 ' + amount + '원이며,' + buildFareDistanceDurationSuffix(distanceKm, vehicleText));
@@ -1211,9 +1273,12 @@
                   });
                 }
                 if (fareResult && fareResult.ferryNeedVehicleType) {
-                  var askVehicleTypeText = '도선료 계산을 위해 차종을 알려주세요. 예: 카니발, 그랜저, 1톤';
-                  addBubble(askVehicleTypeText, 'bot');
-                  logBotMessage({ logText: askVehicleTypeText, needsAgent: false, requestedFeature: null });
+                  // 차종 질문은 announceFareGuideFromDb 안에서 이미 별도 말풍선(질문 색상)으로
+                  // 남겼다 — 여기서는 halt 신호만 돌려줘서 배편 정보/경유지 질문으로 이어지지
+                  // 않고, 사용자가 차종을 답할 때까지 멈춘다. pendingFareVehicleTypeRoute에
+                  // origin/destination을 남겨둬서, 다음 메시지(차종 답변)가 오면
+                  // handleFareVehicleTypePendingReply가 이 요금문의를 그대로 이어간다.
+                  pendingFareVehicleTypeRoute = { origin: origin, destination: destination };
                   return { halted: true, fareText: fareResult ? fareResult.text : null, needsVehicleType: true };
                 }
                 var routeMeta = window.__aiIntakeRouteMeta || null;
@@ -1255,7 +1320,7 @@
     'reserved_date', 'reserved_time',
     'origin_address', 'origin_detail_address', 'origin_contact', 'vehicle_number', 'vehicle_type',
     'destination_address', 'destination_detail_address', 'destination_contact',
-    'memo_customer',
+    'memo_customer', 'memo_billing',
   ];
   function buildDraftState() {
     var fields = {};
@@ -1275,6 +1340,10 @@
       vehicleNumberResolved: vehicleNumberResolved,
       additionalRequestResolved: additionalRequestResolved,
       confirmedOrderType: confirmedOrderType,
+      // 라디오 버튼(reservation_basis_pickup/delivery)은 단일 id로 값을 읽을 수 없어
+      // DRAFT_FIELD_IDS와 별개로 저장한다 — 이게 없으면 상담관리 카드뷰에서 이 세션을 열었을 때
+      // 도착지 인도시간 기준으로 판별했던 결과가 이어지지 않고 기본값(픽업 기준)으로 되돌아간다.
+      reservationBasis: isDeliveryReservationBasis() ? 'delivery' : 'pickup',
     };
   }
   function restoreDraftState(draft) {
@@ -1285,6 +1354,10 @@
       if (el && fields[id]) { el.value = fields[id]; el.disabled = false; }
     });
     syncReservedTimeSelectsFromHidden();
+    if (draft.reservationBasis === 'delivery') {
+      var deliveryRadio = document.getElementById('reservation_basis_delivery');
+      if (deliveryRadio) { deliveryRadio.checked = true; deliveryRadio.dispatchEvent(new Event('change', { bubbles: true })); }
+    }
     (draft.confirmedSlots || []).forEach(function (slot) {
       var badge = document.getElementById(slot + 'ConfirmBadge');
       if (badge) badge.classList.add('visible');
@@ -1324,6 +1397,7 @@
     });
     lines.push('▪ 도착지: ' + val('destination_address') + (val('destination_detail_address') ? ' ' + val('destination_detail_address') : '') + ' (' + val('destination_contact') + ')');
     if (val('memo_customer')) lines.push('▪ 메모: ' + val('memo_customer'));
+    if (val('memo_billing')) lines.push('▪ 업체요청사항: ' + val('memo_billing'));
     return lines.join('\n');
   }
 
@@ -1368,10 +1442,18 @@
     phase = 'confirming';
     var summary = buildSummaryText();
     var confirmQ = prefix ? '다시 접수내용을 등록해 드릴까요?' : '위 내용으로 등록해 드릴까요?';
-    if (prefix) addBubble(prefix, 'bot');
+    // 접수내용 요약과 등록 확인 질문은 화면(addBubble)에서만이 아니라 저장(logBotMessage)도
+    // 각각 따로 해야 한다 — 하나로 합쳐 저장하면 새로고침하거나 상담관리에서 나중에 볼 때
+    // 두 말풍선이 아니라 하나로 뭉쳐 보이고, 질문 말풍선의 파란 배경색도 사라진다.
+    if (prefix) {
+      addBubble(prefix, 'bot');
+      logBotMessage({ logText: prefix, needsAgent: false, requestedFeature: null });
+    }
     addBubble(summary, 'bot');
+    logBotMessage({ logText: summary, needsAgent: false, requestedFeature: null });
     addBubble(confirmQ, 'bot', null, true);
-    return (prefix ? prefix + '\n' : '') + summary + '\n' + confirmQ;
+    logBotMessage({ logText: confirmQ, needsAgent: false, requestedFeature: null });
+    return null;
   }
 
   // 오더접수 필드를 순서대로(동시가 아니라) 검증한다 — 주소 검색은 비동기라 순서를 지키지 않으면
@@ -1415,6 +1497,7 @@
     syncReservedTimeSelectsFromHidden();
     if (dateTimeChanged) applyReservationBasisByText(sourceText);
     setField('memo_customer', data.memo_customer);
+    setField('memo_billing', data.memo_billing);
     setField('vehicle_type', data.vehicle_type || data.vehicleType || null);
     if (data.origin_detail_address) setField('origin_detail_address', data.origin_detail_address);
     if (data.destination_detail_address) setField('destination_detail_address', data.destination_detail_address);
@@ -1441,13 +1524,13 @@
             dtMsg = '예약일시는 **' + formattedDateTime + '**(으)로 확인했습니다.';
           }
           if (newOrderType) dtMsg += '\n"' + ORDER_INTENT_LABELS[newOrderType] + '"로 확인되었습니다.';
-          addBubble(dtMsg, 'bot');
+          sayBot(dtMsg);
         }
         return null;
       });
     } else if (newOrderType) {
       tasks.push(function () {
-        addBubble('오더유형은 "' + ORDER_INTENT_LABELS[newOrderType] + '"로 확인되었습니다.', 'bot');
+        sayBot('오더유형은 "' + ORDER_INTENT_LABELS[newOrderType] + '"로 확인되었습니다.');
         return null;
       });
     }
@@ -1457,7 +1540,18 @@
       tasks.push(function () {
         additionalRequestResolved = true;
         lastAnnouncedMemoText = resolvedMemo;
-        addBubble('요청사항은 \'' + resolvedMemo + '\'입니다.', 'bot');
+        sayBot('요청사항은 \'' + resolvedMemo + '\'입니다.');
+        return null;
+      });
+    }
+
+    // 업체요청사항(memo_billing)은 기사요청사항(memo_customer)과 별개로, 업체가 계산서/내역서/
+    // 명세서 발행 시 참고할 내용만 담는다 — Gemini가 원문에서 이 조건에 맞는 부분만 분리해 채운다.
+    var resolvedBillingMemo = val('memo_billing');
+    if (resolvedBillingMemo && resolvedBillingMemo !== lastAnnouncedBillingMemoText) {
+      tasks.push(function () {
+        lastAnnouncedBillingMemoText = resolvedBillingMemo;
+        sayBot('업체요청사항은 \'' + resolvedBillingMemo + '\'입니다.');
         return null;
       });
     }
@@ -1732,8 +1826,11 @@
       } else if (phase === 'choose_address_candidate' && pendingDisambiguation) {
         followUp = candidateListText(pendingDisambiguation);
       }
-      if (followUp) addBubble(followUp, 'bot', null, true);
-      logBotMessage({ logText: backText + (followUp ? '\n' + followUp : ''), needsAgent: false, requestedFeature: null });
+      logBotMessage({ logText: backText, needsAgent: false, requestedFeature: null });
+      if (followUp) {
+        addBubble(followUp, 'bot', null, true);
+        logBotMessage({ logText: followUp, needsAgent: false, requestedFeature: null });
+      }
       return;
     }
     var clarify = '상담원 연결이 필요하시면 "네", 계속 진행하시려면 "아니요"라고 답해주세요.';
@@ -2156,6 +2253,10 @@
 
   function logBotMessage(result) {
     if (!sessionId) return Promise.resolve(null);
+    // 남길 텍스트도 없고 상담원 호출/세션종료 같은 부수효과도 없으면 아무것도 저장하지 않는다 —
+    // proceedAfterCollecting()의 요약+확인질문처럼 이미 각자 따로 logBotMessage로 저장한 경우,
+    // 호출부가 관행대로 doneText를 또 넘기면서 빈 메시지 행이 남는 것을 막기 위함.
+    if (!result.logText && !result.needsAgent && !result.closeSession) return Promise.resolve(null);
     var payload = {
       message: result.logText,
       needsAgent: result.needsAgent,
@@ -2218,7 +2319,9 @@
       if (m.id > lastPolledId) lastPolledId = m.id;
       if (m.sender === 'agent') addBubble(m.message, 'agent', m.created_at);
       else if (m.sender === 'user') addBubble(m.message, 'user', m.created_at);
-      else addBubble(m.message, 'bot', m.created_at); // 'bot' | 'system'
+      // DB에는 "질문 말풍선" 플래그가 없어, 질문 문구는 항상 "?"로 끝난다는 관례를 휴리스틱으로
+      // 써서 복원 시에도 파란 질문 배경이 유지되게 한다(그렇지 않으면 새로고침할 때마다 사라짐).
+      else addBubble(m.message, 'bot', m.created_at, /\?\s*$/.test(String(m.message || '').trim())); // 'bot' | 'system'
     });
     restoreDraftState(existing.draft);
     startStreaming();
@@ -2282,6 +2385,7 @@
         if (phase === 'collecting' && pendingField === 'vehicle_number' && handleVehicleNumberPendingReply(text)) {
           return null;
         }
+        if (handleFareVehicleTypePendingReply(text)) return null;
         if (handleFareInquiryPendingReply(text)) return null;
         // 명시적인 "상담원 연결" 요청은 Gemini 분류를 거치지 않고 바로 처리한다 — 이 요청만큼은
         // 콜드스타트/응답지연으로 고객이 기다리다 이탈해서 에스컬레이션 자체가 무산되는 일이 없어야 한다.

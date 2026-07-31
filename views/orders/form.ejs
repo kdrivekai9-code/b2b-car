@@ -184,6 +184,7 @@
 
       <div class="section-title small">요청 메모</div>
       <div class="field full"><textarea name="memo_customer" placeholder="예) 사고 이력 안내&#10;예) 스크래치 등 차량 관련 내용"><%= order.memo_customer || '' %></textarea></div>
+      <div class="field full"><label>업체요청사항</label><textarea name="memo_billing" placeholder="예) 계산서/내역서 비고란에 'OOO'로 기재 요청"><%= order.memo_billing || '' %></textarea></div>
 
       <div class="order-form-actions">
         <a class="btn secondary" href="/orders">취소</a>

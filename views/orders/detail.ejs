@@ -36,6 +36,7 @@
 
     <div class="section-title">메모</div>
     <div class="kv"><span class="k">고객사 메모</span><span><%= order.memo_customer || '작성된 메모가 없습니다.' %></span></div>
+    <div class="kv"><span class="k">업체요청사항</span><span><%= order.memo_billing || '작성된 내용이 없습니다.' %></span></div>
     <div class="kv"><span class="k">관리자 메모</span><span><%= order.memo_admin || '작성된 메모가 없습니다.' %></span></div>
 
     <% if (canViewPhotos) { %>
