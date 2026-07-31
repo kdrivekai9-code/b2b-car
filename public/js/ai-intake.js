@@ -41,12 +41,12 @@
   }
 
   var REQUIRED_FIELDS = [
-    { id: 'origin_address', label: '출발지 주소', type: 'address', kind: 'origin', question: '차량을 픽업할 출발지 주소를 알려주세요.' },
-    { id: 'origin_contact', label: '출발지 연락처', type: 'phone', question: '출발지 담당자 연락처를 알려주세요. (예: 010-1234-5678)' },
-    { id: 'vehicle_number', label: '차량번호', type: 'vehicle', question: '차량번호를 알려주세요. (출발지 도착 후 확인 가능하면 "다음" 또는 "없어"라고 답해주셔도 됩니다)' },
-    { id: 'reserved_date', label: '예약일시', type: 'datetime', question: '예약일시를 알려주세요. (예: 내일 오후 3시 / 00일 00시)' },
-    { id: 'destination_address', label: '도착지 주소', type: 'address', kind: 'destination', question: '차량을 인도할 도착지 주소를 알려주세요.' },
-    { id: 'destination_contact', label: '도착지 연락처', type: 'phone', question: '도착지 담당자 연락처를 알려주세요. (예: 010-1234-5678)' },
+    { id: 'origin_address', label: '출발지 주소', type: 'address', kind: 'origin', question: '차량을 픽업할 출발지 주소를 알려주세요?' },
+    { id: 'origin_contact', label: '출발지 연락처', type: 'phone', question: '출발지 담당자 연락처를 알려주세요? (예: 010-1234-5678)' },
+    { id: 'vehicle_number', label: '차량번호', type: 'vehicle', question: '차량번호를 알려주세요? (출발지 도착 후 확인 가능하면 "다음" 또는 "없어"라고 답해주셔도 됩니다)' },
+    { id: 'reserved_date', label: '예약일시', type: 'datetime', question: '예약일시를 알려주세요? (예: 내일 오후 3시 / 00일 00시)' },
+    { id: 'destination_address', label: '도착지 주소', type: 'address', kind: 'destination', question: '차량을 인도할 도착지 주소를 알려주세요?' },
+    { id: 'destination_contact', label: '도착지 연락처', type: 'phone', question: '도착지 담당자 연락처를 알려주세요? (예: 010-1234-5678)' },
   ];
   // 채팅으로 "수정"을 물어볼 때 자연어로 어느 항목인지 알아듣기 위한 키워드 매칭.
   // 차량번호를 맨 앞에 둔다 — "차량번호 출발 전에 다시 확인해주세요"처럼 "출발"/"도착"이
@@ -289,9 +289,12 @@
     return row;
   }
 
-  function addBubble(text, who, createdAt) {
+  // isQuestion: 사용자에게 다음 답을 요구하는 말풍선(필수항목 질문/확인질문/후보선택 등)에만
+  // true로 넘긴다 — 정보 전달용 응답과 구분되도록 배경색을 다르게(하늘색) 표시한다.
+  function addBubble(text, who, createdAt, isQuestion) {
     var div = document.createElement('div');
     div.className = 'ai-chat-bubble ' + (who === 'user' ? 'ai-user' : (who === 'agent' ? 'ai-agent' : 'ai-bot'));
+    if (who === 'bot' && isQuestion) div.className += ' ai-bot-question';
     var timeText = formatBubbleTime(createdAt);
 
     if (who === 'agent') {
@@ -765,11 +768,11 @@
     if (!fareInquiryDraft) return null;
     if (!fareInquiryDraft.origin) {
       fareInquiryPendingField = 'origin';
-      return '탁송 요금 문의를 위해 출발지를 알려주세요.';
+      return '탁송 요금 문의를 위해 출발지를 알려주세요?';
     }
     if (!fareInquiryDraft.destination) {
       fareInquiryPendingField = 'destination';
-      return '탁송 요금 문의를 위해 도착지를 알려주세요.';
+      return '탁송 요금 문의를 위해 도착지를 알려주세요?';
     }
     fareInquiryPendingField = null;
     return null;
@@ -790,7 +793,7 @@
 
     var nextQ = askFareInquiryMissingField();
     if (nextQ) {
-      addBubble(nextQ, 'bot');
+      addBubble(nextQ, 'bot', null, true);
       logBotMessage({ logText: nextQ, needsAgent: false, requestedFeature: null });
       return true;
     }
@@ -1317,14 +1320,14 @@
     var missing = getNextMissingField();
     if (missing) {
       setPendingField(missing.id);
-      addBubble(missing.question, 'bot');
+      addBubble(missing.question, 'bot', null, true);
       return missing.question;
     }
 
     if (!additionalRequestResolved) {
       setPendingField('memo_customer');
-      var extraQ = '추가 요청사항이 있으시면 알려주세요. 없으시면 \'없음\'이라고 답해주세요.';
-      addBubble(extraQ, 'bot');
+      var extraQ = '추가 요청사항이 있으시면 알려주세요? 없으시면 \'없음\'이라고 답해주세요.';
+      addBubble(extraQ, 'bot', null, true);
       return extraQ;
     }
 
@@ -1349,7 +1352,7 @@
     var confirmQ = prefix ? '다시 접수내용을 등록해 드릴까요?' : '위 내용으로 등록해 드릴까요?';
     if (prefix) addBubble(prefix, 'bot');
     addBubble(summary, 'bot');
-    addBubble(confirmQ, 'bot');
+    addBubble(confirmQ, 'bot', null, true);
     return (prefix ? prefix + '\n' : '') + summary + '\n' + confirmQ;
   }
 
@@ -1375,7 +1378,7 @@
     pendingDisambiguation = ambiguousList[0];
     phase = 'choose_address_candidate';
     var q = candidateListText(pendingDisambiguation);
-    addBubble(q, 'bot');
+    addBubble(q, 'bot', null, true);
     return { logText: q, needsAgent: false, requestedFeature: null };
   }
 
@@ -1498,18 +1501,23 @@
       var ambiguousList = results.filter(function (r) { return r && r.ambiguous; });
       if (ambiguousList.length) return startDisambiguation(ambiguousList);
 
-      var doneText = proceedAfterCollecting();
-      if (val('origin_address') && val('destination_address')) {
-        announceFareGuideFromDb().then(function (fareGuideText) {
-          if (fareGuideText === false) return; // 이미 같은 경로로 안내를 마쳤음 — 대기 안내 불필요
-          if (fareGuideText) {
-            logBotMessage({ logText: fareGuideText, needsAgent: false, requestedFeature: null });
-            return;
-          }
-          scheduleDeferredFareGuide();
-        });
-      }
-      return { logText: doneText || null, needsAgent: false, requestedFeature: null };
+      // 요금 안내(있으면)를 먼저 보여주고, 다음 질문은 그 뒤 마지막에 물어본다 — 질문이 다른
+      // 응답 내용 사이에 끼어들어 순서가 뒤섞이지 않도록 한다.
+      var farePromise = (val('origin_address') && val('destination_address'))
+        ? announceFareGuideFromDb().then(function (fareGuideText) {
+            if (fareGuideText === false) return; // 이미 같은 경로로 안내를 마쳤음 — 대기 안내 불필요
+            if (fareGuideText) {
+              logBotMessage({ logText: fareGuideText, needsAgent: false, requestedFeature: null });
+              return;
+            }
+            scheduleDeferredFareGuide();
+          })
+        : Promise.resolve();
+
+      return farePromise.then(function () {
+        var doneText = proceedAfterCollecting();
+        return { logText: doneText || null, needsAgent: false, requestedFeature: null };
+      });
     });
   }
 
@@ -1658,7 +1666,7 @@
     };
     phase = 'offer_agent';
     var q = '더 빠른 처리를 위해 상담원 연결을 해드릴까요?';
-    addBubble(q, 'bot');
+    addBubble(q, 'bot', null, true);
     logBotMessage({ logText: q, needsAgent: false, requestedFeature: null });
   }
 
@@ -1692,7 +1700,7 @@
       if (phase === 'collecting') {
         var meta = fieldMetaFor(pendingField);
         followUp = meta ? meta.question
-          : pendingField === 'memo_customer' ? '추가 요청사항이 있으시면 알려주세요. 없으시면 \'없음\'이라고 답해주세요.'
+          : pendingField === 'memo_customer' ? '추가 요청사항이 있으시면 알려주세요? 없으시면 \'없음\'이라고 답해주세요.'
           : null;
       } else if (phase === 'confirming') {
         followUp = '위 내용으로 등록해 드릴까요?';
@@ -1701,7 +1709,7 @@
       } else if (phase === 'choose_address_candidate' && pendingDisambiguation) {
         followUp = candidateListText(pendingDisambiguation);
       }
-      if (followUp) addBubble(followUp, 'bot');
+      if (followUp) addBubble(followUp, 'bot', null, true);
       logBotMessage({ logText: backText + (followUp ? '\n' + followUp : ''), needsAgent: false, requestedFeature: null });
       return;
     }
@@ -1871,7 +1879,7 @@
     noteProgress();
     phase = 'choose_field';
     var q = '어느 부분을 수정해드릴까요?';
-    addBubble(q, 'bot');
+    addBubble(q, 'bot', null, true);
     logBotMessage({ logText: q, needsAgent: false, requestedFeature: null });
   }
 
@@ -1922,7 +1930,7 @@
     return null;
   }
 
-  var CHOOSE_FIELD_CLARIFY = '출발지 주소 / 출발지 연락처 / 차량번호 / 예약일시 / 도착지 주소 / 도착지 연락처 중 어느 항목을 수정할지 말씀해주세요.';
+  var CHOOSE_FIELD_CLARIFY = '출발지 주소 / 출발지 연락처 / 차량번호 / 예약일시 / 도착지 주소 / 도착지 연락처 중 어느 항목을 수정할지 말씀해주세요?';
 
   function applyFieldChoice(field, text) {
     noteProgress();
@@ -1947,13 +1955,13 @@
     setPendingField(field.id);
 
     function askAgain() {
-      var q = field.label + '를 다시 알려주세요.' + (
+      var q = field.label + '를 다시 알려주세요?' + (
         field.type === 'phone' ? ' (예: 010-1234-5678)'
           : field.type === 'datetime' ? ' (예: 내일 오후 3시 / 00일 00시)'
           : field.type === 'vehicle' ? ' (출발지 도착 후 확인 가능하면 "다음" 또는 "없어"라고 답해주셔도 됩니다)'
           : ''
       );
-      addBubble(q, 'bot');
+      addBubble(q, 'bot', null, true);
       logBotMessage({ logText: q, needsAgent: false, requestedFeature: null });
     }
 
@@ -2010,7 +2018,7 @@
         return;
       }
       if (noteTrouble()) return;
-      addBubble(CHOOSE_FIELD_CLARIFY, 'bot');
+      addBubble(CHOOSE_FIELD_CLARIFY, 'bot', null, true);
       logBotMessage({ logText: CHOOSE_FIELD_CLARIFY, needsAgent: false, requestedFeature: null });
     });
   }
@@ -2036,7 +2044,7 @@
     if (disambiguationQueue.length) {
       pendingDisambiguation = disambiguationQueue.shift();
       var nextQ = candidateListText(pendingDisambiguation);
-      addBubble(nextQ, 'bot');
+      addBubble(nextQ, 'bot', null, true);
       logBotMessage({ logText: nextQ, needsAgent: false, requestedFeature: null });
       return;
     }
@@ -2241,7 +2249,7 @@
           var needQuestion = askFareInquiryMissingField();
           if (needQuestion) {
             addBubble('탁송 요금 문의로 접수했습니다. 필수 정보를 확인하겠습니다.', 'bot');
-            addBubble(needQuestion, 'bot');
+            addBubble(needQuestion, 'bot', null, true);
             logBotMessage({ logText: '탁송 요금 문의로 접수했습니다. 필수 정보를 확인하겠습니다.\n' + needQuestion, needsAgent: false, requestedFeature: null });
             return null;
           }
