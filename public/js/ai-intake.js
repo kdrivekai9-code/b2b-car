@@ -41,10 +41,10 @@
   }
 
   var REQUIRED_FIELDS = [
+    { id: 'reserved_date', label: '예약일시', type: 'datetime', question: '예약시간을 말씀해주세요? (예: 내일오후 3시출발, 23일 2시 도착)' },
     { id: 'origin_address', label: '출발지 주소', type: 'address', kind: 'origin', question: '차량을 픽업할 출발지 주소를 알려주세요?' },
     { id: 'origin_contact', label: '출발지 연락처', type: 'phone', question: '출발지 담당자 연락처를 알려주세요? (예: 010-1234-5678)' },
     { id: 'vehicle_number', label: '차량번호', type: 'vehicle', question: '차량번호를 알려주세요? (출발지 도착 후 확인 가능하면 "다음" 또는 "없어"라고 답해주셔도 됩니다)' },
-    { id: 'reserved_date', label: '예약일시', type: 'datetime', question: '예약일시를 알려주세요? (예: 내일 오후 3시 / 00일 00시)' },
     { id: 'destination_address', label: '도착지 주소', type: 'address', kind: 'destination', question: '차량을 인도할 도착지 주소를 알려주세요?' },
     { id: 'destination_contact', label: '도착지 연락처', type: 'phone', question: '도착지 담당자 연락처를 알려주세요? (예: 010-1234-5678)' },
   ];
@@ -483,7 +483,7 @@
     hideThinkingBubble();
     thinkingBubbleEl = document.createElement('div');
     thinkingBubbleEl.className = 'ai-chat-bubble ai-bot ai-thinking';
-    thinkingBubbleEl.textContent = '확인하고 있어요...';
+    thinkingBubbleEl.innerHTML = '확인하고 있어요<span class="ai-thinking-dots"><span>.</span><span>.</span><span>.</span></span>';
     messages.appendChild(thinkingBubbleEl);
     scrollMessagesToBottom();
   }
@@ -540,8 +540,7 @@
     var minute = Number(tParts[1] || 0);
     var ampm = hour < 12 ? '오전' : '오후';
     var hour12 = hour % 12 || 12;
-    var minuteText = minute ? ' ' + minute + '분' : '';
-    return Number(dParts[1]) + '월 ' + Number(dParts[2]) + '일 ' + WEEKDAY_KO[dt.getDay()] + '요일 ' + ampm + ' ' + hour12 + '시' + minuteText;
+    return Number(dParts[1]) + '월 ' + Number(dParts[2]) + '일 ' + WEEKDAY_KO[dt.getDay()] + '요일 ' + ampm + ' ' + hour12 + '시 ' + pad2(minute) + '분';
   }
 
   function detectReservationBasisFromText(text) {
@@ -1686,14 +1685,13 @@
           // "도착" 문구는 예약 기준이 실제로 도착지 인도시간 기준(delivery)일 때만 쓴다 —
           // 메시지에 "출발/도착" 같은 기준 표현이 없어 detectReservationBasisFromText가 아무것도
           // 못 정했을 때(기본값 pickup 유지)까지 항상 "도착"으로 안내하면 잘못된 정보가 된다.
-          var dtMsg;
+          var basisLabel = isDeliveryReservationBasis() ? '도착지 인도' : '출발지 픽업';
+          var dtMsg = formattedDateTime + '으로 (' + basisLabel + ') 예약되었습니다.';
           if (isDeliveryReservationBasis()) {
             var pickupExpected = formatPickupExpectedTimeText();
-            dtMsg = pickupExpected
-              ? ('예약일시는 **' + formattedDateTime + '** 도착이며\n출발지 픽업예상시간은 ' + pickupExpected + '입니다.')
-              : ('예약일시는 **' + formattedDateTime + '** 도착이며\n출발지 픽업예상시간은 경로 확정 후 계산됩니다.');
-          } else {
-            dtMsg = '예약일시는 **' + formattedDateTime + '**(으)로 확인했습니다.';
+            dtMsg += pickupExpected
+              ? ('\n출발지 픽업예상시간은 ' + pickupExpected + '입니다.')
+              : ('\n출발지 픽업예상시간은 경로 확정 후 계산됩니다.');
           }
           if (newOrderType) dtMsg += '\n"' + ORDER_INTENT_LABELS[newOrderType] + '"로 확인되었습니다.';
           sayBot(dtMsg);

@@ -438,13 +438,9 @@ router.post('/ai-intake/parse', asyncHandler(async (req, res) => {
   const fields = geminiResult ? normalizeGeminiOrderFields(geminiResult) : parseIntakeText(text);
   const fallbackIntent = (geminiResult && ORDER_INTENTS.has(geminiResult.intent)) ? geminiResult.intent : 'dispatch_order';
   const intent = classifyOrderIntentByRule(text, fields) || fallbackIntent;
-  // 탁송 서류 문구만으로 판별된 경우 예약일시가 비어 있을 수 있다(언제 보낼지 안 적고 지금 바로
-  // 보내는 차량인 경우) — 이때는 사용자에게 다시 묻지 않고 현재 시각으로 채운다.
-  if (intent === 'dispatch_order' && !fields.reserved_date && !fields.reserved_time) {
-    const now = defaultReservedDateTime();
-    fields.reserved_date = now.reserved_date;
-    fields.reserved_time = now.reserved_time;
-  }
+  // 예약일시가 없으면 현재 시각으로 조용히 채우지 않고 챗봇이 직접 물어보게 한다 — 이전에는
+  // "지금 바로 보내는 차량"으로 임의 가정했는데, 사용자가 실제로 정한 적 없는 값을 마치 확인한
+  // 것처럼 안내해버리는 문제가 있었다.
   res.json({ intent, ...fields, seemsFrustrated });
 }));
 
