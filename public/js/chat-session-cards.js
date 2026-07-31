@@ -47,8 +47,6 @@
   var orderTransition = document.getElementById('card_chat_session_transition');
   var orderWaypointsWrap = document.getElementById('cardWaypointsWrap');
   var addOrderWaypointBtn = document.getElementById('cardAddWaypointBtn');
-  var intakeHistoryMessagesEl = document.getElementById('cardIntakeHistoryMessages');
-  var intakeHistoryFilterButtons = Array.prototype.slice.call(document.querySelectorAll('#cardIntakeHistoryFilters [data-history-filter]'));
   var orderAddressSearchButtons = Array.prototype.slice.call(document.querySelectorAll('.card-addr-search-btn'));
   if (!layoutEl || !messagesEl || !viewerHead || !viewerActions || !loadOlderBtn || !openDetailLink || !assignSelfBtn || !deleteForm || !deleteBtn || !replyForm || !replyText || !replySendBtn || !replyError) return;
 
@@ -67,8 +65,6 @@
   var selectedAssignedAgentName = '';
   var isAssigningSelf = false;
   var knownMessageIds = {};
-  var intakeHistoryKnownIds = {};
-  var intakeHistoryFilter = 'all';
   var senderLabel = { user: '고객', bot: 'AI', agent: '상담원', system: '시스템' };
   var senderClass = { user: 'ai-user', bot: 'ai-bot', agent: 'ai-agent', system: 'ai-bot' };
   var DELIVERY_BUFFER_SECONDS = 30 * 60;
@@ -254,42 +250,19 @@
     var time = formatChatTime(message.created_at);
     var readText = readStateText(message);
     var readClass = readText === '미읽음' ? ' unread' : '';
-    var metaHtml = '<div class="bubble-meta">'
+    var footerHtml = (time || readText)
+      ? '<div class="bubble-footer">'
+        + (time ? ('<div class="bubble-time">' + escapeHtml(time) + '</div>') : '')
+        + (readText ? ('<div class="bubble-read' + readClass + '">' + readText + '</div>') : '')
+        + '</div>'
+      : '';
+    return '<div class="ai-chat-item ' + who + '" data-id="' + message.id + '">'
+      + '<div class="ai-chat-bubble ' + who + '">'
       + '<span class="bubble-label">' + escapeHtml(label) + '</span>'
-      + (time ? ('<span class="bubble-time">' + escapeHtml(time) + '</span>') : '')
-      + (readText ? ('<span class="bubble-read' + readClass + '">' + readText + '</span>') : '')
-      + '</div>';
-    return '<div class="ai-chat-bubble ' + who + '" data-id="' + message.id + '">'
-      + metaHtml
       + escapeHtml(message.message || '')
-      + '</div>';
-  }
-
-  function intakeHistoryBubbleHtml(message) {
-    var who = senderClass[message.sender] || 'ai-bot';
-    var label = senderLabel[message.sender] || message.sender;
-    var time = formatChatTime(message.created_at);
-    return '<div class="chat-intake-history-bubble ' + who + '" data-id="' + message.id + '" data-sender="' + escapeHtml(message.sender || '') + '">'
-      + '<div class="chat-intake-history-meta">'
-      + '<span class="bubble-label">' + escapeHtml(label) + '</span>'
-      + (time ? ('<span class="bubble-time">' + escapeHtml(time) + '</span>') : '')
       + '</div>'
-      + '<div class="chat-intake-history-text">' + escapeHtml(message.message || '') + '</div>'
+      + footerHtml
       + '</div>';
-  }
-
-  function applyIntakeHistoryFilter() {
-    if (!intakeHistoryMessagesEl) return;
-    var bubbles = intakeHistoryMessagesEl.querySelectorAll('.chat-intake-history-bubble');
-    bubbles.forEach(function (bubble) {
-      var sender = bubble.getAttribute('data-sender') || '';
-      var visible = intakeHistoryFilter === 'all' ? true : sender === intakeHistoryFilter;
-      bubble.classList.toggle('is-hidden', !visible);
-    });
-    intakeHistoryFilterButtons.forEach(function (button) {
-      var active = button.getAttribute('data-history-filter') === intakeHistoryFilter;
-      button.classList.toggle('secondary', !active);
-    });
   }
 
   function rememberMessage(message) {
@@ -299,50 +272,12 @@
     return true;
   }
 
-  function rememberIntakeHistoryMessage(message) {
-    if (!message || !message.id) return false;
-    if (intakeHistoryKnownIds[message.id]) return false;
-    intakeHistoryKnownIds[message.id] = 1;
-    return true;
-  }
-
   function resetViewerMeta() {
     knownMessageIds = {};
-    intakeHistoryKnownIds = {};
     oldestMessageId = null;
     hasMoreOlder = false;
     loadOlderBtn.disabled = true;
     loadOlderBtn.style.display = 'none';
-    if (intakeHistoryMessagesEl) intakeHistoryMessagesEl.innerHTML = '<div class="empty">고객과 AI 대화 이력이 여기에 표시됩니다.</div>';
-  }
-
-  function setIntakeHistory(messages, options) {
-    if (!intakeHistoryMessagesEl) return;
-    options = options || {};
-    if (options.replace) intakeHistoryMessagesEl.innerHTML = '';
-    if (!messages || !messages.length) {
-      if (options.replace) intakeHistoryMessagesEl.innerHTML = '<div class="empty">고객과 AI 대화 이력이 없습니다.</div>';
-      return;
-    }
-
-    var html = [];
-    messages.forEach(function (m) {
-      if (!m || ['user', 'bot', 'agent', 'system'].indexOf(m.sender) === -1) return;
-      if (!rememberIntakeHistoryMessage(m)) return;
-      html.push(intakeHistoryBubbleHtml(m));
-    });
-
-    if (!html.length) {
-      if (options.replace && !intakeHistoryMessagesEl.children.length) {
-        intakeHistoryMessagesEl.innerHTML = '<div class="empty">고객과 AI 대화 이력이 없습니다.</div>';
-      }
-      return;
-    }
-
-    if (options.prepend) intakeHistoryMessagesEl.insertAdjacentHTML('afterbegin', html.join(''));
-    else intakeHistoryMessagesEl.insertAdjacentHTML('beforeend', html.join(''));
-    intakeHistoryMessagesEl.scrollTop = intakeHistoryMessagesEl.scrollHeight;
-    applyIntakeHistoryFilter();
   }
 
   function updateReplyAvailability() {
@@ -687,7 +622,6 @@
   function setMessages(messages, options) {
     options = options || {};
     if (options.replace) messagesEl.innerHTML = '';
-    if (options.replace) setIntakeHistory([], { replace: true });
     if (!messages || !messages.length) {
       if (options.replace) messagesEl.innerHTML = '<div class="empty">아직 메시지가 없습니다.</div>';
       return;
@@ -702,13 +636,12 @@
     if (!html.length) return;
     if (options.prepend) messagesEl.insertAdjacentHTML('afterbegin', html.join(''));
     else messagesEl.insertAdjacentHTML('beforeend', html.join(''));
-    setIntakeHistory(messages, options);
 
     if (!options.preserveScrollBottom) {
       messagesEl.scrollTop = messagesEl.scrollHeight;
     }
 
-    oldestMessageId = Number(messagesEl.querySelector('.ai-chat-bubble') && messagesEl.querySelector('.ai-chat-bubble').dataset.id) || oldestMessageId;
+    oldestMessageId = Number(messagesEl.querySelector('.ai-chat-item') && messagesEl.querySelector('.ai-chat-item').dataset.id) || oldestMessageId;
   }
 
   function closeStream() {
@@ -721,7 +654,7 @@
   // 상대(고객 또는 다른 탭의 상담원)가 방금 읽었다는 신호 — 이미 그려진 말풍선의 배지를
   // 새로고침 없이 그 자리에서 미읽음->읽음으로 바꾼다.
   function markBubblesRead(bubbleClass) {
-    var spans = messagesEl.querySelectorAll('.ai-chat-bubble.' + bubbleClass + ' .bubble-read.unread');
+    var spans = messagesEl.querySelectorAll('.ai-chat-item.' + bubbleClass + ' .bubble-read.unread');
     spans.forEach(function (span) {
       span.textContent = '읽음';
       span.classList.remove('unread');
@@ -742,7 +675,6 @@
         if (!payload || !payload.id) return;
         if (!rememberMessage(payload)) return;
         messagesEl.insertAdjacentHTML('beforeend', messageBubbleHtml(payload));
-        setIntakeHistory([payload], {});
         messagesEl.scrollTop = messagesEl.scrollHeight;
       } catch (err) {
         // noop
@@ -774,6 +706,10 @@
 
   function loadSession(card) {
     var sessionId = card.dataset.sessionId;
+    // 이미 선택된 세션을 다시 클릭하면(특히 첫 카드는 페이지 진입 시 자동 로드됨) 동일 세션에
+    // 대한 메시지 fetch가 중복 실행된다. 두 응답이 겹치면 dedup 가드(knownMessageIds) 때문에
+    // 두 번째 렌더링이 "이미 처리된 메시지"로 취급되어 대화창/대화 이력이 텅 비어버리는 버그가 있었다.
+    if (sessionId && sessionId === selectedSessionId) return;
     selectedSessionStatus = card.dataset.sessionStatus || null;
     selectedAssignedAgentId = String(card.dataset.assignedAgentId || '');
     selectedAssignedAgentName = String(card.dataset.assignedAgentName || '');
@@ -999,13 +935,6 @@
     if (hasOrderPane) orderSessionIdInput.value = '';
     updateReplyAvailability();
   }
-
-  intakeHistoryFilterButtons.forEach(function (button) {
-    button.addEventListener('click', function () {
-      intakeHistoryFilter = button.getAttribute('data-history-filter') || 'all';
-      applyIntakeHistoryFilter();
-    });
-  });
 
   replyText.addEventListener('input', function () {
     if (replyError.style.display !== 'none') setReplyError('');

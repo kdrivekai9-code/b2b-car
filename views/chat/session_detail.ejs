@@ -63,15 +63,14 @@ function readStateText(msg) {
         <% var senderLabel = { user: '고객', agent: '상담원', bot: 'AI', system: '시스템' }; %>
         <% var senderClass = { user: 'ai-user', agent: 'ai-agent' }; %>
         <% messages.forEach(function(m){ %>
-          <div class="ai-chat-bubble <%= senderClass[m.sender] || 'ai-bot' %>" data-id="<%= m.id %>">
-            <div class="bubble-meta">
-              <span class="bubble-label"><%= senderLabel[m.sender] || m.sender %></span>
-              <span class="bubble-time"><%= formatChatTime(m.created_at) %></span>
+          <div class="ai-chat-item <%= senderClass[m.sender] || 'ai-bot' %>" data-id="<%= m.id %>">
+            <div class="ai-chat-bubble <%= senderClass[m.sender] || 'ai-bot' %>"><span class="bubble-label"><%= senderLabel[m.sender] || m.sender %></span><%= m.message %></div>
+            <div class="bubble-footer">
+              <div class="bubble-time"><%= formatChatTime(m.created_at) %></div>
               <% if (readStateText(m)) { %>
-                <span class="bubble-read <%= readStateText(m) === '미읽음' ? 'unread' : '' %>"><%= readStateText(m) %></span>
+                <div class="bubble-read <%= readStateText(m) === '미읽음' ? 'unread' : '' %>"><%= readStateText(m) %></div>
               <% } %>
             </div>
-            <%= m.message %>
           </div>
         <% }) %>
       </div>
@@ -130,37 +129,42 @@ function readStateText(msg) {
 
   function appendMessage(m) {
     if (!m || m.id <= lastId) return;
-    var div = document.createElement('div');
-    div.className = 'ai-chat-bubble ' + (classBySender[m.sender] || 'ai-bot');
-    div.dataset.id = m.id;
+    var who = classBySender[m.sender] || 'ai-bot';
+    var item = document.createElement('div');
+    item.className = 'ai-chat-item ' + who;
+    item.dataset.id = m.id;
 
-    var meta = document.createElement('div');
-    meta.className = 'bubble-meta';
+    var bubble = document.createElement('div');
+    bubble.className = 'ai-chat-bubble ' + who;
 
     var labelSpan = document.createElement('span');
     labelSpan.className = 'bubble-label';
     labelSpan.textContent = labelBySender[m.sender] || m.sender;
-    meta.appendChild(labelSpan);
+    bubble.appendChild(labelSpan);
+    bubble.appendChild(document.createTextNode(m.message));
+    item.appendChild(bubble);
+
+    var footer = document.createElement('div');
+    footer.className = 'bubble-footer';
 
     var timeText = formatChatTime(m.created_at);
     if (timeText) {
-      var timeSpan = document.createElement('span');
-      timeSpan.className = 'bubble-time';
-      timeSpan.textContent = timeText;
-      meta.appendChild(timeSpan);
+      var timeDiv = document.createElement('div');
+      timeDiv.className = 'bubble-time';
+      timeDiv.textContent = timeText;
+      footer.appendChild(timeDiv);
     }
 
     var readText = readStateText(m);
     if (readText) {
-      var readSpan = document.createElement('span');
-      readSpan.className = 'bubble-read' + (readText === '미읽음' ? ' unread' : '');
-      readSpan.textContent = readText;
-      meta.appendChild(readSpan);
+      var readDiv = document.createElement('div');
+      readDiv.className = 'bubble-read' + (readText === '미읽음' ? ' unread' : '');
+      readDiv.textContent = readText;
+      footer.appendChild(readDiv);
     }
 
-    div.appendChild(meta);
-    div.appendChild(document.createTextNode(m.message));
-    messagesEl.appendChild(div);
+    if (footer.children.length) item.appendChild(footer);
+    messagesEl.appendChild(item);
     lastId = m.id;
     messagesEl.scrollTop = messagesEl.scrollHeight;
   }
@@ -173,7 +177,7 @@ function readStateText(msg) {
   }
 
   function markBubblesRead(bubbleClass) {
-    var spans = messagesEl.querySelectorAll('.ai-chat-bubble.' + bubbleClass + ' .bubble-read.unread');
+    var spans = messagesEl.querySelectorAll('.ai-chat-item.' + bubbleClass + ' .bubble-read.unread');
     spans.forEach(function (span) {
       span.textContent = '읽음';
       span.classList.remove('unread');

@@ -302,7 +302,8 @@ form .field.full{flex-basis:100%;}
   .ai-intake-scroll-panel{height:calc(100vh - 120px);overflow-y:auto;overscroll-behavior:contain;}
   .ai-intake-order-card{padding-right:16px;}
   .ai-intake-side{height:calc(100vh - 120px);min-height:0;}
-  .ai-intake-fare-card,.ai-intake-map-card{height:calc((100vh - 120px - 14px) / 2);overflow-y:auto;overscroll-behavior:contain;}
+  .ai-intake-fare-card{flex:0 0 auto;height:auto;overflow-y:visible;}
+  .ai-intake-map-card{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;}
   .ai-chat-card.ai-intake-scroll-panel{overflow:hidden;}
 }
 
@@ -375,11 +376,20 @@ form .field.full{flex-basis:100%;}
 .ai-chat-inline-status.done .ai-chat-inline-spinner{animation:none;border-color:#22c55e;border-top-color:#22c55e;position:relative;}
 .ai-chat-inline-status.done .ai-chat-inline-spinner::after{content:'';position:absolute;left:2px;top:1px;width:4px;height:7px;border-right:1.5px solid #22c55e;border-bottom:1.5px solid #22c55e;transform:rotate(40deg);}
 @keyframes aiInlineSpin{to{transform:rotate(360deg);}}
-.ai-chat-bubble .bubble-meta{display:flex;align-items:center;gap:6px;margin-bottom:4px;}
-.ai-chat-bubble .bubble-label{display:block;font-size:10px;font-weight:700;opacity:.78;text-transform:uppercase;letter-spacing:.03em;}
-.ai-chat-bubble .bubble-time{font-size:10px;opacity:.72;}
-.ai-chat-bubble .bubble-read{margin-left:auto;font-size:10px;opacity:.78;}
-.ai-chat-bubble .bubble-read.unread{opacity:.62;}
+
+/* 상담원 하이브리드 채팅창(고객/AI/상담원 통합) 전용 — 말풍선은 발신자 구분(label)만 안쪽에 담고,
+   시간·읽음여부는 말풍선 바깥 .bubble-footer에 2줄로 표시한다. */
+.ai-chat-messages > .ai-chat-item{max-width:92%;}
+.ai-chat-item{display:flex;flex-direction:column;}
+.ai-chat-item.ai-user{align-self:flex-end;align-items:flex-end;}
+.ai-chat-item.ai-bot,.ai-chat-item.ai-agent{align-self:flex-start;align-items:flex-start;}
+.ai-chat-item .ai-chat-bubble{align-self:auto;max-width:100%;}
+.chat-admin-conversation .ai-chat-bubble.ai-user,.chat-workspace-chat .ai-chat-bubble.ai-user{display:block;}
+.ai-chat-bubble .bubble-label{display:block;font-size:10px;font-weight:700;opacity:.78;text-transform:uppercase;letter-spacing:.03em;margin-bottom:4px;}
+.bubble-footer{display:flex;flex-direction:column;gap:1px;margin-top:3px;padding:0 3px;}
+.bubble-footer .bubble-time{font-size:10px;color:var(--muted);opacity:.72;}
+.bubble-footer .bubble-read{font-size:10px;color:var(--muted);opacity:.78;}
+.bubble-footer .bubble-read.unread{opacity:.62;}
 
 /* AI 챗봇(오더접수) 말풍선의 시간 표시 — 말풍선(색상 박스) 안쪽이 아니라 바깥에 표시한다.
    addBubble()의 appendBubbleRow()가 말풍선과 시간을 이 래퍼의 형제 엘리먼트로 함께 담는다. */
@@ -424,22 +434,8 @@ form .field.full{flex-basis:100%;}
 .chat-admin-viewer .chat-session-card{height:auto;flex:1;min-height:0;}
 .chat-admin-viewer-shell{display:grid;grid-template-columns:minmax(0,.82fr) minmax(430px,1.18fr);gap:14px;height:auto;min-height:0;align-items:start;}
 .chat-admin-conversation{display:flex;flex-direction:column;min-height:0;border:1px solid var(--border);border-radius:12px;background:#fff;padding:10px;}
-.chat-admin-conversation .chat-session-card{height:520px;}
+.chat-admin-conversation .chat-session-card{height:auto;min-height:220px;max-height:420px;}
 .chat-admin-intake{border:1px solid var(--border);border-radius:12px;background:#fff;padding:10px 10px 12px;overflow:visible;min-width:0;max-height:none;}
-.chat-intake-history-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;}
-.chat-intake-history-head .section-title.small{margin:0;flex:1;}
-.chat-intake-history-filters{display:flex;gap:6px;flex-wrap:wrap;}
-.chat-intake-history-panel{margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--border);}
-.chat-intake-history{max-height:260px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding-right:4px;}
-.chat-intake-history-bubble{padding:9px 11px;border-radius:12px;font-size:12px;line-height:1.5;box-shadow:var(--shadow-sm);white-space:pre-wrap;}
-.chat-intake-history-bubble.is-hidden{display:none;}
-.chat-intake-history-bubble.ai-user{align-self:flex-end;background:linear-gradient(135deg,var(--blue),var(--navy2));color:#fff;border-bottom-right-radius:4px;max-width:92%;}
-.chat-intake-history-bubble.ai-bot{align-self:flex-start;background:#f1f5f9;color:var(--text);border-bottom-left-radius:4px;max-width:92%;}
-.chat-intake-history-bubble.ai-agent{align-self:flex-start;background:linear-gradient(135deg,#16a34a,#0d7a3a);color:#fff;border-bottom-left-radius:4px;max-width:92%;}
-.chat-intake-history-meta{display:flex;align-items:center;gap:6px;margin-bottom:4px;}
-.chat-intake-history-meta .bubble-label{display:block;font-size:10px;font-weight:700;opacity:.78;text-transform:uppercase;letter-spacing:.03em;}
-.chat-intake-history-meta .bubble-time{font-size:10px;opacity:.72;}
-.chat-intake-history-text{word-break:break-word;}
 .chat-admin-order-form{padding-right:2px;}
 .chat-admin-intake .chat-order-head{margin-bottom:6px;}
 .chat-admin-intake .chat-order-head h2{margin:0 0 2px;}
@@ -483,8 +479,7 @@ form .field.full{flex-basis:100%;}
   .chat-admin-viewer-shell{grid-template-columns:1fr;height:auto;}
   .chat-admin-conversation{padding:8px;}
   .chat-admin-intake{padding:8px;border:1px solid var(--border);}
-  .chat-intake-history-head{align-items:flex-start;flex-direction:column;}
-  .chat-admin-viewer .chat-session-card{height:520px;flex:none;}
+  .chat-admin-viewer .chat-session-card{height:auto;min-height:220px;max-height:420px;flex:none;}
   .session-card-delete-btn{min-width:44px;padding:0 8px;}
   .chat-workspace-grid{grid-template-columns:1fr;}
   .chat-workspace-chat .chat-session-card{height:520px;}

@@ -115,20 +115,6 @@
             <h2>접수 마무리</h2>
           </div>
 
-          <div class="chat-intake-history-panel">
-            <div class="chat-intake-history-head">
-              <div class="section-title small">대화 이력</div>
-              <div class="chat-intake-history-filters" id="cardIntakeHistoryFilters">
-                <button type="button" class="btn small" data-history-filter="all">전체</button>
-                <button type="button" class="btn small secondary" data-history-filter="bot">AI</button>
-                <button type="button" class="btn small secondary" data-history-filter="agent">상담원</button>
-              </div>
-            </div>
-            <div class="chat-intake-history" id="cardIntakeHistoryMessages">
-              <div class="empty">왼쪽에서 상담 세션을 선택해주세요.</div>
-            </div>
-          </div>
-
           <form id="cardOrderForm" method="POST" action="/orders" class="chat-order-form chat-admin-order-form">
             <input type="hidden" id="card_chat_session_id" name="chat_session_id" value="">
 
