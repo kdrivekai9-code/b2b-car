@@ -647,6 +647,10 @@
         } else {
           sayBot(label + '는 \'' + r.resolvedText + '\'(으)로 확인했습니다.');
         }
+        // 도착지 주소가 실제 확정 주소(지오코딩 결과, 예: "제주특별자치도 ...")로 바뀐 시점이라
+        // 여기서 차종 필수 여부를 다시 판단한다 — 챗봇이 추출한 원문 단계(예: "서귀포 성산")에는
+        // "제주"가 없을 수 있어 그 시점에서 판단하면 놓친다.
+        if (id === 'destination_address' && window.__updateVehicleTypeRequirement) window.__updateVehicleTypeRequirement();
         noteProgress();
         return { success: true };
       }
@@ -1130,7 +1134,7 @@
             var fareInfoMsg = normalizeFareGuideText('현재 경로 기준 구간요금은 약 ' + baseFare.toLocaleString('ko-KR') + '원입니다.');
             addBubble(fareInfoMsg, 'bot');
             logBotMessage({ logText: fareInfoMsg, needsAgent: false, requestedFeature: null });
-            var vehicleQuestionText = '도선료 계산을 위해 차종을 알려주세요. 예: 카니발, 그랜저, 1톤';
+            var vehicleQuestionText = '도선료 계산을 위해 차종을 알려주세요. (예: 카니발, 그랜저)\n*전기차의 경우 도선 요금이 추가되니 반드시 기재요망';
             addBubble(vehicleQuestionText, 'bot', null, true);
             logBotMessage({ logText: vehicleQuestionText, needsAgent: false, requestedFeature: null });
             // lastFareGuideKey는 일부러 갱신하지 않는다 — 아직 최종 요금을 안내한 게 아니라 차종을
@@ -1428,6 +1432,7 @@
         }
 
         document.getElementById('destination_address').value = destination;
+        if (window.__updateVehicleTypeRequirement) window.__updateVehicleTypeRequirement();
         updateFareProgressLine(2, '도착지 지명 검색 중입니다.');
         return Promise.resolve()
           .then(function () { return validateAddressField('destination_address', '도착지 주소'); });
@@ -1519,6 +1524,7 @@
       var el = document.getElementById(id);
       if (el && fields[id]) { el.value = fields[id]; el.disabled = false; }
     });
+    if (window.__updateVehicleTypeRequirement) window.__updateVehicleTypeRequirement();
     syncReservedTimeSelectsFromHidden();
     if (draft.reservationBasis === 'delivery') {
       var deliveryRadio = document.getElementById('reservation_basis_delivery');
@@ -1767,6 +1773,7 @@
 
     if (data.destination_address) {
       document.getElementById('destination_address').value = data.destination_address;
+      if (window.__updateVehicleTypeRequirement) window.__updateVehicleTypeRequirement();
       tasks.push(function () { return validateAddressField('destination_address', '도착지 주소'); });
     }
 

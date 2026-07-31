@@ -1188,6 +1188,10 @@
     destAddressForVehicleReq.addEventListener('input', updateVehicleTypeRequirement);
   }
   updateVehicleTypeRequirement();
+  // ai-intake.js는 챗봇이 파싱한 도착지 값을 .value에 직접 대입만 하고 'input' 이벤트는 안 띄운다
+  // (여기서 'input'을 그대로 흉내내면 wireAddressField의 지명 검색 드롭다운까지 자동으로 열려버려서
+  // 안 된다) — 그래서 이 판단 함수만 따로 전역에 노출해 ai-intake.js가 직접 불러 쓰게 한다.
+  window.__updateVehicleTypeRequirement = updateVehicleTypeRequirement;
 
   // 차종 입력칸 자동완성 — 주소 자동완성(.addr-results)과 같은 시각 패턴을 재사용해서, 1글자만
   // 입력해도 ferry_fare_rules에 등록된 실제 차종 별칭 중 일치하는 것을 보여준다. 정확한 차종명을
