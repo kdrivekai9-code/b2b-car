@@ -100,6 +100,7 @@
   var sessionStatus = 'bot';
   var lastWaitingStatusShown = null; // 'needs_agent'/'agent_active' 대기 안내를 마지막으로 보여준 상태 — 같은 상태 반복이면 다시 안 보여줌
   var lastPolledId = 0;
+  var botMessageWriteChain = Promise.resolve();
   var isComposing = false;
   var submitAfterCompositionEnd = false;
   var fareProgressEl = null;
@@ -323,6 +324,15 @@
     appendBubbleRow(div, who, timeText);
     if (who !== 'user') collapseChatInput();
     scrollMessagesToBottom();
+  }
+
+  // 필드 검증(주소/연락처/차량번호) 확인·재요청 말풍선은 화면에는 즉시 보여주면서도, 다음 정식
+  // 질문(logBotMessage로 남는)과 달리 그동안 서버에 저장되지 않아 새로고침하면 사라졌었다 —
+  // 그 결과 실제로는 여러 확인 말풍선이 오갔는데도 이력에는 마지막 질문 하나만 남는 것처럼
+  // 보였다. addBubble과 로그 저장을 항상 함께 묶어서 이 문제를 막는다.
+  function sayBot(text) {
+    addBubble(text, 'bot');
+    logBotMessage({ logText: text, needsAgent: false, requestedFeature: null });
   }
 
   function ensureFareProgressLine() {
@@ -568,19 +578,19 @@
       if (!status || typeof status !== 'object') return;
       if (status.type === 'no_result' && !shownNoResult) {
         shownNoResult = true;
-        addBubble(originalInput + ' 검색결과가 없습니다.', 'bot');
+        sayBot(originalInput + ' 검색결과가 없습니다.');
       }
       if (status.type === 'retry_start' && !shownRetryStart) {
         shownRetryStart = true;
-        if (status.correctedQuery) addBubble(status.correctedQuery + '로 다시 검색하겠습니다.', 'bot');
+        if (status.correctedQuery) sayBot(status.correctedQuery + '로 다시 검색하겠습니다.');
       }
       if (status.type === 'retry_attempt' && status.correctedQuery) {
         var attempt = Number(status.attempt || 0);
         var total = Number(status.total || 0);
         if (attempt > 0 && total > 0) {
-          addBubble(status.correctedQuery + ' 검색을 시도합니다. (' + attempt + '/' + total + ')', 'bot');
+          sayBot(status.correctedQuery + ' 검색을 시도합니다. (' + attempt + '/' + total + ')');
         } else {
-          addBubble(status.correctedQuery + ' 검색을 시도합니다.', 'bot');
+          sayBot(status.correctedQuery + ' 검색을 시도합니다.');
         }
       }
     }) : Promise.resolve({ success: false });
@@ -590,21 +600,22 @@
       }
       // 원문 검색이 0건이라 Gemini에게 물어 재검색한 경우, 그 과정을 그대로 안내해준다.
       if (r && r.triedFallback) {
-        if (!shownNoResult) addBubble(originalInput + ' 검색결과가 없습니다.', 'bot');
-        if (r.correctedQuery && !shownRetryStart) addBubble(r.correctedQuery + '로 다시 검색하겠습니다.', 'bot');
+        if (!shownNoResult) sayBot(originalInput + ' 검색결과가 없습니다.');
+        if (r.correctedQuery && !shownRetryStart) sayBot(r.correctedQuery + '로 다시 검색하겠습니다.');
       }
       if (r && r.success) {
         if (r.triedFallback && r.correctedQuery) {
           addAddressChangeBubble(label, originalInput, r.resolvedText);
+          logBotMessage({ logText: label + '는 ' + originalInput + ' → ' + r.resolvedText + '(으)로 확인했습니다.', needsAgent: false, requestedFeature: null });
         } else {
-          addBubble(label + '는 \'' + r.resolvedText + '\'(으)로 확인했습니다.', 'bot');
+          sayBot(label + '는 \'' + r.resolvedText + '\'(으)로 확인했습니다.');
         }
         noteProgress();
         return { success: true };
       }
       var el = document.getElementById(id);
       if (el) el.value = '';
-      addBubble(label + '의 주소나 상호명 검색이 되지 않았습니다. 확인 후 다시 알려주세요.', 'bot');
+      sayBot(label + '의 주소나 상호명 검색이 되지 않았습니다. 확인 후 다시 알려주세요.');
       noteTrouble();
       return { success: false };
     });
@@ -618,12 +629,12 @@
     var r = formatter ? formatter(raw) : { formatted: raw, valid: false };
     if (r.valid) {
       if (el) el.value = r.formatted;
-      addBubble(label + '는 ' + r.formatted + '(으)로 확인했습니다.', 'bot');
+      sayBot(label + '는 ' + r.formatted + '(으)로 확인했습니다.');
       noteProgress();
       return Promise.resolve(true);
     }
     if (el) el.value = '';
-    addBubble(label + ' 형식이 올바르지 않습니다. 확인 후 다시 알려주세요.', 'bot');
+    sayBot(label + ' 형식이 올바르지 않습니다. 확인 후 다시 알려주세요.');
     noteTrouble();
     return Promise.resolve(false);
   }
@@ -643,21 +654,21 @@
     if (VEHICLE_NUMBER_RE.test(normalized)) {
       delete lastRejectedVehicleNumber[id];
       if (el) el.value = normalized;
-      addBubble(label + '는 ' + normalized + typeSuffix + '(으)로 확인했습니다.', 'bot');
+      sayBot(label + '는 ' + normalized + typeSuffix + '(으)로 확인했습니다.');
       noteProgress();
       return Promise.resolve(true);
     }
     if (normalized && lastRejectedVehicleNumber[id] === normalized) {
       delete lastRejectedVehicleNumber[id];
       if (el) el.value = normalized;
-      addBubble(label + '를 입력하신 대로 \'' + normalized + '\'' + typeSuffix + '(으)로 등록합니다.', 'bot');
+      sayBot(label + '를 입력하신 대로 \'' + normalized + '\'' + typeSuffix + '(으)로 등록합니다.');
       noteProgress();
       return Promise.resolve(true);
     }
     lastRejectedVehicleNumber[id] = normalized;
     noteTrouble();
     if (el) el.value = '';
-    addBubble('잘못된 차량번호입니다. 확인 후 다시 입력해주세요.', 'bot');
+    sayBot('잘못된 차량번호입니다. 확인 후 다시 입력해주세요.');
     return Promise.resolve(false);
   }
 
@@ -1524,9 +1535,14 @@
   // ---------------- 즐겨찾기(등록주소) 버튼으로 고른 주소 처리 ----------------
   // 직접 타이핑해서 답한 것과 똑같이(사용자 말풍선 + 확인 말풍선 + 다음 질문 진행) 처리한다.
   function applyFavoriteAddress(fieldId, label, f) {
-    addBubble(f.label + ' (' + f.address + ')', 'user');
+    var text = f.label + ' (' + f.address + ')';
+    addBubble(text, 'user');
     document.getElementById(fieldId).value = f.address;
-    validateAddressField(fieldId, label).then(function (r) {
+    // 직접 타이핑한 답변(extractAndProcess)과 마찬가지로 서버에 먼저 남겨야 새로고침해도 이
+    // 사용자 말풍선이 사라지지 않는다 — 기존에는 logUserMessage 없이 화면에만 그려서 유실됐었다.
+    logUserMessage(text).then(function () {
+      return validateAddressField(fieldId, label);
+    }).then(function (r) {
       if (r && r.ambiguous) {
         logBotMessage(startDisambiguation([r]));
         return;
@@ -2098,19 +2114,58 @@
       .catch(function () { return sessionStatus; });
   }
 
-  function logBotMessage(result) {
-    if (!sessionId) return Promise.resolve(null);
+  function postBotMessage(payload) {
     return fetch('/chat/' + sessionId + '/bot-message', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        message: result.logText, needsAgent: result.needsAgent, requestedFeature: result.requestedFeature,
-        draftState: buildDraftState(), closeSession: !!result.closeSession,
-      }),
-    })
-      .then(function (res) { return res.json(); })
-      .then(function (data) { if (data.status) sessionStatus = data.status; return data.message || null; })
-      .catch(function () { return null; });
+      keepalive: true,
+      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'fetch' },
+      body: JSON.stringify(payload),
+    }).then(function (res) {
+      return res.json().catch(function () {
+        return { error: '서버 응답을 읽는 중 문제가 발생했습니다. (상태 코드: ' + res.status + ')' };
+      }).then(function (data) {
+        if (!res.ok) {
+          throw new Error((data && (data.error || data.message)) || ('상태 코드 ' + res.status));
+        }
+        return data;
+      });
+    });
+  }
+
+  function retryBotMessageSave(payload, retriesLeft) {
+    return postBotMessage(payload).catch(function (err) {
+      if (retriesLeft <= 0) throw err;
+      return new Promise(function (resolve) {
+        setTimeout(resolve, 250 * (4 - retriesLeft));
+      }).then(function () {
+        return retryBotMessageSave(payload, retriesLeft - 1);
+      });
+    });
+  }
+
+  function logBotMessage(result) {
+    if (!sessionId) return Promise.resolve(null);
+    var payload = {
+      message: result.logText,
+      needsAgent: result.needsAgent,
+      requestedFeature: result.requestedFeature,
+      draftState: buildDraftState(),
+      closeSession: !!result.closeSession,
+    };
+
+    botMessageWriteChain = botMessageWriteChain
+      .catch(function () { return null; })
+      .then(function () { return retryBotMessageSave(payload, 2); });
+
+    return botMessageWriteChain
+      .then(function (data) {
+        if (data.status) sessionStatus = data.status;
+        return data.message || null;
+      })
+      .catch(function (err) {
+        console.error('봇 메시지 저장 실패:', err && err.message ? err.message : err);
+        return null;
+      });
   }
 
   // 서버에서 온 메시지를 id 기준으로 중복 없이 반영한다(재연결 시 보충분과 실시간 수신분이 겹칠 수 있어서).
