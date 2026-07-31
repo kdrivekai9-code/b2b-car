@@ -160,11 +160,13 @@
             <input type="text" class="addr-detail-input" id="destination_detail_address" name="destination_detail_address" placeholder="상세주소 입력 (건물명, 동/호수)" <%= order.destination_detail_address ? '' : 'disabled' %> value="<%= order.destination_detail_address || '' %>">
             <button type="button" class="btn small secondary registered-addr-btn" data-target="destination_address">등록주소</button>
           </div>
-          <div class="field" style="margin-top:8px;">
-            <label class="field-label-strong">도착지 연락처 <span class="required-mark" aria-hidden="true">*</span></label>
-            <input type="text" class="phone-input" id="destination_contact" name="destination_contact" placeholder="010-0000-0000" value="<%= order.destination_contact || '' %>">
+          <div class="row contact-check-row" style="margin-top:8px;">
+            <div class="field" style="max-width:220px;">
+              <label class="field-label-strong">도착지 연락처 <span class="required-mark" aria-hidden="true">*</span></label>
+              <input type="text" class="phone-input" id="destination_contact" name="destination_contact" placeholder="010-0000-0000" value="<%= order.destination_contact || '' %>">
+            </div>
+            <label class="checkline"><input type="checkbox" id="sameAsOriginContact"> 출발지 연락처와 동일</label>
           </div>
-          <label class="checkline"><input type="checkbox" id="sameAsOriginContact"> 출발지 연락처와 동일</label>
         </div>
       </div>
 
