@@ -426,6 +426,20 @@ form .field.full{flex-basis:100%;}
 .chat-admin-conversation{display:flex;flex-direction:column;min-height:0;border:1px solid var(--border);border-radius:12px;background:#fff;padding:10px;}
 .chat-admin-conversation .chat-session-card{height:520px;}
 .chat-admin-intake{border:1px solid var(--border);border-radius:12px;background:#fff;padding:10px 10px 12px;overflow:visible;min-width:0;max-height:none;}
+.chat-intake-history-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;}
+.chat-intake-history-head .section-title.small{margin:0;flex:1;}
+.chat-intake-history-filters{display:flex;gap:6px;flex-wrap:wrap;}
+.chat-intake-history-panel{margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--border);}
+.chat-intake-history{max-height:260px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding-right:4px;}
+.chat-intake-history-bubble{padding:9px 11px;border-radius:12px;font-size:12px;line-height:1.5;box-shadow:var(--shadow-sm);white-space:pre-wrap;}
+.chat-intake-history-bubble.is-hidden{display:none;}
+.chat-intake-history-bubble.ai-user{align-self:flex-end;background:linear-gradient(135deg,var(--blue),var(--navy2));color:#fff;border-bottom-right-radius:4px;max-width:92%;}
+.chat-intake-history-bubble.ai-bot{align-self:flex-start;background:#f1f5f9;color:var(--text);border-bottom-left-radius:4px;max-width:92%;}
+.chat-intake-history-bubble.ai-agent{align-self:flex-start;background:linear-gradient(135deg,#16a34a,#0d7a3a);color:#fff;border-bottom-left-radius:4px;max-width:92%;}
+.chat-intake-history-meta{display:flex;align-items:center;gap:6px;margin-bottom:4px;}
+.chat-intake-history-meta .bubble-label{display:block;font-size:10px;font-weight:700;opacity:.78;text-transform:uppercase;letter-spacing:.03em;}
+.chat-intake-history-meta .bubble-time{font-size:10px;opacity:.72;}
+.chat-intake-history-text{word-break:break-word;}
 .chat-admin-order-form{padding-right:2px;}
 .chat-admin-intake .chat-order-head{margin-bottom:6px;}
 .chat-admin-intake .chat-order-head h2{margin:0 0 2px;}
@@ -469,6 +483,7 @@ form .field.full{flex-basis:100%;}
   .chat-admin-viewer-shell{grid-template-columns:1fr;height:auto;}
   .chat-admin-conversation{padding:8px;}
   .chat-admin-intake{padding:8px;border:1px solid var(--border);}
+  .chat-intake-history-head{align-items:flex-start;flex-direction:column;}
   .chat-admin-viewer .chat-session-card{height:520px;flex:none;}
   .session-card-delete-btn{min-width:44px;padding:0 8px;}
   .chat-workspace-grid{grid-template-columns:1fr;}

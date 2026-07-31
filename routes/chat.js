@@ -711,6 +711,37 @@ router.post('/sessions/:id/return-to-bot', requireRole('admin'), asyncHandler(as
   res.redirect('/chat/sessions/' + req.params.id);
 }));
 
+router.post('/sessions/bulk-delete', requireRole('admin'), asyncHandler(async (req, res) => {
+  const view = req.body.view === 'card' ? 'card' : 'list';
+  const expectsJson = req.body.ajax === '1' || wantsJsonResponse(req);
+
+  let rawIds = req.body.ids;
+  if (typeof rawIds === 'string') {
+    try { rawIds = JSON.parse(rawIds); } catch (e) { rawIds = rawIds.split(','); }
+  }
+  const ids = Array.isArray(rawIds)
+    ? Array.from(new Set(rawIds.map(Number).filter((n) => Number.isInteger(n) && n > 0)))
+    : [];
+
+  if (ids.length === 0) {
+    if (expectsJson) return res.status(400).json({ error: '삭제할 세션을 선택해주세요.' });
+    return res.redirect('/chat/sessions?view=' + view + '&error=' + encodeURIComponent('삭제할 세션을 선택해주세요.'));
+  }
+
+  const placeholders = ids.map(() => '?').join(',');
+  const existingRows = await db.all(`SELECT id FROM chat_sessions WHERE id IN (${placeholders})`, ids);
+  const existingIds = existingRows.map((r) => r.id);
+
+  if (existingIds.length > 0) {
+    const delPlaceholders = existingIds.map(() => '?').join(',');
+    await db.run(`DELETE FROM chat_sessions WHERE id IN (${delPlaceholders})`, existingIds);
+    broadcastSessionListChangedAsync();
+  }
+
+  if (expectsJson) return res.json({ ok: true, ids: existingIds });
+  res.redirect('/chat/sessions?view=' + view + '&notice=' + encodeURIComponent(existingIds.length + '개의 상담 세션이 삭제되었습니다.'));
+}));
+
 router.post('/sessions/:id/delete', requireRole('admin'), asyncHandler(async (req, res) => {
   const view = req.body.view === 'card' ? 'card' : 'list';
   const expectsJson = req.body.ajax === '1' || wantsJsonResponse(req);

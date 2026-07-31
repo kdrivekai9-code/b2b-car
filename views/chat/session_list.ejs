@@ -115,6 +115,20 @@
             <h2>접수 마무리</h2>
           </div>
 
+          <div class="chat-intake-history-panel">
+            <div class="chat-intake-history-head">
+              <div class="section-title small">대화 이력</div>
+              <div class="chat-intake-history-filters" id="cardIntakeHistoryFilters">
+                <button type="button" class="btn small" data-history-filter="all">전체</button>
+                <button type="button" class="btn small secondary" data-history-filter="bot">AI</button>
+                <button type="button" class="btn small secondary" data-history-filter="agent">상담원</button>
+              </div>
+            </div>
+            <div class="chat-intake-history" id="cardIntakeHistoryMessages">
+              <div class="empty">왼쪽에서 상담 세션을 선택해주세요.</div>
+            </div>
+          </div>
+
           <form id="cardOrderForm" method="POST" action="/orders" class="chat-order-form chat-admin-order-form">
             <input type="hidden" id="card_chat_session_id" name="chat_session_id" value="">
 
@@ -296,13 +310,18 @@
   </div>
 <% } else { %>
   <div class="card">
+    <div class="list-bulk-actions" id="bulkActionsBar" style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+      <span id="bulkSelectedCount" style="color:var(--muted);font-size:.9em;">선택된 항목: 0개</span>
+      <button type="button" class="btn small danger" id="bulkDeleteBtn" disabled>선택 삭제</button>
+    </div>
     <div class="table-wrap">
     <table>
-      <thead><tr><th>번호</th><th>고객</th><th>상태</th><th>담당자</th><th>요청 기능</th><th>최근 메시지</th><th>메시지 수</th><th>업데이트</th><th>관리</th></tr></thead>
+      <thead><tr><th><input type="checkbox" id="selectAllSessions" aria-label="전체 선택"></th><th>번호</th><th>고객</th><th>상태</th><th>담당자</th><th>요청 기능</th><th>최근 메시지</th><th>메시지 수</th><th>업데이트</th><th>관리</th></tr></thead>
       <tbody>
-        <% if (sessions.length === 0) { %><tr><td colspan="9" class="empty">진행 중인 상담 세션이 없습니다.</td></tr><% } %>
+        <% if (sessions.length === 0) { %><tr><td colspan="10" class="empty">진행 중인 상담 세션이 없습니다.</td></tr><% } %>
         <% sessions.forEach(function(s){ %>
           <tr class="<%= s.status === 'needs_agent' ? 'session-row-needs-agent' : '' %>" data-session-row-id="<%= s.id %>">
+            <td><input type="checkbox" class="js-session-checkbox" value="<%= s.id %>" aria-label="세션 #<%= s.id %> 선택"></td>
             <td>#<%= s.id %></td>
             <td><%= s.user_name || '-' %> <span style="color:var(--muted);">(<%= s.user_role || '-' %>)</span></td>
             <td><span class="badge <%= statusBadge[s.status] || 'gray' %>"><%= statusLabel[s.status] || s.status %></span></td>
@@ -367,8 +386,92 @@
       if (!tbody) return;
       if (tbody.querySelectorAll('tr[data-session-row-id]').length > 0) return;
       var empty = document.createElement('tr');
-      empty.innerHTML = '<td colspan="9" class="empty">진행 중인 상담 세션이 없습니다.</td>';
+      empty.innerHTML = '<td colspan="10" class="empty">진행 중인 상담 세션이 없습니다.</td>';
       tbody.appendChild(empty);
+    }
+
+    var selectAllCheckbox = document.getElementById('selectAllSessions');
+    var bulkDeleteBtn = document.getElementById('bulkDeleteBtn');
+    var bulkSelectedCount = document.getElementById('bulkSelectedCount');
+
+    function getRowCheckboxes() {
+      return Array.prototype.slice.call(document.querySelectorAll('.js-session-checkbox'));
+    }
+
+    function updateBulkUi() {
+      var boxes = getRowCheckboxes();
+      var checked = boxes.filter(function (cb) { return cb.checked; });
+      bulkSelectedCount.textContent = '선택된 항목: ' + checked.length + '개';
+      bulkDeleteBtn.disabled = checked.length === 0;
+      if (selectAllCheckbox) {
+        selectAllCheckbox.checked = boxes.length > 0 && checked.length === boxes.length;
+        selectAllCheckbox.indeterminate = checked.length > 0 && checked.length < boxes.length;
+      }
+    }
+
+    document.addEventListener('change', function (event) {
+      if (event.target && event.target.classList && event.target.classList.contains('js-session-checkbox')) {
+        updateBulkUi();
+      }
+    });
+
+    if (selectAllCheckbox) {
+      selectAllCheckbox.addEventListener('change', function () {
+        getRowCheckboxes().forEach(function (cb) { cb.checked = selectAllCheckbox.checked; });
+        updateBulkUi();
+      });
+    }
+
+    if (bulkDeleteBtn) {
+      bulkDeleteBtn.addEventListener('click', function () {
+        var ids = getRowCheckboxes().filter(function (cb) { return cb.checked; }).map(function (cb) { return cb.value; });
+        if (ids.length === 0) return;
+        if (!confirm('선택한 ' + ids.length + '개의 상담 세션을 삭제하시겠습니까?')) return;
+
+        bulkDeleteBtn.disabled = true;
+        var originalText = bulkDeleteBtn.textContent;
+        bulkDeleteBtn.textContent = '삭제중...';
+
+        var body = new URLSearchParams();
+        body.set('view', 'list');
+        body.set('ajax', '1');
+        ids.forEach(function (id) { body.append('ids', id); });
+
+        fetch('/chat/sessions/bulk-delete', {
+          method: 'POST',
+          headers: {
+            'Accept': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest',
+            'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+          },
+          body: body.toString(),
+        })
+          .then(function (res) {
+            return res.json().catch(function () { return {}; }).then(function (json) {
+              if (!res.ok) {
+                throw new Error(json.error || '삭제 처리 중 오류가 발생했습니다.');
+              }
+              return json;
+            });
+          })
+          .then(function (json) {
+            var deletedIds = (json.ids || []).map(String);
+            deletedIds.forEach(function (id) {
+              var row = document.querySelector('tr[data-session-row-id="' + id + '"]');
+              if (row) row.remove();
+            });
+            ensureEmptyRow();
+            updateBulkUi();
+            showToast(deletedIds.length + '개의 상담 세션이 삭제되었습니다.');
+          })
+          .catch(function (error) {
+            showToast(error.message || '삭제 처리 중 오류가 발생했습니다.', true);
+          })
+          .finally(function () {
+            bulkDeleteBtn.textContent = originalText;
+            updateBulkUi();
+          });
+      });
     }
 
     var deleting = {};

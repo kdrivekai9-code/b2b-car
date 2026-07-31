@@ -47,6 +47,8 @@
   var orderTransition = document.getElementById('card_chat_session_transition');
   var orderWaypointsWrap = document.getElementById('cardWaypointsWrap');
   var addOrderWaypointBtn = document.getElementById('cardAddWaypointBtn');
+  var intakeHistoryMessagesEl = document.getElementById('cardIntakeHistoryMessages');
+  var intakeHistoryFilterButtons = Array.prototype.slice.call(document.querySelectorAll('#cardIntakeHistoryFilters [data-history-filter]'));
   var orderAddressSearchButtons = Array.prototype.slice.call(document.querySelectorAll('.card-addr-search-btn'));
   if (!layoutEl || !messagesEl || !viewerHead || !viewerActions || !loadOlderBtn || !openDetailLink || !assignSelfBtn || !deleteForm || !deleteBtn || !replyForm || !replyText || !replySendBtn || !replyError) return;
 
@@ -65,6 +67,8 @@
   var selectedAssignedAgentName = '';
   var isAssigningSelf = false;
   var knownMessageIds = {};
+  var intakeHistoryKnownIds = {};
+  var intakeHistoryFilter = 'all';
   var senderLabel = { user: '고객', bot: 'AI', agent: '상담원', system: '시스템' };
   var senderClass = { user: 'ai-user', bot: 'ai-bot', agent: 'ai-agent', system: 'ai-bot' };
   var DELIVERY_BUFFER_SECONDS = 30 * 60;
@@ -261,6 +265,33 @@
       + '</div>';
   }
 
+  function intakeHistoryBubbleHtml(message) {
+    var who = senderClass[message.sender] || 'ai-bot';
+    var label = senderLabel[message.sender] || message.sender;
+    var time = formatChatTime(message.created_at);
+    return '<div class="chat-intake-history-bubble ' + who + '" data-id="' + message.id + '" data-sender="' + escapeHtml(message.sender || '') + '">'
+      + '<div class="chat-intake-history-meta">'
+      + '<span class="bubble-label">' + escapeHtml(label) + '</span>'
+      + (time ? ('<span class="bubble-time">' + escapeHtml(time) + '</span>') : '')
+      + '</div>'
+      + '<div class="chat-intake-history-text">' + escapeHtml(message.message || '') + '</div>'
+      + '</div>';
+  }
+
+  function applyIntakeHistoryFilter() {
+    if (!intakeHistoryMessagesEl) return;
+    var bubbles = intakeHistoryMessagesEl.querySelectorAll('.chat-intake-history-bubble');
+    bubbles.forEach(function (bubble) {
+      var sender = bubble.getAttribute('data-sender') || '';
+      var visible = intakeHistoryFilter === 'all' ? true : sender === intakeHistoryFilter;
+      bubble.classList.toggle('is-hidden', !visible);
+    });
+    intakeHistoryFilterButtons.forEach(function (button) {
+      var active = button.getAttribute('data-history-filter') === intakeHistoryFilter;
+      button.classList.toggle('secondary', !active);
+    });
+  }
+
   function rememberMessage(message) {
     if (!message || !message.id) return false;
     if (knownMessageIds[message.id]) return false;
@@ -268,12 +299,50 @@
     return true;
   }
 
+  function rememberIntakeHistoryMessage(message) {
+    if (!message || !message.id) return false;
+    if (intakeHistoryKnownIds[message.id]) return false;
+    intakeHistoryKnownIds[message.id] = 1;
+    return true;
+  }
+
   function resetViewerMeta() {
     knownMessageIds = {};
+    intakeHistoryKnownIds = {};
     oldestMessageId = null;
     hasMoreOlder = false;
     loadOlderBtn.disabled = true;
     loadOlderBtn.style.display = 'none';
+    if (intakeHistoryMessagesEl) intakeHistoryMessagesEl.innerHTML = '<div class="empty">고객과 AI 대화 이력이 여기에 표시됩니다.</div>';
+  }
+
+  function setIntakeHistory(messages, options) {
+    if (!intakeHistoryMessagesEl) return;
+    options = options || {};
+    if (options.replace) intakeHistoryMessagesEl.innerHTML = '';
+    if (!messages || !messages.length) {
+      if (options.replace) intakeHistoryMessagesEl.innerHTML = '<div class="empty">고객과 AI 대화 이력이 없습니다.</div>';
+      return;
+    }
+
+    var html = [];
+    messages.forEach(function (m) {
+      if (!m || ['user', 'bot', 'agent', 'system'].indexOf(m.sender) === -1) return;
+      if (!rememberIntakeHistoryMessage(m)) return;
+      html.push(intakeHistoryBubbleHtml(m));
+    });
+
+    if (!html.length) {
+      if (options.replace && !intakeHistoryMessagesEl.children.length) {
+        intakeHistoryMessagesEl.innerHTML = '<div class="empty">고객과 AI 대화 이력이 없습니다.</div>';
+      }
+      return;
+    }
+
+    if (options.prepend) intakeHistoryMessagesEl.insertAdjacentHTML('afterbegin', html.join(''));
+    else intakeHistoryMessagesEl.insertAdjacentHTML('beforeend', html.join(''));
+    intakeHistoryMessagesEl.scrollTop = intakeHistoryMessagesEl.scrollHeight;
+    applyIntakeHistoryFilter();
   }
 
   function updateReplyAvailability() {
@@ -618,6 +687,7 @@
   function setMessages(messages, options) {
     options = options || {};
     if (options.replace) messagesEl.innerHTML = '';
+    if (options.replace) setIntakeHistory([], { replace: true });
     if (!messages || !messages.length) {
       if (options.replace) messagesEl.innerHTML = '<div class="empty">아직 메시지가 없습니다.</div>';
       return;
@@ -632,6 +702,7 @@
     if (!html.length) return;
     if (options.prepend) messagesEl.insertAdjacentHTML('afterbegin', html.join(''));
     else messagesEl.insertAdjacentHTML('beforeend', html.join(''));
+    setIntakeHistory(messages, options);
 
     if (!options.preserveScrollBottom) {
       messagesEl.scrollTop = messagesEl.scrollHeight;
@@ -671,6 +742,7 @@
         if (!payload || !payload.id) return;
         if (!rememberMessage(payload)) return;
         messagesEl.insertAdjacentHTML('beforeend', messageBubbleHtml(payload));
+        setIntakeHistory([payload], {});
         messagesEl.scrollTop = messagesEl.scrollHeight;
       } catch (err) {
         // noop
@@ -927,6 +999,13 @@
     if (hasOrderPane) orderSessionIdInput.value = '';
     updateReplyAvailability();
   }
+
+  intakeHistoryFilterButtons.forEach(function (button) {
+    button.addEventListener('click', function () {
+      intakeHistoryFilter = button.getAttribute('data-history-filter') || 'all';
+      applyIntakeHistoryFilter();
+    });
+  });
 
   replyText.addEventListener('input', function () {
     if (replyError.style.display !== 'none') setReplyError('');
