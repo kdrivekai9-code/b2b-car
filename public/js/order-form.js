@@ -595,14 +595,35 @@
     return h > 0 ? (h + '시간 ' + m + '분') : (m + '분');
   }
 
+  function appendDistanceRow(listEl, fromLabel, toLabel, km) {
+    var row = document.createElement('div');
+    row.className = 'map-distance-row';
+    row.innerHTML = '<span>' + fromLabel + ' → ' + toLabel + '</span><span>' + km.toFixed(1) + 'km</span>';
+    listEl.appendChild(row);
+  }
+
   function renderDistanceRows(points, distancesKm) {
     var listEl = document.getElementById('mapDistanceList');
     listEl.innerHTML = '';
+    // 선박 이동이 필수인 구간(경유지 없이 출발-도착만 있는 경우)은 일반 "출발 → 도착" 한 줄
+    // 대신, 실제 지명으로 "출발지명 → 출발항 → 도착항 → 도착지명" 세 구간으로 나눠 보여준다.
+    var routeMeta = window.__aiIntakeRouteMeta || null;
+    var seg = (routeMeta && routeMeta.hasFerryLeg) ? routeMeta.ferrySegments : null;
+    if (seg && points.length === 2) {
+      var originAddrInput = document.getElementById('origin_address');
+      var destAddrInput = document.getElementById('destination_address');
+      var originName = (originAddrInput && originAddrInput.value.trim()) || slotLabel('origin');
+      var destName = (destAddrInput && destAddrInput.value.trim()) || slotLabel('destination');
+      var fromPort = seg.fromPort || '출발항';
+      var toPort = seg.toPort || '도착항';
+      appendDistanceRow(listEl, originName, fromPort, (seg.beforeDistanceM || 0) / 1000);
+      appendDistanceRow(listEl, fromPort, toPort, (seg.ferryDistanceM || 0) / 1000);
+      appendDistanceRow(listEl, toPort, destName, (seg.afterDistanceM || 0) / 1000);
+      document.getElementById('mapDistanceInfo').style.display = '';
+      return;
+    }
     for (var i = 0; i < points.length - 1; i++) {
-      var row = document.createElement('div');
-      row.className = 'map-distance-row';
-      row.innerHTML = '<span>' + slotLabel(points[i].slot) + ' → ' + slotLabel(points[i + 1].slot) + '</span><span>' + distancesKm[i].toFixed(1) + 'km</span>';
-      listEl.appendChild(row);
+      appendDistanceRow(listEl, slotLabel(points[i].slot), slotLabel(points[i + 1].slot), distancesKm[i]);
     }
     document.getElementById('mapDistanceInfo').style.display = '';
   }
@@ -630,6 +651,7 @@
     }
     lastRouteKm = totalKm;
     updateFarePreview(totalKm);
+    updateFerryFareTile(totalKm);
     syncReservationBasisPreview();
   }
 
@@ -712,9 +734,44 @@
       .catch(function () {});
   }
 
+  var ferryFareTileRequestId = 0;
+  // "예상톨비" 옆 도선요금 타일 — branch_id가 아직 선택되지 않아도(예: AI 챗봇 요금 문의 중)
+  // 표시되어야 하므로 updateFarePreview(지사 미선택 시 조기 종료)와는 별도로 항상 조회한다.
+  function updateFerryFareTile(totalKm) {
+    var ferryFareItem = document.getElementById('routeFerryFareItem');
+    var ferryFareValue = document.getElementById('routeFerryFare');
+    if (!ferryFareItem || !ferryFareValue) return;
+    var routeMeta = window.__aiIntakeRouteMeta || null;
+    if (!routeMeta || !routeMeta.hasFerryLeg || totalKm == null) {
+      ferryFareItem.style.display = 'none';
+      return;
+    }
+    var requestId = (ferryFareTileRequestId += 1);
+    fetch('/orders/fare-preview?' + ferryQueryParams(totalKm).toString())
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        if (requestId !== ferryFareTileRequestId) return;
+        if (!data || !data.enabled) {
+          ferryFareItem.style.display = 'none';
+          return;
+        }
+        if (data.ferryNeedVehicleType) {
+          ferryFareItem.style.display = '';
+          ferryFareValue.textContent = '차종 필요';
+        } else if (data.ferryApplied && data.ferryFare != null) {
+          ferryFareItem.style.display = '';
+          ferryFareValue.textContent = Number(data.ferryFare).toLocaleString('ko-KR') + '원';
+        } else {
+          ferryFareItem.style.display = 'none';
+        }
+      })
+      .catch(function () { ferryFareItem.style.display = 'none'; });
+  }
+
   if (vehicleTypeInput) {
     vehicleTypeInput.addEventListener('input', function () {
       updateFarePreview(lastRouteKm);
+      updateFerryFareTile(lastRouteKm);
     });
   }
 

@@ -533,7 +533,7 @@ form .field.full{flex-basis:100%;}
 
 .route-search-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;}
 .route-priority-select{padding:5px 8px;font-size:12px;border-radius:6px;}
-.route-summary-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}
+.route-summary-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(76px,1fr));gap:8px;}
 .route-summary-item{background:#fff;border:1px solid var(--border);border-radius:8px;padding:8px 10px;text-align:center;}
 .route-summary-item .label{font-size:10px;color:var(--muted);margin-bottom:3px;}
 .route-summary-item .value{font-size:14px;font-weight:700;color:var(--navy);}

@@ -846,13 +846,22 @@
     if (!pendingFareVehicleTypeRoute) return false;
     var route = pendingFareVehicleTypeRoute;
     pendingFareVehicleTypeRoute = null;
+    var vehicleType = String(text || '').trim();
+    // order-form.js가 관리하는 오른쪽 "경로탐색" 패널(예상톨비 옆 도선요금 타일 등)은 실제
+    // vehicle_type 입력칸 값 + input 이벤트로 갱신된다 — 요금문의 흐름은 지금까지 이 필드를
+    // 건드리지 않아서 그 타일이 계속 "차종 필요"에 머물러 있었다.
+    var vehicleTypeEl = document.getElementById('vehicle_type');
+    if (vehicleTypeEl) {
+      vehicleTypeEl.value = vehicleType;
+      vehicleTypeEl.dispatchEvent(new Event('input', { bubbles: true }));
+    }
     // 출발지/도착지/거리는 이미 첫 턴에서 확인·계산을 마쳤으므로 다시 검증하거나 그 확인
     // 말풍선들을 반복해서 보여주지 않는다 — announceFareAndContinue로 바로 이어가서, 차종을
     // 반영한 요금(과 필요하면 경유지 질문)만 새로 안내한다.
     announceFareAndContinue({
       origin: route.origin,
       destination: route.destination,
-      vehicleType: String(text || '').trim(),
+      vehicleType: vehicleType,
       inquiryId: route.inquiryId,
       adminAreaOnly: route.adminAreaOnly,
       isResume: true,
