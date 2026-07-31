@@ -223,8 +223,9 @@
 
             <div class="row">
               <div class="field">
-                <label>차종 (선택)</label>
-                <input type="text" id="card_vehicle_type" name="vehicle_type" placeholder="예: 카니발, 1톤">
+                <label>차종<span class="required-mark" id="cardVehicleTypeRequiredMark" aria-hidden="true" style="display:none;"> *</span> (<span id="cardVehicleTypeOptionalText">선택</span>)</label>
+                <input type="text" id="card_vehicle_type" name="vehicle_type" placeholder="예: 카니발, 1톤" autocomplete="off">
+                <div id="card_vehicle_type_results" class="addr-results"></div>
               </div>
               <div class="field">
                 <label>출발지 차량번호 (선택)</label>

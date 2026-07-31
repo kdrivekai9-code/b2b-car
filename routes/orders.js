@@ -523,6 +523,33 @@ router.get('/fare-preview', asyncHandler(async (req, res) => {
   res.json(result);
 }));
 
+// 차종 입력칸 자동완성 — ferry_fare_rules.vehicle_label(쉼표로 구분된 별칭 목록)을 유일한 차종
+// 마스터 데이터로 재사용한다. 1글자부터 부분일치 검색하고, 접두일치를 우선 정렬해 보여준다.
+router.get('/vehicle-type-suggest', asyncHandler(async (req, res) => {
+  const q = String(req.query.q || '').trim();
+  if (!q) return res.json({ suggestions: [] });
+
+  const rows = await db.all('SELECT DISTINCT vehicle_label FROM ferry_fare_rules WHERE is_active = 1');
+  const aliasSet = new Set();
+  rows.forEach((row) => {
+    String(row.vehicle_label || '').split(',').forEach((alias) => {
+      const trimmed = alias.trim();
+      if (trimmed) aliasSet.add(trimmed);
+    });
+  });
+
+  const needle = q.toLowerCase();
+  const matches = Array.from(aliasSet).filter((alias) => alias.toLowerCase().includes(needle));
+  matches.sort((a, b) => {
+    const aPrefix = a.toLowerCase().startsWith(needle);
+    const bPrefix = b.toLowerCase().startsWith(needle);
+    if (aPrefix !== bPrefix) return aPrefix ? -1 : 1;
+    return a.localeCompare(b, 'ko');
+  });
+
+  res.json({ suggestions: matches.slice(0, 8) });
+}));
+
 function combineAddress(main, detail) {
   main = (main || '').trim();
   detail = (detail || '').trim();

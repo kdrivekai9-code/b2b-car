@@ -132,9 +132,12 @@
               <span id="deliveryRouteFormulaPreview" style="font-size:10px; color:var(--muted); font-weight:500;">(경로탐색 : -)</span>
             </div>
           </div>
-          <label>차종 / 출발지 차량번호 (선택)</label>
+          <label>차종<span class="required-mark" id="vehicleTypeRequiredMark" aria-hidden="true" style="display:none;"> *</span> / 출발지 차량번호 (선택)</label>
           <div class="inline-duo">
-            <input type="text" id="vehicle_type" name="vehicle_type" placeholder="예: 카니발, 그랜저, 1톤" value="<%= order.vehicle_type || '' %>">
+            <div style="flex:1;min-width:0;">
+              <input type="text" id="vehicle_type" name="vehicle_type" placeholder="예: 카니발, 그랜저, 1톤" value="<%= order.vehicle_type || '' %>" autocomplete="off">
+              <div id="vehicle_type_results" class="addr-results"></div>
+            </div>
             <input type="text" name="vehicle_number" placeholder="예: 12가3456" value="<%= order.vehicle_number || '' %>">
           </div>
         </div>

@@ -1171,6 +1171,90 @@
   wireAddressField('origin_address', 'origin');
   wireAddressField('destination_address', 'destination');
 
+  // 제주항/서귀포 등 제주 지역 도착은 도선료 계산에 차종이 사실상 필수이므로, 도착지 주소에
+  // "제주"가 들어가면 차종 입력을 필수로 표시한다(빨간 별표 + "선택"→"필수" 라벨 전환).
+  function updateVehicleTypeRequirement() {
+    var destInput = document.getElementById('destination_address');
+    if (!destInput || !vehicleTypeInput) return;
+    var isJeju = /제주/.test(destInput.value || '');
+    vehicleTypeInput.required = isJeju;
+    var mark = document.getElementById('vehicleTypeRequiredMark');
+    if (mark) mark.style.display = isJeju ? '' : 'none';
+    var optionalText = document.getElementById('vehicleTypeOptionalText');
+    if (optionalText) optionalText.textContent = isJeju ? '필수' : '선택';
+  }
+  var destAddressForVehicleReq = document.getElementById('destination_address');
+  if (destAddressForVehicleReq) {
+    destAddressForVehicleReq.addEventListener('input', updateVehicleTypeRequirement);
+  }
+  updateVehicleTypeRequirement();
+
+  // 차종 입력칸 자동완성 — 주소 자동완성(.addr-results)과 같은 시각 패턴을 재사용해서, 1글자만
+  // 입력해도 ferry_fare_rules에 등록된 실제 차종 별칭 중 일치하는 것을 보여준다. 정확한 차종명을
+  // 고르게 해서 도선료 매칭 실패(스펠링 불일치)를 애초에 줄이는 목적도 겸한다.
+  function wireVehicleTypeAutocomplete(inputEl, resultsEl) {
+    if (!inputEl || !resultsEl) return;
+    var searchTimer = null;
+    var requestId = 0;
+
+    function clearResults() { resultsEl.innerHTML = ''; }
+
+    function renderSuggestions(suggestions, query) {
+      if (!suggestions.length) {
+        resultsEl.innerHTML = '<div class="addr-result-item muted">일치하는 차종이 없습니다.</div>';
+        return;
+      }
+      resultsEl.innerHTML = '';
+      suggestions.forEach(function (label) {
+        var item = document.createElement('div');
+        item.className = 'addr-result-item';
+        var normalizedLabel = label.toLocaleLowerCase();
+        var normalizedQuery = query.toLocaleLowerCase();
+        var matchIndex = normalizedLabel.indexOf(normalizedQuery);
+        if (matchIndex === -1) {
+          item.textContent = label;
+        } else {
+          item.appendChild(document.createTextNode(label.slice(0, matchIndex)));
+          var highlight = document.createElement('span');
+          highlight.className = 'addr-result-match';
+          highlight.textContent = label.slice(matchIndex, matchIndex + query.length);
+          item.appendChild(highlight);
+          item.appendChild(document.createTextNode(label.slice(matchIndex + query.length)));
+        }
+        item.addEventListener('mousedown', function (e) {
+          // blur보다 먼저 선택을 처리하기 위해 click 대신 mousedown에서 값을 채운다.
+          e.preventDefault();
+          inputEl.value = label;
+          inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+          clearResults();
+        });
+        resultsEl.appendChild(item);
+      });
+    }
+
+    inputEl.addEventListener('input', function () {
+      clearTimeout(searchTimer);
+      var q = inputEl.value.trim();
+      if (!q) { clearResults(); return; }
+      searchTimer = setTimeout(function () {
+        var myRequestId = (requestId += 1);
+        fetch('/orders/vehicle-type-suggest?q=' + encodeURIComponent(q))
+          .then(function (res) { return res.json(); })
+          .then(function (data) {
+            if (myRequestId !== requestId) return;
+            if (inputEl.value.trim() !== q) return;
+            renderSuggestions((data && data.suggestions) || [], q);
+          })
+          .catch(function () {});
+      }, 200);
+    });
+
+    inputEl.addEventListener('blur', function () {
+      setTimeout(clearResults, 150);
+    });
+  }
+  wireVehicleTypeAutocomplete(vehicleTypeInput, document.getElementById('vehicle_type_results'));
+
   // "주차장/입구/정문" 같은 범용 시설어가 붙으면 카카오 키워드 검색이 그 단어를 업종 필터처럼
   // 취급해 정작 중요한 지명(예: "수서역이마트")을 무시하고 엉뚱한 곳을 1위로 주는 경우가 실측으로 확인됐다.
   // 이런 단어가 있을 때만 원문/핵심지명 두 가지로 검색해서 1위가 다르면 챗봇이 사용자에게 확인받는다.

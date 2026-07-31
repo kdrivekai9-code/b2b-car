@@ -133,7 +133,7 @@
             </div>
           </div>
           <div class="row" style="margin-top:8px;">
-            <div class="field"><label class="field-label-strong">차종 (선택)</label><input type="text" id="vehicle_type" name="vehicle_type" placeholder="예: 카니발, 그랜저, 1톤" value="<%= order.vehicle_type || '' %>"></div>
+            <div class="field"><label class="field-label-strong">차종<span class="required-mark" id="vehicleTypeRequiredMark" aria-hidden="true" style="display:none;"> *</span> (<span id="vehicleTypeOptionalText">선택</span>)</label><input type="text" id="vehicle_type" name="vehicle_type" placeholder="예: 카니발, 그랜저, 1톤" value="<%= order.vehicle_type || '' %>" autocomplete="off"><div id="vehicle_type_results" class="addr-results"></div></div>
             <div class="field"><label class="field-label-strong">출발지 차량번호 (선택)</label><input type="text" id="vehicle_number" name="vehicle_number" placeholder="예: 12가3456" value="<%= order.vehicle_number || '' %>"></div>
           </div>
           <label class="checkline"><input type="checkbox" id="sameAsMyPhone"> 요청자(본인) 연락처와 동일</label>

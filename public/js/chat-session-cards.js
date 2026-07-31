@@ -610,6 +610,7 @@
     orderVehicleNumber.value = order.vehicle_number || '';
     orderDestinationAddress.value = order.destination_address || '';
     clearInputCoord(orderDestinationAddress);
+    orderDestinationAddress.dispatchEvent(new Event('input', { bubbles: true }));
     orderDestinationDetailAddress.value = order.destination_detail_address || '';
     orderDestinationContact.value = order.destination_contact || '';
     orderBranchId.value = order.branch_id || '';
@@ -935,6 +936,81 @@
     [orderOriginContact, orderDestinationContact].forEach(function (input) {
       input.addEventListener('input', function () { normalizePhoneInput(input); });
     });
+
+    // 제주항/서귀포 등 제주 지역 도착은 도선료 계산에 차종이 사실상 필수이므로, 도착지 주소에
+    // "제주"가 들어가면 차종 입력을 필수로 표시한다(빨간 별표 + "선택"→"필수" 라벨 전환).
+    function updateCardVehicleTypeRequirement() {
+      var isJeju = /제주/.test(orderDestinationAddress.value || '');
+      orderVehicleType.required = isJeju;
+      var mark = document.getElementById('cardVehicleTypeRequiredMark');
+      if (mark) mark.style.display = isJeju ? '' : 'none';
+      var optionalText = document.getElementById('cardVehicleTypeOptionalText');
+      if (optionalText) optionalText.textContent = isJeju ? '필수' : '선택';
+    }
+    orderDestinationAddress.addEventListener('input', updateCardVehicleTypeRequirement);
+    updateCardVehicleTypeRequirement();
+
+    // 차종 입력칸 자동완성 — 주소 자동완성(.addr-results)과 같은 시각 패턴으로, 1글자만
+    // 입력해도 ferry_fare_rules에 등록된 실제 차종 별칭 중 일치하는 것을 보여준다.
+    (function wireCardVehicleTypeAutocomplete() {
+      var resultsEl = document.getElementById('card_vehicle_type_results');
+      if (!orderVehicleType || !resultsEl) return;
+      var searchTimer = null;
+      var requestId = 0;
+
+      function clearResults() { resultsEl.innerHTML = ''; }
+
+      function renderSuggestions(suggestions, query) {
+        if (!suggestions.length) {
+          resultsEl.innerHTML = '<div class="addr-result-item muted">일치하는 차종이 없습니다.</div>';
+          return;
+        }
+        resultsEl.innerHTML = '';
+        suggestions.forEach(function (label) {
+          var item = document.createElement('div');
+          item.className = 'addr-result-item';
+          var normalizedLabel = label.toLocaleLowerCase();
+          var normalizedQuery = query.toLocaleLowerCase();
+          var matchIndex = normalizedLabel.indexOf(normalizedQuery);
+          if (matchIndex === -1) {
+            item.textContent = label;
+          } else {
+            item.appendChild(document.createTextNode(label.slice(0, matchIndex)));
+            var highlight = document.createElement('span');
+            highlight.className = 'addr-result-match';
+            highlight.textContent = label.slice(matchIndex, matchIndex + query.length);
+            item.appendChild(highlight);
+            item.appendChild(document.createTextNode(label.slice(matchIndex + query.length)));
+          }
+          item.addEventListener('mousedown', function (e) {
+            e.preventDefault();
+            orderVehicleType.value = label;
+            clearResults();
+          });
+          resultsEl.appendChild(item);
+        });
+      }
+
+      orderVehicleType.addEventListener('input', function () {
+        clearTimeout(searchTimer);
+        var q = orderVehicleType.value.trim();
+        if (!q) { clearResults(); return; }
+        searchTimer = setTimeout(function () {
+          var myRequestId = (requestId += 1);
+          fetch('/orders/vehicle-type-suggest?q=' + encodeURIComponent(q))
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+              if (myRequestId !== requestId) return;
+              if (orderVehicleType.value.trim() !== q) return;
+              renderSuggestions((data && data.suggestions) || [], q);
+            })
+            .catch(function () {});
+        }, 200);
+      });
+      orderVehicleType.addEventListener('blur', function () {
+        setTimeout(clearResults, 150);
+      });
+    })();
 
     [orderReservedTimeHour, orderReservedTimeMinute].forEach(function (select) {
       select.addEventListener('change', function () {
