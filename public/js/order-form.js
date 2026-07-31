@@ -1103,6 +1103,21 @@
     if (!text || !key) return text;
     // place_name · 도로명주소 형태의 라벨을 그대로 치환해도 되도록, 원문 그대로 한 번 지운다.
     text = text.replace(key, ' ');
+    // 카카오 API가 돌려주는 도로명/지번주소는 "경기도"가 아니라 "경기"처럼 시/도 접미사가 없이
+    // 오는 경우가 흔한데, 사용자가 원문에 "경기도"처럼 접미사를 붙여 입력하면 문자열이 정확히
+    // 일치하지 않아 안 지워지고 도로명주소 전체가 그대로 상세주소에 중복으로 남는 문제가 있었다
+    // — 첫 단어(시/도명) 뒤에 흔한 행정구역 접미사를 선택적으로 허용해 한 번 더 시도한다.
+    var words = key.split(/\s+/).filter(Boolean);
+    if (words.length) {
+      var escapeWord = function (w) { return w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); };
+      var pattern = escapeWord(words[0]) + '(?:도|특별시|광역시|특별자치도|특별자치시)?';
+      for (var i = 1; i < words.length; i++) pattern += '\\s*' + escapeWord(words[i]);
+      try {
+        text = text.replace(new RegExp(pattern, 'gi'), ' ');
+      } catch (e) {
+        // 정규식 실패 시 무시하고 다음 시도로 넘어간다.
+      }
+    }
     // 가운데 공백/구두점 차이로 exact match가 안 되는 경우를 위해 공백을 느슨하게 한 번 더 시도한다.
     var escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     var relaxed = escaped.replace(/\s+/g, '\\s*');
