@@ -655,12 +655,18 @@
     syncReservationBasisPreview();
   }
 
-  // 강원/경남/경북/부산/울산 출발 + 제주 도착 건은 카카오모빌리티가 기본으로 잡아주는 도선
-  // 경로(보통 완도항)가 아니라 삼천포신항 경유로 경로탐색을 강제한다 — 실제 물리 노선 선택은
-  // 카카오 길찾기 알고리즘이 정하므로, 경유지로 삼천포신항 좌표를 직접 찍어 넣어야 한다.
+  // 강원/경남/경북/부산/울산 출발 + 제주 도착 건은 삼천포신항-제주항(오션비스타) 도선을 타야
+  // 하는데, 카카오모빌리티 길찾기는 이 노선을 아예 모른다(실제로 삼천포를 그냥 육로로 지나쳐서
+  // 완도까지 내려가 완도-제주 항로로 계산해버리는 것을 직접 확인함 — 단순 경유지로 찍어서는
+  // 고쳐지지 않는다). 그래서 이 구간은 카카오에게 통짜로 묻지 않고 ①출발지→삼천포신항(육로),
+  // ②삼천포신항→제주항(카카오가 모르는 구간이라 직선거리+실제 시간표 기준 고정 소요시간),
+  // ③제주항→목적지(육로) 세 구간으로 나눠 직접 계산해서 합친다.
   // 이 지역 판정 정규식은 lib/ferryFare.js의 pickFerryRouteCode()와 반드시 같이 맞춰야 한다.
   var SAMCHEONPO_REGION_RE = /(강원|경상남도|경남|경상북도|경북|부산|울산)/;
   var SAMCHEONPO_PORT_LATLNG = { lat: 34.9269695307662, lng: 128.088376812689 }; // 삼천포신항여객터미널(카카오 로컬API 조회값)
+  var JEJU_PORT_LATLNG = { lat: 33.519591050522465, lng: 126.53500143704899 }; // 제주항연안여객터미널(카카오 로컬API 조회값)
+  // 오션비스타제주 실제 시간표 기준(약 6시간30분) — ferry_schedules 테이블의 duration_minutes와 맞춰야 한다.
+  var SAMCHEONPO_JEJU_FERRY_DURATION_S = 390 * 60;
   function shouldForceSamcheonpoRoute() {
     var originEl = document.getElementById('origin_address');
     var destEl = document.getElementById('destination_address');
@@ -839,6 +845,76 @@
       });
   }
 
+  // 삼천포신항-제주항 구간은 카카오가 통짜로 계산 못 하므로(위 shouldForceSamcheonpoRoute 주석
+  // 참고) ①출발지→삼천포신항, ②제주항→목적지 두 번의 육로 길찾기를 따로 불러 합친다.
+  // 중간에 사용자가 추가한 경유지(있다면)는 승선 전(육지) 구간에 속하는 것으로 보고 ① 쪽에 붙인다.
+  function fetchSplitSamcheonpoDirections(points, requestId) {
+    var coord = function (p) { return p.latlng.getLng() + ',' + p.latlng.getLat(); };
+    var origin = points[0];
+    var destination = points[points.length - 1];
+    var beforeWaypoints = points.slice(1, -1);
+
+    var legAParams = new URLSearchParams();
+    legAParams.set('origin', coord(origin));
+    legAParams.set('destination', SAMCHEONPO_PORT_LATLNG.lng + ',' + SAMCHEONPO_PORT_LATLNG.lat);
+    legAParams.set('priority', 'RECOMMEND');
+    if (beforeWaypoints.length) legAParams.set('waypoints', beforeWaypoints.map(coord).join('|'));
+
+    var legBParams = new URLSearchParams();
+    legBParams.set('origin', JEJU_PORT_LATLNG.lng + ',' + JEJU_PORT_LATLNG.lat);
+    legBParams.set('destination', coord(destination));
+    legBParams.set('priority', 'RECOMMEND');
+
+    Promise.all([
+      fetch('/kakao/directions?' + legAParams.toString()).then(function (res) { return res.ok ? res.json() : null; }),
+      fetch('/kakao/directions?' + legBParams.toString()).then(function (res) { return res.ok ? res.json() : null; }),
+    ]).then(function (results) {
+      if (requestId !== directionsRequestId) return;
+      var legA = results[0];
+      var legB = results[1];
+      if (!legA || !legB) { setAiRouteMeta({ hasFerryLeg: false, ferryLegs: [], ferrySegments: null }); return; }
+
+      var ferryDistanceM = haversineKm(
+        [SAMCHEONPO_PORT_LATLNG.lat, SAMCHEONPO_PORT_LATLNG.lng],
+        [JEJU_PORT_LATLNG.lat, JEJU_PORT_LATLNG.lng]
+      ) * 1000;
+      // 기본요금(거리구간요금)은 도선 구간을 제외한 육로 거리만으로 계산해야 한다 — 도선료는
+      // ferryFare.js가 별도 정액으로 더한다.
+      var totalRoadKm = (legA.totalDistance + legB.totalDistance) / 1000;
+      var totalDuration = legA.totalDuration + SAMCHEONPO_JEJU_FERRY_DURATION_S + legB.totalDuration;
+
+      setAiRouteMeta({
+        hasFerryLeg: true,
+        ferryLegs: [{ synthetic: true, fromPort: '삼천포신항', toPort: '제주항' }],
+        ferrySegments: {
+          fromPort: '삼천포신항',
+          toPort: '제주항',
+          beforeDistanceM: legA.totalDistance,
+          beforeDurationS: legA.totalDuration,
+          ferryDistanceM: ferryDistanceM,
+          ferryDurationS: SAMCHEONPO_JEJU_FERRY_DURATION_S,
+          afterDistanceM: legB.totalDistance,
+          afterDurationS: legB.totalDuration,
+        },
+      });
+
+      var fullPath = [];
+      if (legA.path) fullPath = fullPath.concat(legA.path.map(function (c) { return new kakao.maps.LatLng(c[0], c[1]); }));
+      fullPath.push(new kakao.maps.LatLng(SAMCHEONPO_PORT_LATLNG.lat, SAMCHEONPO_PORT_LATLNG.lng));
+      fullPath.push(new kakao.maps.LatLng(JEJU_PORT_LATLNG.lat, JEJU_PORT_LATLNG.lng));
+      if (legB.path) fullPath = fullPath.concat(legB.path.map(function (c) { return new kakao.maps.LatLng(c[0], c[1]); }));
+      if (fullPath.length > 1) drawPolyline(fullPath);
+
+      renderDistanceRows(points, []);
+      renderRouteSummary(totalRoadKm, totalDuration, (legA.tollFare || 0) + (legB.tollFare || 0), {
+        mode: (legA.usedFuture || legB.usedFuture) ? 'future' : 'current',
+      });
+    }).catch(function () {
+      setAiRouteMeta({ hasFerryLeg: false, ferryLegs: [], ferrySegments: null });
+      /* 직선거리 fallback 유지 */
+    });
+  }
+
   // 마커/경로선/구간별 거리를 현재 입력 상태에 맞춰 다시 그린다.
   // 우선 직선거리로 즉시 표시하고, 카카오모빌리티 길찾기(유료 API) 응답이 오면 실제 도로 경로/거리로 교체한다.
   function refreshMapView() {
@@ -877,15 +953,11 @@
     points.forEach(function (p) { bounds.extend(p.latlng); });
     map.setBounds(bounds);
 
-    // 실제 길찾기 요청에만 삼천포신항 강제 경유지를 끼워 넣는다 — 지도에 그려지는 마커/구간별
-    // 거리 표시(위 straightKm 등)는 사용자가 실제로 입력한 지점 기준 그대로 유지해야 하므로
-    // points 원본은 건드리지 않고, 요청용 배열만 복사해서 사용한다.
-    var directionsPoints = points;
     if (points.length >= 2 && shouldForceSamcheonpoRoute()) {
-      var forcedWaypoint = { latlng: new kakao.maps.LatLng(SAMCHEONPO_PORT_LATLNG.lat, SAMCHEONPO_PORT_LATLNG.lng) };
-      directionsPoints = [points[0], forcedWaypoint].concat(points.slice(1));
+      fetchSplitSamcheonpoDirections(points, directionsRequestId);
+      return;
     }
-    fetchRealDirections(directionsPoints, directionsRequestId);
+    fetchRealDirections(points, directionsRequestId);
   }
 
   function wireReservationTimeChange(el) {
