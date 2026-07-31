@@ -1847,8 +1847,12 @@
     var form = document.getElementById('orderForm');
     if (!form) return Promise.resolve({ ok: false, error: '오더 등록 폼을 찾을 수 없습니다.' });
     var params = new URLSearchParams(new FormData(form));
+    // keepalive: "등록해 드릴까요?"에 "네"라고 답한 직후 탭을 새로고침/전환하는 경우가 실제로
+    // 있었는데, 이 요청이 keepalive 없이 진행 중이면 네비게이션과 함께 그대로 끊겨서 등록도 안
+    // 되고 실패 안내도 못 띄운 채 phase만 'confirming'에 멈춰버렸다 — 요청이 끝까지 가게 한다.
     return fetch('/orders/ai-intake/submit-precheck', {
       method: 'POST',
+      keepalive: true,
       headers: { 'X-Requested-With': 'fetch', 'Content-Type': 'application/x-www-form-urlencoded' },
       body: params,
     })
