@@ -1154,10 +1154,13 @@
     var slot = (kind === 'waypoint') ? mainId.replace('_address', '') : (kind === 'origin' ? 'origin' : 'destination');
     var query = mainInput.value.trim();
 
-    function confirmWith(best, detailToken, meta) {
+    // searchedQuery: 오타 보정 재검색(예: "알파동타워"→"알파돔타워")으로 찾은 결과일 때는, 남은
+    // 상세주소 힌트를 원문(query)이 아니라 실제로 검색에 성공한 보정된 문구 기준으로 뽑아야 한다 —
+    // 원문 그대로 쓰면 보정 전 오타 토큰이 best의 라벨과 매칭되지 않아 그대로 상세주소에 남는다.
+    function confirmWith(best, detailToken, meta, searchedQuery) {
       if (!best) return { success: false, resolvedText: null };
       applyResult(best, mainInput, detailInput, slot, kind, document.getElementById(slot + 'Preview'));
-      var detailHint = extractDetailHintFromResolved(query, best);
+      var detailHint = extractDetailHintFromResolved(searchedQuery || query, best);
       if (detailToken) appendDetailToken(detailInput, detailToken);
       if (detailHint) appendDetailToken(detailInput, detailHint);
       return {
@@ -1206,7 +1209,7 @@
               }
               geocodeWithMode(candidate, 'plain', function (candidateResults) {
                 if (candidateResults.length) {
-                  resolve(confirmWith(candidateResults[0], '', { triedFallback: true, correctedQuery: candidate }));
+                  resolve(confirmWith(candidateResults[0], '', { triedFallback: true, correctedQuery: candidate }, candidate));
                   return;
                 }
                 tryNext();
