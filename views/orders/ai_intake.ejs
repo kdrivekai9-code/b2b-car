@@ -46,7 +46,7 @@
       </div>
       <div class="ai-quick-replies" id="aiQuickReplies" style="display:none;"></div>
       <div class="ai-chat-input-row">
-        <textarea id="aiIntakeText" placeholder="예)&#10;내일 13시 출발&#10;출: 강남역 010-1111-2222&#10;경: 마포역 010-2222-3333&#10;도: 도곡역 010-3333-4444&#10;12가3456"></textarea>
+        <textarea id="aiIntakeText" placeholder="예) 내일 13시 출발 / 출: 강남역 010-1111-2222 / 경: 마포역 010-2222-3333 / 도: 도곡역 010-3333-4444 / 12가3456"></textarea>
         <button type="button" class="ai-favorite-btn" id="aiFavoriteBtn" aria-label="즐겨찾기 주소 사용" title="즐겨찾기 주소 사용">⭐</button>
         <button type="button" class="ai-send-btn" id="aiSendBtn" aria-label="메시지 전송" title="메시지 전송" disabled>↑</button>
       </div>
@@ -123,10 +123,10 @@
             <input type="text" class="addr-detail-input" id="origin_detail_address" name="origin_detail_address" placeholder="상세주소 입력 (건물명, 동/호수)" <%= order.origin_detail_address ? '' : 'disabled' %> value="<%= order.origin_detail_address || '' %>">
             <button type="button" class="btn small secondary registered-addr-btn" data-target="origin_address">등록주소</button>
           </div>
-          <div class="row" style="margin-top:8px;">
-            <div class="field"><label class="field-label-strong">출발지 연락처 <span class="required-mark" aria-hidden="true">*</span></label><input type="text" class="phone-input" id="origin_contact" name="origin_contact" placeholder="010-0000-0000" value="<%= order.origin_contact || '' %>"></div>
+          <div class="row contact-check-row" style="margin-top:8px;">
+            <div class="field" style="max-width:220px;"><label class="field-label-strong">출발지 연락처 <span class="required-mark" aria-hidden="true">*</span></label><input type="text" class="phone-input" id="origin_contact" name="origin_contact" placeholder="010-0000-0000" value="<%= order.origin_contact || '' %>"></div>
+            <label class="checkline"><input type="checkbox" id="sameAsMyPhone"> 요청자(본인) 연락처와 동일</label>
           </div>
-          <label class="checkline"><input type="checkbox" id="sameAsMyPhone"> 요청자(본인) 연락처와 동일</label>
           <div class="row" style="margin-top:8px;">
             <div id="pickupPreviewBlock" class="field full" style="display:none; margin-bottom:0;">
               <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; font-size:12px; line-height:1.5; color:var(--navy); font-weight:800;">
