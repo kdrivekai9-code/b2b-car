@@ -534,10 +534,13 @@
         params.set('origin', origin);
         params.set('destination', destination);
         params.set('priority', 'RECOMMEND');
-        if (waypointInputs.length) {
-          var coords = waypointInputs.map(coordStringFromInput).filter(Boolean);
-          if (coords.length) params.set('waypoints', coords.join('|'));
+        var waypointCoords = waypointInputs.length ? waypointInputs.map(coordStringFromInput).filter(Boolean) : [];
+        // 강원/경남/경북/부산/울산 출발 + 제주 도착 건은 삼천포신항 경유로 경로탐색을 강제한다 —
+        // order-form.js의 shouldForceSamcheonpoRoute()/SAMCHEONPO_PORT_LATLNG와 반드시 같이 맞춰야 한다.
+        if (/(강원|경상남도|경남|경상북도|경북|부산|울산)/.test(orderOriginAddress.value || '') && /제주/.test(orderDestinationAddress.value || '')) {
+          waypointCoords = ['128.088376812689,34.9269695307662'].concat(waypointCoords);
         }
+        if (waypointCoords.length) params.set('waypoints', waypointCoords.join('|'));
         var departureTime = buildCardDepartureTimeParam();
         if (departureTime) params.set('departure_time', departureTime);
         return fetch('/kakao/directions?' + params.toString())

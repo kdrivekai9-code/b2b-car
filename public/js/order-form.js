@@ -633,6 +633,20 @@
     syncReservationBasisPreview();
   }
 
+  // 강원/경남/경북/부산/울산 출발 + 제주 도착 건은 카카오모빌리티가 기본으로 잡아주는 도선
+  // 경로(보통 완도항)가 아니라 삼천포신항 경유로 경로탐색을 강제한다 — 실제 물리 노선 선택은
+  // 카카오 길찾기 알고리즘이 정하므로, 경유지로 삼천포신항 좌표를 직접 찍어 넣어야 한다.
+  // 이 지역 판정 정규식은 lib/ferryFare.js의 pickFerryRouteCode()와 반드시 같이 맞춰야 한다.
+  var SAMCHEONPO_REGION_RE = /(강원|경상남도|경남|경상북도|경북|부산|울산)/;
+  var SAMCHEONPO_PORT_LATLNG = { lat: 34.9269695307662, lng: 128.088376812689 }; // 삼천포신항여객터미널(카카오 로컬API 조회값)
+  function shouldForceSamcheonpoRoute() {
+    var originEl = document.getElementById('origin_address');
+    var destEl = document.getElementById('destination_address');
+    var origin = originEl ? originEl.value : '';
+    var destination = destEl ? destEl.value : '';
+    return SAMCHEONPO_REGION_RE.test(origin) && /제주/.test(destination);
+  }
+
   // 구간요금 설정(fare_rules) 기반 자동 요금 계산 — 지사가 요금표를 사용하지 않으면 기존처럼 수동 입력을 유지한다.
   var fareAmountInput = document.getElementById('fare_amount');
   var ferryFareInput = document.getElementById('ferry_fare_amount');
@@ -806,7 +820,15 @@
     points.forEach(function (p) { bounds.extend(p.latlng); });
     map.setBounds(bounds);
 
-    fetchRealDirections(points, directionsRequestId);
+    // 실제 길찾기 요청에만 삼천포신항 강제 경유지를 끼워 넣는다 — 지도에 그려지는 마커/구간별
+    // 거리 표시(위 straightKm 등)는 사용자가 실제로 입력한 지점 기준 그대로 유지해야 하므로
+    // points 원본은 건드리지 않고, 요청용 배열만 복사해서 사용한다.
+    var directionsPoints = points;
+    if (points.length >= 2 && shouldForceSamcheonpoRoute()) {
+      var forcedWaypoint = { latlng: new kakao.maps.LatLng(SAMCHEONPO_PORT_LATLNG.lat, SAMCHEONPO_PORT_LATLNG.lng) };
+      directionsPoints = [points[0], forcedWaypoint].concat(points.slice(1));
+    }
+    fetchRealDirections(directionsPoints, directionsRequestId);
   }
 
   function wireReservationTimeChange(el) {
