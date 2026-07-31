@@ -689,9 +689,15 @@
     var routeMeta = window.__aiIntakeRouteMeta || null;
     var vehicleType = vehicleTypeInput ? vehicleTypeInput.value.trim() : '';
     var reservedDateInput = document.querySelector('input[name="reserved_date"]');
+    var reservedTimeInput = document.querySelector('input[name="reserved_time"]');
     var fareReservedDate = (isDeliveryReservationBasis() && pickupReservedDateInput && pickupReservedDateInput.value)
       ? pickupReservedDateInput.value
       : (reservedDateInput && reservedDateInput.value ? reservedDateInput.value : '');
+    // 도선 예상 도착시각 계산은 "출발지에서 실제 출발하는 시각"이 기준이라, 도착지 인도시간
+    // 기준 예약이면(역산된) pickup_reserved_time을, 아니면 reserved_time을 그대로 쓴다.
+    var fareReservedTime = (isDeliveryReservationBasis() && pickupReservedTimeInput && pickupReservedTimeInput.value)
+      ? pickupReservedTimeInput.value
+      : (reservedTimeInput && reservedTimeInput.value ? reservedTimeInput.value : '');
     var originAddressInput = document.getElementById('origin_address');
     var params = new URLSearchParams();
     if (branchId) params.set('branch_id', branchId);
@@ -699,9 +705,20 @@
     if (vehicleType) params.set('vehicle_type', vehicleType);
     if (originAddressInput && originAddressInput.value.trim()) params.set('origin_address', originAddressInput.value.trim());
     if (fareReservedDate) params.set('reserved_date', fareReservedDate);
+    if (fareReservedTime) params.set('reserved_time', fareReservedTime);
     if (routeMeta) {
       params.set('has_ferry_leg', routeMeta.hasFerryLeg ? '1' : '0');
       params.set('route_meta_json', JSON.stringify(routeMeta));
+      // 도선 구간의 육로 구간별(출발지→항구/항구→도착지) 거리·소요시간 — 기본요금을 구간별로
+      // 각각 계산해서 합산하고(기본요금이 두 번 청구되는 게 맞다는 확인을 받음), 예상 도착시각도
+      // 실제 배편 시간표를 조회해서 계산하기 위해 필요하다.
+      var seg = routeMeta.ferrySegments;
+      if (seg) {
+        if (Number.isFinite(seg.beforeDistanceM)) params.set('before_km', String((seg.beforeDistanceM / 1000).toFixed(2)));
+        if (Number.isFinite(seg.afterDistanceM)) params.set('after_km', String((seg.afterDistanceM / 1000).toFixed(2)));
+        if (Number.isFinite(seg.beforeDurationS)) params.set('before_minutes', String(Math.round(seg.beforeDurationS / 60)));
+        if (Number.isFinite(seg.afterDurationS)) params.set('after_minutes', String(Math.round(seg.afterDurationS / 60)));
+      }
     }
     return params;
   }
@@ -746,10 +763,13 @@
   function updateFerryFareTile(totalKm) {
     var ferryFareItem = document.getElementById('routeFerryFareItem');
     var ferryFareValue = document.getElementById('routeFerryFare');
+    var ferryArrivalItem = document.getElementById('routeFerryArrivalItem');
+    var ferryArrivalValue = document.getElementById('routeFerryArrival');
     if (!ferryFareItem || !ferryFareValue) return;
     var routeMeta = window.__aiIntakeRouteMeta || null;
     if (!routeMeta || !routeMeta.hasFerryLeg || totalKm == null) {
       ferryFareItem.style.display = 'none';
+      if (ferryArrivalItem) ferryArrivalItem.style.display = 'none';
       return;
     }
     var requestId = (ferryFareTileRequestId += 1);
@@ -759,6 +779,7 @@
         if (requestId !== ferryFareTileRequestId) return;
         if (!data || !data.enabled) {
           ferryFareItem.style.display = 'none';
+          if (ferryArrivalItem) ferryArrivalItem.style.display = 'none';
           return;
         }
         if (data.ferryNeedVehicleType) {
@@ -770,8 +791,21 @@
         } else {
           ferryFareItem.style.display = 'none';
         }
+        // 도착 예상 시각은 실제 배편 시간표를 조회해서 계산한 결과다 — 승선/하선 대기 등
+        // 여유시간은 화면에 별도로 보여주지 않고 이 값 자체에 이미 반영되어 있다.
+        if (ferryArrivalItem && ferryArrivalValue) {
+          if (data.ferryEstimate && data.ferryEstimate.finalArrivalLabel) {
+            ferryArrivalItem.style.display = '';
+            ferryArrivalValue.textContent = data.ferryEstimate.finalArrivalLabel + ' 도착 예정';
+          } else {
+            ferryArrivalItem.style.display = 'none';
+          }
+        }
       })
-      .catch(function () { ferryFareItem.style.display = 'none'; });
+      .catch(function () {
+        ferryFareItem.style.display = 'none';
+        if (ferryArrivalItem) ferryArrivalItem.style.display = 'none';
+      });
   }
 
   if (vehicleTypeInput) {

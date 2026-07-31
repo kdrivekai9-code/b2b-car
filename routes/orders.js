@@ -500,12 +500,21 @@ router.get('/fare-preview', asyncHandler(async (req, res) => {
   const branchId = req.query.branch_id || null;
   const distanceKm = parseFloat(req.query.distance_km);
   if (!Number.isFinite(distanceKm)) return res.json({ enabled: false });
+  const beforeKm = parseFloat(req.query.before_km);
+  const afterKm = parseFloat(req.query.after_km);
+  const beforeMinutes = parseFloat(req.query.before_minutes);
+  const afterMinutes = parseFloat(req.query.after_minutes);
   const result = await calculateFareWithFerry(branchId, distanceKm, {
     vehicleType: req.query.vehicle_type || req.query.vehicleType || '',
     originAddress: req.query.origin_address || req.query.originAddress || '',
     hasFerryLeg: req.query.has_ferry_leg === '1' || req.query.has_ferry_leg === 'true',
     reservedDate: req.query.reserved_date || null,
+    reservedTime: req.query.reserved_time || null,
     dayType: req.query.day_type || req.query.dayType || '',
+    beforeKm: Number.isFinite(beforeKm) ? beforeKm : undefined,
+    afterKm: Number.isFinite(afterKm) ? afterKm : undefined,
+    beforeMinutes: Number.isFinite(beforeMinutes) ? beforeMinutes : undefined,
+    afterMinutes: Number.isFinite(afterMinutes) ? afterMinutes : undefined,
     routeMeta: (() => {
       if (!req.query.route_meta_json) return null;
       try { return JSON.parse(req.query.route_meta_json); } catch (e) { return null; }
