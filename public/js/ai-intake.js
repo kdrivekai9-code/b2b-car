@@ -24,7 +24,6 @@
   if (!textarea || !sendBtn || !messages) return;
 
   var CHAT_INPUT_COLLAPSED_HEIGHT = 64;
-  var CHAT_INPUT_MAX_HEIGHT = 180;
 
   function scrollMessagesToBottom() {
     messages.scrollTop = messages.scrollHeight;
@@ -34,10 +33,10 @@
     textarea.style.height = CHAT_INPUT_COLLAPSED_HEIGHT + 'px';
   }
 
-  function autoResizeChatInput() {
-    textarea.style.height = 'auto';
-    var next = Math.max(CHAT_INPUT_COLLAPSED_HEIGHT, Math.min(textarea.scrollHeight, CHAT_INPUT_MAX_HEIGHT));
-    textarea.style.height = next + 'px';
+  // 대화가 한 번이라도 시작되면(첫 메시지 전송, 또는 재방문 시 기존 대화 복원) 안내용 예시
+  // placeholder는 더 이상 보여줄 필요가 없다 — 그 뒤로는 빈 입력창만 보이게 한다.
+  function clearGuidePlaceholder() {
+    textarea.placeholder = '';
   }
 
   var REQUIRED_FIELDS = [
@@ -2486,7 +2485,7 @@
     // 박혀 있는데(빈 대화 첫 진입을 위한 것), 복원할 이전 대화가 있으면 그 안내 위에 그냥
     // 이어붙이기만 해서 매번 재진입할 때마다 안내 문구가 또 나오는 것처럼 보였다 — 실제 대화를
     // 복원하는 경우엔 이 안내를 지우고 시작한다.
-    if (existing.messages && existing.messages.length > 0) messages.innerHTML = '';
+    if (existing.messages && existing.messages.length > 0) { messages.innerHTML = ''; clearGuidePlaceholder(); }
     (existing.messages || []).forEach(function (m) {
       if (m.id > lastPolledId) lastPolledId = m.id;
       // 사용자 메시지가 나오면 새 턴의 시작이므로, 그 앞 턴의 마지막 봇 말풍선 시간은 그대로 둔
@@ -2524,6 +2523,7 @@
     addBubble(text, 'user');
     touchAiActivity(true);
     textarea.value = '';
+    clearGuidePlaceholder();
     collapseChatInput();
     sendBtn.dataset.processing = '1';
     updateSendButton();
@@ -2702,7 +2702,6 @@
     }
   });
   textarea.addEventListener('input', function () {
-    autoResizeChatInput();
     updateSendButton();
     touchAiActivity(false);
   });

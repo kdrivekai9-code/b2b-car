@@ -503,7 +503,7 @@ form .field.full{flex-basis:100%;}
 .ai-quick-reply-chip:hover{background:var(--blue);color:#fff;}
 
 .ai-chat-input-row{position:relative;display:flex;flex-direction:column;}
-.ai-chat-input-row textarea{min-height:64px;resize:vertical;font-family:inherit;font-size:13px;padding:10px 90px 42px 12px;border:1px solid var(--border);border-radius:12px;background:#fff;}
+.ai-chat-input-row textarea{height:64px;resize:none;overflow-y:auto;font-family:inherit;font-size:13px;padding:10px 90px 42px 12px;border:1px solid var(--border);border-radius:12px;background:#fff;}
 .ai-send-btn{position:absolute;right:10px;bottom:10px;display:grid;place-items:center;width:30px;height:30px;padding:0;border:0;border-radius:50%;background:#151922;color:#fff;font-family:inherit;font-size:20px;font-weight:700;line-height:1;cursor:pointer;transition:var(--transition);}
 .ai-send-btn:hover:not(:disabled){transform:translateY(-1px);background:#000;box-shadow:0 4px 10px rgba(15,23,42,.25);}
 .ai-send-btn:active:not(:disabled){transform:translateY(0);}
