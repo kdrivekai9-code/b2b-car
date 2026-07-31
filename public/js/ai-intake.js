@@ -1171,6 +1171,106 @@
     });
   }
 
+  function fetchFarePreview(distanceKm, hasFerryLeg, vehicleType) {
+    var qs = new URLSearchParams();
+    var branchId = val('branch_id');
+    if (branchId) qs.set('branch_id', branchId);
+    qs.set('distance_km', Math.max(0, distanceKm).toFixed(2));
+    qs.set('has_ferry_leg', hasFerryLeg ? '1' : '0');
+    if (vehicleType) qs.set('vehicle_type', vehicleType);
+    if (val('reserved_date')) qs.set('reserved_date', val('reserved_date'));
+    return fetch('/orders/fare-preview?' + qs.toString())
+      .then(function (res) { return res.json(); })
+      .catch(function () { return null; });
+  }
+
+  function formatHM(date) {
+    return pad2(date.getHours()) + '시 ' + pad2(date.getMinutes()) + '분';
+  }
+  function formatMDHM(date) {
+    return pad2(date.getMonth() + 1) + '월 ' + pad2(date.getDate()) + '일 ' + formatHM(date);
+  }
+  // 30분 버퍼까지 더한 뒤 소요시간 계산 오차를 감안해 10분 단위로 올림한다.
+  function roundUpToTenMinutes(date) {
+    var d = new Date(date.getTime());
+    var rounded = Math.ceil(d.getMinutes() / 10) * 10;
+    d.setSeconds(0, 0);
+    d.setMinutes(rounded);
+    return d;
+  }
+
+  // 제주도처럼 선박 이동이 필수인 구간의 요금 문의 — 실제 카카오 경로탐색 결과(routeMeta.
+  // ferrySegments)로 "출발지→승선항", "항해(도선료)", "하선항→도착지" 세 구간을 나눠 각각의
+  // 실제 거리 기준으로 요금을 조회하고, 출발지에서 지금 바로 출발한다고 가정했을 때 승선항
+  // 도착시간(+30분 여유)을 선박 출항시간으로 가정해 도착 예상 시각까지 계산해서 안내한다.
+  function announceDetailedFerryFare(ctx, routeMeta) {
+    var seg = routeMeta.ferrySegments;
+    var beforeKm = (seg.beforeDistanceM || 0) / 1000;
+    var afterKm = (seg.afterDistanceM || 0) / 1000;
+    var beforeMin = Math.round((seg.beforeDurationS || 0) / 60);
+    var ferryMin = Math.round((seg.ferryDurationS || 0) / 60);
+    var afterMin = Math.round((seg.afterDurationS || 0) / 60);
+
+    return Promise.all([
+      fetchFarePreview(beforeKm, false, ''),
+      fetchFarePreview(afterKm, false, ''),
+      fetchFarePreview(beforeKm + afterKm, true, ctx.vehicleType),
+    ]).then(function (results) {
+      var leg1 = results[0];
+      var leg3 = results[1];
+      var ferryCalc = results[2];
+
+      if (!leg1 || !leg1.enabled || !leg3 || !leg3.enabled || !ferryCalc || !ferryCalc.enabled) {
+        clearFareProgressLine();
+        var failText = '구간요금 조회 중 오류가 발생했습니다. 잠시 후 다시 시도하거나 상담원에게 문의해주세요.';
+        addBubble(failText, 'bot');
+        logBotMessage({ logText: failText, needsAgent: false, requestedFeature: null });
+        return { halted: true, fareText: failText };
+      }
+      finishFareProgressLine('4/4 구간요금 조회 완료');
+
+      var fare1 = Number(leg1.fare || 0);
+      var fare3 = Number(leg3.fare || 0);
+      var ferryFare = Number.isFinite(Number(ferryCalc.ferryFare)) ? Number(ferryCalc.ferryFare) : 0;
+      var totalFare = fare1 + ferryFare + fare3;
+      var dayTypeText = ferryCalc.ferryDayType === 'holiday' ? '주말 요금 적용' : '주중 요금 적용';
+      var fromPort = seg.fromPort || '승선항';
+      var toPort = seg.toPort || '하선항';
+
+      var now = new Date();
+      var boardTime = roundUpToTenMinutes(new Date(now.getTime() + (beforeMin + 30) * 60000));
+      var portArriveTime = new Date(boardTime.getTime() + ferryMin * 60000);
+      var finalArriveTime = new Date(portArriveTime.getTime() + afterMin * 60000);
+      var crossesDay = finalArriveTime.toDateString() !== now.toDateString();
+
+      var lines = [];
+      lines.push('구간1 : ' + (val('origin_address') || '출발지') + '에서 ' + fromPort + '까지 거리는 ' + beforeKm.toFixed(1) + 'km 이며 요금은 **' + fare1.toLocaleString('ko-KR') + '원** 입니다.(소요시간 ' + beforeMin + '분)');
+      lines.push('구간2 : ' + fromPort + ' **도선료**(' + ctx.vehicleType + ')는 ' + dayTypeText + ' **' + ferryFare.toLocaleString('ko-KR') + '원** 입니다.(소요시간 ' + ferryMin + '분, ' + formatHM(boardTime) + ' 도선-> ' + formatHM(portArriveTime) + ' 도착)');
+      lines.push('구간3 : ' + toPort + '에서 도착지 ' + (val('destination_address') || '도착지') + ' 까지 거리는 ' + afterKm.toFixed(1) + 'km 이며 요금은 ' + fare3.toLocaleString('ko-KR') + '원입니다.(' + afterMin + '분)');
+      lines.push('총 요금은 **' + totalFare.toLocaleString('ko-KR') + '**원이며 출발지 ' + formatHM(now) + ' 출발시 도착지에는 ' + (crossesDay ? formatMDHM(finalArriveTime) : formatHM(finalArriveTime)) + ' 도착 예상(가장 빠른 선박 예약가능시)됩니다.');
+
+      var msg = lines.join('\n');
+      addBubble(msg, 'bot');
+      logBotMessage({ logText: msg, needsAgent: false, requestedFeature: null });
+
+      if (ctx.inquiryId) {
+        updateInquiryEstimate(ctx.inquiryId, {
+          resolved_origin: val('origin_address'),
+          resolved_destination: val('destination_address'),
+          estimated_distance_km: beforeKm + afterKm,
+          estimated_fare: totalFare,
+          estimated_ferry_fare: ferryFare,
+          fare_source: (leg1.fallbackUsed || leg3.fallbackUsed) ? 'fallback_default' : 'branch',
+          has_ferry_leg: true,
+          ferry_legs_json: JSON.stringify(routeMeta.ferryLegs || []),
+        });
+      }
+
+      // 선박 이동이 필수인 구간이라 경유지 여부를 다시 물을 필요가 없어 질문을 생략한다.
+      return { halted: false, fareText: msg };
+    });
+  }
+
   // 구간요금 조회 → (필요 시 배편/차종 안내) → 경유지 질문까지 이어가는 부분 — 최초 조회(주소
   // 검증·거리계산을 막 끝낸 시점)와, 차종 질문에 답해서 재개하는 경우(ctx.isResume) 둘 다에서
   // 공유해서 쓴다. 재개 시에는 이미 보여준 배편 안내를 또 보여주지 않는다.
@@ -1203,6 +1303,14 @@
         logBotMessage({ logText: ferryText, needsAgent: false, requestedFeature: null });
       }
     }
+    // 제주도처럼 선박 이동이 필수인 구간이고 실제 구간별 거리·시간을 구했다면(routeMeta.
+    // ferrySegments), 차종을 알고 있는 시점부터는 구간별 상세 안내로 대체한다 — 이 경우 경유지
+    // 질문도 생략한다(선박이동이 필수라 경유지가 있어도 항로 자체는 바뀌지 않음). 차종을 아직
+    // 모르면(halt 필요) 아래 일반 흐름 그대로 차종만 묻는다.
+    if (routeMeta && routeMeta.hasFerryLeg && routeMeta.ferrySegments && ctx.vehicleType) {
+      return announceDetailedFerryFare(ctx, routeMeta);
+    }
+
     return Promise.resolve()
       .then(function () {
         return announceFareGuideFromDb({
@@ -1236,8 +1344,7 @@
         if (fareResult.ferryNeedVehicleType) {
           // 차종 질문은 announceFareGuideFromDb 안에서 이미 별도 말풍선(질문 색상)으로 남겼다 —
           // 여기서는 halt 신호만 돌려줘서 경유지 질문으로 이어지지 않고, 사용자가 차종을 답할
-          // 때까지 멈춘다. pendingFareVehicleTypeRoute에 재개에 필요한 값(주소검증/거리계산을
-          // 다시 반복하지 않도록 distanceKm까지)을 남겨둔다.
+          // 때까지 멈춘다. pendingFareVehicleTypeRoute에 재개에 필요한 값을 남겨둔다.
           pendingFareVehicleTypeRoute = {
             origin: ctx.origin,
             destination: ctx.destination,
@@ -1246,7 +1353,11 @@
           };
           return { halted: true, fareText: fareResult.text, needsVehicleType: true };
         }
-        stageBotMessage('경유지가 있으신가요? 있으면 경유지 주소를 알려주시면 다시 경유지 포함 요금을 안내해 드릴께요', true);
+        // 선박 이동이 필수인 구간(hasFerryLeg)은 경유지가 있어도 항로 자체가 바뀌지 않으므로
+        // 질문을 생략한다 — 그 외(일반 육로 구간)에는 기존대로 경유지를 물어본다.
+        if (!(routeMeta && routeMeta.hasFerryLeg)) {
+          stageBotMessage('경유지가 있으신가요? 있으면 경유지 주소를 알려주시면 다시 경유지 포함 요금을 안내해 드릴께요', true);
+        }
         return { halted: false, fareText: fareResult.text };
       });
   }

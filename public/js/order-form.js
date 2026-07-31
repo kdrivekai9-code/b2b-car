@@ -722,9 +722,9 @@
   }
 
   function setAiRouteMeta(meta) {
-    window.__aiIntakeRouteMeta = meta || { hasFerryLeg: false, ferryLegs: [] };
+    window.__aiIntakeRouteMeta = meta || { hasFerryLeg: false, ferryLegs: [], ferrySegments: null };
   }
-  setAiRouteMeta({ hasFerryLeg: false, ferryLegs: [] });
+  setAiRouteMeta({ hasFerryLeg: false, ferryLegs: [], ferrySegments: null });
   if (routePrioritySelect) {
     routePrioritySelect.addEventListener('change', function () {
       routePriority = routePrioritySelect.value;
@@ -750,7 +750,7 @@
       .then(function (res) { return res.ok ? res.json() : null; })
       .then(function (data) {
         if (!data || requestId !== directionsRequestId) return; // 오래된 응답 또는 실패 시 직선거리 fallback 유지
-        setAiRouteMeta({ hasFerryLeg: !!data.hasFerryLeg, ferryLegs: Array.isArray(data.ferryLegs) ? data.ferryLegs : [] });
+        setAiRouteMeta({ hasFerryLeg: !!data.hasFerryLeg, ferryLegs: Array.isArray(data.ferryLegs) ? data.ferryLegs : [], ferrySegments: data.ferrySegments || null });
         if (data.path && data.path.length > 1) {
           drawPolyline(data.path.map(function (c) { return new kakao.maps.LatLng(c[0], c[1]); }));
         }
@@ -761,7 +761,7 @@
         });
       })
       .catch(function () {
-        setAiRouteMeta({ hasFerryLeg: false, ferryLegs: [] });
+        setAiRouteMeta({ hasFerryLeg: false, ferryLegs: [], ferrySegments: null });
         /* 직선거리 fallback 유지 */
       });
   }
@@ -797,7 +797,7 @@
     }
     renderDistanceRows(points, straightKm);
     var straightTotal = straightKm.reduce(function (a, b) { return a + b; }, 0);
-    setAiRouteMeta({ hasFerryLeg: false, ferryLegs: [] });
+    setAiRouteMeta({ hasFerryLeg: false, ferryLegs: [], ferrySegments: null });
     renderRouteSummary(straightTotal, null, null, { mode: 'straight' });
 
     var bounds = new kakao.maps.LatLngBounds();

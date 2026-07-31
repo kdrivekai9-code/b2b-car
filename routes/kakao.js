@@ -138,6 +138,49 @@ function extractFerryLegs(route) {
   return legs;
 }
 
+// 차량 페리 항로(예: 완도-제주)에서는 카카오가 진입/진출 지점을 각각 별도 guide로 표시한다
+// (관측된 guidance: "페리항로 진입"/"페리항로 진출"). 진출 guide의 distance/duration이 그 두
+// 지점 사이 실제 페리 항해 구간 값과 정확히 일치한다(대전→서귀포 성산 실측 경로에서 진입 이전
+// 구간 296.4km/219분 + 페리 구간 97.2km/91분 + 진출 이후 구간 39.5km/49분 = 총 433.2km/359분
+// 으로, 카카오가 응답하는 총 거리·시간과 정확히 합산됨을 확인). 이를 이용해 "출발지→승선항",
+// "항해", "하선항→도착지" 세 구간으로 나눠 각각 실제 거리/소요시간을 계산할 수 있다.
+function extractFerrySegments(route) {
+  const flatGuides = [];
+  (route.sections || []).forEach((section) => {
+    (section.guides || []).forEach((guide) => flatGuides.push(guide));
+  });
+
+  let enterIdx = -1;
+  let exitIdx = -1;
+  for (let i = 0; i < flatGuides.length; i += 1) {
+    const guidance = String(flatGuides[i].guidance || '');
+    if (enterIdx === -1 && /페리항로\s*진입/.test(guidance)) {
+      enterIdx = i;
+    } else if (enterIdx !== -1 && exitIdx === -1 && /페리항로\s*진출/.test(guidance)) {
+      exitIdx = i;
+      break;
+    }
+  }
+  if (enterIdx === -1 || exitIdx === -1) return null;
+
+  const sumDist = (arr) => arr.reduce((s, g) => s + (Number.isFinite(g.distance) ? g.distance : 0), 0);
+  const sumDur = (arr) => arr.reduce((s, g) => s + (Number.isFinite(g.duration) ? g.duration : 0), 0);
+  const beforeGuides = flatGuides.slice(1, enterIdx + 1); // 출발지(index 0) 제외, 승선항 도착까지
+  const afterGuides = flatGuides.slice(exitIdx + 1); // 하선항 이후부터 목적지까지
+  const ferryGuide = flatGuides[exitIdx];
+
+  return {
+    fromPort: flatGuides[enterIdx].name || null,
+    toPort: flatGuides[exitIdx].name || null,
+    beforeDistanceM: sumDist(beforeGuides),
+    beforeDurationS: sumDur(beforeGuides),
+    ferryDistanceM: Number.isFinite(ferryGuide.distance) ? ferryGuide.distance : null,
+    ferryDurationS: Number.isFinite(ferryGuide.duration) ? ferryGuide.duration : null,
+    afterDistanceM: sumDist(afterGuides),
+    afterDurationS: sumDur(afterGuides),
+  };
+}
+
 const ADDRESS_CORRECTION_SCHEMA = {
   type: 'OBJECT',
   properties: {
@@ -313,6 +356,7 @@ router.get('/directions', asyncHandler(async (req, res) => {
   });
 
   const ferryLegs = extractFerryLegs(route);
+  const ferrySegments = ferryLegs.length > 0 ? extractFerrySegments(route) : null;
 
   res.json({
     totalDistance: route.summary.distance, // meters
@@ -321,6 +365,7 @@ router.get('/directions', asyncHandler(async (req, res) => {
     segments: (route.sections || []).map((s) => ({ distance: s.distance, duration: s.duration })),
     hasFerryLeg: ferryLegs.length > 0,
     ferryLegs,
+    ferrySegments,
     path,
     usedFuture: canUseFuture,
     departureTimeApplied: canUseFuture ? normalizedDeparture : null,
