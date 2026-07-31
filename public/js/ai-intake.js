@@ -520,6 +520,11 @@
     return null;
   }
 
+  function isDeliveryReservationBasis() {
+    var deliveryRadio = document.getElementById('reservation_basis_delivery');
+    return !!(deliveryRadio && deliveryRadio.checked);
+  }
+
   function applyReservationBasisByText(text) {
     var basis = detectReservationBasisFromText(text);
     if (!basis) return;
@@ -630,17 +635,19 @@
     var el = document.getElementById(id);
     var raw = el ? el.value : '';
     var normalized = raw.replace(/\s+/g, '');
+    var vehicleType = val('vehicle_type');
+    var typeSuffix = vehicleType ? (' (' + vehicleType + ')') : '';
     if (VEHICLE_NUMBER_RE.test(normalized)) {
       delete lastRejectedVehicleNumber[id];
       if (el) el.value = normalized;
-      addBubble(label + '는 ' + normalized + '(으)로 확인했습니다.', 'bot');
+      addBubble(label + '는 ' + normalized + typeSuffix + '(으)로 확인했습니다.', 'bot');
       noteProgress();
       return Promise.resolve(true);
     }
     if (normalized && lastRejectedVehicleNumber[id] === normalized) {
       delete lastRejectedVehicleNumber[id];
       if (el) el.value = normalized;
-      addBubble(label + '를 입력하신 대로 \'' + normalized + '\'(으)로 등록합니다.', 'bot');
+      addBubble(label + '를 입력하신 대로 \'' + normalized + '\'' + typeSuffix + '(으)로 등록합니다.', 'bot');
       noteProgress();
       return Promise.resolve(true);
     }
@@ -985,7 +992,11 @@
       var routeMeta = window.__aiIntakeRouteMeta || opts.routeMeta || null;
 
       var key = (branchId || 'fallback') + '|' + distanceKm.toFixed(1);
-      if (key === lastFareGuideKey) return null;
+      // 이미 같은 경로로 안내한 적이 있으면(중복 방지) null이 아니라 false를 돌려준다 — 호출부가
+      // "거리 계산이 아직 안 끝나서 대기 중"과 "이미 안내를 마쳤음"을 구분할 수 있어야, 이미
+      // 요금을 알려준 뒤에 "경로탐색이 완료되는 즉시 안내드릴게요" 같은 잘못된 대기 안내가
+      // 다시 뜨는 걸 막을 수 있다.
+      if (key === lastFareGuideKey) return false;
 
       var qs = new URLSearchParams();
       if (branchId) qs.set('branch_id', branchId);
@@ -1396,10 +1407,18 @@
       tasks.push(function () {
         var formattedDateTime = formatReservedDateTime(val('reserved_date'), val('reserved_time'));
         if (formattedDateTime) {
-          var pickupExpected = formatPickupExpectedTimeText();
-          var dtMsg = pickupExpected
-            ? ('예약일시는 **' + formattedDateTime + '** 도착이며\n출발지 픽업예상시간은 ' + pickupExpected + '입니다.')
-            : ('예약일시는 **' + formattedDateTime + '** 도착이며\n출발지 픽업예상시간은 경로 확정 후 계산됩니다.');
+          // "도착" 문구는 예약 기준이 실제로 도착지 인도시간 기준(delivery)일 때만 쓴다 —
+          // 메시지에 "출발/도착" 같은 기준 표현이 없어 detectReservationBasisFromText가 아무것도
+          // 못 정했을 때(기본값 pickup 유지)까지 항상 "도착"으로 안내하면 잘못된 정보가 된다.
+          var dtMsg;
+          if (isDeliveryReservationBasis()) {
+            var pickupExpected = formatPickupExpectedTimeText();
+            dtMsg = pickupExpected
+              ? ('예약일시는 **' + formattedDateTime + '** 도착이며\n출발지 픽업예상시간은 ' + pickupExpected + '입니다.')
+              : ('예약일시는 **' + formattedDateTime + '** 도착이며\n출발지 픽업예상시간은 경로 확정 후 계산됩니다.');
+          } else {
+            dtMsg = '예약일시는 **' + formattedDateTime + '**(으)로 확인했습니다.';
+          }
           if (newOrderType) dtMsg += '\n"' + ORDER_INTENT_LABELS[newOrderType] + '"로 확인되었습니다.';
           addBubble(dtMsg, 'bot');
         }
@@ -1482,6 +1501,7 @@
       var doneText = proceedAfterCollecting();
       if (val('origin_address') && val('destination_address')) {
         announceFareGuideFromDb().then(function (fareGuideText) {
+          if (fareGuideText === false) return; // 이미 같은 경로로 안내를 마쳤음 — 대기 안내 불필요
           if (fareGuideText) {
             logBotMessage({ logText: fareGuideText, needsAgent: false, requestedFeature: null });
             return;
