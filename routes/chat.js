@@ -499,6 +499,7 @@ router.get('/sessions/:id/intake-order', requireRole('admin'), asyncHandler(asyn
     payment_method_id: fields.payment_method_id || '',
     fare_amount: fields.fare_amount || '',
     waypoints: extractedWaypoints,
+    reservation_basis: (draft && draft.reservationBasis === 'delivery') ? 'delivery' : 'pickup',
   };
 
   res.json({
@@ -555,6 +556,7 @@ router.get('/sessions/:id', requireRole('admin'), asyncHandler(async (req, res) 
     payment_method_id: fields.payment_method_id || '',
     fare_amount: fields.fare_amount || '',
     waypoints: extractedWaypoints,
+    reservation_basis: (draft && draft.reservationBasis === 'delivery') ? 'delivery' : 'pickup',
   };
 
   res.render('chat/session_detail', {

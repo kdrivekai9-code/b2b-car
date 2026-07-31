@@ -1302,7 +1302,7 @@
                   addBubble(ferryText, 'bot');
                   logBotMessage({ logText: ferryText, needsAgent: false, requestedFeature: null });
                 }
-                stageBotMessage('경유지가 있으신가요? 있으면 경유지 주소를 알려주시면 다시 경유지 포함 요금을 안내해 드릴께요');
+                stageBotMessage('경유지가 있으신가요? 있으면 경유지 주소를 알려주시면 다시 경유지 포함 요금을 안내해 드릴께요', true);
                 return { halted: false, fareText: fareResult ? fareResult.text : null };
               });
           });

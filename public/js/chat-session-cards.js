@@ -244,12 +244,19 @@
     assignMeta.textContent = '담당: ' + (name || '미지정');
   }
 
+  // DB에는 "질문 말풍선"이라는 별도 플래그가 없으므로, AI 챗봇 쪽 관례(질문 문구는 항상 "?"로
+  // 끝남)를 그대로 휴리스틱으로 써서 봇 질문 말풍선에도 같은 파란 배경(.ai-bot-question)을 준다.
+  function isQuestionBubble(message) {
+    return message.sender === 'bot' && /\?\s*$/.test(String(message.message || '').trim());
+  }
+
   function messageBubbleHtml(message) {
     var who = senderClass[message.sender] || 'ai-bot';
     var label = senderLabel[message.sender] || message.sender;
     var time = formatChatTime(message.created_at);
     var readText = readStateText(message);
     var readClass = readText === '미읽음' ? ' unread' : '';
+    var bubbleClass = 'ai-chat-bubble ' + who + (isQuestionBubble(message) ? ' ai-bot-question' : '');
     var footerHtml = (time || readText)
       ? '<div class="bubble-footer">'
         + (time ? ('<div class="bubble-time">' + escapeHtml(time) + '</div>') : '')
@@ -257,7 +264,7 @@
         + '</div>'
       : '';
     return '<div class="ai-chat-item ' + who + '" data-id="' + message.id + '">'
-      + '<div class="ai-chat-bubble ' + who + '">'
+      + '<div class="' + bubbleClass + '">'
       + '<span class="bubble-label">' + escapeHtml(label) + '</span>'
       + escapeHtml(message.message || '')
       + '</div>'
@@ -574,6 +581,14 @@
     orderFareAmount.value = order.fare_amount || '';
     orderMemoCustomer.value = order.memo_customer || '';
     orderTransition.value = 'agent_active';
+
+    if (orderReservationBasisPickup && orderReservationBasisDelivery) {
+      var isDelivery = order.reservation_basis === 'delivery';
+      orderReservationBasisPickup.checked = !isDelivery;
+      orderReservationBasisDelivery.checked = isDelivery;
+      (isDelivery ? orderReservationBasisDelivery : orderReservationBasisPickup)
+        .dispatchEvent(new Event('change', { bubbles: true }));
+    }
 
     clearWaypoints();
     var waypoints = Array.isArray(order.waypoints) ? order.waypoints : [];

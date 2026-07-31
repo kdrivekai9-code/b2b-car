@@ -17,6 +17,11 @@ function readStateText(msg) {
   if (msg.sender === 'agent') return msg.read_by_user_at ? '읽음' : '미읽음';
   return '';
 }
+// DB에는 "질문 말풍선" 플래그가 없어, AI 챗봇 쪽 관례(질문 문구는 항상 "?"로 끝남)를
+// 휴리스틱으로 써서 봇 질문 말풍선에도 같은 파란 배경(.ai-bot-question)을 준다.
+function isQuestionBubble(msg) {
+  return msg.sender === 'bot' && /\?\s*$/.test(String(msg.message || '').trim());
+}
 %>
 
 <div class="page-head-row">
@@ -64,7 +69,7 @@ function readStateText(msg) {
         <% var senderClass = { user: 'ai-user', agent: 'ai-agent' }; %>
         <% messages.forEach(function(m){ %>
           <div class="ai-chat-item <%= senderClass[m.sender] || 'ai-bot' %>" data-id="<%= m.id %>">
-            <div class="ai-chat-bubble <%= senderClass[m.sender] || 'ai-bot' %>"><span class="bubble-label"><%= senderLabel[m.sender] || m.sender %></span><%= m.message %></div>
+            <div class="ai-chat-bubble <%= senderClass[m.sender] || 'ai-bot' %><%= isQuestionBubble(m) ? ' ai-bot-question' : '' %>"><span class="bubble-label"><%= senderLabel[m.sender] || m.sender %></span><%= m.message %></div>
             <div class="bubble-footer">
               <div class="bubble-time"><%= formatChatTime(m.created_at) %></div>
               <% if (readStateText(m)) { %>
@@ -127,6 +132,10 @@ function readStateText(msg) {
     return '';
   }
 
+  function isQuestionBubble(m) {
+    return m.sender === 'bot' && /\?\s*$/.test(String(m.message || '').trim());
+  }
+
   function appendMessage(m) {
     if (!m || m.id <= lastId) return;
     var who = classBySender[m.sender] || 'ai-bot';
@@ -135,7 +144,7 @@ function readStateText(msg) {
     item.dataset.id = m.id;
 
     var bubble = document.createElement('div');
-    bubble.className = 'ai-chat-bubble ' + who;
+    bubble.className = 'ai-chat-bubble ' + who + (isQuestionBubble(m) ? ' ai-bot-question' : '');
 
     var labelSpan = document.createElement('span');
     labelSpan.className = 'bubble-label';

@@ -417,7 +417,7 @@ form .field.full{flex-basis:100%;}
 /* PC 화면에서 카드 목록/대화창을 한 화면 안에 최대한 맞춘다 — 뷰포트 높이에서 상단 헤더/여백만큼을
    뺀 값으로 두 컬럼의 높이를 맞추고(align-items:stretch), 각 컬럼 내부에서만 스크롤되게 한다. */
 .chat-admin-layout{display:grid;grid-template-columns:360px minmax(0,1fr);gap:16px;align-items:start;height:auto;min-height:520px;}
-.chat-admin-card-list{height:auto;max-height:calc(100vh - 220px);overflow-y:auto;padding:12px;}
+.chat-admin-card-list{height:calc(100vh - 220px);overflow-y:auto;padding:12px;}
 .session-card-row{display:flex;gap:8px;align-items:stretch;margin-bottom:10px;}
 .session-card-item{width:100%;text-align:left;border:1px solid var(--border);background:#fff;border-radius:12px;padding:12px 12px 10px;cursor:pointer;transition:var(--transition);margin-bottom:10px;}
 .session-card-row .session-card-item{flex:1;min-width:0;margin-bottom:0;}
@@ -432,14 +432,19 @@ form .field.full{flex-basis:100%;}
 .session-card-meta{margin-top:8px;font-size:11px;color:var(--muted);}
 .chat-admin-viewer{height:auto;display:flex;flex-direction:column;min-height:0;}
 .chat-admin-viewer .chat-session-card{height:auto;flex:1;min-height:0;}
-.chat-admin-viewer-shell{display:grid;grid-template-columns:minmax(0,.82fr) minmax(430px,1.18fr);gap:14px;height:auto;min-height:0;align-items:start;}
-.chat-admin-conversation{display:flex;flex-direction:column;min-height:0;border:1px solid var(--border);border-radius:12px;background:#fff;padding:10px;}
-.chat-admin-conversation .chat-session-card{height:auto;min-height:220px;max-height:420px;}
-.chat-admin-intake{border:1px solid var(--border);border-radius:12px;background:#fff;padding:10px 10px 12px;overflow:visible;min-width:0;max-height:none;}
-.chat-admin-order-form{padding-right:2px;}
-.chat-admin-intake .chat-order-head{margin-bottom:6px;}
+.chat-admin-viewer-shell{display:grid;grid-template-columns:minmax(0,.82fr) minmax(430px,1.18fr);gap:20px;height:auto;min-height:0;align-items:start;}
+/* 상담 대화창은 좌측 카드 목록과 같은 뷰포트 기준 높이로 맞춰 자체 스크롤되고, 접수마무리는
+   높이 제한 없이 내용만큼 늘어나 페이지 스크롤로 전체를 볼 수 있게 한다. */
+.chat-admin-conversation{display:flex;flex-direction:column;min-height:0;height:calc(100vh - 220px);overflow-y:auto;border:1px solid var(--border);border-top:3px solid var(--blue);border-radius:12px;background:#fff;padding:0;box-shadow:var(--shadow-sm);}
+.chat-admin-conversation .chat-session-card{height:auto;min-height:370px;max-height:570px;margin:0 10px;}
+.chat-admin-conversation .chat-admin-viewer-actions,.chat-admin-conversation .chat-reply-row,.chat-admin-conversation .chat-inline-error{margin-left:10px;margin-right:10px;}
+.chat-admin-conversation .chat-admin-viewer-actions,.chat-admin-conversation .chat-reply-row{margin-bottom:10px;}
+.chat-admin-viewer-head{background:var(--tint);padding:10px 14px;border-radius:9px 9px 0 0;border-bottom:1px solid var(--border);margin:0 0 10px;}
+.chat-admin-intake{border:1px solid var(--border);border-top:3px solid var(--green);border-radius:12px;background:#fff;padding:0 0 12px;overflow:visible;min-width:0;height:auto;box-shadow:var(--shadow-sm);}
+.chat-admin-order-form{padding:0 10px 0 10px;}
+.chat-admin-intake .chat-order-head{background:#eef9f1;padding:10px 14px;border-radius:9px 9px 0 0;border-bottom:1px solid var(--border);margin:0 0 10px;}
 .chat-admin-intake .chat-order-head h2{margin:0 0 2px;}
-.chat-admin-intake .chat-order-head .page-sub{margin:0 0 6px;}
+.chat-admin-intake .chat-order-head .page-sub{margin:0;}
 .chat-admin-order-form .field{margin-bottom:8px;}
 .chat-admin-order-form .row{margin-bottom:0;}
 .chat-admin-order-form .chat-order-actions{margin-top:8px;padding-top:8px;}
@@ -479,7 +484,7 @@ form .field.full{flex-basis:100%;}
   .chat-admin-viewer-shell{grid-template-columns:1fr;height:auto;}
   .chat-admin-conversation{padding:8px;}
   .chat-admin-intake{padding:8px;border:1px solid var(--border);}
-  .chat-admin-viewer .chat-session-card{height:auto;min-height:220px;max-height:420px;flex:none;}
+  .chat-admin-viewer .chat-session-card{height:auto;min-height:370px;max-height:570px;flex:none;}
   .session-card-delete-btn{min-width:44px;padding:0 8px;}
   .chat-workspace-grid{grid-template-columns:1fr;}
   .chat-workspace-chat .chat-session-card{height:520px;}
