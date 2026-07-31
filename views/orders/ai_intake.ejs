@@ -127,16 +127,14 @@
             <div class="field" style="max-width:220px;"><label class="field-label-strong">출발지 연락처 <span class="required-mark" aria-hidden="true">*</span></label><input type="text" class="phone-input" id="origin_contact" name="origin_contact" placeholder="010-0000-0000" value="<%= order.origin_contact || '' %>"></div>
             <label class="checkline"><input type="checkbox" id="sameAsMyPhone"> 요청자(본인) 연락처와 동일</label>
           </div>
-          <div class="row" style="margin-top:8px;">
-            <div id="pickupPreviewBlock" class="field full" style="display:none; margin-bottom:0;">
-              <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; font-size:12px; line-height:1.5; color:var(--navy); font-weight:800;">
-                <span>출발지 픽업시간 <span class="required-mark" aria-hidden="true">*</span></span>
-                <span id="pickupPreviewValue">-</span>
-                <span id="deliveryRouteFormulaPreview" style="font-size:10px; color:var(--muted); font-weight:500;">(경로탐색 : -)</span>
-              </div>
+          <div id="pickupPreviewBlock" class="field full" style="display:none; margin-top:8px; margin-bottom:0;">
+            <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; font-size:12px; line-height:1.5; color:var(--navy); font-weight:800;">
+              <span>출발지 픽업시간 <span class="required-mark" aria-hidden="true">*</span></span>
+              <span id="pickupPreviewValue">-</span>
+              <span id="deliveryRouteFormulaPreview" style="font-size:10px; color:var(--muted); font-weight:500;">(경로탐색 : -)</span>
             </div>
           </div>
-          <div class="row" style="margin-top:8px;">
+          <div class="row" style="margin-top:8px; margin-bottom:0;">
             <div class="field"><label class="field-label-strong">차종<span class="required-mark" id="vehicleTypeRequiredMark" aria-hidden="true" style="display:none;"> *</span> (<span id="vehicleTypeOptionalText">선택</span>)</label><input type="text" id="vehicle_type" name="vehicle_type" placeholder="예: 카니발, 그랜저, 1톤" value="<%= order.vehicle_type || '' %>" autocomplete="off"><div id="vehicle_type_results" class="addr-results"></div></div>
             <div class="field"><label class="field-label-strong">출발지 차량번호 (선택)</label><input type="text" id="vehicle_number" name="vehicle_number" placeholder="예: 12가3456" value="<%= order.vehicle_number || '' %>"></div>
           </div>
@@ -171,8 +169,8 @@
       </div>
 
       <div class="ai-intake-section">
-        <div class="field full"><label class="field-label-strong">메모(기사전달사항)</label><textarea id="memo_customer" name="memo_customer" placeholder="예) 사고 이력 안내&#10;예) 스크래치 등 차량 관련 내용"><%= order.memo_customer || '' %></textarea></div>
-        <div class="field full"><label class="field-label-strong">업체 전달사항</label><textarea id="memo_billing" name="memo_billing" placeholder="예) 계산서/내역서 비고란에 'OOO'로 기재 요청"><%= order.memo_billing || '' %></textarea></div>
+        <div class="field full"><label class="field-label-strong">메모(기사전달사항)</label><textarea id="memo_customer" name="memo_customer" class="single-line-textarea" placeholder="예)차량인수증 사인받아서 출발지 주소로 보내주세요"><%= order.memo_customer || '' %></textarea></div>
+        <div class="field full"><label class="field-label-strong">업체 전달사항</label><textarea id="memo_billing" name="memo_billing" class="single-line-textarea" placeholder="예) 계산서/내역서 비고란에 'OOO'로 기재 요청"><%= order.memo_billing || '' %></textarea></div>
       </div>
 
       <% if (currentUser.role === 'admin') { %>

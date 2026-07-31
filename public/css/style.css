@@ -324,6 +324,7 @@ form .field.full{flex-basis:100%;}
 .ai-intake-grid .order-form-actions{margin-top:10px;padding-top:10px;}
 .ai-intake-grid textarea{min-height:52px;}
 .ai-intake-grid input,.ai-intake-grid select{padding:7px 10px;}
+.ai-intake-grid textarea.single-line-textarea{min-height:36px;height:36px;padding:8px 10px;resize:vertical;}
 .ai-intake-grid .addr-detail-input{margin-top:4px;}
 .ai-intake-grid .addr-tools{margin-top:4px;}
 .ai-intake-grid .checkline{margin-top:2px;}
