@@ -109,6 +109,14 @@
   // 도선료 계산에 차종이 필요해 요금문의 흐름이 멈춘 경우, 다음 메시지를 그 답으로 보고 이어가기
   // 위한 대기 상태 — { origin, destination }.
   var pendingFareVehicleTypeRoute = null;
+  // 한 번의 사용자 메시지에 여러 봇 말풍선이 연달아 나올 때(요금문의 등), 시간 표시는 그 턴의
+  // 마지막 말풍선 아래에만 남긴다 — 새 봇 말풍선이 추가될 때마다 직전 것의 시간을 지운다.
+  // 새 사용자 메시지 처리를 시작할 때(resetTurnBotRow) null로 되돌려 이전 턴의 마지막
+  // 말풍선(이미 시간이 남아있음)은 건드리지 않는다.
+  var lastBotRowInTurn = null;
+  function resetTurnBotRow() {
+    lastBotRowInTurn = null;
+  }
   var lastAnnouncedMemoText = '';
   var lastAnnouncedBillingMemoText = '';
   var lastAiActivityPingAt = 0;
@@ -325,7 +333,14 @@
       userText.textContent = text;
       div.appendChild(userText);
     }
-    appendBubbleRow(div, who, timeText);
+    var row = appendBubbleRow(div, who, timeText);
+    if (who === 'bot') {
+      if (lastBotRowInTurn) {
+        var prevTimeEl = lastBotRowInTurn.querySelector('.bubble-time');
+        if (prevTimeEl) prevTimeEl.style.display = 'none';
+      }
+      lastBotRowInTurn = row;
+    }
     if (who !== 'user') collapseChatInput();
     scrollMessagesToBottom();
   }
@@ -443,6 +458,7 @@
     sendBtn.dataset.processing = '1';
     updateSendButton();
     quickRepliesEl.style.display = 'none';
+    resetTurnBotRow();
     addBubble(phoneValue, 'user');
     document.getElementById(field.id).value = phoneValue;
     ensureSession()
@@ -1787,6 +1803,7 @@
   // 직접 타이핑해서 답한 것과 똑같이(사용자 말풍선 + 확인 말풍선 + 다음 질문 진행) 처리한다.
   function applyFavoriteAddress(fieldId, label, f) {
     var text = f.label + ' (' + f.address + ')';
+    resetTurnBotRow();
     addBubble(text, 'user');
     document.getElementById(fieldId).value = f.address;
     // 직접 타이핑한 답변(extractAndProcess)과 마찬가지로 서버에 먼저 남겨야 새로고침해도 이
@@ -2467,6 +2484,9 @@
     if (existing.messages && existing.messages.length > 0) messages.innerHTML = '';
     (existing.messages || []).forEach(function (m) {
       if (m.id > lastPolledId) lastPolledId = m.id;
+      // 사용자 메시지가 나오면 새 턴의 시작이므로, 그 앞 턴의 마지막 봇 말풍선 시간은 그대로 둔
+      // 채(더 이상 건드리지 않고) 다음 봇 말풍선부터 새로 추적을 시작한다.
+      if (m.sender === 'user') resetTurnBotRow();
       if (m.sender === 'agent') addBubble(m.message, 'agent', m.created_at);
       else if (m.sender === 'user') addBubble(m.message, 'user', m.created_at);
       // DB에는 "질문 말풍선" 플래그가 없어, 질문 문구는 항상 "?"로 끝난다는 관례를 휴리스틱으로
@@ -2495,6 +2515,7 @@
   function extractAndProcess() {
     var text = textarea.value.trim();
     if (!text || sendBtn.disabled) return;
+    resetTurnBotRow();
     addBubble(text, 'user');
     touchAiActivity(true);
     textarea.value = '';
