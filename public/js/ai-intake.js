@@ -1396,8 +1396,8 @@
       if (wpVehicle) lines.push('▪ 차량번호: ' + wpVehicle);
     });
     lines.push('▪ 도착지: ' + val('destination_address') + (val('destination_detail_address') ? ' ' + val('destination_detail_address') : '') + ' (' + val('destination_contact') + ')');
-    if (val('memo_customer')) lines.push('▪ 메모: ' + val('memo_customer'));
-    if (val('memo_billing')) lines.push('▪ 업체요청사항: ' + val('memo_billing'));
+    if (val('memo_customer')) lines.push('▪ 메모(기사전달사항): ' + val('memo_customer'));
+    if (val('memo_billing')) lines.push('▪ 업체 전달사항: ' + val('memo_billing'));
     return lines.join('\n');
   }
 
@@ -1551,7 +1551,7 @@
     if (resolvedBillingMemo && resolvedBillingMemo !== lastAnnouncedBillingMemoText) {
       tasks.push(function () {
         lastAnnouncedBillingMemoText = resolvedBillingMemo;
-        sayBot('업체요청사항은 \'' + resolvedBillingMemo + '\'입니다.');
+        sayBot('업체 전달사항은 \'' + resolvedBillingMemo + '\'입니다.');
         return null;
       });
     }
