@@ -846,10 +846,16 @@
     if (!pendingFareVehicleTypeRoute) return false;
     var route = pendingFareVehicleTypeRoute;
     pendingFareVehicleTypeRoute = null;
-    handleFareInquiryFlowFromText({
+    // 출발지/도착지/거리는 이미 첫 턴에서 확인·계산을 마쳤으므로 다시 검증하거나 그 확인
+    // 말풍선들을 반복해서 보여주지 않는다 — announceFareAndContinue로 바로 이어가서, 차종을
+    // 반영한 요금(과 필요하면 경유지 질문)만 새로 안내한다.
+    announceFareAndContinue({
       origin: route.origin,
       destination: route.destination,
       vehicleType: String(text || '').trim(),
+      inquiryId: route.inquiryId,
+      adminAreaOnly: route.adminAreaOnly,
+      isResume: true,
     }).then(function () { return null; });
     return true;
   }
@@ -1165,6 +1171,86 @@
     });
   }
 
+  // 구간요금 조회 → (필요 시 배편/차종 안내) → 경유지 질문까지 이어가는 부분 — 최초 조회(주소
+  // 검증·거리계산을 막 끝낸 시점)와, 차종 질문에 답해서 재개하는 경우(ctx.isResume) 둘 다에서
+  // 공유해서 쓴다. 재개 시에는 이미 보여준 배편 안내를 또 보여주지 않는다.
+  function announceFareAndContinue(ctx) {
+    updateFareProgressLine(4, '구간요금 조회 중입니다...');
+    var routeMeta = window.__aiIntakeRouteMeta || null;
+    var ferryLegs = (routeMeta && Array.isArray(routeMeta.ferryLegs)) ? routeMeta.ferryLegs : [];
+    // 배편 정보는 요금 API 응답을 기다릴 필요 없이 경로탐색 결과(routeMeta)만으로 이미 알 수
+    // 있다 — "왜 차종을 물어보는지" 납득할 수 있도록 구간요금/차종 질문보다 먼저 보여준다.
+    // 재개 턴(차종 답변 이후)에서는 이미 한 번 보여준 것이라 다시 보여주지 않는다.
+    if (!ctx.isResume) {
+      if (routeMeta && routeMeta.hasFerryLeg) {
+        var ferryBadgeText = '배편 이용 가능성이 높습니다.';
+        addBubble(ferryBadgeText, 'bot');
+        logBotMessage({ logText: ferryBadgeText, needsAgent: false, requestedFeature: null });
+      }
+      if (ferryLegs.length) {
+        var lines = ['선박 구간 정보가 확인되었습니다.'];
+        ferryLegs.forEach(function (leg, idx) {
+          var fromPort = (leg && leg.fromPort) ? String(leg.fromPort).trim() : '';
+          var toPort = (leg && leg.toPort) ? String(leg.toPort).trim() : '';
+          if (fromPort || toPort) {
+            lines.push((idx + 1) + ') 출발항: ' + (fromPort || '확인중') + ' / 도착항: ' + (toPort || '확인중'));
+          } else if (leg && leg.summary) {
+            lines.push((idx + 1) + ') ' + String(leg.summary));
+          }
+        });
+        var ferryText = lines.join('\n');
+        addBubble(ferryText, 'bot');
+        logBotMessage({ logText: ferryText, needsAgent: false, requestedFeature: null });
+      }
+    }
+    return Promise.resolve()
+      .then(function () {
+        return announceFareGuideFromDb({
+          adminAreaOnly: ctx.adminAreaOnly,
+          vehicleType: ctx.vehicleType,
+          routeMeta: routeMeta,
+          returnPayload: true,
+        });
+      })
+      .then(function (fareResult) {
+        if (!fareResult || !fareResult.text) {
+          clearFareProgressLine();
+          var failText = '구간요금 조회 중 오류가 발생했습니다. 잠시 후 다시 시도하거나 상담원에게 문의해주세요.';
+          addBubble(failText, 'bot');
+          logBotMessage({ logText: failText, needsAgent: false, requestedFeature: null });
+          return { halted: true, fareText: failText };
+        }
+        finishFareProgressLine('4/4 구간요금 조회 완료');
+        if (ctx.inquiryId) {
+          updateInquiryEstimate(ctx.inquiryId, {
+            resolved_origin: fareResult.resolvedOrigin || val('origin_address'),
+            resolved_destination: fareResult.resolvedDestination || val('destination_address'),
+            estimated_distance_km: fareResult.distanceKm,
+            estimated_fare: fareResult.totalFare || fareResult.fare,
+            estimated_ferry_fare: fareResult.ferryFare,
+            fare_source: fareResult.fareSource,
+            has_ferry_leg: !!(routeMeta && routeMeta.hasFerryLeg),
+            ferry_legs_json: ferryLegs.length ? JSON.stringify(ferryLegs) : null,
+          });
+        }
+        if (fareResult.ferryNeedVehicleType) {
+          // 차종 질문은 announceFareGuideFromDb 안에서 이미 별도 말풍선(질문 색상)으로 남겼다 —
+          // 여기서는 halt 신호만 돌려줘서 경유지 질문으로 이어지지 않고, 사용자가 차종을 답할
+          // 때까지 멈춘다. pendingFareVehicleTypeRoute에 재개에 필요한 값(주소검증/거리계산을
+          // 다시 반복하지 않도록 distanceKm까지)을 남겨둔다.
+          pendingFareVehicleTypeRoute = {
+            origin: ctx.origin,
+            destination: ctx.destination,
+            inquiryId: ctx.inquiryId,
+            adminAreaOnly: ctx.adminAreaOnly,
+          };
+          return { halted: true, fareText: fareResult.text, needsVehicleType: true };
+        }
+        stageBotMessage('경유지가 있으신가요? 있으면 경유지 주소를 알려주시면 다시 경유지 포함 요금을 안내해 드릴께요', true);
+        return { halted: false, fareText: fareResult.text };
+      });
+  }
+
   function handleFareInquiryFlowFromText(routeInfo) {
     var origin = routeInfo.origin;
     var destination = routeInfo.destination;
@@ -1239,72 +1325,14 @@
             addBubble(distanceDoneText, 'bot');
             logBotMessage({ logText: distanceDoneText, needsAgent: false, requestedFeature: null });
 
-            updateFareProgressLine(4, '구간요금 조회 중입니다...');
-            return Promise.resolve()
-              .then(function () {
-                return announceFareGuideFromDb({
-                  adminAreaOnly: adminAreaOnly,
-                  vehicleType: vehicleType,
-                  routeMeta: window.__aiIntakeRouteMeta || null,
-                  returnPayload: true,
-                });
-              })
-              .then(function (fareResult) {
-                if (!fareResult || !fareResult.text) {
-                  clearFareProgressLine();
-                  var failText = '구간요금 조회 중 오류가 발생했습니다. 잠시 후 다시 시도하거나 상담원에게 문의해주세요.';
-                  addBubble(failText, 'bot');
-                  logBotMessage({ logText: failText, needsAgent: false, requestedFeature: null });
-                  return { halted: true, fareText: failText };
-                }
-                finishFareProgressLine('4/4 구간요금 조회 완료');
-                if (fareResult && inquiryId) {
-                  var routeMeta = window.__aiIntakeRouteMeta || null;
-                  var ferryLegs = (routeMeta && Array.isArray(routeMeta.ferryLegs)) ? routeMeta.ferryLegs : [];
-                  updateInquiryEstimate(inquiryId, {
-                    resolved_origin: fareResult.resolvedOrigin || val('origin_address'),
-                    resolved_destination: fareResult.resolvedDestination || val('destination_address'),
-                    estimated_distance_km: fareResult.distanceKm,
-                    estimated_fare: fareResult.totalFare || fareResult.fare,
-                    estimated_ferry_fare: fareResult.ferryFare,
-                    fare_source: fareResult.fareSource,
-                    has_ferry_leg: !!(routeMeta && routeMeta.hasFerryLeg),
-                    ferry_legs_json: ferryLegs.length ? JSON.stringify(ferryLegs) : null,
-                  });
-                }
-                if (fareResult && fareResult.ferryNeedVehicleType) {
-                  // 차종 질문은 announceFareGuideFromDb 안에서 이미 별도 말풍선(질문 색상)으로
-                  // 남겼다 — 여기서는 halt 신호만 돌려줘서 배편 정보/경유지 질문으로 이어지지
-                  // 않고, 사용자가 차종을 답할 때까지 멈춘다. pendingFareVehicleTypeRoute에
-                  // origin/destination을 남겨둬서, 다음 메시지(차종 답변)가 오면
-                  // handleFareVehicleTypePendingReply가 이 요금문의를 그대로 이어간다.
-                  pendingFareVehicleTypeRoute = { origin: origin, destination: destination };
-                  return { halted: true, fareText: fareResult ? fareResult.text : null, needsVehicleType: true };
-                }
-                var routeMeta = window.__aiIntakeRouteMeta || null;
-                if (routeMeta && routeMeta.hasFerryLeg) {
-                  var ferryBadgeText = '배편 이용 가능성이 높습니다.';
-                  addBubble(ferryBadgeText, 'bot');
-                  logBotMessage({ logText: ferryBadgeText, needsAgent: false, requestedFeature: null });
-                }
-                if (routeMeta && Array.isArray(routeMeta.ferryLegs) && routeMeta.ferryLegs.length) {
-                  var lines = ['선박 구간 정보가 확인되었습니다.'];
-                  routeMeta.ferryLegs.forEach(function (leg, idx) {
-                    var fromPort = (leg && leg.fromPort) ? String(leg.fromPort).trim() : '';
-                    var toPort = (leg && leg.toPort) ? String(leg.toPort).trim() : '';
-                    if (fromPort || toPort) {
-                      lines.push((idx + 1) + ') 출발항: ' + (fromPort || '확인중') + ' / 도착항: ' + (toPort || '확인중'));
-                    } else if (leg && leg.summary) {
-                      lines.push((idx + 1) + ') ' + String(leg.summary));
-                    }
-                  });
-                  var ferryText = lines.join('\n');
-                  addBubble(ferryText, 'bot');
-                  logBotMessage({ logText: ferryText, needsAgent: false, requestedFeature: null });
-                }
-                stageBotMessage('경유지가 있으신가요? 있으면 경유지 주소를 알려주시면 다시 경유지 포함 요금을 안내해 드릴께요', true);
-                return { halted: false, fareText: fareResult ? fareResult.text : null };
-              });
+            return announceFareAndContinue({
+              origin: origin,
+              destination: destination,
+              vehicleType: vehicleType,
+              inquiryId: inquiryId,
+              adminAreaOnly: adminAreaOnly,
+              isResume: false,
+            });
           });
       })
       .then(function () {
