@@ -109,16 +109,18 @@
 
       <div class="ai-intake-section section-origin">
         <div class="field full">
-          <label class="field-label-strong">출발지 주소 <span class="required-mark" aria-hidden="true">*</span> <span class="confirm-badge" id="originConfirmBadge">✓ 지도확정</span></label>
+          <div class="field-label-row">
+            <label class="field-label-strong">출발지 주소 <span class="required-mark" aria-hidden="true">*</span> <span class="confirm-badge" id="originConfirmBadge">✓ 지도확정</span></label>
+            <label class="checkline"><input type="checkbox" class="direct-input-toggle" data-target="origin_address"> 직접 입력 (주소 검색 안됨)</label>
+          </div>
           <div class="addr-input-row">
             <input type="text" class="addr-input" id="origin_address" name="origin_address" required placeholder="도로명, 지번 또는 상호명으로 검색" value="<%= order.origin_address || '' %>">
             <button type="button" class="btn small secondary addr-search-btn" data-target="origin_address">🔍 검색</button>
-            <button type="button" class="btn small secondary map-view-btn" data-slot="origin" title="지도보기">🗺 지도보기</button>
+            <button type="button" class="btn small secondary map-view-btn" data-slot="origin" title="지도보기">지도보기</button>
           </div>
           <div id="origin_address_results" class="addr-results"></div>
-          <input type="text" class="addr-detail-input" id="origin_detail_address" name="origin_detail_address" placeholder="상세주소 입력 (건물명, 동/호수)" <%= order.origin_detail_address ? '' : 'disabled' %> value="<%= order.origin_detail_address || '' %>">
-          <div class="addr-tools">
-            <label class="checkline"><input type="checkbox" class="direct-input-toggle" data-target="origin_address"> 직접 입력 (주소 검색 안됨)</label>
+          <div class="addr-detail-row">
+            <input type="text" class="addr-detail-input" id="origin_detail_address" name="origin_detail_address" placeholder="상세주소 입력 (건물명, 동/호수)" <%= order.origin_detail_address ? '' : 'disabled' %> value="<%= order.origin_detail_address || '' %>">
             <button type="button" class="btn small secondary registered-addr-btn" data-target="origin_address">등록주소</button>
           </div>
           <div class="row" style="margin-top:8px;">
@@ -146,16 +148,18 @@
 
       <div class="ai-intake-section section-destination" style="margin-top:10px;">
         <div class="field full">
-          <label class="field-label-strong">도착지 주소 <span class="required-mark" aria-hidden="true">*</span> <span class="confirm-badge" id="destinationConfirmBadge">✓ 지도확정</span></label>
+          <div class="field-label-row">
+            <label class="field-label-strong">도착지 주소 <span class="required-mark" aria-hidden="true">*</span> <span class="confirm-badge" id="destinationConfirmBadge">✓ 지도확정</span></label>
+            <label class="checkline"><input type="checkbox" class="direct-input-toggle" data-target="destination_address"> 직접 입력 (주소 검색 안됨)</label>
+          </div>
           <div class="addr-input-row">
             <input type="text" class="addr-input" id="destination_address" name="destination_address" required placeholder="도로명, 지번 또는 상호명으로 검색" value="<%= order.destination_address || '' %>">
             <button type="button" class="btn small secondary addr-search-btn" data-target="destination_address">🔍 검색</button>
-            <button type="button" class="btn small secondary map-view-btn" data-slot="destination" title="지도보기">🗺 지도보기</button>
+            <button type="button" class="btn small secondary map-view-btn" data-slot="destination" title="지도보기">지도보기</button>
           </div>
           <div id="destination_address_results" class="addr-results"></div>
-          <input type="text" class="addr-detail-input" id="destination_detail_address" name="destination_detail_address" placeholder="상세주소 입력 (건물명, 동/호수)" <%= order.destination_detail_address ? '' : 'disabled' %> value="<%= order.destination_detail_address || '' %>">
-          <div class="addr-tools">
-            <label class="checkline"><input type="checkbox" class="direct-input-toggle" data-target="destination_address"> 직접 입력 (주소 검색 안됨)</label>
+          <div class="addr-detail-row">
+            <input type="text" class="addr-detail-input" id="destination_detail_address" name="destination_detail_address" placeholder="상세주소 입력 (건물명, 동/호수)" <%= order.destination_detail_address ? '' : 'disabled' %> value="<%= order.destination_detail_address || '' %>">
             <button type="button" class="btn small secondary registered-addr-btn" data-target="destination_address">등록주소</button>
           </div>
           <div class="field" style="margin-top:8px;">

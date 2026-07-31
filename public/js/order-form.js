@@ -256,7 +256,7 @@
       '<div class="addr-input-row">' +
       '<input type="text" class="addr-input" id="' + id + '_address" name="waypoints[]" placeholder="경유지 주소">' +
       '<button type="button" class="btn small secondary addr-search-btn" data-target="' + id + '_address">🔍 검색</button>' +
-      (hasLegend ? '' : '<button type="button" class="btn small secondary map-view-btn" data-slot="' + id + '" title="지도보기">🗺 지도보기</button>') +
+      (hasLegend ? '' : '<button type="button" class="btn small secondary map-view-btn" data-slot="' + id + '" title="지도보기">지도보기</button>') +
       '<button type="button" class="btn small secondary remove-waypoint-btn">삭제</button>' +
       '</div>' +
       '<div id="' + id + '_address_results" class="addr-results"></div>' +
