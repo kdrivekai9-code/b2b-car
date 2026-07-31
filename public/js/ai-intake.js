@@ -1271,12 +1271,12 @@
       var crossesDay = finalArriveTime.toDateString() !== now.toDateString();
 
       var lines = [];
-      lines.push('구간1 : ' + (val('origin_address') || '출발지') + '에서 ' + fromPort + '까지 거리는 ' + beforeKm.toFixed(1) + 'km 이며 요금은 **' + fare1.toLocaleString('ko-KR') + '원** 입니다.(소요시간 ' + beforeMin + '분)');
-      lines.push('구간2 : ' + fromPort + ' **도선료**(' + ctx.vehicleType + ')는 ' + dayTypeText + ' **' + ferryFare.toLocaleString('ko-KR') + '원** 입니다.(소요시간 ' + ferryMin + '분, ' + formatHM(boardTime) + ' 도선-> ' + formatHM(portArriveTime) + ' 도착)');
-      lines.push('구간3 : ' + toPort + '에서 도착지 ' + (val('destination_address') || '도착지') + ' 까지 거리는 ' + afterKm.toFixed(1) + 'km 이며 요금은 ' + fare3.toLocaleString('ko-KR') + '원입니다.(' + afterMin + '분)');
-      lines.push('총 요금은 **' + totalFare.toLocaleString('ko-KR') + '**원이며 출발지 ' + formatHM(now) + ' 출발시 도착지에는 ' + (crossesDay ? formatMDHM(finalArriveTime) : formatHM(finalArriveTime)) + ' 도착 예상(가장 빠른 선박 예약가능시)됩니다.');
+      lines.push('**구간1 : **' + (val('origin_address') || '출발지') + '에서 ' + fromPort + '까지 거리는 ' + beforeKm.toFixed(1) + 'km 이며 요금은 ' + fare1.toLocaleString('ko-KR') + '원 입니다.(소요시간 ' + beforeMin + '분)');
+      lines.push('**구간2 : **' + fromPort + ' 도선료(' + ctx.vehicleType + ')는 ' + dayTypeText + ' ' + ferryFare.toLocaleString('ko-KR') + '원 입니다.(소요시간 ' + ferryMin + '분, ' + formatHM(boardTime) + ' 도선-> ' + formatHM(portArriveTime) + ' 도착)');
+      lines.push('**구간3 : **' + toPort + '에서 도착지 ' + (val('destination_address') || '도착지') + ' 까지 거리는 ' + afterKm.toFixed(1) + 'km 이며 요금은 ' + fare3.toLocaleString('ko-KR') + '원입니다.(' + afterMin + '분)');
+      lines.push('**총 요금은 ' + totalFare.toLocaleString('ko-KR') + '원**이며 출발지 ' + formatHM(now) + ' 출발시 도착지에는 ' + (crossesDay ? formatMDHM(finalArriveTime) : formatHM(finalArriveTime)) + '(30분 추가 적용) 도착 가능 합니다.\n\n#정확한 도착시간은 배편 운항시간과 기사배정을 고려하여 최종적으로 수정될 수 있습니다.');
 
-      var msg = lines.join('\n');
+      var msg = lines.join('\n\n');
       addBubble(msg, 'bot');
       logBotMessage({ logText: msg, needsAgent: false, requestedFeature: null });
 
