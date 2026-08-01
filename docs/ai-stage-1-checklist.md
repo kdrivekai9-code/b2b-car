@@ -218,6 +218,21 @@ branch_manager/client 실측 등 남은 항목 참고).
 - [x] 단계 승인자 확인 완료 — 프로젝트 오너, 2026-08-01
 - [x] 다음 단계(오더 폼 전환) 착수 승인 — 프로젝트 오너, 2026-08-01
 
+## Production 전환 (2026-08-02)
+4개 플래그(`NEXT_STAGE1_DASHBOARD_ENABLED`/`NEXT_STAGE1_ORDERS_ENABLED`/
+`NEXT_STAGE1_INQUIRIES_ENABLED`/`NEXT_STAGE1_CHAT_SESSIONS_ENABLED`)를 프로젝트 오너
+승인 하에 production에 전부 ON으로 전환했다(순서: Stage 1 → 2 → 3). 전환 직후
+admin/branch_manager/client 3개 역할 × 4개 화면 실측 재확인(페이지 로드, 403 케이스,
+콘솔 에러 없음) — 전부 정상. 전환 직전 별도로 발견한 이슈(Postgres 커넥션 풀 고갈,
+아래 참고)를 먼저 해결한 뒤 진행했다. 이 시점부터 실사용자에게 React 버전이 노출된다.
+
+**전환 전 발견/해결한 인프라 이슈**: 10-브라우저 동시접속 부하 테스트 중
+`DATABASE_URL`이 Supabase Session Pooler(포트 5432, pool_size 15)를 쓰고 있어
+`EMAXCONNSESSION` 에러가 실제로 재현됨을 확인 — Transaction Pooler(포트 6543)로
+전환해 동일 부하에서 에러가 사라짐을 확인 후 production에 반영했다(`.env.example`
+참고). Stage 1 자체의 결함은 아니지만, 이후 모든 단계의 실사용 안정성에 영향을 주는
+사전 조건이라 여기 함께 기록한다.
+
 ## 판정
 - 판정 결과: [x] PASS  [ ] FAIL
 - 판정일시: 2026-08-01

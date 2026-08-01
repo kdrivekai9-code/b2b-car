@@ -104,6 +104,15 @@
    만들어 재배포해도 같은 alias만 갱신하는 방식으로 해결 — 앞으로의 Stage에서도 재사용
    가능한 인프라로 남긴다.
 
+## Production 전환 (2026-08-02)
+`NEXT_STAGE2_ORDER_FORM_ENABLED`를 프로젝트 오너 승인 하에 production ON으로 전환했다
+(Stage 1 다음, Stage 3 이전 순서). 전환 직후 실제 오더 생성을 production 쓰기 경로로
+end-to-end 실행해 정상 저장/리다이렉트 확인(OID1083), admin/branch_manager/client
+3개 역할 전부 `/orders/new` 폼 정상 렌더 확인. 전환 전 발견한 Postgres 커넥션 풀
+이슈(Session Pooler→Transaction Pooler 전환)는 `docs/ai-stage-1-checklist.md`의
+"Production 전환" 절 참고 — Stage 2
+자체 결함은 아니지만 이 전환의 안정성에도 영향을 주는 사전 조건이었다.
+
 ## 판정
 - 판정 결과: [x] PASS  [ ] FAIL
 - 판정일시: 2026-08-01
