@@ -31,13 +31,16 @@ export function proxy(req) {
     return NextResponse.rewrite(new URL('/api/index', req.url));
   }
 
-  // /chat/sessions는 같은 경로에 두 가지 완전히 다른 화면이 걸려있다: 기본(카드뷰, 실시간
-  // 채팅/답장/배정/삭제/오더등록폼 — Stage 1 범위 밖)과 ?view=list(읽기 전용 테이블만,
-  // Stage 1 대상). 그래서 플래그만으로는 못 가르고, view=list일 때만 + 플래그도 켜졌을
-  // 때만 React로 보낸다. 그 외(카드뷰 등)는 플래그 상태와 무관하게 항상 Express로 보낸다.
+  // /chat/sessions는 같은 경로에 두 가지 완전히 다른 화면이 걸려있다: ?view=list(읽기 전용
+  // 테이블, Stage 1)와 카드뷰(실시간 채팅/답장/배정/삭제/오더등록 링크, Stage 3) — 뷰 없이
+  // /chat/sessions만 요청하면 routes/chat.js(L404)와 동일하게 카드뷰로 취급한다. 각 뷰는
+  // 서로 다른 플래그로 독립적으로 게이팅한다.
   if (pathname === '/chat/sessions') {
-    const isListView = searchParams.get('view') === 'list';
-    if (isListView && process.env.NEXT_STAGE1_CHAT_SESSIONS_ENABLED === 'true') {
+    const view = searchParams.get('view') === 'list' ? 'list' : 'card';
+    if (view === 'list' && process.env.NEXT_STAGE1_CHAT_SESSIONS_ENABLED === 'true') {
+      return NextResponse.next();
+    }
+    if (view === 'card' && process.env.NEXT_STAGE3_CHAT_CARDS_ENABLED === 'true') {
       return NextResponse.next();
     }
     return NextResponse.rewrite(new URL('/api/index', req.url));

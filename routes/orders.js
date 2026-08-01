@@ -139,7 +139,7 @@ router.get('/data.json', asyncHandler(async (req, res) => {
   const data = await buildOrdersListData(scopeFilter(req), req.query);
   // EJS 버전은 res.locals.currentUser(서버 전역)로 지사 필터 노출 여부를 판단한다 —
   // JSON 응답에는 그 값이 없으므로 role만 별도로 실어준다(다른 정보는 안 실음).
-  res.json({ ...data, currentUserRole: req.session.user.role });
+  res.json({ ...data, currentUserRole: req.session.user.role, currentUser: req.session.user });
 }));
 
 // EJS 생성폼 라우트와 Next.js Stage 2 프리뷰(GET /orders/new/data.json)가 완전히 동일한
@@ -184,6 +184,7 @@ router.get('/new/data.json', asyncHandler(async (req, res) => {
     ...data,
     currentUserRole: req.session.user.role,
     currentUserPhone: req.session.user.phone || '',
+    currentUser: req.session.user,
   });
 }));
 

@@ -183,7 +183,7 @@ router.get('/', requireRole('admin', 'branch_manager'), asyncHandler(async (req,
 // 않는다(계약 변경 없음); React 페이지 쪽에서 그 HTML 403을 감지해 동일한 안내를 보여준다.
 router.get('/data.json', requireRole('admin', 'branch_manager'), asyncHandler(async (req, res) => {
   const data = await buildInquiriesListData(scopeFilter(req), req.query);
-  res.json(data);
+  res.json({ ...data, currentUser: req.session.user });
 }));
 
 router.get('/:id', requireRole('admin', 'branch_manager'), asyncHandler(async (req, res) => {

@@ -1,5 +1,6 @@
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
+import AppShell from '../_components/AppShell';
 
 // Stage 1 slice: reproduces routes/orders.js + views/orders/list.ejs behavior
 // (same data, same auth/scoping via /orders/data.json) as a React page.
@@ -52,7 +53,7 @@ export default async function OrdersListPage({ searchParams }) {
   }
 
   return (
-    <>
+    <AppShell currentUser={data.currentUser} activePath="/orders">
       <div className="page-head-row">
         <div>
           <h1 className="page-title">오더 리스트</h1>
@@ -155,6 +156,6 @@ export default async function OrdersListPage({ searchParams }) {
           </div>
         )}
       </section>
-    </>
+    </AppShell>
   );
 }

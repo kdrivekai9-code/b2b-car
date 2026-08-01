@@ -1,5 +1,6 @@
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
+import AppShell from '../_components/AppShell';
 
 // Stage 1 slice: reproduces routes/inquiries.js + views/inquiries/list.ejs behavior
 // (same data, same auth/scoping via /inquiries/data.json) as a React page.
@@ -41,7 +42,7 @@ export default async function InquiriesListPage({ searchParams }) {
   const { inquiries, filters } = data;
 
   return (
-    <>
+    <AppShell currentUser={data.currentUser} activePath="/inquiries">
       <div className="page-head-row">
         <div>
           <h1 className="page-title">문의 관리</h1>
@@ -109,6 +110,6 @@ export default async function InquiriesListPage({ searchParams }) {
           </table>
         </div>
       </div>
-    </>
+    </AppShell>
   );
 }

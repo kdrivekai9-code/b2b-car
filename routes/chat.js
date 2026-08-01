@@ -432,7 +432,19 @@ router.get('/sessions', requireRole('admin'), asyncHandler(async (req, res) => {
 // 카드뷰(실시간 채팅/답장/배정/삭제/오더등록폼)는 범위 밖이라 이 엔드포인트에 없다.
 router.get('/sessions/data.json', requireRole('admin'), asyncHandler(async (req, res) => {
   const sessions = await buildSessionListSessions();
-  res.json({ sessions });
+  res.json({ sessions, currentUser: req.session.user });
+}));
+
+// Next.js Stage 3 프리뷰(src/app/chat/sessions/page.js, view=card 대상)가 fetch()로
+// 호출하는 JSON 버전 — 카드뷰의 좌측 세션목록 + 온라인 상담원 배지에 필요한 초기 데이터.
+// 실시간 갱신은 이 엔드포인트가 아니라 클라이언트가 여는 EventSource(/sessions/:id/stream,
+// /agent-presence/stream)가 담당한다 — 이 라우트는 최초 로드/수동 새로고침 시에만 호출된다.
+router.get('/sessions/card-data.json', requireRole('admin'), asyncHandler(async (req, res) => {
+  const [sessions, onlineAgents] = await Promise.all([
+    buildSessionListSessions(),
+    listOnlineAgentNames(),
+  ]);
+  res.json({ sessions, onlineAgents, currentUser: req.session.user });
 }));
 
 // ---------------- 관리자: 카드뷰용 메시지 지연 로딩 ----------------

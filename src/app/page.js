@@ -1,6 +1,7 @@
 import { Fragment } from 'react';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
+import AppShell from './_components/AppShell';
 
 // Stage 1 slice: reproduces routes/dashboard.js + views/dashboard.ejs behavior
 // (same data, same auth/scoping via /dashboard/data.json) as a React page.
@@ -43,7 +44,7 @@ export default async function DashboardPage({ searchParams }) {
   const hourMax = Math.max(1, ...data.hourly);
 
   return (
-    <>
+    <AppShell currentUser={data.currentUser} activePath="/">
       <div className="page-head-row">
         <div>
           <h1 className="page-title">통합 대시보드</h1>
@@ -209,6 +210,6 @@ export default async function DashboardPage({ searchParams }) {
           </table>
         </div>
       </div>
-    </>
+    </AppShell>
   );
 }

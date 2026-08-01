@@ -1,12 +1,13 @@
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
+import AppShell from '../../_components/AppShell';
+import CardBoard from './CardBoard';
 
-// Stage 1 slice: reproduces the READ-ONLY portion of routes/chat.js's GET /sessions
-// (view=list mode only) + views/chat/session_list.ejs's list-view table.
-// Only reached when NEXT_STAGE1_CHAT_SESSIONS_ENABLED=true AND ?view=list
-// (see src/proxy.js — the default card view, with its live chat viewer, reply form,
-// agent assignment, delete/bulk-delete, and embedded order-intake form, always stays
-// on the legacy Express page regardless of the flag; none of that is reproduced here).
+// Stage 1 슬라이스: view=list(읽기 전용 테이블)만 다뤘다. Stage 3에서 카드뷰(?view=card 또는
+// view 없음, routes/chat.js L404와 동일하게 기본값을 card로 취급)를 추가했다 — 실시간
+// 채팅/답장/배정/삭제 + 오더등록 링크 포함. session_detail.ejs(상세페이지)는 이번에도
+// 범위 밖으로 Express에 남는다("상세 페이지 열기" 링크는 Next에 페이지가 없어 자동으로
+// Express로 fallback rewrite된다). 두 뷰 모두 src/proxy.js에서 각자 다른 플래그로 게이팅.
 export const dynamic = 'force-dynamic';
 export const preferredRegion = 'icn1';
 export const maxDuration = 30;
@@ -14,12 +15,15 @@ export const maxDuration = 30;
 const STATUS_LABEL = { bot: '봇 응대중', needs_agent: '상담원 호출', agent_active: '상담원 응대중', closed: '종료' };
 const STATUS_BADGE = { bot: 'gray', needs_agent: 'red', agent_active: 'blue', closed: 'dark' };
 
-export default async function ChatSessionListPage() {
+export default async function ChatSessionListPage({ searchParams }) {
+  const sp = await searchParams;
+  const view = sp.view === 'list' ? 'list' : 'card';
   const hdrs = await headers();
   const host = hdrs.get('host');
   const proto = hdrs.get('x-forwarded-proto') || 'https';
 
-  const res = await fetch(`${proto}://${host}/chat/sessions/data.json`, {
+  const dataPath = view === 'card' ? '/chat/sessions/card-data.json' : '/chat/sessions/data.json';
+  const res = await fetch(`${proto}://${host}${dataPath}`, {
     headers: { cookie: hdrs.get('cookie') || '', 'X-Requested-With': 'fetch' },
     cache: 'no-store',
   });
@@ -38,10 +42,20 @@ export default async function ChatSessionListPage() {
   }
   if (!res.ok) throw new Error('상담 세션 목록을 불러오지 못했습니다 (' + res.status + ')');
 
-  const { sessions } = await res.json();
+  const data = await res.json();
+
+  if (view === 'card') {
+    return (
+      <AppShell currentUser={data.currentUser} activePath="/chat/sessions">
+        <CardBoard initialSessions={data.sessions} initialOnlineAgents={data.onlineAgents} currentUser={data.currentUser} />
+      </AppShell>
+    );
+  }
+
+  const { sessions } = data;
 
   return (
-    <>
+    <AppShell currentUser={data.currentUser} activePath="/chat/sessions">
       <div className="page-head-row">
         <div>
           <h1 className="page-title">상담 관리</h1>
@@ -79,6 +93,6 @@ export default async function ChatSessionListPage() {
           </table>
         </div>
       </div>
-    </>
+    </AppShell>
   );
 }

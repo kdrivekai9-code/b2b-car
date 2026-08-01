@@ -147,7 +147,7 @@ router.get('/', asyncHandler(async (req, res) => {
 // (router.use 위쪽에 이미 적용됨)와 같은 scopeFilter/쿼리/집계를 그대로 재사용한다.
 router.get('/dashboard/data.json', asyncHandler(async (req, res) => {
   const data = await buildDashboardData(scopeFilter(req), req.query);
-  res.json(data);
+  res.json({ ...data, currentUser: req.session.user });
 }));
 
 module.exports = router;

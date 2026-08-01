@@ -1,6 +1,7 @@
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import OrderForm from './OrderForm';
+import AppShell from '../../_components/AppShell';
 
 // Stage 2 slice: reproduces routes/orders.js's GET /orders/new + POST /orders (create only —
 // there is no "edit order" flow in the legacy app to migrate). Only reached when
@@ -25,7 +26,7 @@ export default async function NewOrderPage() {
   const data = await res.json();
 
   return (
-    <>
+    <AppShell currentUser={data.currentUser} activePath="/orders/new">
       <div className="page-head-row page-heading">
         <div>
           <h1 className="page-title">오더 등록</h1>
@@ -33,6 +34,6 @@ export default async function NewOrderPage() {
         <div className="page-heading-meta">필수 항목부터 입력해 주세요 (Next.js 프리뷰)</div>
       </div>
       <OrderForm initialData={data} />
-    </>
+    </AppShell>
   );
 }
