@@ -15,7 +15,7 @@ function isActive(activePath, prefix, exact) {
   return activePath.startsWith(prefix);
 }
 
-export default function AppShell({ currentUser, activePath, children }) {
+export default function AppShell({ currentUser, activePath, topNav = false, children }) {
   const roleLabel = currentUser ? ROLE_LABEL[currentUser.role] || '' : '';
   const gradeLabel = currentUser && currentUser.role === 'client' && currentUser.grade
     ? ' · ' + (GRADE_LABEL[currentUser.grade] || '')
@@ -24,9 +24,9 @@ export default function AppShell({ currentUser, activePath, children }) {
   const isAdminOrBranchManager = currentUser && (currentUser.role === 'admin' || currentUser.role === 'branch_manager');
 
   return (
-    <div className="app">
-      <aside className="sidebar" id="appSidebar">
-        <button type="button" className="sidebar-toggle" id="sidebarToggle" title="사이드바 접기/펼치기">☰</button>
+    <div className={`app${topNav ? ' app-top-nav' : ''}`}>
+      <aside className={`sidebar${topNav ? ' sidebar-top-nav' : ''}`} id="appSidebar" data-layout-mode={topNav ? 'top-nav' : undefined}>
+        {!topNav && <button type="button" className="sidebar-toggle" id="sidebarToggle" title="사이드바 접기/펼치기">☰</button>}
         <div className="brand">
           <span className="brand-icon">🚚</span>
           <span className="brand-text">B2B-CAR<small>탁송 B2B 통합·운영 플랫폼</small></span>
@@ -68,7 +68,7 @@ export default function AppShell({ currentUser, activePath, children }) {
             </>
           )}
         </nav>
-        <div className="sidebar-resize-handle" id="sidebarResizeHandle"></div>
+        {!topNav && <div className="sidebar-resize-handle" id="sidebarResizeHandle"></div>}
       </aside>
       <div className="main">
         <Script src="/js/push.js" strategy="afterInteractive" />

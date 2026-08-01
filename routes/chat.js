@@ -601,6 +601,25 @@ router.get('/sessions/:id', requireRole('admin'), asyncHandler(async (req, res) 
   });
 }));
 
+// Next.js Stage 3 슬라이스 2 프리뷰(src/app/chat/sessions/[id]/page.js)가 fetch()로
+// 호출하는 JSON 버전 — 세션 메타 + 담당자 지정용 admin 유저 목록만 반환한다(메시지는
+// 카드뷰와 동일하게 GET /sessions/:id/messages를 별도로 호출, 접수 마무리 폼은 이번
+// 슬라이스 범위 밖이라 branches/groups/paymentMethods/intakeOrder는 싣지 않는다).
+router.get('/sessions/:id/data.json', requireRole('admin'), asyncHandler(async (req, res) => {
+  const session = await db.get(`
+    SELECT cs.id, cs.status, cs.assigned_agent_id, cs.requested_feature, cs.created_at, cs.updated_at,
+      u.name AS user_name, u.role AS user_role, u.phone AS user_phone,
+      a.name AS assigned_agent_name
+    FROM chat_sessions cs
+    LEFT JOIN users u ON u.id = cs.user_id
+    LEFT JOIN users a ON a.id = cs.assigned_agent_id
+    WHERE cs.id = ?
+  `, [req.params.id]);
+  if (!session) return res.status(404).json({ error: '세션을 찾을 수 없습니다.' });
+  const agents = await db.all("SELECT id, name FROM users WHERE role = 'admin' AND status = 'active' ORDER BY name");
+  res.json({ session, agents, currentUser: req.session.user });
+}));
+
 router.post('/sessions/:id/assign-self', requireRole('admin'), asyncHandler(async (req, res) => {
   const session = await db.get(`
     SELECT cs.id, cs.status, cs.assigned_agent_id, a.name AS assigned_agent_name
@@ -649,15 +668,26 @@ router.post('/sessions/:id/assign', requireRole('admin'), asyncHandler(async (re
     LEFT JOIN users a ON a.id = cs.assigned_agent_id
     WHERE cs.id = ?
   `, [req.params.id]);
-  if (!session) return res.status(404).send('세션을 찾을 수 없습니다.');
+  const wantsJson = wantsJsonResponse(req);
+  if (!session) {
+    if (wantsJson) return res.status(404).json({ error: '세션을 찾을 수 없습니다.' });
+    return res.status(404).send('세션을 찾을 수 없습니다.');
+  }
 
   const agentId = Number(req.body.agent_id);
-  if (!agentId) return res.redirect('/chat/sessions/' + req.params.id + '?error=' + encodeURIComponent('담당 상담원을 선택해주세요.'));
+  if (!agentId) {
+    if (wantsJson) return res.status(400).json({ error: '담당 상담원을 선택해주세요.' });
+    return res.redirect('/chat/sessions/' + req.params.id + '?error=' + encodeURIComponent('담당 상담원을 선택해주세요.'));
+  }
 
   const agent = await db.get("SELECT id, name FROM users WHERE id = ? AND role = 'admin' AND status = 'active'", [agentId]);
-  if (!agent) return res.redirect('/chat/sessions/' + req.params.id + '?error=' + encodeURIComponent('유효한 상담원이 아닙니다.'));
+  if (!agent) {
+    if (wantsJson) return res.status(400).json({ error: '유효한 상담원이 아닙니다.' });
+    return res.redirect('/chat/sessions/' + req.params.id + '?error=' + encodeURIComponent('유효한 상담원이 아닙니다.'));
+  }
 
   if (session.assigned_agent_id && Number(session.assigned_agent_id) === Number(agent.id)) {
+    if (wantsJson) return res.json({ ok: true, assignedAgentId: agent.id, assignedAgentName: agent.name, status: session.status });
     return res.redirect('/chat/sessions/' + req.params.id + '?notice=' + encodeURIComponent('이미 해당 상담원이 담당 중입니다.'));
   }
 
@@ -678,6 +708,7 @@ router.post('/sessions/:id/assign', requireRole('admin'), asyncHandler(async (re
   );
   broadcastMessageAsync(req.params.id, systemMsg);
   broadcastSessionListChangedAsync();
+  if (wantsJson) return res.json({ ok: true, assignedAgentId: agent.id, assignedAgentName: agent.name, status: session.status });
   res.redirect('/chat/sessions/' + req.params.id + '?notice=' + encodeURIComponent('담당 상담원이 지정되었습니다.'));
 }));
 
@@ -725,18 +756,28 @@ router.post('/sessions/:id/reply', requireRole('admin'), asyncHandler(async (req
 
 router.post('/sessions/:id/close', requireRole('admin'), asyncHandler(async (req, res) => {
   const existing = await db.get('SELECT id FROM chat_sessions WHERE id = ?', [req.params.id]);
-  if (!existing) return res.status(404).send('세션을 찾을 수 없습니다.');
+  const wantsJson = wantsJsonResponse(req);
+  if (!existing) {
+    if (wantsJson) return res.status(404).json({ error: '세션을 찾을 수 없습니다.' });
+    return res.status(404).send('세션을 찾을 수 없습니다.');
+  }
   await db.run(`UPDATE chat_sessions SET status = 'closed' WHERE id = ?`, [req.params.id]);
   broadcastSessionListChangedAsync();
+  if (wantsJson) return res.json({ ok: true, status: 'closed' });
   res.redirect('/chat/sessions');
 }));
 
 // 상담원 응대를 종료하고 다시 봇이 처리하도록 되돌린다.
 router.post('/sessions/:id/return-to-bot', requireRole('admin'), asyncHandler(async (req, res) => {
   const existing = await db.get('SELECT id FROM chat_sessions WHERE id = ?', [req.params.id]);
-  if (!existing) return res.status(404).send('세션을 찾을 수 없습니다.');
+  const wantsJson = wantsJsonResponse(req);
+  if (!existing) {
+    if (wantsJson) return res.status(404).json({ error: '세션을 찾을 수 없습니다.' });
+    return res.status(404).send('세션을 찾을 수 없습니다.');
+  }
   await db.run(`UPDATE chat_sessions SET status = 'bot', assigned_agent_id = NULL WHERE id = ?`, [req.params.id]);
   broadcastSessionListChangedAsync();
+  if (wantsJson) return res.json({ ok: true, status: 'bot' });
   res.redirect('/chat/sessions/' + req.params.id);
 }));
 

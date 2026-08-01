@@ -1,0 +1,120 @@
+'use client';
+
+import { useState } from 'react';
+import SessionViewer, { STATUS_LABEL, fetchJson } from './SessionViewer';
+
+const STATUS_BADGE = { bot: 'gray', needs_agent: 'red', agent_active: 'blue', closed: 'dark' };
+
+// session_detail.ejs 이식. 메시지/SSE/답장/담당지정(self)/삭제는 SessionViewer가 담당하고,
+// 이 화면 고유 기능 3개(다른 상담원 지정 드롭다운/종료/봇복귀)만 여기서 구현한다 — 카드뷰엔
+// 없는 기능들이다(조사 결과, session_detail.ejs L51-96 참고). "내가 담당하기"는
+// SessionViewer의 액션바에 이미 있어 중복 렌더링하지 않고, 이 화면 상단엔 "다른 상담원
+// 지정" 드롭다운만 별도로 둔다(legacy는 두 폼이 나란히 있었지만, 액션이 겹치는 걸 피하려고
+// 위치만 재배치 — 기능 자체는 동일).
+export default function SessionDetailView({ initialSession, agents, currentUser }) {
+  const [session, setSession] = useState(initialSession);
+  const [assignAgentId, setAssignAgentId] = useState('');
+  const [isAssigning, setIsAssigning] = useState(false);
+  const [actionError, setActionError] = useState('');
+
+  function applyPatch(patch) {
+    setSession((prev) => ({
+      ...prev,
+      ...(patch.status ? { status: patch.status } : {}),
+      ...(patch.assignedAgentId !== undefined ? { assigned_agent_id: patch.assignedAgentId } : {}),
+      ...(patch.assignedAgentName !== undefined ? { assigned_agent_name: patch.assignedAgentName } : {}),
+    }));
+  }
+
+  function assignToAgent(e) {
+    e.preventDefault();
+    if (!assignAgentId || isAssigning) return;
+    setIsAssigning(true);
+    setActionError('');
+    fetchJson(`/chat/sessions/${session.id}/assign`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: assignAgentId }),
+    })
+      .then((data) => {
+        applyPatch({ assignedAgentId: String(data.assignedAgentId), assignedAgentName: data.assignedAgentName });
+        setAssignAgentId('');
+      })
+      .catch((err) => setActionError(err.message || '담당자 지정에 실패했습니다.'))
+      .finally(() => setIsAssigning(false));
+  }
+
+  function closeSession() {
+    if (!window.confirm('이 상담을 종료하시겠습니까?')) return;
+    fetchJson(`/chat/sessions/${session.id}/close`, { method: 'POST' })
+      .then(() => window.location.assign('/chat/sessions'))
+      .catch((err) => setActionError(err.message || '상담 종료에 실패했습니다.'));
+  }
+
+  function returnToBot() {
+    fetchJson(`/chat/sessions/${session.id}/return-to-bot`, { method: 'POST' })
+      .then(() => applyPatch({ status: 'bot', assignedAgentId: '', assignedAgentName: '' }))
+      .catch((err) => setActionError(err.message || '봇 복귀에 실패했습니다.'));
+  }
+
+  const isClosed = session.status === 'closed';
+
+  return (
+    <>
+      <div className="page-head-row">
+        <div>
+          <h1 className="page-title">
+            상담 #{session.id} <span className={`badge ${STATUS_BADGE[session.status] || 'gray'}`}>{STATUS_LABEL[session.status] || session.status}</span>
+          </h1>
+          <p className="page-sub">고객: {session.user_name || '-'} ({session.user_role || '-'}){session.user_phone ? ` · ${session.user_phone}` : ''}</p>
+        </div>
+        <div className="page-head-actions">
+          <a className="btn secondary" href="/chat/sessions">← 목록으로</a>
+          <a className="btn secondary" href="/orders/ai-intake">AI 접수 화면</a>
+        </div>
+      </div>
+
+      <section className="card chat-workspace-chat">
+        <div className="session-meta">
+          <span>요청 기능: <b>{session.requested_feature || '-'}</b></span>
+          <span>담당 상담원: <b>{session.assigned_agent_name || '미배정'}</b></span>
+          <span>생성일시: <b>{session.created_at}</b></span>
+          <span>최근 업데이트: <b>{session.updated_at}</b></span>
+        </div>
+
+        {!isClosed && (
+          <form onSubmit={assignToAgent} className="session-meta" style={{ marginTop: -4 }}>
+            <label htmlFor="assign_agent_id" style={{ fontSize: 12, color: 'var(--muted)' }}>담당자 변경</label>
+            <select id="assign_agent_id" value={assignAgentId} onChange={(e) => setAssignAgentId(e.target.value)} required>
+              <option value="">상담원 선택</option>
+              {agents.map((a) => (
+                <option key={a.id} value={a.id}>{a.name}</option>
+              ))}
+            </select>
+            <button className="btn small secondary" type="submit" disabled={isAssigning || !assignAgentId}>지정</button>
+          </form>
+        )}
+        {actionError && <div className="chat-inline-error">{actionError}</div>}
+
+        <SessionViewer
+          sessionId={session.id}
+          status={session.status}
+          assignedAgentId={session.assigned_agent_id ? String(session.assigned_agent_id) : ''}
+          assignedAgentName={session.assigned_agent_name || ''}
+          currentUser={currentUser}
+          autoLoadAll
+          onStatusChange={applyPatch}
+          onDeleted={() => window.location.assign('/chat/sessions')}
+          extraActions={!isClosed && (
+            <>
+              {session.status === 'agent_active' && (
+                <button className="btn small secondary" type="button" onClick={returnToBot}>봇에게 되돌리기</button>
+              )}
+              <button className="btn small secondary" type="button" onClick={closeSession}>상담 종료</button>
+            </>
+          )}
+        />
+      </section>
+    </>
+  );
+}

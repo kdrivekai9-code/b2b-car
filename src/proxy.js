@@ -46,6 +46,23 @@ export function proxy(req) {
     return NextResponse.rewrite(new URL('/api/index', req.url));
   }
 
+  // /chat/sessions/:id는 상세페이지(Stage 3 슬라이스 2) — 숫자 세션 id일 때만 대상이다.
+  // 같은 한 세그먼트 접두사를 쓰는 /chat/sessions/data.json, /chat/sessions/card-data.json,
+  // /chat/sessions/needs-agent-summary, /chat/sessions/bulk-delete 같은 고정 서브경로도
+  // config.matcher의 '/chat/sessions/:id' 패턴에 전부 걸리므로(Next의 :id는 세그먼트
+  // 하나면 뭐든 매치, 숫자로 제한 안 됨), 이 분기에서 명시적으로 걸러 Express로 보내지
+  // 않으면 맨 아래 기본 return NextResponse.next()로 새 [id] 다이나믹 라우트에 잘못
+  // 매치되어버린다(실제로 겪은 버그 — /chat/sessions/needs-agent-summary가 세션 id
+  // "needs-agent-summary"로 취급되어 500 에러 발생).
+  const singleSegmentMatch = pathname.match(/^\/chat\/sessions\/([^/]+)$/);
+  if (singleSegmentMatch) {
+    const isNumericId = /^\d+$/.test(singleSegmentMatch[1]);
+    if (isNumericId && process.env.NEXT_STAGE3_CHAT_DETAIL_ENABLED === 'true') {
+      return NextResponse.next();
+    }
+    return NextResponse.rewrite(new URL('/api/index', req.url));
+  }
+
   const flagName = PATH_FLAGS[pathname];
   if (flagName && process.env[flagName] !== 'true') {
     return NextResponse.rewrite(new URL('/api/index', req.url));
@@ -55,4 +72,4 @@ export function proxy(req) {
 
 // Next's proxy bundler statically analyzes this export, so it's kept as a literal array
 // (a computed expression like Object.keys(PATH_FLAGS) may not be statically evaluable).
-export const config = { matcher: ['/', '/orders', '/inquiries', '/chat/sessions', '/orders/new'] };
+export const config = { matcher: ['/', '/orders', '/inquiries', '/chat/sessions', '/chat/sessions/:id', '/orders/new'] };
