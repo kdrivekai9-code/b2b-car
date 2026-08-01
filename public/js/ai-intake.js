@@ -928,20 +928,12 @@
       .then(function (res) { return res.json().catch(function () { return {}; }); })
       .then(function (data) { return data && data.id ? Number(data.id) : null; })
       .catch(function () {
-        var failText = '구간요금 조회 요청이 실패했습니다. 네트워크 상태를 확인한 뒤 다시 시도해주세요.';
-        addBubble(failText, 'bot');
-        if (opts.returnPayload) {
-          return {
-            text: failText,
-            distanceKm: distanceKm,
-            fare: null,
-            resolvedOrigin: origin,
-            resolvedDestination: destination,
-            fareSource: 'error',
-            fallbackUsed: false,
-          };
-        }
-        return failText;
+        // 이전에는 이 catch가 announceFareGuideFromDb에만 있는 opts/distanceKm/origin/destination을
+        // 참조하고 있었다(복사해오면서 남은 실수) — 실제로 요청이 실패하면 ReferenceError가 나서
+        // 실패 안내조차 못 띄우고 프로미스 체인이 그대로 끊겼다. 이 함수는 인콰이어리 생성 결과
+        // (id 또는 null)만 돌려주면 되므로 단순하게 정리한다.
+        sayBot('구간요금 조회 요청이 실패했습니다. 네트워크 상태를 확인한 뒤 다시 시도해주세요.');
+        return null;
       });
   }
 
@@ -1199,7 +1191,7 @@
     });
   }
 
-  function fetchFarePreview(distanceKm, hasFerryLeg, vehicleType) {
+  function fetchFarePreview(distanceKm, hasFerryLeg, vehicleType, extra) {
     var qs = new URLSearchParams();
     var branchId = val('branch_id');
     if (branchId) qs.set('branch_id', branchId);
@@ -1208,6 +1200,13 @@
     if (vehicleType) qs.set('vehicle_type', vehicleType);
     if (val('origin_address')) qs.set('origin_address', val('origin_address'));
     if (val('reserved_date')) qs.set('reserved_date', val('reserved_date'));
+    // 실제 배편 스케줄 기반 도착시간(ferryEstimate)은 서버가 reserved_time과 before/after_minutes를
+    // 함께 받아야 계산한다 — 구간요금만 필요한 일반 호출(구간1/구간3)에는 넘기지 않는다.
+    if (extra) {
+      if (extra.reservedTime) qs.set('reserved_time', extra.reservedTime);
+      if (Number.isFinite(extra.beforeMinutes)) qs.set('before_minutes', String(extra.beforeMinutes));
+      if (Number.isFinite(extra.afterMinutes)) qs.set('after_minutes', String(extra.afterMinutes));
+    }
     return fetch('/orders/fare-preview?' + qs.toString())
       .then(function (res) { return res.json(); })
       .catch(function () { return null; });
@@ -1243,7 +1242,11 @@
     return Promise.all([
       fetchFarePreview(beforeKm, false, ''),
       fetchFarePreview(afterKm, false, ''),
-      fetchFarePreview(beforeKm + afterKm, true, ctx.vehicleType),
+      fetchFarePreview(beforeKm + afterKm, true, ctx.vehicleType, {
+        reservedTime: val('reserved_time') || '',
+        beforeMinutes: beforeMin,
+        afterMinutes: afterMin,
+      }),
     ]).then(function (results) {
       var leg1 = results[0];
       var leg3 = results[1];
@@ -1266,17 +1269,34 @@
       var fromPort = seg.fromPort || '승선항';
       var toPort = seg.toPort || '하선항';
 
-      var now = new Date();
-      var boardTime = roundUpToTenMinutes(new Date(now.getTime() + (beforeMin + 30) * 60000));
-      var portArriveTime = new Date(boardTime.getTime() + ferryMin * 60000);
-      var finalArriveTime = new Date(portArriveTime.getTime() + afterMin * 60000);
-      var crossesDay = finalArriveTime.toDateString() !== now.toDateString();
+      // ferry_schedules에 등록된 실제 다음 배편 시각(estimateFerryArrival)이 있으면 그걸 그대로
+      // 쓴다 — 30분 여유시간은 이미 finalArrivalLabel 계산에 서버에서 반영되어 있으므로 화면에
+      // "(30분 추가 적용)" 같은 별도 안내 문구는 붙이지 않는다(실제 도착시간 값에만 반영).
+      // 스케줄 조회가 안 되는 경우(예약시각 미확정 등)에만 지금 출발한다고 가정한 근사치로 대체한다.
+      var estimate = ferryCalc.ferryEstimate;
+      var boardLabel, portArriveLabel, finalArriveLabel, totalLineTail;
+      if (estimate) {
+        boardLabel = estimate.boardingLabel;
+        portArriveLabel = estimate.portArrivalLabel;
+        finalArriveLabel = estimate.finalArrivalLabel;
+        totalLineTail = fromPort + ' ' + estimate.boardingLabel + ' 출항(' + (estimate.shipName || ctx.vehicleType) + ') 기준 도착지에는 ' + finalArriveLabel + ' 도착 가능 합니다.';
+      } else {
+        var now = new Date();
+        var boardTime = roundUpToTenMinutes(new Date(now.getTime() + (beforeMin + 30) * 60000));
+        var portArriveTime = new Date(boardTime.getTime() + ferryMin * 60000);
+        var finalArriveTime = new Date(portArriveTime.getTime() + afterMin * 60000);
+        var crossesDay = finalArriveTime.toDateString() !== now.toDateString();
+        boardLabel = formatHM(boardTime);
+        portArriveLabel = formatHM(portArriveTime);
+        finalArriveLabel = crossesDay ? formatMDHM(finalArriveTime) : formatHM(finalArriveTime);
+        totalLineTail = '출발지 ' + formatHM(now) + ' 출발시 도착지에는 ' + finalArriveLabel + ' 도착 가능 합니다.';
+      }
 
       var lines = [];
       lines.push('**구간1 : **' + (val('origin_address') || '출발지') + '에서 ' + fromPort + '까지 거리는 ' + beforeKm.toFixed(1) + 'km 이며 요금은 ' + fare1.toLocaleString('ko-KR') + '원 입니다.(소요시간 ' + beforeMin + '분)');
-      lines.push('**구간2 : **' + fromPort + ' 도선료(' + ctx.vehicleType + ')는 ' + dayTypeText + ' ' + ferryFare.toLocaleString('ko-KR') + '원 입니다.(소요시간 ' + ferryMin + '분, ' + formatHM(boardTime) + ' 도선-> ' + formatHM(portArriveTime) + ' 도착)');
+      lines.push('**구간2 : **' + fromPort + ' 도선료(' + ctx.vehicleType + ')는 ' + dayTypeText + ' ' + ferryFare.toLocaleString('ko-KR') + '원 입니다.(소요시간 ' + ferryMin + '분, ' + boardLabel + ' 도선-> ' + portArriveLabel + ' 도착)');
       lines.push('**구간3 : **' + toPort + '에서 도착지 ' + (val('destination_address') || '도착지') + ' 까지 거리는 ' + afterKm.toFixed(1) + 'km 이며 요금은 ' + fare3.toLocaleString('ko-KR') + '원입니다.(' + afterMin + '분)');
-      lines.push('**총 요금은 ' + totalFare.toLocaleString('ko-KR') + '원**이며 출발지 ' + formatHM(now) + ' 출발시 도착지에는 ' + (crossesDay ? formatMDHM(finalArriveTime) : formatHM(finalArriveTime)) + '(30분 추가 적용) 도착 가능 합니다.\n\n#정확한 도착시간은 배편 운항시간과 기사배정을 고려하여 최종적으로 수정될 수 있습니다.');
+      lines.push('**총 요금은 ' + totalFare.toLocaleString('ko-KR') + '원**이며 ' + totalLineTail + '\n\n#정확한 도착시간은 배편 운항시간과 기사배정을 고려하여 최종적으로 수정될 수 있습니다.');
 
       var msg = lines.join('\n\n');
       addBubble(msg, 'bot');
