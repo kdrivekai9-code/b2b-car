@@ -493,7 +493,7 @@
 
   function setField(id, value) {
     var el = document.getElementById(id);
-    if (el && value) { el.value = value; el.disabled = false; }
+    if (el && value) { el.value = value; el.disabled = false; el.style.display = ''; }
   }
 
   // 예약 시간은 시/분 드롭다운(분은 10분 단위 6개)으로 입력받지만, Gemini가 자연어("오후 2시 15분")에서
@@ -1520,7 +1520,7 @@
     var fields = draft.fields || {};
     DRAFT_FIELD_IDS.forEach(function (id) {
       var el = document.getElementById(id);
-      if (el && fields[id]) { el.value = fields[id]; el.disabled = false; }
+      if (el && fields[id]) { el.value = fields[id]; el.disabled = false; el.style.display = ''; }
     });
     if (window.__updateVehicleTypeRequirement) window.__updateVehicleTypeRequirement();
     syncReservedTimeSelectsFromHidden();
@@ -1907,6 +1907,14 @@
   // 구조화돼 있어 이 위험이 훨씬 낮으므로 그쪽은 그대로 isAgentRequest만 사용한다.
   function looksLikeOrderIntake(t) {
     return /\d{2,3}[-\s]?\d{3,4}[-\s]?\d{4}/.test(t) || /(^|[\n\s])(출발|출:|출\s|도착|도:|도\s|경유|경:|경\d)/.test(t);
+  }
+
+  // needs_agent 대기 중에 온 메시지가 원래 상담원을 부른 사유와 무관한 새 오더 요청처럼
+  // 보이는지 판단한다 — looksLikeOrderIntake보다 느슨하게(라벨/전화번호 없는 자연어 문장도)
+  // 잡아야 해서 탁송/예약 관련 키워드까지 함께 본다.
+  var NEW_ORDER_WHILE_WAITING_RE = /(탁송|접수|예약|대리|일일\s?기사|오더)/;
+  function looksLikeNewOrderWhileWaiting(t) {
+    return looksLikeOrderIntake(t) || NEW_ORDER_WHILE_WAITING_RE.test(t);
   }
 
   function escalateToAgent(requestedFeature) {
@@ -2481,6 +2489,10 @@
   function restoreExistingSession(existing) {
     sessionId = existing.id;
     sessionStatus = existing.status;
+    // needs_agent 상태는 그 자체가 "이미 안내를 보여준 적 있다"는 뜻이다 — 이 플래그가 브라우저
+    // 메모리에만 있어서 재접속/새로고침 때마다 초기화되면, 세션 상태는 그대로 needs_agent인데도
+    // 다음 메시지에서 "접수되었습니다" 안내가 또 뜨는 문제가 있었다.
+    if (existing.status === 'needs_agent') lastWaitingStatusShown = 'needs_agent';
     // 화면에는 항상 "오더접수 내용을 붙여넣거나..." 안내 말풍선이 서버 렌더링 시점에 이미 하나
     // 박혀 있는데(빈 대화 첫 진입을 위한 것), 복원할 이전 대화가 있으면 그 안내 위에 그냥
     // 이어붙이기만 해서 매번 재진입할 때마다 안내 문구가 또 나오는 것처럼 보였다 — 실제 대화를
@@ -2536,12 +2548,23 @@
           // 고객이 메시지를 보낼 때마다 별도 안내 없이 그대로 전달만 한다(이미 서버에 저장돼
           // 상담원이 볼 수 있음) — 매번 "대화 중입니다" 안내가 반복되는 게 불필요하다는 피드백 반영.
           // 아직 상담원이 붙지 않은 needs_agent 상태에서는, 이 상태로 처음 넘어온 메시지에서만
-          // 접수 안내를 보여주고 이후 반복해서 보여주지 않는다.
+          // 접수 안내를 보여주고 이후 반복해서 보여주지 않는다 — lastWaitingStatusShown은
+          // restoreExistingSession에서 세션 상태가 이미 needs_agent면 미리 세팅해두므로,
+          // 재접속(새로고침)해도 이 안내가 또 뜨지 않는다.
           if (status === 'needs_agent' && lastWaitingStatusShown !== status) {
             lastWaitingStatusShown = status;
             var waitingText = '상담원 연결 요청이 접수되었습니다. 상담원이 확인 후 답변드리겠습니다.';
             addBubble(waitingText, 'bot');
             logBotMessage({ logText: waitingText, needsAgent: false, requestedFeature: null });
+          } else if (status === 'needs_agent' && looksLikeNewOrderWhileWaiting(text)) {
+            // 아직 상담원이 배정되지 않은 상태에서 앞서 요청한 것과 무관해 보이는 새 오더성
+            // 메시지가 오면, 옛 "접수되었습니다" 안내를 그대로 반복하는 대신(내용과 안 맞아
+            // 혼란스러움) 새 오더는 별도 대화로 시작해야 한다고 명확히 안내한다 — 상담원 대기
+            // 중인 이 세션의 진행 상태(phase 등)를 그대로 재사용하면 엉뚱하게 섞일 수 있어서,
+            // 안전하게 "새 채팅"으로 유도하는 쪽을 택했다.
+            var newOrderHintText = '현재 상담원 연결 대기 중입니다. 남겨주신 내용은 상담원에게 함께 전달됩니다. 별도의 새 오더 접수를 원하시면 좌측 상단 메뉴에서 "새 채팅"으로 시작해주세요.';
+            addBubble(newOrderHintText, 'bot');
+            logBotMessage({ logText: newOrderHintText, needsAgent: false, requestedFeature: null });
           }
           return null;
         }
