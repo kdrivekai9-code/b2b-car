@@ -26,10 +26,12 @@ async function fetchOrdersInRange(scope, from, to) {
   return db.all(`SELECT * FROM orders ${whereSql}`, params);
 }
 
-router.get('/', asyncHandler(async (req, res) => {
-  const scope = scopeFilter(req);
-  const preset = req.query.period || 'all';
-  const { from, to } = periodRange(preset, req.query.from, req.query.to);
+// EJS 렌더 라우트와 Next.js 프리뷰(GET /dashboard/data.json)가 완전히 동일한 쿼리/스코핑/집계
+// 로직을 공유하도록 분리했다 — 인증/RBAC 로직을 두 곳에 중복 구현하지 않기 위함
+// (docs/ai-stage-migration-workorder.md Stage 1 원칙: 데이터 계약/세션/RBAC 유지).
+async function buildDashboardData(scope, query) {
+  const preset = query.period || 'all';
+  const { from, to } = periodRange(preset, query.from, query.to);
   const prevRange = previousPeriod(from, to);
 
   // 넷 다 서로 의존관계 없는 독립 조회라 병렬로 실행한다 — 가장 자주 열리는 페이지라
@@ -120,7 +122,7 @@ router.get('/', asyncHandler(async (req, res) => {
     }))
     .sort((a, b) => b.cnt - a.cnt);
 
-  res.render('dashboard', {
+  return {
     title: '통합 대시보드',
     totalOrders: orders.length, totalFare, unassigned, inProgress, completed, issues,
     counts, ORDER_STATUSES,
@@ -129,11 +131,23 @@ router.get('/', asyncHandler(async (req, res) => {
     branchCompare, statusMatrix, groupCompare,
     showBranchSections: currentUserIsMultiBranch(scope, branches),
     period: { preset, from, to, label: PRESET_LABELS[preset] || '전체 기간' },
-  });
-}));
+  };
+}
 
 function currentUserIsMultiBranch(scope, branches) {
   return !scope.branch_id && branches.length > 1;
 }
+
+router.get('/', asyncHandler(async (req, res) => {
+  const data = await buildDashboardData(scopeFilter(req), req.query);
+  res.render('dashboard', data);
+}));
+
+// Next.js Stage 1 프리뷰(app/page.js)가 fetch()로 호출하는 JSON 버전 — 같은 requireAuth
+// (router.use 위쪽에 이미 적용됨)와 같은 scopeFilter/쿼리/집계를 그대로 재사용한다.
+router.get('/dashboard/data.json', asyncHandler(async (req, res) => {
+  const data = await buildDashboardData(scopeFilter(req), req.query);
+  res.json(data);
+}));
 
 module.exports = router;

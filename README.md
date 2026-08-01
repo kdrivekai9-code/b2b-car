@@ -123,6 +123,14 @@ npm run e2e
 - 환경변수 변경: `npx vercel env add <NAME> production` (추가) / `npx vercel env rm <NAME> production` (삭제) 후 재배포 필요
 - `db.js`는 `process.env.VERCEL` 존재 여부로 커넥션 풀 크기를 자동 조절합니다(서버리스: 인스턴스당 max 3, 로컬: max 10).
 
+### Next.js 전환(Stage 1) 공존 구조
+`docs/ai-stage-migration-workorder.md`의 Stage 1 착수 슬라이스(대시보드)가 같은 Vercel 프로젝트에 통합되어 있습니다.
+
+- `vercel.json`에는 더 이상 전체 경로를 `/api/index`로 보내는 고정 rewrite가 없습니다 — 대신 `next.config.js`의 `rewrites().fallback`이 Next.js 자체 라우트(`app/`)나 정적파일로 못 찾는 모든 경로를 기존 Express 앱(`/api/index`)으로 흘려보냅니다. `/orders`, `/inquiries`, `/chat/sessions` 등 아직 안 옮긴 화면은 지금까지와 동일하게 Express가 처리합니다.
+- `middleware.js`가 정확히 `/` 경로만 가로채, 환경변수 `NEXT_STAGE1_DASHBOARD_ENABLED`가 `'true'`가 아니면 기존 Express 대시보드로 그대로 리라이트합니다(기본값 OFF = 동작 무변화). `'true'`일 때만 `app/page.js`(React)가 응답합니다.
+- `app/page.js`는 새 JSON 엔드포인트 `GET /dashboard/data.json`(`routes/dashboard.js`, 기존과 동일한 `requireAuth`/`scopeFilter` 적용)을 요청 쿠키를 그대로 실어 서버사이드에서 fetch합니다 — 세션/RBAC 검증 로직은 전부 기존 Express 코드 그대로이며 새로 구현하지 않았습니다.
+- 롤백: Vercel 환경변수에서 `NEXT_STAGE1_DASHBOARD_ENABLED`를 `false`(또는 미설정)로 되돌리고 재배포하면 즉시 기존 EJS 대시보드로 복귀합니다. 코드 되돌림이 필요 없습니다.
+
 ## 데모 계정
 | 역할 | 아이디 | 비밀번호 | 비고 |
 |---|---|---|---|

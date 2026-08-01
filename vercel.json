@@ -1,13 +1,11 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
   "functions": {
     "api/index.js": {
       "maxDuration": 300,
       "includeFiles": "{views,public}/**"
     }
   },
-  "regions": ["icn1"],
-  "rewrites": [
-    { "source": "/(.*)", "destination": "/api/index" }
-  ]
+  "regions": ["icn1"]
 }
