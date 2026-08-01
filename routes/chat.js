@@ -384,21 +384,28 @@ router.get('/sessions/needs-agent-summary', requireRole('admin'), asyncHandler(a
   res.json({ sessions: rows });
 }));
 
+// 목록(list/card 뷰 공통)이 쓰는 세션 조회만 따로 뺐다 — Next.js Stage 1 프리뷰(list 뷰의
+// 읽기 전용 테이블만 대상)는 이 데이터만 있으면 되고, 카드뷰 전용 데이터(onlineAgents,
+// branches 등 — 실시간 채팅/오더등록폼에서만 쓰임)는 필요 없다.
+async function buildSessionListSessions() {
+  return db.all(`
+    SELECT cs.*, u.name AS user_name, u.role AS user_role, u.phone AS user_phone,
+      a.name AS assigned_agent_name,
+      (SELECT message FROM chat_messages WHERE session_id = cs.id ORDER BY id DESC LIMIT 1) AS last_message,
+      (SELECT COUNT(*) FROM chat_messages WHERE session_id = cs.id) AS message_count
+    FROM chat_sessions cs
+    LEFT JOIN users u ON u.id = cs.user_id
+    LEFT JOIN users a ON a.id = cs.assigned_agent_id
+    ORDER BY (cs.status = 'needs_agent') DESC, cs.updated_at DESC
+  `);
+}
+
 router.get('/sessions', requireRole('admin'), asyncHandler(async (req, res) => {
   const view = req.query.view === 'list' ? 'list' : 'card';
   const notice = req.query.notice || null;
   const error = req.query.error || null;
   const [sessions, onlineAgents, branches, groups, paymentMethods, defaults] = await Promise.all([
-    db.all(`
-      SELECT cs.*, u.name AS user_name, u.role AS user_role, u.phone AS user_phone,
-        a.name AS assigned_agent_name,
-        (SELECT message FROM chat_messages WHERE session_id = cs.id ORDER BY id DESC LIMIT 1) AS last_message,
-        (SELECT COUNT(*) FROM chat_messages WHERE session_id = cs.id) AS message_count
-      FROM chat_sessions cs
-      LEFT JOIN users u ON u.id = cs.user_id
-      LEFT JOIN users a ON a.id = cs.assigned_agent_id
-      ORDER BY (cs.status = 'needs_agent') DESC, cs.updated_at DESC
-    `),
+    buildSessionListSessions(),
     listOnlineAgentNames(),
     db.all("SELECT id, name FROM branches WHERE status = 'active' ORDER BY name"),
     db.all('SELECT id, name FROM groups_tbl ORDER BY name'),
@@ -418,6 +425,14 @@ router.get('/sessions', requireRole('admin'), asyncHandler(async (req, res) => {
     defaultReservedDate: defaults.reserved_date,
     defaultReservedTime: defaults.reserved_time,
   });
+}));
+
+// Next.js Stage 1 프리뷰(src/app/chat/sessions/page.js, view=list만 대상)가 fetch()로
+// 호출하는 JSON 버전 — 같은 requireRole('admin')과 같은 세션 조회를 그대로 재사용한다.
+// 카드뷰(실시간 채팅/답장/배정/삭제/오더등록폼)는 범위 밖이라 이 엔드포인트에 없다.
+router.get('/sessions/data.json', requireRole('admin'), asyncHandler(async (req, res) => {
+  const sessions = await buildSessionListSessions();
+  res.json({ sessions });
 }));
 
 // ---------------- 관리자: 카드뷰용 메시지 지연 로딩 ----------------

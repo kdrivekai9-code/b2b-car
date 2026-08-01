@@ -124,11 +124,11 @@ npm run e2e
 - `db.js`는 `process.env.VERCEL` 존재 여부로 커넥션 풀 크기를 자동 조절합니다(서버리스: 인스턴스당 max 3, 로컬: max 10).
 
 ### Next.js 전환(Stage 1) 공존 구조
-`docs/ai-stage-migration-workorder.md`의 Stage 1 착수 슬라이스(대시보드, 오더 리스트, 문의 목록)가 같은 Vercel 프로젝트에 통합되어 있습니다. Next.js 관련 파일은 전부 `src/`(Next의 대체 루트) 아래에 있고, 이 디렉터리만 `src/package.json`(`"type":"module"`)으로 ESM을 씁니다 — 저장소 루트는 계속 `"type":"commonjs"`이고 기존 Express 코드는 전혀 안 바뀝니다.
+`docs/ai-stage-migration-workorder.md`의 Stage 1(읽기 전용 페이지) 대상 4개 화면(대시보드, 오더 리스트, 문의 목록, 상담 세션 목록의 읽기 전용 리스트뷰) 전부가 같은 Vercel 프로젝트에 통합되어 있습니다. Next.js 관련 파일은 전부 `src/`(Next의 대체 루트) 아래에 있고, 이 디렉터리만 `src/package.json`(`"type":"module"`)으로 ESM을 씁니다 — 저장소 루트는 계속 `"type":"commonjs"`이고 기존 Express 코드는 전혀 안 바뀝니다.
 
-- `vercel.json`에는 더 이상 전체 경로를 `/api/index`로 보내는 고정 rewrite가 없고, `"framework": "nextjs"`가 명시되어 있습니다(이게 없으면 Vercel이 Next.js 빌드 결과물을 무시하고 기존 Express 함수만 배포합니다). 대신 `next.config.js`의 `rewrites().fallback`이 Next.js 자체 라우트(`src/app/`)나 정적파일로 못 찾는 모든 경로를 기존 Express 앱(`/api/index`)으로 흘려보냅니다. `/chat/sessions` 등 아직 안 옮긴 화면은 지금까지와 동일하게 Express가 처리합니다.
-- `src/proxy.js`(Next 16부터 "middleware"의 새 이름)가 마이그레이션된 경로별로 정확히 매칭해서, 각 경로에 대응하는 환경변수(`NEXT_STAGE1_DASHBOARD_ENABLED` → `/`, `NEXT_STAGE1_ORDERS_ENABLED` → `/orders`, `NEXT_STAGE1_INQUIRIES_ENABLED` → `/inquiries`)가 `'true'`가 아니면 기존 Express 화면으로 그대로 리라이트합니다(기본값 OFF = 동작 무변화). `'true'`일 때만 `src/app/**`의 React 페이지가 응답합니다.
-- 각 `src/app/**/page.js`는 새 JSON 엔드포인트(`GET /dashboard/data.json`, `GET /orders/data.json` 등, 기존 라우트와 동일한 `requireAuth`/`scopeFilter` 적용)를 요청 쿠키 + `X-Requested-With: fetch` 헤더를 실어 서버사이드에서 fetch합니다(이 헤더가 없으면 인증 실패 시 401 JSON 대신 `/login` HTML로 리다이렉트되어 파싱이 깨집니다). 세션/RBAC 검증 로직은 전부 기존 Express 코드 그대로이며 새로 구현하지 않았습니다.
+- `vercel.json`에는 더 이상 전체 경로를 `/api/index`로 보내는 고정 rewrite가 없고, `"framework": "nextjs"`가 명시되어 있습니다(이게 없으면 Vercel이 Next.js 빌드 결과물을 무시하고 기존 Express 함수만 배포합니다). 대신 `next.config.js`의 `rewrites().fallback`이 Next.js 자체 라우트(`src/app/`)나 정적파일로 못 찾는 모든 경로를 기존 Express 앱(`/api/index`)으로 흘려보냅니다.
+- `src/proxy.js`(Next 16부터 "middleware"의 새 이름)가 마이그레이션된 경로별로 정확히 매칭해서, 각 경로에 대응하는 환경변수(`NEXT_STAGE1_DASHBOARD_ENABLED` → `/`, `NEXT_STAGE1_ORDERS_ENABLED` → `/orders`, `NEXT_STAGE1_INQUIRIES_ENABLED` → `/inquiries`, `NEXT_STAGE1_CHAT_SESSIONS_ENABLED` → `/chat/sessions`)가 `'true'`가 아니면 기존 Express 화면으로 그대로 리라이트합니다(기본값 OFF = 동작 무변화). `/chat/sessions`는 추가로 `?view=list`일 때만 React로 가고, 기본(카드뷰 — 실시간 채팅/답장/배정/삭제/오더등록폼이 얽혀있음)은 플래그 상태와 무관하게 항상 Express로 유지됩니다(Stage 1 범위 밖).
+- 각 `src/app/**/page.js`는 새 JSON 엔드포인트(`GET /dashboard/data.json`, `GET /orders/data.json` 등, 기존 라우트와 동일한 `requireAuth`/`requireRole`/`scopeFilter` 적용)를 요청 쿠키 + `X-Requested-With: fetch` 헤더를 실어 서버사이드에서 fetch합니다(이 헤더가 없으면 인증 실패 시 401 JSON 대신 `/login` HTML로 리다이렉트되어 파싱이 깨집니다). `requireRole` 실패(403)는 JSON이 아니라 HTML로 오므로, 각 페이지가 `res.status===403`을 감지해 `views/403.ejs`와 같은 안내를 인라인으로 재현합니다. 세션/RBAC 검증 로직은 전부 기존 Express 코드 그대로이며 새로 구현하지 않았습니다.
 - 롤백: Vercel 환경변수에서 해당 플래그를 `false`(또는 미설정)로 되돌리고 재배포하면 즉시 기존 EJS 화면으로 복귀합니다. 코드 되돌림이 필요 없습니다.
 
 ## 데모 계정
