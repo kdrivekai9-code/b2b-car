@@ -14,6 +14,7 @@ import { NextResponse } from 'next/server';
 const STAGE1_FLAGS = {
   '/': 'NEXT_STAGE1_DASHBOARD_ENABLED',
   '/orders': 'NEXT_STAGE1_ORDERS_ENABLED',
+  '/inquiries': 'NEXT_STAGE1_INQUIRIES_ENABLED',
 };
 
 export function proxy(req) {
@@ -26,4 +27,4 @@ export function proxy(req) {
 
 // Next's proxy bundler statically analyzes this export, so it's kept as a literal array
 // (a computed expression like Object.keys(STAGE1_FLAGS) may not be statically evaluable).
-export const config = { matcher: ['/', '/orders'] };
+export const config = { matcher: ['/', '/orders', '/inquiries'] };

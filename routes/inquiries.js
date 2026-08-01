@@ -133,18 +133,20 @@ router.post('/:id/estimate', asyncHandler(async (req, res) => {
   res.json({ ok: true });
 }));
 
-router.get('/', requireRole('admin', 'branch_manager'), asyncHandler(async (req, res) => {
-  const scope = scopeFilter(req);
+// EJS 렌더 라우트와 Next.js 프리뷰(GET /inquiries/data.json)가 완전히 동일한 쿼리/스코핑
+// 로직을 공유하도록 분리했다 — dashboard.js/orders.js와 동일한 패턴. LIMIT 300으로
+// 페이지네이션 없이 캡핑하는 기존 동작도 그대로 유지한다(계약 변경 없음).
+async function buildInquiriesListData(scope, query) {
   const where = [];
   const params = [];
 
   if (scope.branch_id) { where.push('i.branch_id = ?'); params.push(scope.branch_id); }
   if (scope.group_id) { where.push('i.requester_group_id = ?'); params.push(scope.group_id); }
-  if (req.query.status) { where.push('i.status = ?'); params.push(req.query.status); }
-  if (req.query.category) { where.push('i.category = ?'); params.push(req.query.category); }
-  if (req.query.q) {
+  if (query.status) { where.push('i.status = ?'); params.push(query.status); }
+  if (query.category) { where.push('i.category = ?'); params.push(query.category); }
+  if (query.q) {
     where.push('(i.inquiry_text LIKE ? OR i.origin_text LIKE ? OR i.destination_text LIKE ?)');
-    params.push(`%${req.query.q}%`, `%${req.query.q}%`, `%${req.query.q}%`);
+    params.push(`%${query.q}%`, `%${query.q}%`, `%${query.q}%`);
   }
 
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
@@ -160,15 +162,28 @@ router.get('/', requireRole('admin', 'branch_manager'), asyncHandler(async (req,
     params
   );
 
-  res.render('inquiries/list', {
-    title: '문의 관리',
+  return {
     inquiries,
     filters: {
-      status: req.query.status || '',
-      category: req.query.category || '',
-      q: req.query.q || '',
+      status: query.status || '',
+      category: query.category || '',
+      q: query.q || '',
     },
-  });
+  };
+}
+
+router.get('/', requireRole('admin', 'branch_manager'), asyncHandler(async (req, res) => {
+  const data = await buildInquiriesListData(scopeFilter(req), req.query);
+  res.render('inquiries/list', { title: '문의 관리', ...data });
+}));
+
+// Next.js Stage 1 프리뷰(src/app/inquiries/page.js)가 fetch()로 호출하는 JSON 버전 — 같은
+// requireRole('admin','branch_manager')와 같은 scopeFilter/쿼리를 그대로 재사용한다.
+// client 역할은 EJS와 동일하게 403(HTML)을 그대로 받는다 — 별도 JSON 403 처리를 추가하지
+// 않는다(계약 변경 없음); React 페이지 쪽에서 그 HTML 403을 감지해 동일한 안내를 보여준다.
+router.get('/data.json', requireRole('admin', 'branch_manager'), asyncHandler(async (req, res) => {
+  const data = await buildInquiriesListData(scopeFilter(req), req.query);
+  res.json(data);
 }));
 
 router.get('/:id', requireRole('admin', 'branch_manager'), asyncHandler(async (req, res) => {
