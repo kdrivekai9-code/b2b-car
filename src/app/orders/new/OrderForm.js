@@ -45,19 +45,32 @@ function deriveMemoWithReservationLine(currentMemo, isDeliveryBasis, deliveryDat
   return keptLines.join('\n').replace(/^\n+|\n+$/g, '');
 }
 
+let prefillWaypointSeq = 0;
+
 function initialFieldState(order, defaultBranch) {
   const reservedDate = order.reserved_date || '';
   const now = new Date();
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(reservedDate);
   const reservedTime = order.reserved_time || '';
   const t = /^(\d{2}):(\d{2})$/.exec(reservedTime);
+  // order의 나머지 필드(origin_address 등)는 기본적으로 전부 빈 값이다(/orders/new 단독
+  // 페이지는 buildOrderFormInitData가 항상 빈 order를 준다) — Stage 3 슬라이스 3에서
+  // 카드뷰의 "접수 마무리" 탭이 GET /chat/sessions/:id/intake-order 응답을 그대로 이
+  // order 인자에 병합해서 넘기면 여기서 자동으로 prefill된다(필드명이 이미 1:1 대응).
+  const prefillWaypoints = Array.isArray(order.waypoints)
+    ? order.waypoints.map((w) => ({
+      id: 'prefill-' + (prefillWaypointSeq += 1),
+      address: w.address || '', detail: '', contact: w.contact || '', vehicleNumber: '',
+      lat: null, lon: null,
+    }))
+    : [];
   return {
-    origin_address: '', origin_detail_address: '', origin_contact: '',
+    origin_address: order.origin_address || '', origin_detail_address: order.origin_detail_address || '', origin_contact: order.origin_contact || '',
     origin_lat: null, origin_lon: null,
-    destination_address: '', destination_detail_address: '', destination_contact: '',
+    destination_address: order.destination_address || '', destination_detail_address: order.destination_detail_address || '', destination_contact: order.destination_contact || '',
     destination_lat: null, destination_lon: null,
-    waypoints: [],
-    reservation_basis: 'pickup',
+    waypoints: prefillWaypoints,
+    reservation_basis: order.reservation_basis === 'delivery' ? 'delivery' : 'pickup',
     // 아직 실제 역산 계산이 안 붙어 있어(경로/지도 레이어 이후 추가 예정) 항상 빈 값으로
     // 시작한다 — "배송기준" 제출을 의도적으로 막는 역할도 겸한다(위 handleSubmit 참고).
     pickup_reserved_date: '',
@@ -67,14 +80,15 @@ function initialFieldState(order, defaultBranch) {
     reservedDateDay: m ? m[3] : pad2(now.getDate()),
     reservedTimeHour: t ? t[1] : '00',
     reservedTimeMinute: t ? t[2] : '00',
-    vehicle_type: '', vehicle_number: '',
-    payment_method_id: '',
-    fare_amount: '',
+    vehicle_type: order.vehicle_type || '', vehicle_number: order.vehicle_number || '',
+    payment_method_id: order.payment_method_id || '',
+    fare_amount: order.fare_amount || '',
     ferry_fare_amount: 0,
-    branch_id: defaultBranch || '',
-    requester_group_id: '',
-    memo_customer: '', memo_billing: '',
+    branch_id: order.branch_id || defaultBranch || '',
+    requester_group_id: order.requester_group_id || '',
+    memo_customer: order.memo_customer || '', memo_billing: '',
     sameAsMyPhone: false, sameAsOriginContact: false,
+    chat_session_transition: 'agent_active',
   };
 }
 
@@ -108,7 +122,7 @@ function reducer(state, action) {
 
 let waypointSeq = 0;
 
-export default function OrderForm({ initialData }) {
+export default function OrderForm({ initialData, chatSessionId }) {
   const { order, branches, groups, paymentMethods, defaultBranch, currentUserRole, currentUserPhone } = initialData;
   const [state, dispatch] = useReducer(reducer, initialFieldState(order, defaultBranch));
   const [submitting, setSubmitting] = useState(false);
@@ -294,6 +308,10 @@ export default function OrderForm({ initialData }) {
     params.set('ferry_fare_amount', String(state.ferry_fare_amount || 0));
     params.set('memo_customer', state.memo_customer);
     params.set('memo_billing', state.memo_billing);
+    if (chatSessionId) {
+      params.set('chat_session_id', String(chatSessionId));
+      params.set('chat_session_transition', state.chat_session_transition);
+    }
     state.waypoints.forEach((w) => {
       params.append('waypoints[]', w.address);
       params.append('waypoint_details[]', w.detail);
@@ -539,6 +557,16 @@ export default function OrderForm({ initialData }) {
             <textarea placeholder="예) 계산서/내역서 비고란에 'OOO'로 기재 요청"
               value={state.memo_billing} onChange={(e) => setField('memo_billing', e.target.value)} />
           </div>
+
+          {chatSessionId && (
+            <div className="field" style={{ maxWidth: 260 }}>
+              <label>등록 후 상담 상태</label>
+              <select value={state.chat_session_transition} onChange={(e) => setField('chat_session_transition', e.target.value)}>
+                <option value="agent_active">상담 계속 진행</option>
+                <option value="closed">상담 종료</option>
+              </select>
+            </div>
+          )}
 
           {error && <div className="error-msg">{error}</div>}
 

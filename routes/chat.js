@@ -444,7 +444,9 @@ router.get('/sessions/card-data.json', requireRole('admin'), asyncHandler(async 
     buildSessionListSessions(),
     listOnlineAgentNames(),
   ]);
-  res.json({ sessions, onlineAgents, currentUser: req.session.user });
+  // Stage 3 슬라이스 3: "접수 마무리" 탭은 카드뷰 자체보다 더 세밀하게 롤백할 수 있도록
+  // 별도 플래그로 게이팅한다(카드뷰 전체를 끄지 않고 이 탭만 껐다 켤 수 있음).
+  res.json({ sessions, onlineAgents, currentUser: req.session.user, intakeEnabled: process.env.NEXT_STAGE3_CHAT_INTAKE_ENABLED === 'true' });
 }));
 
 // ---------------- 관리자: 카드뷰용 메시지 지연 로딩 ----------------

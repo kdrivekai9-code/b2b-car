@@ -47,7 +47,7 @@ export default async function ChatSessionListPage({ searchParams }) {
   if (view === 'card') {
     return (
       <AppShell currentUser={data.currentUser} activePath="/chat/sessions">
-        <CardBoard initialSessions={data.sessions} initialOnlineAgents={data.onlineAgents} currentUser={data.currentUser} />
+        <CardBoard initialSessions={data.sessions} initialOnlineAgents={data.onlineAgents} currentUser={data.currentUser} intakeEnabled={!!data.intakeEnabled} />
       </AppShell>
     );
   }
