@@ -350,7 +350,7 @@
     var mainInput = document.getElementById(regAddrTarget);
     var detailInput = document.getElementById(detailIdFor(regAddrTarget));
     mainInput.value = f.address;
-    if (detailInput) detailInput.disabled = false;
+    if (detailInput) { detailInput.disabled = false; detailInput.style.display = ''; }
     mainInput.dispatchEvent(new Event('blur'));
   }
 
@@ -524,7 +524,7 @@
       var input = document.getElementById(chk.dataset.target);
       input.dataset.skipGeocode = chk.checked ? '1' : '0';
       var detailInput = document.getElementById(detailIdFor(chk.dataset.target));
-      if (chk.checked && detailInput) detailInput.disabled = false;
+      if (chk.checked && detailInput) { detailInput.disabled = false; detailInput.style.display = ''; }
     });
   });
 
@@ -1061,6 +1061,7 @@
     mainInput.value = mainAddressOf(r);
     if (detailInput) {
       detailInput.disabled = false;
+      detailInput.style.display = '';
       if (r.type === 'place') detailInput.value = r.place_name;
       else { detailInput.value = ''; detailInput.focus(); }
     }

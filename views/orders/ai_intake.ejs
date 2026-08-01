@@ -120,7 +120,7 @@
           </div>
           <div id="origin_address_results" class="addr-results"></div>
           <div class="addr-detail-row">
-            <input type="text" class="addr-detail-input" id="origin_detail_address" name="origin_detail_address" placeholder="상세주소 입력 (건물명, 동/호수)" <%= order.origin_detail_address ? '' : 'disabled' %> value="<%= order.origin_detail_address || '' %>">
+            <input type="text" class="addr-detail-input" id="origin_detail_address" name="origin_detail_address" placeholder="상세주소 입력 (건물명, 동/호수)" <%- order.origin_detail_address ? '' : 'disabled style="display:none;"' %> value="<%= order.origin_detail_address || '' %>">
             <button type="button" class="btn small secondary registered-addr-btn" data-target="origin_address">등록주소</button>
           </div>
           <div class="row contact-check-row" style="margin-top:8px;">
@@ -157,7 +157,7 @@
           </div>
           <div id="destination_address_results" class="addr-results"></div>
           <div class="addr-detail-row">
-            <input type="text" class="addr-detail-input" id="destination_detail_address" name="destination_detail_address" placeholder="상세주소 입력 (건물명, 동/호수)" <%= order.destination_detail_address ? '' : 'disabled' %> value="<%= order.destination_detail_address || '' %>">
+            <input type="text" class="addr-detail-input" id="destination_detail_address" name="destination_detail_address" placeholder="상세주소 입력 (건물명, 동/호수)" <%- order.destination_detail_address ? '' : 'disabled style="display:none;"' %> value="<%= order.destination_detail_address || '' %>">
             <button type="button" class="btn small secondary registered-addr-btn" data-target="destination_address">등록주소</button>
           </div>
           <div class="row contact-check-row" style="margin-top:8px;">

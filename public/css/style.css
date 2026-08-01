@@ -301,6 +301,11 @@ form .field.full{flex-basis:100%;}
   .ai-chat-card{position:sticky;top:12px;}
   .ai-intake-scroll-panel{height:calc(100vh - 120px);overflow-y:auto;overscroll-behavior:contain;}
   .ai-intake-order-card{padding-right:16px;}
+  .ai-intake-order-card.ai-intake-scroll-panel{scrollbar-width:thin;scrollbar-color:#c2cbda #eef1f6;}
+  .ai-intake-order-card.ai-intake-scroll-panel::-webkit-scrollbar{width:10px;}
+  .ai-intake-order-card.ai-intake-scroll-panel::-webkit-scrollbar-track{background:#eef1f6;border-radius:8px;}
+  .ai-intake-order-card.ai-intake-scroll-panel::-webkit-scrollbar-thumb{background:#c2cbda;border-radius:8px;}
+  .ai-intake-order-card.ai-intake-scroll-panel::-webkit-scrollbar-thumb:hover{background:#a9b4c7;}
   .ai-intake-side{height:calc(100vh - 120px);min-height:0;}
   .ai-intake-fare-card{flex:0 0 auto;height:auto;overflow-y:visible;}
   .ai-intake-fare-card .fare-payment-row{flex-wrap:nowrap;gap:8px;}
@@ -571,7 +576,7 @@ form .field.full{flex-basis:100%;}
 .addr-detail-input{margin-top:6px;background:#f4f6f9;}
 .addr-detail-input:not(:disabled){background:#fff;}
 .addr-detail-input:disabled{color:var(--gray);cursor:not-allowed;}
-.addr-detail-row{position:relative;margin-top:6px;}
+.addr-detail-row{position:relative;margin-top:6px;min-height:34px;}
 .addr-detail-row .addr-detail-input{width:100%;margin-top:0;padding-right:84px;}
 .addr-detail-row .registered-addr-btn{position:absolute;right:4px;top:50%;transform:translateY(-50%);padding:5px 9px;white-space:nowrap;}
 .contact-check-row{align-items:flex-end;}
