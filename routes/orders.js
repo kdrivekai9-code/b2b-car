@@ -142,8 +142,10 @@ router.get('/data.json', asyncHandler(async (req, res) => {
   res.json({ ...data, currentUserRole: req.session.user.role });
 }));
 
-router.get('/new', asyncHandler(async (req, res) => {
-  const scope = scopeFilter(req);
+// EJS 생성폼 라우트와 Next.js Stage 2 프리뷰(GET /orders/new/data.json)가 완전히 동일한
+// 조회 로직을 공유하도록 분리했다 — dashboard.js/orders.js(목록)/inquiries.js/chat.js에서
+// 이미 쓴 것과 같은 패턴.
+async function buildOrderFormInitData(scope, userId) {
   // 서로 의존관계 없는 조회들이라 순차적으로 기다릴 필요가 없다 — 병렬로 실행해서
   // 콜드스타트/커넥션 재연결로 왕복시간이 늘어난 상황에서 지연이 곱연산되는 걸 막는다.
   const [branches, groups, paymentMethods, favorites] = await Promise.all([
@@ -154,12 +156,34 @@ router.get('/new', asyncHandler(async (req, res) => {
     scope.branch_id
       ? getEffectivePaymentMethods(scope.branch_id)
       : db.all('SELECT * FROM payment_methods WHERE is_active = 1 ORDER BY id'),
-    db.all('SELECT * FROM favorite_addresses WHERE user_id = ? ORDER BY id DESC', [req.session.user.id]),
+    db.all('SELECT * FROM favorite_addresses WHERE user_id = ? ORDER BY id DESC', [userId]),
   ]);
-  res.render('orders/form', {
-    title: '오더 등록', order: defaultReservedDateTime(), branches, groups, paymentMethods, favorites, mode: 'create', error: null,
+  return {
+    order: defaultReservedDateTime(), branches, groups, paymentMethods, favorites,
     defaultBranch: scope.branch_id || '', defaultGroup: scope.group_id || '',
+  };
+}
+
+router.get('/new', asyncHandler(async (req, res) => {
+  const scope = scopeFilter(req);
+  const data = await buildOrderFormInitData(scope, req.session.user.id);
+  res.render('orders/form', {
+    title: '오더 등록', ...data, mode: 'create', error: null,
     kakaoJsKey: process.env.KAKAO_JS_KEY || '',
+  });
+}));
+
+// Next.js Stage 2 프리뷰(src/app/orders/new/page.js)가 fetch()로 호출하는 JSON 버전 — 같은
+// requireAuth(라우터 상단에 이미 적용됨)와 같은 scopeFilter/조회를 그대로 재사용한다.
+// currentUserRole/currentUserPhone은 EJS가 res.locals.currentUser에서 바로 읽는 값들이라
+// JSON 응답에는 따로 실어준다("요청자 연락처와 동일" 체크박스, client 요금 읽기전용 판단에 필요).
+router.get('/new/data.json', asyncHandler(async (req, res) => {
+  const scope = scopeFilter(req);
+  const data = await buildOrderFormInitData(scope, req.session.user.id);
+  res.json({
+    ...data,
+    currentUserRole: req.session.user.role,
+    currentUserPhone: req.session.user.phone || '',
   });
 }));
 
