@@ -75,10 +75,11 @@ function broadcastSessionListChangedAsync(payload) {
 
 const ORDERS_PAGE_SIZE = 50;
 
-router.get('/', asyncHandler(async (req, res) => {
-  const scope = scopeFilter(req);
-  const { branch_id, status, from, to, q } = req.query;
-  const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+// EJS 렌더 라우트와 Next.js 프리뷰(GET /orders/data.json)가 완전히 동일한 쿼리/스코핑/필터
+// 로직을 공유하도록 분리했다 — dashboard.js의 buildDashboardData와 같은 패턴.
+async function buildOrdersListData(scope, query) {
+  const { branch_id, status, from, to, q } = query;
+  const page = Math.max(1, parseInt(query.page, 10) || 1);
   const offset = (page - 1) * ORDERS_PAGE_SIZE;
 
   const where = [];
@@ -120,12 +121,25 @@ router.get('/', asyncHandler(async (req, res) => {
   const totalCount = Number(countRow.total);
   const totalPages = Math.max(1, Math.ceil(totalCount / ORDERS_PAGE_SIZE));
 
-  res.render('orders/list', {
-    title: '오더 리스트',
+  return {
     orders, branches, ORDER_STATUSES,
     filters: { branch_id: branch_id || '', status: status || '', from: from || '', to: to || '', q: q || '' },
     pagination: { page, pageSize: ORDERS_PAGE_SIZE, totalCount, totalPages },
-  });
+  };
+}
+
+router.get('/', asyncHandler(async (req, res) => {
+  const data = await buildOrdersListData(scopeFilter(req), req.query);
+  res.render('orders/list', { title: '오더 리스트', ...data });
+}));
+
+// Next.js Stage 1 프리뷰(src/app/orders/page.js)가 fetch()로 호출하는 JSON 버전 — 같은
+// requireAuth(라우터 상단에 이미 적용됨)와 같은 scopeFilter/쿼리를 그대로 재사용한다.
+router.get('/data.json', asyncHandler(async (req, res) => {
+  const data = await buildOrdersListData(scopeFilter(req), req.query);
+  // EJS 버전은 res.locals.currentUser(서버 전역)로 지사 필터 노출 여부를 판단한다 —
+  // JSON 응답에는 그 값이 없으므로 role만 별도로 실어준다(다른 정보는 안 실음).
+  res.json({ ...data, currentUserRole: req.session.user.role });
 }));
 
 router.get('/new', asyncHandler(async (req, res) => {

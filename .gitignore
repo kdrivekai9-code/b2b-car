@@ -6,6 +6,7 @@ data/
 supabase/.temp/
 .vercel
 .env*
+!.env.example
 .DS_Store
 .npm-cache/
 .playwright-browsers/
