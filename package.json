@@ -8,6 +8,7 @@
     "start": "node server.js",
     "dev": "node server.js",
     "dev:next": "next dev --port 3001",
+    "dev:all": "concurrently -n express,next -c cyan,magenta \"npm run dev\" \"npm run dev:next\"",
     "build": "next build",
     "dev:watch": "node --watch server.js",
     "seed": "node seed.js",
@@ -40,6 +41,7 @@
     "web-push": "^3.6.7"
   },
   "devDependencies": {
-    "@playwright/test": "^1.62.0"
+    "@playwright/test": "^1.62.0",
+    "concurrently": "^10.0.4"
   }
 }
