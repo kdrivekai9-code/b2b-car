@@ -95,6 +95,13 @@
         <tr><td colspan="15" class="empty">조건에 맞는 오더가 없습니다.</td></tr>
       <% } %>
       <% orders.forEach(function(o){ %>
+        <%
+          // 구간 릴레이: leg_count > 0이면(order_legs 마이그레이션 이후 생성된 오더)
+          // "N/M명 배정" 요약으로, 아니면(레거시 오더) 기존 단일 기사 표시 그대로.
+          var driverLabel = Number(o.leg_count) > 0
+            ? '기사 ' + o.legs_assigned_count + '/' + o.leg_count + '명 배정' + (o.leg_driver_names ? ' (' + o.leg_driver_names + ')' : '')
+            : (o.driver_name ? (o.driver_name + (o.driver_phone ? ' (' + o.driver_phone + ')' : '')) : '미배정');
+        %>
         <tr onclick="location.href='/orders/<%= o.id %>'" style="cursor:pointer;">
           <td data-column="oid" data-label="OID"><a href="/orders/<%= o.id %>"><%= o.oid %></a></td>
           <td data-column="branch" data-label="지사" title="<%= o.branch_name %>"><%= o.branch_name %></td>
@@ -104,7 +111,7 @@
           <td data-column="waypoints" data-label="경유지" title="<%= o.waypoints_text || '' %>"><%= o.waypoints_text || '-' %></td>
           <td data-column="destination" data-label="도착지" title="<%= o.destination_address %>"><%= o.destination_address %></td>
           <td data-column="vehicle" data-label="차종 / 차량번호" title="<%= [o.vehicle_type, o.vehicle_number].filter(Boolean).join(' / ') || '-' %>"><%= [o.vehicle_type, o.vehicle_number].filter(Boolean).join(' / ') || '-' %></td>
-          <td data-column="driver" data-label="기사정보" title="<%= o.driver_name ? (o.driver_name + (o.driver_phone ? ' (' + o.driver_phone + ')' : '')) : '미배정' %>"><%= o.driver_name ? (o.driver_name + (o.driver_phone ? ' (' + o.driver_phone + ')' : '')) : '미배정' %></td>
+          <td data-column="driver" data-label="기사정보" title="<%= driverLabel %>"><%= driverLabel %></td>
           <td data-column="reserved_at" data-label="예약일시" title="<%= o.reserved_date %> <%= o.reserved_time %>"><%= o.reserved_date %> <%= o.reserved_time %></td>
           <td data-column="payment_method" data-label="결제방식" title="<%= o.payment_method_name || '-' %>"><%= o.payment_method_name || '-' %></td>
           <td data-column="fare" data-label="요금"><%= formatMoney(o.fare_amount) %></td>

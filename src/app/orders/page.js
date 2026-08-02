@@ -120,7 +120,11 @@ export default async function OrdersListPage({ searchParams }) {
               {orders.length === 0 && <tr><td colSpan={15} className="empty">조건에 맞는 오더가 없습니다.</td></tr>}
               {orders.map((o) => {
                 const vehicle = [o.vehicle_type, o.vehicle_number].filter(Boolean).join(' / ') || '-';
-                const driver = o.driver_name ? (o.driver_name + (o.driver_phone ? ` (${o.driver_phone})` : '')) : '미배정';
+                // 구간 릴레이: leg_count > 0이면(order_legs 마이그레이션 이후 생성된 오더)
+                // "N/M명 배정" 요약, 아니면(레거시 오더) 기존 단일 기사 표시 그대로.
+                const driver = Number(o.leg_count) > 0
+                  ? `기사 ${o.legs_assigned_count}/${o.leg_count}명 배정` + (o.leg_driver_names ? ` (${o.leg_driver_names})` : '')
+                  : (o.driver_name ? (o.driver_name + (o.driver_phone ? ` (${o.driver_phone})` : '')) : '미배정');
                 return (
                   <tr key={o.id} style={{ cursor: 'pointer' }}>
                     <td><a href={`/orders/${o.id}`}>{o.oid}</a></td>

@@ -75,20 +75,43 @@
 
     <div class="card">
       <h2>🧑‍✈️ 기사 배정</h2>
-      <form method="POST" action="/orders/<%= order.id %>/driver">
-        <div class="row">
-          <div class="field">
-            <label>기사 선택</label>
-            <select name="driver_id">
-              <option value="">미배정</option>
-              <% drivers.forEach(function(d){ %>
-                <option value="<%= d.id %>" <%= String(order.assigned_driver_id) === String(d.id) ? 'selected' : '' %>><%= d.name %> (<%= d.phone || '연락처 없음' %>)</option>
-              <% }) %>
-            </select>
+      <% if (typeof legs !== 'undefined' && legs.length > 0) { %>
+        <!-- 구간 릴레이: 구간(leg)마다 다른 기사를 배정할 수 있다. order_legs 마이그레이션
+             이후 생성된 오더만 이 화면을 본다 — 그 전 오더는 아래 else 분기(기존 단일
+             배정)를 그대로 쓴다. -->
+        <form method="POST" action="/orders/<%= order.id %>/legs/drivers">
+          <% legs.forEach(function(leg){ %>
+            <div class="row" style="align-items:center;">
+              <div class="field" style="flex:0 0 auto;min-width:220px;">
+                <label>구간 <%= leg.seq %>: <%= leg.fromLabel %> → <%= leg.toLabel %></label>
+                <input type="hidden" name="leg_seq" value="<%= leg.seq %>">
+                <select name="leg_driver_id">
+                  <option value="">미배정</option>
+                  <% drivers.forEach(function(d){ %>
+                    <option value="<%= d.id %>" <%= String(leg.driverId) === String(d.id) ? 'selected' : '' %>><%= d.name %> (<%= d.phone || '연락처 없음' %>)</option>
+                  <% }) %>
+                </select>
+              </div>
+            </div>
+          <% }) %>
+          <button class="btn" type="submit">구간별 배정 저장</button>
+        </form>
+      <% } else { %>
+        <form method="POST" action="/orders/<%= order.id %>/driver">
+          <div class="row">
+            <div class="field">
+              <label>기사 선택</label>
+              <select name="driver_id">
+                <option value="">미배정</option>
+                <% drivers.forEach(function(d){ %>
+                  <option value="<%= d.id %>" <%= String(order.assigned_driver_id) === String(d.id) ? 'selected' : '' %>><%= d.name %> (<%= d.phone || '연락처 없음' %>)</option>
+                <% }) %>
+              </select>
+            </div>
           </div>
-        </div>
-        <button class="btn" type="submit">배정 저장</button>
-      </form>
+          <button class="btn" type="submit">배정 저장</button>
+        </form>
+      <% } %>
       <div class="section-title small">사진 업로드 링크(기사 전달용, 로그인 불필요)</div>
       <input type="text" class="photo-link-input" readonly value="<%= baseUrl %>/upload/<%= order.photo_upload_token %>" onclick="this.select()">
     </div>

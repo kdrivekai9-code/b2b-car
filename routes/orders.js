@@ -99,7 +99,10 @@ async function buildOrdersListData(scope, query) {
     SELECT o.*, b.name AS branch_name, g.name AS group_name, g.main_phone AS group_phone,
       pm.name AS payment_method_name, d.name AS driver_name, d.phone AS driver_phone,
       (SELECT string_agg(w.address, ', ' ORDER BY w.seq) FROM order_waypoints w WHERE w.order_id = o.id) AS waypoints_text,
-      (SELECT COUNT(*) FROM order_photos p WHERE p.order_id = o.id) AS photo_count
+      (SELECT COUNT(*) FROM order_photos p WHERE p.order_id = o.id) AS photo_count,
+      (SELECT COUNT(*) FROM order_legs ol WHERE ol.order_id = o.id) AS leg_count,
+      (SELECT COUNT(*) FROM order_legs ol WHERE ol.order_id = o.id AND ol.driver_id IS NOT NULL) AS legs_assigned_count,
+      (SELECT string_agg(DISTINCT ld.name, ', ') FROM order_legs ol2 JOIN drivers ld ON ld.id = ol2.driver_id WHERE ol2.order_id = o.id) AS leg_driver_names
     FROM orders o
     JOIN branches b ON b.id = o.branch_id
     LEFT JOIN groups_tbl g ON g.id = o.requester_group_id
@@ -756,6 +759,19 @@ router.post('/', asyncHandler(async (req, res) => {
     );
   }
 
+  // 구간 릴레이: 경유지 N개 = 구간 N+1개(출발지→경유지1→...→도착지). driver_id는 전부
+  // NULL로 시작 — 상세페이지에서 구간별로 나중에 배정한다(기존 단일 기사배정과 같은 흐름,
+  // 생성 시점엔 배정 안 함). order_legs 마이그레이션이 아직 안 된 DB에서도 오더 생성
+  // 자체는 실패하면 안 되므로(구버전 DB 호환 처리, 위 catch 블록과 같은 방어), 실패해도
+  // 무시하고 그 오더는 계속 레거시 단일 배정 화면으로 동작한다.
+  try {
+    for (let i = 0; i < finalWaypoints.length + 1; i++) {
+      await db.run('INSERT INTO order_legs (order_id, seq, driver_id) VALUES (?, ?, NULL)', [newId, i + 1]);
+    }
+  } catch (e) {
+    console.error('order_legs 생성 실패(마이그레이션 미적용 가능성, 무시하고 진행):', e.message);
+  }
+
   await db.run(`
     INSERT INTO order_status_history (order_id, actor_user_id, old_status, new_status, note)
     VALUES (?, ?, NULL, '오더등록', '최초 등록')
@@ -783,6 +799,37 @@ router.post('/', asyncHandler(async (req, res) => {
   if (wantsJson) return res.json({ orderId: newId, oid });
   res.redirect('/orders/' + newId);
 }));
+
+// 구간 릴레이: order_legs 행을 정류장 라벨(출발지→경유지1→...→도착지)과 짝지어 뷰에서
+// 바로 렌더링할 수 있는 형태로 만든다. 주소는 저장돼 있지 않으므로(마이그레이션 주석 참고)
+// 매번 order/waypoints에서 조립한다 — 오더가 생성 후 수정 불가라 매번 같은 결과가 나온다.
+// order_legs 마이그레이션 이전에 생성된 오더는 빈 배열을 반환 → 뷰가 기존 단일 배정
+// UI로 자동 폴백한다.
+async function buildOrderLegs(orderId, order, waypoints) {
+  let legRows;
+  try {
+    legRows = await db.all(`
+      SELECT ol.seq, ol.driver_id, d.name AS driver_name, d.phone AS driver_phone
+      FROM order_legs ol
+      LEFT JOIN drivers d ON d.id = ol.driver_id
+      WHERE ol.order_id = ?
+      ORDER BY ol.seq ASC
+    `, [orderId]);
+  } catch (e) {
+    return []; // order_legs 테이블이 아직 없는 DB(마이그레이션 미적용) — 조용히 폴백
+  }
+  if (!legRows.length) return [];
+
+  const stopLabels = [order.origin_address, ...waypoints.map((w) => w.address), order.destination_address];
+  return legRows.map((row) => ({
+    seq: row.seq,
+    fromLabel: stopLabels[row.seq - 1] || '-',
+    toLabel: stopLabels[row.seq] || '-',
+    driverId: row.driver_id,
+    driverName: row.driver_name,
+    driverPhone: row.driver_phone,
+  }));
+}
 
 router.get('/:id', asyncHandler(async (req, res) => {
   const order = await db.get(`
@@ -822,9 +869,10 @@ router.get('/:id', asyncHandler(async (req, res) => {
     || (u.role === 'branch_manager' && !!photoSettings.branch_manager_can_view)
     || (u.role === 'client' && !!photoSettings.client_can_view);
   const photos = canViewPhotos ? await db.all('SELECT * FROM order_photos WHERE order_id = ? ORDER BY id DESC', [req.params.id]) : [];
+  const legs = await buildOrderLegs(req.params.id, order, waypoints);
 
   res.render('orders/detail', {
-    title: '오더 상세 - ' + order.oid, order, history, waypoints, drivers, photos, canViewPhotos,
+    title: '오더 상세 - ' + order.oid, order, history, waypoints, drivers, photos, canViewPhotos, legs,
     baseUrl: req.protocol + '://' + req.get('host'),
     ORDER_STATUSES: statusConfig.map((s) => s.status_code),
   });
@@ -857,6 +905,35 @@ router.post('/:id/driver', asyncHandler(async (req, res) => {
       await notify({
         branchId: order.branch_id, eventType: 'driver_assign', excludeUserId: u.id,
         title: '기사 배정', body: `${order.oid} 오더에 기사가 배정되었습니다.`, url: `/orders/${order.id}`,
+      });
+    } catch (e) { console.error('알림 발송 실패:', e.message); }
+  }
+
+  res.redirect('/orders/' + req.params.id);
+}));
+
+// 구간 릴레이: 구간(leg)별 기사 배정. order_legs가 없는(마이그레이션 이전) 오더는
+// views/orders/detail.ejs가 이 폼 자체를 안 그려주므로 여기 도달하지 않는다 — 그런
+// 오더는 계속 위 POST /:id/driver(단일 배정)만 쓴다.
+router.post('/:id/legs/drivers', asyncHandler(async (req, res) => {
+  const order = await loadOrderInScope(req, res);
+  if (!order) return;
+  const u = req.session.user;
+  const legSeqs = [].concat(req.body.leg_seq || []);
+  const legDriverIds = [].concat(req.body.leg_driver_id || []);
+
+  let anyAssigned = false;
+  for (let i = 0; i < legSeqs.length; i++) {
+    const driverId = legDriverIds[i] || null;
+    await db.run('UPDATE order_legs SET driver_id = ? WHERE order_id = ? AND seq = ?', [driverId, req.params.id, legSeqs[i]]);
+    if (driverId) anyAssigned = true;
+  }
+
+  if (anyAssigned) {
+    try {
+      await notify({
+        branchId: order.branch_id, eventType: 'driver_assign', excludeUserId: u.id,
+        title: '기사 배정', body: `${order.oid} 오더의 구간별 기사가 배정되었습니다.`, url: `/orders/${order.id}`,
       });
     } catch (e) { console.error('알림 발송 실패:', e.message); }
   }
