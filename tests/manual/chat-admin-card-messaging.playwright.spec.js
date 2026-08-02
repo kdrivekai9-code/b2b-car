@@ -16,6 +16,7 @@ async function loginAsAdmin(page) {
 
 async function createChatSession(page) {
   let lastStatus = 0;
+  const deadlineAt = Date.now() + 25000;
 
   for (let attempt = 0; attempt < 6; attempt += 1) {
     const res = await page.request.post(BASE_URL + '/chat/session', {
@@ -32,7 +33,11 @@ async function createChatSession(page) {
     if ([401, 403, 429, 302, 307].includes(lastStatus)) {
       await loginAsAdmin(page);
       const retryDelayMs = strictRetryDelayMs(res.headers(), attempt);
-      await page.waitForTimeout(retryDelayMs);
+      const remainingMs = deadlineAt - Date.now();
+      if (remainingMs <= 150) {
+        throw new Error('세션 생성 재시도 시간 초과: lastStatus=' + lastStatus);
+      }
+      await page.waitForTimeout(Math.min(retryDelayMs, Math.max(100, remainingMs - 50)));
       continue;
     }
 
@@ -149,6 +154,8 @@ async function deleteSessionFromCard(page, sessionId) {
 }
 
 test.describe('Chat admin card messaging', () => {
+  test.describe.configure({ timeout: 90000 });
+
   test('카드 보기에서 AI/상담원 라벨, 시간, 읽음 표시가 노출된다', async ({ page }) => {
     await loginAsAdmin(page);
 

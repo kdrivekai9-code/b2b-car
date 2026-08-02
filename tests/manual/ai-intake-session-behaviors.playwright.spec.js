@@ -16,6 +16,7 @@ async function loginAsAdmin(page) {
 
 async function createSession(page) {
   let lastStatus = 0;
+  const deadlineAt = Date.now() + 25000;
 
   for (let attempt = 0; attempt < 6; attempt += 1) {
     const res = await page.request.post(BASE_URL + '/chat/session', {
@@ -32,7 +33,11 @@ async function createSession(page) {
     if ([401, 403, 429, 302, 307].includes(lastStatus)) {
       await loginAsAdmin(page);
       const retryDelayMs = strictRetryDelayMs(res.headers(), attempt);
-      await page.waitForTimeout(retryDelayMs);
+      const remainingMs = deadlineAt - Date.now();
+      if (remainingMs <= 150) {
+        throw new Error('세션 생성 재시도 시간 초과: lastStatus=' + lastStatus);
+      }
+      await page.waitForTimeout(Math.min(retryDelayMs, Math.max(100, remainingMs - 50)));
       continue;
     }
 
@@ -70,6 +75,8 @@ async function getMessagesSince(page, sessionId, since) {
 }
 
 test.describe('AI intake session behaviors', () => {
+  test.describe.configure({ timeout: 90000 });
+
   test('needs_agent 이후 새 접수를 위한 세션 전환 경로(기존 종료 + 신규 생성)가 동작한다', async ({ page }) => {
     await loginAsAdmin(page);
 
