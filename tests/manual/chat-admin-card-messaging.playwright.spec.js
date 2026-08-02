@@ -25,11 +25,31 @@ async function loginAsAdmin(page) {
 }
 
 async function createChatSession(page) {
-  const res = await page.request.post(BASE_URL + '/chat/session');
-  expect(res.ok()).toBeTruthy();
-  const data = await res.json();
-  expect(data.sessionId).toBeTruthy();
-  return String(data.sessionId);
+  let lastStatus = 0;
+
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const res = await page.request.post(BASE_URL + '/chat/session', {
+      headers: { Accept: 'application/json' },
+    });
+    lastStatus = res.status();
+
+    if (res.ok()) {
+      const data = await res.json();
+      expect(data.sessionId).toBeTruthy();
+      return String(data.sessionId);
+    }
+
+    if ([401, 403, 429, 302, 307].includes(lastStatus)) {
+      await loginAsAdmin(page);
+      await page.waitForTimeout(300 * (attempt + 1));
+      continue;
+    }
+
+    const bodyText = await res.text();
+    throw new Error('세션 생성 실패: status=' + lastStatus + ', body=' + bodyText);
+  }
+
+  throw new Error('세션 생성 재시도 실패: lastStatus=' + lastStatus);
 }
 
 async function postUserMessage(page, sessionId, text) {

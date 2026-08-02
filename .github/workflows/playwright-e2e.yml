@@ -171,11 +171,13 @@ jobs:
       SESSION_SECRET: ${{ secrets.SESSION_SECRET != '' && secrets.SESSION_SECRET || 'ci-session-secret' }}
       PLAYWRIGHT_BROWSERS_PATH: .playwright-browsers
       E2E_BASE_URL: http://127.0.0.1:3000
+      E2E_LOGIN_ID: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_id_branch_manager || 'seoul_manager' }}
+      E2E_PASSWORD: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_password_branch_manager != '' && github.event.inputs.login_password_branch_manager || secrets.LOGIN_PASSWORD_BRANCH_MANAGER != '' && secrets.LOGIN_PASSWORD_BRANCH_MANAGER || 'Manager!2345' }}
       LOGIN_BASE_URL: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.base_url || 'http://127.0.0.1:3000' }}
-      LOGIN_ID_ADMIN: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_id_admin || 'admin' }}
+      LOGIN_ID_ADMIN: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_id_branch_manager || 'seoul_manager' }}
       LOGIN_ID_BRANCH_MANAGER: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_id_branch_manager || 'seoul_manager' }}
       LOGIN_ID_CLIENT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_id_client || 'seoulmotors' }}
-      LOGIN_PASSWORD_ADMIN: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_password_admin != '' && github.event.inputs.login_password_admin || secrets.LOGIN_PASSWORD_ADMIN != '' && secrets.LOGIN_PASSWORD_ADMIN || 'Admin!2345' }}
+      LOGIN_PASSWORD_ADMIN: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_password_branch_manager != '' && github.event.inputs.login_password_branch_manager || secrets.LOGIN_PASSWORD_BRANCH_MANAGER != '' && secrets.LOGIN_PASSWORD_BRANCH_MANAGER || 'Manager!2345' }}
       LOGIN_PASSWORD_BRANCH_MANAGER: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_password_branch_manager != '' && github.event.inputs.login_password_branch_manager || secrets.LOGIN_PASSWORD_BRANCH_MANAGER != '' && secrets.LOGIN_PASSWORD_BRANCH_MANAGER || 'Manager!2345' }}
       LOGIN_PASSWORD_CLIENT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_password_client != '' && github.event.inputs.login_password_client || secrets.LOGIN_PASSWORD_CLIENT != '' && secrets.LOGIN_PASSWORD_CLIENT || 'Client!2345' }}
 
