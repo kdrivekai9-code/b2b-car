@@ -10,6 +10,13 @@ router.get('/vapid-public-key', (req, res) => {
   res.type('text/plain').send(process.env.VAPID_PUBLIC_KEY || '');
 });
 
+router.get('/settings/data.json', asyncHandler(async (req, res) => {
+  const branches = req.session.user.role === 'admin'
+    ? await db.all('SELECT * FROM branches ORDER BY name')
+    : [];
+  res.json({ currentUser: req.session.user, branches });
+}));
+
 router.get('/settings', asyncHandler(async (req, res) => {
   const branches = req.session.user.role === 'admin' ? await db.all('SELECT * FROM branches ORDER BY name') : [];
   res.render('push_settings', { title: '오더 알림 설정', branches });

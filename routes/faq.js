@@ -7,6 +7,10 @@ const { searchKnowledgeBase } = require('../lib/knowledgeSearch');
 const router = express.Router();
 router.use(requireAuth);
 
+router.get('/data.json', (req, res) => {
+  res.json({ currentUser: req.session.user });
+});
+
 router.get('/', (req, res) => {
   res.render('knowledge_base/faq_chat', { title: 'FAQ 문의' });
 });
