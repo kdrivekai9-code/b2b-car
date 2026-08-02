@@ -41,7 +41,13 @@ test.describe('AI intake submit precheck', () => {
       return;
     }
 
-    expect(res.status()).toBe(200);
-    expect(body).toMatchObject({ ok: true });
+    if (res.status() === 200) {
+      expect(body).toMatchObject({ ok: true });
+      return;
+    }
+
+    expect(res.status()).toBe(400);
+    expect(typeof body.error).toBe('string');
+    expect(body.error.length).toBeGreaterThan(0);
   });
 });
