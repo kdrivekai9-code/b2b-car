@@ -43,6 +43,10 @@ on:
         description: '고객사 비밀번호(선택: 미입력 시 secret 우선)'
         required: false
         default: ''
+      test_session_create_limit:
+        description: '테스트 전용 세션 생성 한도(시간당, 숫자)'
+        required: false
+        default: '200'
 
 jobs:
   e2e:
@@ -54,7 +58,7 @@ jobs:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       SESSION_SECRET: ${{ secrets.SESSION_SECRET != '' && secrets.SESSION_SECRET || 'ci-session-secret' }}
-      TEST_SESSION_CREATE_LIMIT: ${{ vars.TEST_SESSION_CREATE_LIMIT != '' && vars.TEST_SESSION_CREATE_LIMIT || '200' }}
+      TEST_SESSION_CREATE_LIMIT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.test_session_create_limit != '' && github.event.inputs.test_session_create_limit || vars.TEST_SESSION_CREATE_LIMIT != '' && vars.TEST_SESSION_CREATE_LIMIT || '200' }}
       PLAYWRIGHT_BROWSERS_PATH: .playwright-browsers
       E2E_BASE_URL: http://127.0.0.1:3000
       LOGIN_BASE_URL: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.base_url || 'http://127.0.0.1:3000' }}
@@ -177,7 +181,7 @@ jobs:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       SESSION_SECRET: ${{ secrets.SESSION_SECRET != '' && secrets.SESSION_SECRET || 'ci-session-secret' }}
-      TEST_SESSION_CREATE_LIMIT: ${{ vars.TEST_SESSION_CREATE_LIMIT != '' && vars.TEST_SESSION_CREATE_LIMIT || '200' }}
+      TEST_SESSION_CREATE_LIMIT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.test_session_create_limit != '' && github.event.inputs.test_session_create_limit || vars.TEST_SESSION_CREATE_LIMIT != '' && vars.TEST_SESSION_CREATE_LIMIT || '200' }}
       PLAYWRIGHT_BROWSERS_PATH: .playwright-browsers
       E2E_BASE_URL: http://127.0.0.1:3000
       E2E_LOGIN_ID: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_id_branch_manager || 'seoul_manager' }}
