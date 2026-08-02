@@ -16,7 +16,7 @@ async function loginAsAdmin(page) {
 async function createSession(page) {
   let lastStatus = 0;
 
-  for (let attempt = 0; attempt < 8; attempt += 1) {
+  for (let attempt = 0; attempt < 6; attempt += 1) {
     const res = await page.request.post(BASE_URL + '/chat/session', {
       headers: { Accept: 'application/json' },
     });
@@ -32,8 +32,8 @@ async function createSession(page) {
       await loginAsAdmin(page);
       const retryAfter = Number(res.headers()['retry-after'] || '');
       const retryDelayMs = Number.isFinite(retryAfter) && retryAfter > 0
-        ? Math.min(Math.floor(retryAfter * 1000), 5000)
-        : Math.min(400 * (attempt + 1), 5000);
+        ? Math.min(Math.floor(retryAfter * 1000), 1200)
+        : Math.min(200 * (attempt + 1), 1200);
       await page.waitForTimeout(retryDelayMs);
       continue;
     }
