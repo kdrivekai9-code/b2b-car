@@ -3,6 +3,7 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import AddressField from './AddressField';
 import RouteMap from './RouteMap';
+import RouteCalculator from './RouteCalculator';
 import OrderSidePanel from '../[id]/OrderSidePanel';
 
 // Submits to the exact same POST /orders the legacy form.ejs uses, with the exact same
@@ -508,18 +509,16 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
           <div className="section-title small">운행 일정</div>
           <div className="field full">
             <label>예약일시 <span className="required-mark" aria-hidden="true">*</span></label>
-            {!isEdit && (
-              <div className="inline-duo" style={{ marginBottom: 8, alignItems: 'center' }}>
-                <label className="checkline">
-                  <input type="radio" name="reservation_basis" checked={state.reservation_basis === 'pickup'}
-                    onChange={() => setField('reservation_basis', 'pickup')} /> 출발지 픽업시간 기준
-                </label>
-                <label className="checkline">
-                  <input type="radio" name="reservation_basis" checked={state.reservation_basis === 'delivery'}
-                    onChange={() => setField('reservation_basis', 'delivery')} /> 도착지 인도시간 기준
-                </label>
-              </div>
-            )}
+            <div className="inline-duo" style={{ marginBottom: 8, alignItems: 'center' }}>
+              <label className="checkline">
+                <input type="radio" name="reservation_basis" checked={state.reservation_basis === 'pickup'}
+                  onChange={() => setField('reservation_basis', 'pickup')} /> 출발지 픽업시간 기준
+              </label>
+              <label className="checkline">
+                <input type="radio" name="reservation_basis" checked={state.reservation_basis === 'delivery'}
+                  onChange={() => setField('reservation_basis', 'delivery')} /> 도착지 인도시간 기준
+              </label>
+            </div>
             <div className="inline-duo reservation-datetime-row">
               <div className="inline-duo reservation-date-row">
                 <select className="date-select" aria-label="예약 연도" value={state.reservedDateYear}
@@ -664,7 +663,17 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
         </form>
 
         {isEdit ? (
-          <OrderSidePanel data={initialData} orderId={orderId} />
+          <>
+            {/* 지도는 안 그리지만 경로탐색·요금 자동계산·배송기준 예약시간 역산은 그대로
+                동작해야 해서, RouteMap에서 지도 렌더링만 뺀 헤드리스 버전을 붙인다. */}
+            <RouteCalculator
+              points={routePoints}
+              originAddress={state.origin_address}
+              destinationAddress={state.destination_address}
+              onRouteUpdate={setRouteInfo}
+            />
+            <OrderSidePanel data={initialData} orderId={orderId} />
+          </>
         ) : (
           <RouteMap
             points={routePoints}
