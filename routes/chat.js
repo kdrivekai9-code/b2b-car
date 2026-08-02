@@ -17,7 +17,11 @@ const {
 const router = express.Router();
 router.use(requireAuth);
 
-const SESSION_CREATE_LIMIT = process.env.NODE_ENV === 'test' ? 200 : 20;
+const DEFAULT_SESSION_CREATE_LIMIT = 20;
+const parsedTestSessionCreateLimit = Number.parseInt(process.env.TEST_SESSION_CREATE_LIMIT || '', 10);
+const SESSION_CREATE_LIMIT = process.env.NODE_ENV === 'test' && Number.isInteger(parsedTestSessionCreateLimit) && parsedTestSessionCreateLimit > 0
+  ? parsedTestSessionCreateLimit
+  : DEFAULT_SESSION_CREATE_LIMIT;
 const SESSION_CREATE_WINDOW_SQL = `to_char(now() at time zone 'Asia/Seoul' - interval '1 hour', 'YYYY-MM-DD HH24:MI:SS')`;
 
 function defaultReservedDateTime() {

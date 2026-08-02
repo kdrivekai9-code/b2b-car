@@ -1,5 +1,6 @@
 const { test, expect } = require('@playwright/test');
 const { loginWithRetry } = require('./helpers/auth');
+const { strictRetryDelayMs } = require('./helpers/retryAfter');
 
 const BASE_URL = process.env.E2E_BASE_URL || 'http://127.0.0.1:3000';
 const LOGIN_ID = process.env.E2E_LOGIN_ID || 'admin';
@@ -30,10 +31,7 @@ async function createSession(page) {
 
     if ([401, 403, 429, 302, 307].includes(lastStatus)) {
       await loginAsAdmin(page);
-      const retryAfter = Number(res.headers()['retry-after'] || '');
-      const retryDelayMs = Number.isFinite(retryAfter) && retryAfter > 0
-        ? Math.min(Math.floor(retryAfter * 1000), 1200)
-        : Math.min(200 * (attempt + 1), 1200);
+      const retryDelayMs = strictRetryDelayMs(res.headers(), attempt);
       await page.waitForTimeout(retryDelayMs);
       continue;
     }

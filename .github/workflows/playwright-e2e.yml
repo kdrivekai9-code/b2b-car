@@ -54,6 +54,7 @@ jobs:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       SESSION_SECRET: ${{ secrets.SESSION_SECRET != '' && secrets.SESSION_SECRET || 'ci-session-secret' }}
+      TEST_SESSION_CREATE_LIMIT: ${{ vars.TEST_SESSION_CREATE_LIMIT != '' && vars.TEST_SESSION_CREATE_LIMIT || '200' }}
       PLAYWRIGHT_BROWSERS_PATH: .playwright-browsers
       E2E_BASE_URL: http://127.0.0.1:3000
       LOGIN_BASE_URL: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.base_url || 'http://127.0.0.1:3000' }}
@@ -176,6 +177,7 @@ jobs:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       SESSION_SECRET: ${{ secrets.SESSION_SECRET != '' && secrets.SESSION_SECRET || 'ci-session-secret' }}
+      TEST_SESSION_CREATE_LIMIT: ${{ vars.TEST_SESSION_CREATE_LIMIT != '' && vars.TEST_SESSION_CREATE_LIMIT || '200' }}
       PLAYWRIGHT_BROWSERS_PATH: .playwright-browsers
       E2E_BASE_URL: http://127.0.0.1:3000
       E2E_LOGIN_ID: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_id_branch_manager || 'seoul_manager' }}
