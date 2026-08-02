@@ -8,6 +8,11 @@ const asyncHandler = require('../middleware/asyncHandler');
 const router = express.Router();
 router.use(requireAuth, requireRole('admin'));
 
+router.get('/data.json', asyncHandler(async (req, res) => {
+  const rules = await db.all('SELECT * FROM ferry_fare_rules ORDER BY route_code, ship_name, sort_order, id');
+  res.json({ currentUser: req.session.user, rules, saved: req.query.saved === '1' });
+}));
+
 router.get('/', asyncHandler(async (req, res) => {
   const rules = await db.all('SELECT * FROM ferry_fare_rules ORDER BY route_code, ship_name, sort_order, id');
   res.render('ferry_fares/list', {
