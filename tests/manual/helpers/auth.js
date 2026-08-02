@@ -9,40 +9,31 @@ async function loginWithRetry(page, options = {}) {
   const loginId = options.loginId || 'admin';
   const password = options.password || 'Admin!2345';
   const attempts = Number(options.attempts || 6);
+  const loginUrl = baseUrl + '/login';
   const protectedUrl = baseUrl + '/chat/sessions?view=list';
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     await page.context().clearCookies();
-    const loginRes = await page.request.post(baseUrl + '/login', {
-      form: {
-        login_id: loginId,
-        password,
-      },
-      maxRedirects: 0,
-    });
+    await page.goto(loginUrl, { waitUntil: 'domcontentloaded' });
+    await page.locator('#loginId').fill(loginId);
+    await page.locator('#loginPassword').fill(password);
 
-    const status = loginRes.status();
-    const location = String(loginRes.headers()['location'] || '');
+    await Promise.all([
+      page.locator('form').waitFor({ state: 'attached' }),
+      page.locator('button[type="submit"]').click(),
+    ]);
 
-    if (status === 429) {
-      const retryAfter = Number(loginRes.headers()['retry-after'] || '');
-      const delayMs = Number.isFinite(retryAfter) && retryAfter > 0
-        ? Math.min(Math.floor(retryAfter * 1000), 1500)
-        : Math.min(250 * (attempt + 1), 1200);
-      await sleep(delayMs);
-      continue;
+    await page.waitForLoadState('domcontentloaded');
+
+    if (!/\/login(?:\?|$)/.test(page.url())) {
+      await page.goto(protectedUrl, { waitUntil: 'domcontentloaded' });
+      if (!/\/login(?:\?|$)/.test(page.url())) return;
     }
 
-    if (status === 302 && (location === '/' || location === '')) {
-      const probe = await page.request.get(protectedUrl, {
-        maxRedirects: 0,
-      });
-      if (probe.status() === 200) {
-        await page.goto(protectedUrl, { waitUntil: 'domcontentloaded' });
-        if (!/\/login(?:\?|$)/.test(page.url())) {
-          return;
-        }
-      }
+    const errorText = await page.locator('.error-msg').textContent().catch(() => '');
+    if (/너무 많은 로그인 시도/.test(String(errorText || ''))) {
+      await sleep(Math.min(500 * (attempt + 1), 2000));
+      continue;
     }
 
     await sleep(Math.min(250 * (attempt + 1), 1200));
