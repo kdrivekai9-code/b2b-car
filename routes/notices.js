@@ -6,6 +6,15 @@ const asyncHandler = require('../middleware/asyncHandler');
 const router = express.Router();
 router.use(requireAuth);
 
+router.get('/data.json', asyncHandler(async (req, res) => {
+  const notices = await db.all(`
+    SELECT n.id, n.title, n.created_at, u.name AS author_name
+    FROM notices n LEFT JOIN users u ON u.id = n.author_id
+    ORDER BY n.id DESC
+  `);
+  res.json({ currentUser: req.session.user, notices });
+}));
+
 router.get('/', asyncHandler(async (req, res) => {
   const notices = await db.all(`
     SELECT n.*, u.name AS author_name

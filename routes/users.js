@@ -7,6 +7,19 @@ const asyncHandler = require('../middleware/asyncHandler');
 const router = express.Router();
 router.use(requireAuth, requireRole('admin'));
 
+router.get('/data.json', asyncHandler(async (req, res) => {
+  const users = await db.all(`
+    SELECT u.id, u.login_id, u.name, u.phone, u.role, u.grade, u.status, u.branch_id, u.group_id,
+           b.name AS branch_name, g.name AS group_name,
+           (u.active_session_hash IS NOT NULL AND u.active_session_expires_at > now()) AS is_logged_in
+    FROM users u
+    LEFT JOIN branches b ON b.id = u.branch_id
+    LEFT JOIN groups_tbl g ON g.id = u.group_id
+    ORDER BY u.id
+  `);
+  res.json({ currentUser: req.session.user, users });
+}));
+
 router.get('/', asyncHandler(async (req, res) => {
   const users = await db.all(`
     SELECT u.*, b.name AS branch_name, g.name AS group_name,

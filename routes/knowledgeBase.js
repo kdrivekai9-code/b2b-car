@@ -8,6 +8,14 @@ const { embedKnowledgeEntry } = require('../lib/knowledgeSearch');
 const router = express.Router();
 router.use(requireAuth, requireRole('admin'));
 
+router.get('/data.json', asyncHandler(async (req, res) => {
+  const [entries, categories] = await Promise.all([
+    db.all('SELECT id, category, question, answer, created_at FROM knowledge_base ORDER BY category, id'),
+    db.all('SELECT * FROM knowledge_categories ORDER BY name'),
+  ]);
+  res.json({ currentUser: req.session.user, entries, categories });
+}));
+
 router.get('/', asyncHandler(async (req, res) => {
   const entries = await db.all('SELECT * FROM knowledge_base ORDER BY category, id');
   res.render('knowledge_base/list', { title: '지식관리', entries });

@@ -6,6 +6,15 @@ const asyncHandler = require('../middleware/asyncHandler');
 const router = express.Router();
 router.use(requireAuth, requireRole('admin'));
 
+router.get('/data.json', asyncHandler(async (req, res) => {
+  const drivers = await db.all(`
+    SELECT d.id, d.name, d.phone, d.status, d.branch_id, b.name AS branch_name
+    FROM drivers d JOIN branches b ON b.id = d.branch_id
+    ORDER BY d.id
+  `);
+  res.json({ currentUser: req.session.user, drivers });
+}));
+
 router.get('/', asyncHandler(async (req, res) => {
   const drivers = await db.all(`
     SELECT d.*, b.name AS branch_name

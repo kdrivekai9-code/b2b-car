@@ -8,6 +8,11 @@ const { getEffectivePaymentMethods, getEffectiveStatuses } = require('../lib/bra
 const router = express.Router();
 router.use(requireAuth, requireRole('admin'));
 
+router.get('/data.json', asyncHandler(async (req, res) => {
+  const branches = await db.all('SELECT id, name, code, main_phone, address, contact_name, contact_phone, status FROM branches ORDER BY id');
+  res.json({ currentUser: req.session.user, branches });
+}));
+
 router.get('/', asyncHandler(async (req, res) => {
   const branches = await db.all('SELECT * FROM branches ORDER BY id');
   res.render('branches/list', { title: '지사 관리', branches });

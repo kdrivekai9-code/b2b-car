@@ -6,6 +6,11 @@ const asyncHandler = require('../middleware/asyncHandler');
 const router = express.Router();
 router.use(requireAuth, requireRole('admin'));
 
+router.get('/data.json', asyncHandler(async (req, res) => {
+  const paymentMethods = await db.all('SELECT * FROM payment_methods ORDER BY id');
+  res.json({ currentUser: req.session.user, paymentMethods });
+}));
+
 router.get('/', asyncHandler(async (req, res) => {
   const paymentMethods = await db.all('SELECT * FROM payment_methods ORDER BY id');
   res.render('settings/index', { title: '설정', paymentMethods });

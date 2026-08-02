@@ -32,6 +32,14 @@ const PATH_FLAGS = {
   '/inquiries': 'NEXT_STAGE1_INQUIRIES_ENABLED',
   '/orders/new': 'NEXT_STAGE2_ORDER_FORM_ENABLED',
   '/orders/ai-intake': 'NEXT_STAGE3_AI_INTAKE_ENABLED',
+  '/users': 'NEXT_USERS_ENABLED',
+  '/drivers': 'NEXT_DRIVERS_ENABLED',
+  '/groups': 'NEXT_GROUPS_ENABLED',
+  '/branches': 'NEXT_BRANCHES_ENABLED',
+  '/notices': 'NEXT_NOTICES_ENABLED',
+  '/location-aliases': 'NEXT_LOCATION_ALIASES_ENABLED',
+  '/settings': 'NEXT_SETTINGS_ENABLED',
+  '/knowledge-base': 'NEXT_KNOWLEDGE_BASE_ENABLED',
 };
 
 export function proxy(req) {
@@ -100,4 +108,4 @@ export function proxy(req) {
 
 // Next's proxy bundler statically analyzes this export, so it's kept as a literal array
 // (a computed expression like Object.keys(PATH_FLAGS) may not be statically evaluable).
-export const config = { matcher: ['/', '/orders', '/inquiries', '/chat/sessions', '/chat/sessions/:id', '/orders/new', '/orders/ai-intake', '/orders/:id'] };
+export const config = { matcher: ['/', '/orders', '/inquiries', '/chat/sessions', '/chat/sessions/:id', '/orders/new', '/orders/ai-intake', '/orders/:id', '/users', '/drivers', '/groups', '/branches', '/notices', '/location-aliases', '/settings', '/knowledge-base'] };
