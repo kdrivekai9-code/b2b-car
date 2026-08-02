@@ -71,6 +71,20 @@ export default function OrderSidePanel({ data, orderId }) {
         </>
       )}
 
+      {currentUserRole === 'admin' && (
+        <>
+          <div className="section-title small">오더 타입 변경</div>
+          <form method="POST" action={`/orders/${orderId}/order-type`} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <select name="order_type" defaultValue={order.order_type || 'dispatch'} style={{ flex: '0 0 auto', minWidth: 120 }}>
+              <option value="dispatch">탁송</option>
+              <option value="premium">프리미엄</option>
+              <option value="daily_driver">일일기사</option>
+            </select>
+            <button className="btn small secondary" type="submit">변경</button>
+          </form>
+        </>
+      )}
+
       <div className="section-title small">오더수정이력</div>
       <ul className="timeline">
         {history.map((h) => (

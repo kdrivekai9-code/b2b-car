@@ -1260,6 +1260,23 @@ router.post('/:id/legs/drivers', asyncHandler(async (req, res) => {
   res.redirect('/orders/' + req.params.id);
 }));
 
+// 관리자 수동 오더 타입 변경 (§7-2 3순위)
+router.post('/:id/order-type', requireRole('admin'), asyncHandler(async (req, res) => {
+  const order = await db.get('SELECT id FROM orders WHERE id = ?', [req.params.id]);
+  if (!order) return res.status(404).json({ error: '오더를 찾을 수 없습니다.' });
+  const validTypes = ['dispatch', 'premium', 'daily_driver'];
+  const newType = req.body.order_type;
+  if (!validTypes.includes(newType)) return res.status(400).json({ error: '유효하지 않은 오더 타입입니다.' });
+  await db.run('UPDATE orders SET order_type = ? WHERE id = ?', [newType, order.id]);
+  await db.run(
+    `INSERT INTO order_status_history (order_id, actor_user_id, old_status, new_status, note)
+     VALUES (?, ?, NULL, NULL, ?)`,
+    [order.id, req.session.user.id, `오더 타입 변경: ${newType}`]
+  );
+  if (req.get('X-Requested-With') === 'fetch') return res.json({ ok: true });
+  res.redirect('/orders/' + req.params.id);
+}));
+
 router.post('/:id/status', asyncHandler(async (req, res) => {
   const order = await loadOrderInScope(req, res);
   if (!order) return;
