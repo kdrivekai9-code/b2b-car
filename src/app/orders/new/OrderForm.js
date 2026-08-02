@@ -3,6 +3,7 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import AddressField from './AddressField';
 import RouteMap from './RouteMap';
+import OrderSidePanel from '../[id]/OrderSidePanel';
 
 // Submits to the exact same POST /orders the legacy form.ejs uses, with the exact same
 // field names and urlencoded wire format (verified directly against the live endpoint).
@@ -45,8 +46,6 @@ function deriveMemoWithReservationLine(currentMemo, isDeliveryBasis, deliveryDat
   return keptLines.join('\n').replace(/^\n+|\n+$/g, '');
 }
 
-let prefillWaypointSeq = 0;
-
 function initialFieldState(order, defaultBranch, mode) {
   const reservedDate = order.reserved_date || '';
   const now = new Date();
@@ -59,8 +58,13 @@ function initialFieldState(order, defaultBranch, mode) {
   // order 인자에 병합해서 넘기면 여기서 자동으로 prefill된다(필드명이 이미 1:1 대응),
   // edit 모드에서는 GET /orders/:id/data.json이 같은 형태로 detail/vehicleNumber까지 채워준다.
   const prefillWaypoints = Array.isArray(order.waypoints)
-    ? order.waypoints.map((w) => ({
-      id: 'prefill-' + (prefillWaypointSeq += 1),
+    ? order.waypoints.map((w, i) => ({
+      // 모듈 레벨 카운터로 id를 만들면(예전 방식) 서버 프로세스가 이전 요청들에서 이미
+      // 증가시켜둔 값과 클라이언트의 신선한 값이 어긋나 SSR/hydration mismatch가 난다
+      // (edit 모드에서 실제로 겪은 버그 — order.waypoints가 항상 비어 있던 create 모드에선
+      // 안 드러났었다). order.waypoints는 서버/클라이언트가 같은 데이터를 받으므로 배열
+      // index로 만들면 항상 결정적이다.
+      id: 'prefill-' + i,
       address: w.address || '', detail: w.detail || '', contact: w.contact || '', vehicleNumber: w.vehicleNumber || '',
       lat: null, lon: null,
     }))
@@ -129,8 +133,9 @@ function reducer(state, action) {
 
 let waypointSeq = 0;
 
-export default function OrderForm({ initialData, chatSessionId, mode = 'create', orderId }) {
+export default function OrderForm({ initialData, chatSessionId, mode = 'create', orderId, externalPrefill }) {
   const { order, branches, groups, paymentMethods, defaultBranch, currentUserRole, currentUserPhone } = initialData;
+  const isEdit = mode === 'edit';
   const [state, dispatch] = useReducer(reducer, initialFieldState(order, defaultBranch, mode));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
@@ -265,6 +270,44 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
   const isAdmin = currentUserRole === 'admin';
   const isClient = currentUserRole === 'client';
 
+  // AI 챗봇 parse 결과를 폼으로 점진 반영한다. 값이 비어 있지 않은 필드만 덮어쓴다.
+  // (빈 문자열로 기존 입력을 지우지 않도록 보호)
+  useEffect(() => {
+    if (!externalPrefill || typeof externalPrefill !== 'object') return;
+    const p = externalPrefill;
+    const clearFields = new Set(Array.isArray(p.__clearFields) ? p.__clearFields : []);
+    const setIfFilled = (name, value) => {
+      const v = String(value == null ? '' : value).trim();
+      if (!v && !clearFields.has(name)) return;
+      dispatch({ type: 'SET_FIELD', name, value: v });
+    };
+
+    setIfFilled('origin_address', p.origin_address);
+    setIfFilled('origin_detail_address', p.origin_detail_address);
+    setIfFilled('origin_contact', p.origin_contact);
+    setIfFilled('destination_address', p.destination_address);
+    setIfFilled('destination_detail_address', p.destination_detail_address);
+    setIfFilled('destination_contact', p.destination_contact);
+    setIfFilled('vehicle_type', p.vehicle_type);
+    setIfFilled('vehicle_number', p.vehicle_number);
+    setIfFilled('memo_customer', p.memo_customer);
+    setIfFilled('memo_billing', p.memo_billing);
+
+    const date = String(p.reserved_date || '').trim();
+    const time = String(p.reserved_time || '').trim();
+    const dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+    const timeMatch = /^(\d{2}):(\d{2})$/.exec(time);
+    if (dateMatch) {
+      dispatch({ type: 'SET_RESERVED_DATE_PART', name: 'reservedDateYear', value: dateMatch[1] });
+      dispatch({ type: 'SET_RESERVED_DATE_PART', name: 'reservedDateMonth', value: dateMatch[2] });
+      dispatch({ type: 'SET_RESERVED_DATE_PART', name: 'reservedDateDay', value: dateMatch[3] });
+    }
+    if (timeMatch) {
+      dispatch({ type: 'SET_FIELD', name: 'reservedTimeHour', value: timeMatch[1] });
+      dispatch({ type: 'SET_FIELD', name: 'reservedTimeMinute', value: timeMatch[2] });
+    }
+  }, [externalPrefill]);
+
   function setField(name, value) {
     dispatch({ type: 'SET_FIELD', name, value });
   }
@@ -326,6 +369,29 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
       params.append('waypoint_vehicle_numbers[]', w.vehicleNumber);
     });
 
+    // 레거시 AI intake와 동일하게 등록 직전에 서버 precheck를 먼저 실행한다.
+    // 실패 사유를 즉시 인라인 에러로 보여주고 실제 저장 요청은 보내지 않는다.
+    try {
+      const precheckRes = await fetch('/orders/ai-intake/submit-precheck', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'X-Requested-With': 'fetch',
+        },
+        body: params,
+      });
+      if (precheckRes.status !== 404) {
+        const precheckData = await precheckRes.json().catch(() => ({}));
+        if (!precheckRes.ok || !precheckData.ok) {
+          setError(precheckData.error || precheckData.message || '등록 가능 여부를 확인하지 못했습니다.');
+          return;
+        }
+      }
+    } catch {
+      setError('등록 가능 여부를 확인하지 못했습니다. 네트워크 상태를 확인해주세요.');
+      return;
+    }
+
     setSubmitting(true);
     try {
       const res = await fetch(mode === 'edit' ? `/orders/${orderId}` : '/orders', {
@@ -357,8 +423,13 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
   }
 
   return (
-    <form className="order-form" onSubmit={handleSubmit}>
+    <div className="order-form">
       <div className="order-grid">
+        {/* OrderSidePanel(03번 자리, edit 모드)이 기사배정용 <form>을 자체적으로 갖고 있어서
+            — HTML은 <form> 중첩을 허용하지 않는다(중첩되면 브라우저가 파서 레벨에서 구조를
+            바꿔버려 실제로 hydration mismatch가 났다). 그래서 이 <form>은 grid의 01/02
+            섹션만 감싸고, display:contents로 grid 레이아웃 자체에는 관여하지 않게 한다. */}
+        <form className="order-form-fields" onSubmit={handleSubmit} style={{ display: 'contents' }}>
         <section className="card order-panel route-panel">
           <div className="panel-title">
             <div className="panel-icon">01</div>
@@ -437,16 +508,18 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
           <div className="section-title small">운행 일정</div>
           <div className="field full">
             <label>예약일시 <span className="required-mark" aria-hidden="true">*</span></label>
-            <div className="inline-duo" style={{ marginBottom: 8, alignItems: 'center' }}>
-              <label className="checkline">
-                <input type="radio" name="reservation_basis" checked={state.reservation_basis === 'pickup'}
-                  onChange={() => setField('reservation_basis', 'pickup')} /> 출발지 픽업시간 기준
-              </label>
-              <label className="checkline">
-                <input type="radio" name="reservation_basis" checked={state.reservation_basis === 'delivery'}
-                  onChange={() => setField('reservation_basis', 'delivery')} /> 도착지 인도시간 기준
-              </label>
-            </div>
+            {!isEdit && (
+              <div className="inline-duo" style={{ marginBottom: 8, alignItems: 'center' }}>
+                <label className="checkline">
+                  <input type="radio" name="reservation_basis" checked={state.reservation_basis === 'pickup'}
+                    onChange={() => setField('reservation_basis', 'pickup')} /> 출발지 픽업시간 기준
+                </label>
+                <label className="checkline">
+                  <input type="radio" name="reservation_basis" checked={state.reservation_basis === 'delivery'}
+                    onChange={() => setField('reservation_basis', 'delivery')} /> 도착지 인도시간 기준
+                </label>
+              </div>
+            )}
             <div className="inline-duo reservation-datetime-row">
               <div className="inline-duo reservation-date-row">
                 <select className="date-select" aria-label="예약 연도" value={state.reservedDateYear}
@@ -588,14 +661,19 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
             </button>
           </div>
         </section>
+        </form>
 
-        <RouteMap
-          points={routePoints}
-          originAddress={state.origin_address}
-          destinationAddress={state.destination_address}
-          onRouteUpdate={setRouteInfo}
-        />
+        {isEdit ? (
+          <OrderSidePanel data={initialData} orderId={orderId} />
+        ) : (
+          <RouteMap
+            points={routePoints}
+            originAddress={state.origin_address}
+            destinationAddress={state.destination_address}
+            onRouteUpdate={setRouteInfo}
+          />
+        )}
       </div>
-    </form>
+    </div>
   );
 }

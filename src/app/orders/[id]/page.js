@@ -3,13 +3,14 @@ import { redirect } from 'next/navigation';
 import AppShell from '../../_components/AppShell';
 import OrderForm from '../new/OrderForm';
 import OrderDetailAdminPanels from './OrderDetailAdminPanels';
-import OrderHistoryPanel from './OrderHistoryPanel';
 
 // 오더 상세페이지를 기존 접수폼(OrderForm.js, /orders/new)의 edit 모드로 재사용 —
 // views/orders/detail.ejs는 수정이 아예 불가능한 읽기전용 화면이었다. 모든 역할(admin/
-// branch_manager/client)이 이제 자기 소속 오더를 직접 수정할 수 있다. 상태변경/기사배정/
-// 관리자메모는 여전히 admin/branch_manager 전용(OrderDetailAdminPanels.js) — client는
-// 대신 배정 기사 정보 + 변경이력만 보는 OrderHistoryPanel.js를 본다.
+// branch_manager/client)이 이제 자기 소속 오더를 직접 수정할 수 있다. OrderForm 안의
+// 03번 자리(경로 미리보기 대신 기사배정 정보 + 오더수정이력, OrderSidePanel.js)는 역할과
+// 무관하게 항상 보인다(기사배정 "수정"만 admin/branch_manager 전용). 상태변경/관리자메모는
+// 여전히 admin/branch_manager 전용(OrderDetailAdminPanels.js). 사진은 역할별 열람 권한
+// (canViewPhotos, branch_photo_settings 기준)에 따라 아래에서 공통으로 보여준다.
 // NEXT_ORDER_DETAIL_EDIT_ENABLED=true일 때만 도달(src/proxy.js).
 export const dynamic = 'force-dynamic';
 export const preferredRegion = 'icn1';
@@ -72,11 +73,27 @@ export default async function OrderDetailPage({ params }) {
       </div>
 
       <OrderForm initialData={data} mode="edit" orderId={id} />
-      <div style={{ marginTop: 18 }}>
-        {isAdminOrBranchManager
-          ? <OrderDetailAdminPanels data={data} orderId={id} />
-          : <OrderHistoryPanel data={data} />}
-      </div>
+
+      {data.canViewPhotos && (
+        <div className="card" style={{ marginTop: 18 }}>
+          <h2>📷 기사 업로드 사진</h2>
+          {data.photos.length === 0 ? (
+            <p className="page-sub" style={{ margin: 0 }}>업로드된 사진이 없습니다.</p>
+          ) : (
+            <div className="upload-gallery">
+              {data.photos.map((p) => (
+                <a key={p.id} href={p.url} target="_blank" rel="noreferrer"><img src={p.url} alt="업로드된 사진" /></a>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {isAdminOrBranchManager && (
+        <div style={{ marginTop: 18 }}>
+          <OrderDetailAdminPanels data={data} orderId={id} />
+        </div>
+      )}
     </AppShell>
   );
 }
