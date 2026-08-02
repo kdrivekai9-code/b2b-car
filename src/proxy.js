@@ -12,11 +12,26 @@
 // own src/app/** route handle that one path instead.
 import { NextResponse } from 'next/server';
 
+// 실제 Vercel 배포에서는 '/api/index'로의 rewrite가 Vercel 라우팅의 특수 동작이라
+// 원본 경로/쿼리를 그대로 유지한 채 그 서버리스 함수(api/index.js → server.js)로
+// 디스패치된다. 로컬(next dev, 포트 분리 개발용)에는 이 특수 동작이 없으므로 직접
+// http://localhost:3000(Express, `npm run dev`)으로 절대 URL 리라이트한다 — Next의
+// rewrite destination은 절대 URL을 리버스 프록시 대상으로 허용하는 공식 기능이다.
+// process.env.VERCEL은 실제 배포에서만 true라(server.js가 이미 같은 패턴으로
+// app.listen() 여부를 가름) production/preview 동작에는 전혀 영향이 없다.
+function toExpress(req) {
+  if (process.env.VERCEL) {
+    return NextResponse.rewrite(new URL('/api/index', req.url));
+  }
+  return NextResponse.rewrite(new URL(req.nextUrl.pathname + req.nextUrl.search, 'http://localhost:3000'));
+}
+
 const PATH_FLAGS = {
   '/': 'NEXT_STAGE1_DASHBOARD_ENABLED',
   '/orders': 'NEXT_STAGE1_ORDERS_ENABLED',
   '/inquiries': 'NEXT_STAGE1_INQUIRIES_ENABLED',
   '/orders/new': 'NEXT_STAGE2_ORDER_FORM_ENABLED',
+  '/orders/ai-intake': 'NEXT_STAGE3_AI_INTAKE_ENABLED',
 };
 
 export function proxy(req) {
@@ -28,7 +43,7 @@ export function proxy(req) {
   // GET /orders 플래그가 켜진 환경에서 POST /orders 오더 등록이 조용히 씹혔다). 그래서
   // GET이 아닌 모든 요청은 플래그 상태와 무관하게 항상 기존 Express로 보낸다.
   if (req.method !== 'GET') {
-    return NextResponse.rewrite(new URL('/api/index', req.url));
+    return toExpress(req);
   }
 
   // /chat/sessions는 같은 경로에 두 가지 완전히 다른 화면이 걸려있다: ?view=list(읽기 전용
@@ -43,7 +58,7 @@ export function proxy(req) {
     if (view === 'card' && process.env.NEXT_STAGE3_CHAT_CARDS_ENABLED === 'true') {
       return NextResponse.next();
     }
-    return NextResponse.rewrite(new URL('/api/index', req.url));
+    return toExpress(req);
   }
 
   // /chat/sessions/:id는 상세페이지(Stage 3 슬라이스 2) — 숫자 세션 id일 때만 대상이다.
@@ -60,7 +75,7 @@ export function proxy(req) {
     if (isNumericId && process.env.NEXT_STAGE3_CHAT_DETAIL_ENABLED === 'true') {
       return NextResponse.next();
     }
-    return NextResponse.rewrite(new URL('/api/index', req.url));
+    return toExpress(req);
   }
 
   // /orders/:id(오더 상세/수정, 신규) — 위 /chat/sessions/:id와 완전히 같은 이유로 같은
@@ -73,16 +88,16 @@ export function proxy(req) {
     if (isNumericId && process.env.NEXT_ORDER_DETAIL_EDIT_ENABLED === 'true') {
       return NextResponse.next();
     }
-    return NextResponse.rewrite(new URL('/api/index', req.url));
+    return toExpress(req);
   }
 
   const flagName = PATH_FLAGS[pathname];
   if (flagName && process.env[flagName] !== 'true') {
-    return NextResponse.rewrite(new URL('/api/index', req.url));
+    return toExpress(req);
   }
   return NextResponse.next();
 }
 
 // Next's proxy bundler statically analyzes this export, so it's kept as a literal array
 // (a computed expression like Object.keys(PATH_FLAGS) may not be statically evaluable).
-export const config = { matcher: ['/', '/orders', '/inquiries', '/chat/sessions', '/chat/sessions/:id', '/orders/new', '/orders/:id'] };
+export const config = { matcher: ['/', '/orders', '/inquiries', '/chat/sessions', '/chat/sessions/:id', '/orders/new', '/orders/ai-intake', '/orders/:id'] };
