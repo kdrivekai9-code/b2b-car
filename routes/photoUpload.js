@@ -24,6 +24,16 @@ function safeFilename(originalname) {
   return 'photo' + ext;
 }
 
+router.get('/:token/data.json', asyncHandler(async (req, res) => {
+  const order = await db.get('SELECT id, oid, branch_id, photo_upload_token FROM orders WHERE photo_upload_token = ?', [req.params.token]);
+  if (!order) return res.status(404).json({ order: null, guide: null, photos: [] });
+  const [guide, photos] = await Promise.all([
+    db.get('SELECT guide_text, guide_image_url FROM branch_photo_settings WHERE branch_id = ?', [order.branch_id]),
+    db.all('SELECT id, url FROM order_photos WHERE order_id = ? ORDER BY id DESC', [order.id]),
+  ]);
+  res.json({ order, guide: guide || null, photos });
+}));
+
 router.get('/:token', asyncHandler(async (req, res) => {
   const order = await db.get('SELECT * FROM orders WHERE photo_upload_token = ?', [req.params.token]);
   if (!order) return res.status(404).render('photo_upload', { title: '잘못된 링크', order: null, guide: null, photos: [] });

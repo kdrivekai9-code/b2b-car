@@ -104,6 +104,18 @@ export function proxy(req) {
     return toExpress(req);
   }
 
+  // /upload/:token — 공개 사진 업로드 페이지. 토큰은 임의 문자열(숫자 아님)이므로
+  // /upload/data.json 같은 하위 API 경로와 구분하기 위해 명시적으로 처리한다.
+  const uploadTokenMatch = pathname.match(/^\/upload\/([^/]+)$/);
+  if (uploadTokenMatch) {
+    const seg = uploadTokenMatch[1];
+    // data.json, vapid-public-key 등 API 하위 경로가 아닌 경우에만 Next.js로 보낸다.
+    if (!/\.(json|js|css|ico|png|jpg|svg|woff2?)$/.test(seg) && process.env.NEXT_UPLOAD_ENABLED === 'true') {
+      return NextResponse.next();
+    }
+    return toExpress(req);
+  }
+
   const flagName = PATH_FLAGS[pathname];
   if (flagName && process.env[flagName] !== 'true') {
     return toExpress(req);
@@ -113,4 +125,4 @@ export function proxy(req) {
 
 // Next's proxy bundler statically analyzes this export, so it's kept as a literal array
 // (a computed expression like Object.keys(PATH_FLAGS) may not be statically evaluable).
-export const config = { matcher: ['/', '/orders', '/inquiries', '/chat/sessions', '/chat/sessions/:id', '/orders/new', '/orders/ai-intake', '/orders/:id', '/users', '/drivers', '/groups', '/branches', '/notices', '/location-aliases', '/settings', '/knowledge-base', '/faq', '/push/settings', '/access-logs', '/login', '/ferry-fares'] };
+export const config = { matcher: ['/', '/orders', '/inquiries', '/chat/sessions', '/chat/sessions/:id', '/orders/new', '/orders/ai-intake', '/orders/:id', '/users', '/drivers', '/groups', '/branches', '/notices', '/location-aliases', '/settings', '/knowledge-base', '/faq', '/push/settings', '/access-logs', '/login', '/ferry-fares', '/upload/:token'] };
