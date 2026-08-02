@@ -98,6 +98,18 @@ jobs:
         if: ${{ env.DATABASE_URL != '' }}
         run: npm run seed
 
+      - name: Clear test chat sessions
+        if: ${{ env.DATABASE_URL != '' }}
+        run: |
+          node -e "
+            require('dotenv').config();
+            const { pool, run } = require('./db');
+            run('DELETE FROM chat_sessions')
+              .then(() => console.log('chat_sessions 정리 완료'))
+              .catch(e => { console.error('chat_sessions 정리 실패:', e.message); process.exit(1); })
+              .finally(() => pool.end());
+          "
+
       - name: Start server
         if: ${{ env.DATABASE_URL != '' }}
         run: |
@@ -226,6 +238,18 @@ jobs:
       - name: Seed demo data
         if: ${{ env.DATABASE_URL != '' }}
         run: npm run seed
+
+      - name: Clear test chat sessions
+        if: ${{ env.DATABASE_URL != '' }}
+        run: |
+          node -e "
+            require('dotenv').config();
+            const { pool, run } = require('./db');
+            run('DELETE FROM chat_sessions')
+              .then(() => console.log('chat_sessions 정리 완료'))
+              .catch(e => { console.error('chat_sessions 정리 실패:', e.message); process.exit(1); })
+              .finally(() => pool.end());
+          "
 
       - name: Start server
         if: ${{ env.DATABASE_URL != '' }}
