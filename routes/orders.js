@@ -686,7 +686,11 @@ router.post('/', asyncHandler(async (req, res) => {
     destination_address, destination_detail_address, destination_contact, vehicle_number, reserved_date, reserved_time,
     vehicle_type, payment_method_id, fare_amount, ferry_fare_amount, memo_customer, memo_billing, chat_session_id, chat_session_transition,
     pickup_reserved_date, pickup_reserved_time,
+    order_type, trip_type, final_destination_address, final_destination_address_detail,
+    destination_wait_minutes, reservation_hours_bracket,
   } = req.body;
+  const validOrderTypes = ['dispatch', 'premium', 'daily_driver'];
+  const finalOrderType = validOrderTypes.includes(order_type) ? order_type : 'dispatch';
   const waypoints = [].concat(req.body.waypoints || []);
   const waypointDetails = [].concat(req.body.waypoint_details || []);
   const waypointContacts = [].concat(req.body.waypoint_contacts || []);
@@ -745,17 +749,24 @@ router.post('/', asyncHandler(async (req, res) => {
     inserted = await db.run(`
       INSERT INTO orders (oid, branch_id, requester_group_id, origin_address, origin_address_detail, origin_contact,
         destination_address, destination_address_detail, destination_contact, vehicle_number,
-        vehicle_type, reserved_date, reserved_time, payment_method_id, fare_amount, ferry_fare_amount, status, memo_customer, memo_billing, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '오더등록', ?, ?, ?)
+        vehicle_type, reserved_date, reserved_time, payment_method_id, fare_amount, ferry_fare_amount,
+        order_type, trip_type, final_destination_address, final_destination_address_detail,
+        destination_wait_minutes, reservation_hours_bracket,
+        status, memo_customer, memo_billing, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '오더등록', ?, ?, ?)
       RETURNING id
     `, [
       tempOid, finalBranch, finalGroup, finalOriginAddress, origin_detail_address || null, origin_contact || null,
       finalDestinationAddress, destination_detail_address || null, destination_contact || null, splitVehicle.vehicleNumber,
-      splitVehicle.vehicleType, effectiveReservedDate, effectiveReservedTime, payment_method_id || null, Number(fare_amount) || 0, Number(ferry_fare_amount) || 0, memo_customer || null, memo_billing || null, u.id,
+      splitVehicle.vehicleType, effectiveReservedDate, effectiveReservedTime, payment_method_id || null, Number(fare_amount) || 0, Number(ferry_fare_amount) || 0,
+      finalOrderType, trip_type || null, final_destination_address || null, final_destination_address_detail || null,
+      destination_wait_minutes ? Number(destination_wait_minutes) : null,
+      ['within_4h', 'within_8h', 'over_8h'].includes(reservation_hours_bracket) ? reservation_hours_bracket : null,
+      memo_customer || null, memo_billing || null, u.id,
     ]);
   } catch (e) {
     const msg = String((e && e.message) || '');
-    const missingCompatColumns = e && e.code === '42703' && /(vehicle_type|ferry_fare_amount|memo_billing)/.test(msg);
+    const missingCompatColumns = e && e.code === '42703' && /(vehicle_type|ferry_fare_amount|memo_billing|order_type|trip_type|final_destination|destination_wait|reservation_hours)/.test(msg);
     if (!missingCompatColumns) throw e;
 
     // 구버전 DB(마이그레이션 미적용)에서는 vehicle_type/ferry_fare_amount/memo_billing 없이 저장해도 기본 흐름을 유지한다.

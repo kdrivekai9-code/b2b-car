@@ -72,37 +72,32 @@
   var ADDITIONAL_REQUEST_NONE_RE = /^(없어요?|없습니다|없음|딱히\s?없어요?|특별히\s?없어요?|아니오|아니요|괜찮아요?|no)[.!~\s]*$/i;
 
   var pendingField = null;
-  var modifyFieldMode = false; // pendingField 응답이 "수정 요청"에 대한 답변인지 구분
+  var modifyFieldMode = false;
   var lastModifiedFieldId = null;
-  // reserved_date/reserved_time 입력칸은 폼 기본값으로 "지금 시각"이 항상 미리 채워져 있어서
-  // (일반 오더 등록 화면 UX를 위한 기본값) 값이 비어있는지만으로는 "사용자가 실제로 예약일시를
-  // 알려줬는지"를 판단할 수 없다 — 그래서 실제로 챗봇이 예약일시를 확인해준 적이 있는지 별도로 추적한다.
   var reservedDateTimeConfirmed = false;
-  // 차량번호는 폼 기본값이 비어있어 "값이 없음"과 "아직 안 물어봄"을 구분할 수 없다(스킵한 경우
-  // 값은 계속 비어있는 게 정상이라서) — 질문을 실제로 마쳤는지(스킵/확인/포기 불문) 별도로 추적한다.
   var vehicleNumberResolved = false;
-  // "추가 요청사항" 질문도 마찬가지 이유로 별도 추적한다(응답이 "없음"이면 memo가 계속 빈 채로 남는다).
   var additionalRequestResolved = false;
-  // 이번 대화에서 오더유형(탁송/대리/일일기사)이 몇 번째 메시지에서 정해졌는지와 무관하게 한 번만
-  // 안내하기 위한 추적 — 확정되면 우측 "오더 접수 내용" 패널 옆에도 배지로 표시한다.
   var confirmedOrderType = null;
-  // 검증 실패/못 알아들음이 연속으로 쌓이면(형식 오류, 주소 검색 실패, "1번/2번으로 답해주세요" 반복 등)
-  // 사용자가 답답해할 가능성이 높다고 보고 상담원 연결을 먼저 제안한다. 뭔가 하나라도 성공하면 초기화된다.
   var troubleStreak = 0;
   var TROUBLE_STREAK_LIMIT = 2;
-  // 상담원 연결 제안 중 "아니요, 계속할게요"를 선택하면 원래 하던 질문/단계로 그대로 돌아가야 하므로,
-  // 제안하기 직전 상태를 여기 담아둔다.
   var preOfferState = null;
-  // Gemini가 이번 메시지에서 화남/답답함을 감지했으면(seemsFrustrated) true — 그 메시지의 내용은
-  // 평소대로 처리(필드 확인 등)하되, 다음 질문 대신 상담원 연결 제안을 먼저 보여주기 위한 플래그.
   var pendingFrustrationOffer = false;
   var phase = 'collecting'; // 'collecting' | 'confirming' | 'choose_field' | 'choose_address_candidate' | 'offer_agent'
-  var pendingDisambiguation = null; // { fieldId, label, candidates } — 지금 사용자에게 확인받는 중인 주소 후보
-  var disambiguationQueue = []; // 한 턴에 모호한 주소가 여러 개면 순서대로 처리하기 위한 대기열
+  var pendingDisambiguation = null;
+  var disambiguationQueue = [];
   var sessionId = null;
   var sessionStatus = 'bot';
-  var lastWaitingStatusShown = null; // 'needs_agent'/'agent_active' 대기 안내를 마지막으로 보여준 상태 — 같은 상태 반복이면 다시 안 보여줌
+  var lastWaitingStatusShown = null;
   var lastPolledId = 0;
+
+  // ---- 일일기사/프리미엄 전용 FSM 상태 ----
+  // orderCategory: 'dispatch' | 'premium' | 'daily_driver' — confirmedOrderType에서 파생
+  var orderCategory = 'dispatch';
+  var tripType = null; // 'round_trip' | 'one_way'
+  var waypointsList = []; // { address, addressDetail, contact, waitMinutes } 배열 — 대화로 누적
+  var currentWaypointAddrIdx = 0; // 지금 몇 번째 경유지를 수집 중인지
+  var destinationWaitResolved = false; // 도착지 대기시간 질문 완료 여부
+  var premiumWaitYnAsked = false; // 프리미엄 경유지 대기시간 1단계 질문 여부
   var botMessageWriteChain = Promise.resolve();
   var isComposing = false;
   var submitAfterCompositionEnd = false;
@@ -1574,6 +1569,23 @@
     return lines.join('\n');
   }
 
+  // 일일기사 도착지 대기시간 처리 후 다음 단계로 이동
+  function handleAfterDestinationWait() {
+    destinationWaitResolved = true;
+    if (tripType === 'round_trip') {
+      // 왕복 → 최종목적지 질문
+      setPendingField('final_destination_address');
+      var finalQ = '최종 목적지(기사가 최종적으로 복귀할 주소)를 알려주세요?';
+      addBubble(finalQ, 'bot', null, true);
+      return logBotMessage({ logText: finalQ, needsAgent: false, requestedFeature: null });
+    }
+    // 편도 → 전달사항으로
+    setPendingField('memo_customer');
+    var memoQ = '기사 전달사항이 있으시면 알려주세요? (없으면 "없어"라고 답해주세요)';
+    addBubble(memoQ, 'bot', null, true);
+    return logBotMessage({ logText: memoQ, needsAgent: false, requestedFeature: null });
+  }
+
   // 이번 턴에 새로 채워진 필드들의 검증이 모두 끝난 뒤 호출된다.
   // 아직 빈 필수 항목이 있으면 다음 질문으로, 전부 채워졌으면 요약 + 등록 확인 질문으로 넘어간다.
   function proceedAfterCollecting() {
@@ -1663,6 +1675,22 @@
     if (newOrderType) {
       confirmedOrderType = newOrderType;
       updateOrderTypeBadge(newOrderType);
+      // orderCategory 동기화
+      if (newOrderType === 'daily_driver_order') orderCategory = 'daily_driver';
+      else if (newOrderType === 'proxy_order') orderCategory = 'premium';
+      else orderCategory = 'dispatch';
+    }
+
+    // 일일기사/프리미엄 진입 — 오더유형이 최초로 확정되었고 탁송이 아닐 때
+    if (newOrderType && orderCategory !== 'dispatch') {
+      var greetMsg = orderCategory === 'daily_driver'
+        ? '안녕하세요. 일일기사 예약을 도와드리겠습니다.\n이용 형태를 선택해 주세요.\n1. 왕복  2. 편도'
+        : '안녕하세요. 프리미엄 서비스 예약을 도와드리겠습니다.';
+      sayBot(greetMsg);
+      if (orderCategory === 'daily_driver') {
+        pendingField = 'trip_type';
+      }
+      return { logText: greetMsg, needsAgent: false, requestedFeature: null };
     }
 
     setField('reserved_date', data.reserved_date);
@@ -2581,7 +2609,106 @@
           },
         });
         if (phaseDispatch && phaseDispatch.handled) return phaseDispatch.value;
-        if (handleFareVehicleTypePendingReply(text)) return null;
+
+        // ---- 일일기사 전용 pendingField 인터셉트 ----
+        if (pendingField === 'trip_type' && orderCategory === 'daily_driver') {
+          var parsed = flowApi.parseTripTypeResponse(text);
+          if (parsed) {
+            tripType = parsed;
+            var tripLabel = parsed === 'round_trip' ? '왕복' : '편도';
+            setPendingField(null);
+            var ddFields = flowApi.getDailyDriverFields(tripType);
+            // 예약일시 질문으로 이동
+            var nextField = ddFields[1]; // index 1 = 예약일시
+            setPendingField(nextField.id);
+            var confirmMsg = tripLabel + '으로 확인했습니다. ' + nextField.question;
+            addBubble(confirmMsg, 'bot', null, true);
+            return logBotMessage({ logText: confirmMsg, needsAgent: false, requestedFeature: null });
+          }
+          var retryMsg = '왕복 또는 편도 중 하나를 선택해 주세요.\n1. 왕복  2. 편도';
+          addBubble(retryMsg, 'bot', null, true);
+          return logBotMessage({ logText: retryMsg, needsAgent: false, requestedFeature: null });
+        }
+
+        // ---- 일일기사 경유지 추가 여부 ----
+        if (pendingField === 'waypoint_add_more' && orderCategory === 'daily_driver') {
+          var addMore = flowApi.parseWaitYesNo(text);
+          if (addMore === true) {
+            setPendingField('waypoint_address_' + currentWaypointAddrIdx);
+            var wpQ = '경유지 ' + (currentWaypointAddrIdx + 1) + '번 주소를 알려주세요?';
+            addBubble(wpQ, 'bot', null, true);
+            return logBotMessage({ logText: wpQ, needsAgent: false, requestedFeature: null });
+          }
+          // 추가 없음 → 도착지로 이동
+          setPendingField('destination_address');
+          var destQ = '도착지 주소를 알려주세요?';
+          addBubble(destQ, 'bot', null, true);
+          return logBotMessage({ logText: destQ, needsAgent: false, requestedFeature: null });
+        }
+
+        // ---- 일일기사 경유지 대기시간 Y/N ----
+        if (pendingField === 'waypoint_wait_yn' && orderCategory === 'daily_driver') {
+          var hasWait = flowApi.parseWaitYesNo(text);
+          if (hasWait === true) {
+            setPendingField('waypoint_wait_minutes');
+            var waitQ = '예상 대기시간을 알려주세요. (예: 60분, 잘모른다)';
+            addBubble(waitQ, 'bot', null, true);
+            return logBotMessage({ logText: waitQ, needsAgent: false, requestedFeature: null });
+          }
+          // 없음 → 다음 경유지 or 도착지
+          currentWaypointAddrIdx += 1;
+          setPendingField('waypoint_add_more');
+          var moreQ = '경유지를 더 추가하시겠어요?';
+          addBubble(moreQ, 'bot', null, true);
+          return logBotMessage({ logText: moreQ, needsAgent: false, requestedFeature: null });
+        }
+
+        // ---- 일일기사 경유지 대기시간 입력 ----
+        if (pendingField === 'waypoint_wait_minutes' && orderCategory === 'daily_driver') {
+          var mins = flowApi.parseWaitMinutes(text);
+          if (mins !== null) {
+            if (waypointsList[currentWaypointAddrIdx]) waypointsList[currentWaypointAddrIdx].waitMinutes = mins;
+            currentWaypointAddrIdx += 1;
+            setPendingField('waypoint_add_more');
+            var moreQ2 = '경유지를 더 추가하시겠어요?';
+            addBubble(moreQ2, 'bot', null, true);
+            return logBotMessage({ logText: moreQ2, needsAgent: false, requestedFeature: null });
+          }
+          var retryWait = '예상 대기시간을 숫자(분)로 알려주세요. 모르시면 "잘모른다"라고 답해주세요.';
+          addBubble(retryWait, 'bot', null, true);
+          return logBotMessage({ logText: retryWait, needsAgent: false, requestedFeature: null });
+        }
+
+        // ---- 일일기사 도착지 대기시간 Y/N ----
+        if (pendingField === 'destination_wait_yn' && orderCategory === 'daily_driver') {
+          var hasDestWait = flowApi.parseWaitYesNo(text);
+          if (hasDestWait === true) {
+            setPendingField('destination_wait_minutes');
+            var destWaitQ = '예상 대기시간을 알려주세요. (예: 60분, 잘모른다)';
+            addBubble(destWaitQ, 'bot', null, true);
+            return logBotMessage({ logText: destWaitQ, needsAgent: false, requestedFeature: null });
+          }
+          // 없음 → 최종목적지(왕복) or 전달사항
+          return handleAfterDestinationWait();
+        }
+
+        // ---- 일일기사 도착지 대기시간 입력 ----
+        if (pendingField === 'destination_wait_minutes' && orderCategory === 'daily_driver') {
+          var destMins = flowApi.parseWaitMinutes(text);
+          if (destMins !== null) {
+            destinationWaitResolved = true;
+            // destination_wait_minutes 폼 필드가 있으면 채운다
+            var dwEl = document.getElementById('destination_wait_minutes');
+            if (dwEl) dwEl.value = destMins > 0 ? String(destMins) : '';
+            return handleAfterDestinationWait();
+          }
+          var retryDestWait = '예상 대기시간을 숫자(분)로 알려주세요. 모르시면 "잘모른다"라고 답해주세요.';
+          addBubble(retryDestWait, 'bot', null, true);
+          return logBotMessage({ logText: retryDestWait, needsAgent: false, requestedFeature: null });
+        }
+        // ---- /일일기사 인터셉트 끝 ----
+
+
         if (handleFareInquiryPendingReply(text)) return null;
         // 명시적인 "상담원 연결" 요청은 Gemini 분류를 거치지 않고 바로 처리한다 — 이 요청만큼은
         // 콜드스타트/응답지연으로 고객이 기다리다 이탈해서 에스컬레이션 자체가 무산되는 일이 없어야 한다.
