@@ -125,6 +125,15 @@ jobs:
           PREFLIGHT_SUMMARY_PATH: artifacts/preflight-summary.md
         run: npm run check:preflight
 
+      - name: Write test session limit summary
+        if: ${{ env.DATABASE_URL != '' }}
+        run: |
+          {
+            echo "### Test session create limit"
+            echo
+            echo "- TEST_SESSION_CREATE_LIMIT: ${TEST_SESSION_CREATE_LIMIT}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Run Playwright test (except chat-admin)
         if: ${{ env.DATABASE_URL != '' }}
         run: PLAYWRIGHT_BROWSERS_PATH=.playwright-browsers E2E_BASE_URL=http://127.0.0.1:3000 npx playwright test tests/manual --reporter=line --workers=1 --pass-with-no-tests --grep-invert "Chat admin card messaging|AI intake"
@@ -244,6 +253,15 @@ jobs:
           PREFLIGHT_REPORT_PATH: artifacts/preflight-ai-intake-report.json
           PREFLIGHT_SUMMARY_PATH: artifacts/preflight-ai-intake-summary.md
         run: npm run check:preflight
+
+      - name: Write test session limit summary
+        if: ${{ env.DATABASE_URL != '' }}
+        run: |
+          {
+            echo "### Test session create limit"
+            echo
+            echo "- TEST_SESSION_CREATE_LIMIT: ${TEST_SESSION_CREATE_LIMIT}"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Run AI intake Playwright bundle
         if: ${{ env.DATABASE_URL != '' }}
