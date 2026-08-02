@@ -4,38 +4,38 @@ async function loginWithRetry(page, options = {}) {
   const baseUrl = options.baseUrl || 'http://127.0.0.1:3000';
   const loginId = options.loginId || 'admin';
   const password = options.password || 'Admin!2345';
-  const attempts = Number(options.attempts || 5);
+  const attempts = Number(options.attempts || 8);
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     await page.context().clearCookies();
-    await page.goto(baseUrl + '/login', { waitUntil: 'domcontentloaded' });
+    const loginRes = await page.request.post(baseUrl + '/login', {
+      form: {
+        login_id: loginId,
+        password,
+      },
+      maxRedirects: 0,
+    });
 
-    const currentUrl = page.url();
-    if (!/\/login(?:\?|$)/.test(currentUrl)) {
-      return;
-    }
+    const status = loginRes.status();
+    const location = String(loginRes.headers()['location'] || '');
 
-    const loginIdInput = page.locator('input[name="login_id"]');
-    const passwordInput = page.locator('input[name="password"]');
-    const submitBtn = page.locator('button[type="submit"]');
-
-    const hasLoginForm = (await loginIdInput.count()) > 0 && (await passwordInput.count()) > 0 && (await submitBtn.count()) > 0;
-    if (!hasLoginForm) {
-      await page.waitForTimeout(400 * (attempt + 1));
+    if (status === 429) {
+      const retryAfter = Number(loginRes.headers()['retry-after'] || '');
+      const delayMs = Number.isFinite(retryAfter) && retryAfter > 0
+        ? Math.min(Math.floor(retryAfter * 1000), 5000)
+        : Math.min(500 * (attempt + 1), 5000);
+      await page.waitForTimeout(delayMs);
       continue;
     }
 
-    await loginIdInput.fill(loginId);
-    await passwordInput.fill(password);
-    await submitBtn.click();
-    await page.waitForLoadState('domcontentloaded');
-
-    const nextUrl = page.url();
-    if (!/\/login(?:\?|$)/.test(nextUrl)) {
-      return;
+    if (status === 302 && (location === '/' || location === '')) {
+      const probe = await page.request.get(baseUrl + '/chat/sessions?view=list', {
+        maxRedirects: 0,
+      });
+      if (probe.status() === 200) return;
     }
 
-    await page.waitForTimeout(400 * (attempt + 1));
+    await page.waitForTimeout(Math.min(500 * (attempt + 1), 5000));
   }
 
   throw new Error('로그인 후 보호 페이지로 이동하지 못했습니다: ' + page.url());
@@ -43,6 +43,8 @@ async function loginWithRetry(page, options = {}) {
 
 async function openAiIntakeWithRetry(page, options = {}) {
   const baseUrl = options.baseUrl || 'http://127.0.0.1:3000';
+  const loginId = options.loginId || 'admin';
+  const password = options.password || 'Admin!2345';
   const attempts = Number(options.attempts || 3);
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
@@ -53,6 +55,11 @@ async function openAiIntakeWithRetry(page, options = {}) {
 
     const currentUrl = page.url();
     if (/\/login(?:\?|$)/.test(currentUrl)) {
+      await loginWithRetry(page, {
+        baseUrl,
+        loginId,
+        password,
+      });
       await page.waitForTimeout(300 * (attempt + 1));
       continue;
     }

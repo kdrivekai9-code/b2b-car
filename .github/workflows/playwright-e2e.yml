@@ -127,8 +127,8 @@ jobs:
       - name: Run Playwright test (chat-admin isolated account)
         if: ${{ env.DATABASE_URL != '' }}
         env:
-          E2E_LOGIN_ID: ${{ env.LOGIN_ID_BRANCH_MANAGER }}
-          E2E_PASSWORD: ${{ env.LOGIN_PASSWORD_BRANCH_MANAGER }}
+          E2E_LOGIN_ID: ${{ env.LOGIN_ID_ADMIN }}
+          E2E_PASSWORD: ${{ env.LOGIN_PASSWORD_ADMIN }}
         run: PLAYWRIGHT_BROWSERS_PATH=.playwright-browsers E2E_BASE_URL=http://127.0.0.1:3000 npx playwright test tests/manual/chat-admin-card-messaging.playwright.spec.js --reporter=line --workers=1
 
       - name: Upload server log on failure

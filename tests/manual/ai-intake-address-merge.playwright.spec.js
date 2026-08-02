@@ -164,6 +164,8 @@ async function loginAsAdmin(page) {
 async function openAiIntake(page) {
   await openAiIntakeWithRetry(page, {
     baseUrl: BASE_URL,
+    loginId: LOGIN_ID,
+    password: PASSWORD,
   });
 }
 
