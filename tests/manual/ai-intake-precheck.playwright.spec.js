@@ -5,11 +5,23 @@ const LOGIN_ID = process.env.E2E_LOGIN_ID || 'admin';
 const PASSWORD = process.env.E2E_PASSWORD || 'Admin!2345';
 
 async function loginAsAdmin(page) {
-  await page.goto(BASE_URL + '/login');
-  await page.fill('input[name="login_id"]', LOGIN_ID);
-  await page.fill('input[name="password"]', PASSWORD);
-  await page.click('button[type="submit"]');
-  await expect(page).toHaveURL(/\/$/);
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await page.goto(BASE_URL + '/login');
+    await page.fill('input[name="login_id"]', LOGIN_ID);
+    await page.fill('input[name="password"]', PASSWORD);
+    await page.click('button[type="submit"]');
+    await page.waitForLoadState('domcontentloaded');
+
+    const currentUrl = page.url();
+    if (!/\/login(?:\?|$)/.test(currentUrl)) {
+      return;
+    }
+
+    // 병렬 실행 중 세션 교체(reason=replaced)로 즉시 로그인 화면에 남을 수 있어 재시도한다.
+    await page.context().clearCookies();
+  }
+
+  throw new Error('로그인 후 보호 페이지로 이동하지 못했습니다: ' + page.url());
 }
 
 test.describe('AI intake submit precheck', () => {
