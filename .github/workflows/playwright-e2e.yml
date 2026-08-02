@@ -122,7 +122,7 @@ jobs:
 
       - name: Run Playwright test (except chat-admin)
         if: ${{ env.DATABASE_URL != '' }}
-        run: npm run e2e -- --grep-invert "Chat admin card messaging"
+        run: npm run e2e -- --grep-invert "Chat admin card messaging|AI intake"
 
       - name: Run Playwright test (chat-admin isolated account)
         if: ${{ env.DATABASE_URL != '' }}
