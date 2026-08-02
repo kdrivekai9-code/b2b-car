@@ -1,33 +1,22 @@
 const { test, expect } = require('@playwright/test');
+const { loginWithRetry } = require('./helpers/auth');
 
 const BASE_URL = process.env.E2E_BASE_URL || 'http://127.0.0.1:3000';
 const LOGIN_ID = process.env.E2E_LOGIN_ID || 'admin';
 const PASSWORD = process.env.E2E_PASSWORD || 'Admin!2345';
 
 async function loginAsAdmin(page) {
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    await page.goto(BASE_URL + '/login');
-    await page.fill('input[name="login_id"]', LOGIN_ID);
-    await page.fill('input[name="password"]', PASSWORD);
-    await page.click('button[type="submit"]');
-    await page.waitForLoadState('domcontentloaded');
-
-    const currentUrl = page.url();
-    if (!/\/login(?:\?|$)/.test(currentUrl)) {
-      return;
-    }
-
-    // 병렬 실행 중 세션 교체(reason=replaced)로 즉시 로그인 화면에 남을 수 있어 재시도한다.
-    await page.context().clearCookies();
-  }
-
-  throw new Error('로그인 후 보호 페이지로 이동하지 못했습니다: ' + page.url());
+  await loginWithRetry(page, {
+    baseUrl: BASE_URL,
+    loginId: LOGIN_ID,
+    password: PASSWORD,
+  });
 }
 
 async function createChatSession(page) {
   let lastStatus = 0;
 
-  for (let attempt = 0; attempt < 4; attempt += 1) {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
     const res = await page.request.post(BASE_URL + '/chat/session', {
       headers: { Accept: 'application/json' },
     });
@@ -41,7 +30,11 @@ async function createChatSession(page) {
 
     if ([401, 403, 429, 302, 307].includes(lastStatus)) {
       await loginAsAdmin(page);
-      await page.waitForTimeout(300 * (attempt + 1));
+      const retryAfter = Number(res.headers()['retry-after'] || '');
+      const retryDelayMs = Number.isFinite(retryAfter) && retryAfter > 0
+        ? Math.min(Math.floor(retryAfter * 1000), 5000)
+        : Math.min(400 * (attempt + 1), 5000);
+      await page.waitForTimeout(retryDelayMs);
       continue;
     }
 

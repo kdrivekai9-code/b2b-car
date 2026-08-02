@@ -2,6 +2,7 @@
 // 특징: 외부 API 의존성을 줄이기 위해 챗 세션/주소검색 응답을 테스트에서 모킹한다.
 
 const { test, expect } = require('@playwright/test');
+const { loginWithRetry, openAiIntakeWithRetry } = require('./helpers/auth');
 
 const BASE_URL = process.env.E2E_BASE_URL || 'http://127.0.0.1:3000';
 const LOGIN_ID = process.env.E2E_LOGIN_ID || 'admin';
@@ -153,31 +154,17 @@ async function setupChatSessionMocks(page) {
 }
 
 async function loginAsAdmin(page) {
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    await page.goto(BASE_URL + '/login');
-    await page.fill('input[name="login_id"]', LOGIN_ID);
-    await page.fill('input[name="password"]', PASSWORD);
-    await page.click('button[type="submit"]');
-    await page.waitForLoadState('domcontentloaded');
-
-    const currentUrl = page.url();
-    if (!/\/login(?:\?|$)/.test(currentUrl)) {
-      return;
-    }
-
-    // 병렬 실행 중 세션 교체(reason=replaced)로 즉시 로그인 화면에 남을 수 있어 재시도한다.
-    await page.context().clearCookies();
-  }
-
-  throw new Error('로그인 후 보호 페이지로 이동하지 못했습니다: ' + page.url());
+  await loginWithRetry(page, {
+    baseUrl: BASE_URL,
+    loginId: LOGIN_ID,
+    password: PASSWORD,
+  });
 }
 
 async function openAiIntake(page) {
-  // 서버가 query.session을 Number(...)로 파싱하므로, 비숫자 문자열은 null로 처리되어
-  // 오히려 최근 열린 세션 복원으로 되돌아간다. 항상 존재하지 않을 큰 숫자를 써서 격리한다.
-  const isolatedSessionId = String(9000000 + Math.floor(Math.random() * 100000));
-  await page.goto(BASE_URL + '/orders/ai-intake?session=' + encodeURIComponent(isolatedSessionId));
-  await expect(page.locator('#aiIntakeText')).toBeVisible();
+  await openAiIntakeWithRetry(page, {
+    baseUrl: BASE_URL,
+  });
 }
 
 async function sendChat(page, text, options = {}) {
