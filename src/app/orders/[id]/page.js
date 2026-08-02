@@ -2,13 +2,14 @@ import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import AppShell from '../../_components/AppShell';
 import OrderForm from '../new/OrderForm';
-import OrderReadOnlyView from './OrderReadOnlyView';
 import OrderDetailAdminPanels from './OrderDetailAdminPanels';
+import OrderHistoryPanel from './OrderHistoryPanel';
 
 // 오더 상세페이지를 기존 접수폼(OrderForm.js, /orders/new)의 edit 모드로 재사용 —
-// views/orders/detail.ejs는 수정이 아예 불가능한 읽기전용 화면이었다. client는 계속
-// 읽기전용(OrderReadOnlyView), admin/branch_manager만 실제로 수정 가능. 상태변경/기사배정/
-// 관리자메모/변경이력은 OrderDetailAdminPanels.js가 기존 라우트를 그대로 재사용한다.
+// views/orders/detail.ejs는 수정이 아예 불가능한 읽기전용 화면이었다. 모든 역할(admin/
+// branch_manager/client)이 이제 자기 소속 오더를 직접 수정할 수 있다. 상태변경/기사배정/
+// 관리자메모는 여전히 admin/branch_manager 전용(OrderDetailAdminPanels.js) — client는
+// 대신 배정 기사 정보 + 변경이력만 보는 OrderHistoryPanel.js를 본다.
 // NEXT_ORDER_DETAIL_EDIT_ENABLED=true일 때만 도달(src/proxy.js).
 export const dynamic = 'force-dynamic';
 export const preferredRegion = 'icn1';
@@ -53,7 +54,7 @@ export default async function OrderDetailPage({ params }) {
 
   const data = await res.json();
   const { order, currentUserRole } = data;
-  const isClient = currentUserRole === 'client';
+  const isAdminOrBranchManager = currentUserRole === 'admin' || currentUserRole === 'branch_manager';
 
   return (
     <AppShell currentUser={data.currentUser} activePath="/orders">
@@ -70,16 +71,12 @@ export default async function OrderDetailPage({ params }) {
         </div>
       </div>
 
-      {isClient ? (
-        <OrderReadOnlyView data={data} />
-      ) : (
-        <>
-          <OrderForm initialData={data} mode="edit" orderId={id} />
-          <div style={{ marginTop: 18 }}>
-            <OrderDetailAdminPanels data={data} orderId={id} />
-          </div>
-        </>
-      )}
+      <OrderForm initialData={data} mode="edit" orderId={id} />
+      <div style={{ marginTop: 18 }}>
+        {isAdminOrBranchManager
+          ? <OrderDetailAdminPanels data={data} orderId={id} />
+          : <OrderHistoryPanel data={data} />}
+      </div>
     </AppShell>
   );
 }

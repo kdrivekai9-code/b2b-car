@@ -7,6 +7,12 @@
 // 요청이 다시 이 페이지(같은 NEXT_ORDER_DETAIL_EDIT_ENABLED 플래그 경로)로 돌아온다.
 // 관리자 메모만 이번에 새로 추가한 POST /:id/admin-memo를 쓴다(기존 POST /:id/fare는
 // legacy 화면 전용으로 완전히 그대로 남겨둠 — 계획 문서 참고).
+function historyLabel(h) {
+  if (h.old_status == null) return `최초 등록: ${h.new_status}`;
+  if (h.old_status === h.new_status) return '정보 수정'; // POST /:id 필드 수정 시 남기는 항목(상태는 안 바뀜)
+  return `${h.old_status} → ${h.new_status}`;
+}
+
 export default function OrderDetailAdminPanels({ data, orderId }) {
   const { order, drivers, legs, history, canViewPhotos, photos, ORDER_STATUSES, baseUrl } = data;
 
@@ -98,7 +104,7 @@ export default function OrderDetailAdminPanels({ data, orderId }) {
         <ul className="timeline">
           {history.map((h) => (
             <li key={h.id}>
-              <b>{h.old_status ? `${h.old_status} → ${h.new_status}` : `최초 등록: ${h.new_status}`}</b>
+              <b>{historyLabel(h)}</b>
               <div className="meta">{h.actor_name || '시스템'} · {h.created_at}{h.note ? ` · ${h.note}` : ''}</div>
             </li>
           ))}

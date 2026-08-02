@@ -133,7 +133,13 @@
       <ul class="timeline">
         <% history.forEach(function(h){ %>
           <li>
-            <b><%= h.old_status ? (h.old_status + ' → ' + h.new_status) : ('최초 등록: ' + h.new_status) %></b>
+            <%
+              // POST /orders/:id(신규 React 수정 화면)의 필드 수정은 상태를 안 바꾸고
+              // old_status=new_status로 이력을 남긴다 — "접수 → 접수"처럼 보이지 않게 구분한다.
+              var historyLabel = h.old_status == null ? ('최초 등록: ' + h.new_status)
+                : (h.old_status === h.new_status ? '정보 수정' : (h.old_status + ' → ' + h.new_status));
+            %>
+            <b><%= historyLabel %></b>
             <div class="meta"><%= h.actor_name || '시스템' %> · <%= h.created_at %><% if (h.note) { %> · <%= h.note %><% } %></div>
           </li>
         <% }) %>

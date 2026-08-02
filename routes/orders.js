@@ -943,9 +943,33 @@ router.get('/:id/data.json', asyncHandler(async (req, res) => {
   });
 }));
 
+// GET /:id/data.json와 같은 스코프 규칙(loadOrderForView)을 쓰되, 404/403 응답은
+// loadOrderInScope와 같은 스타일(HTML render/send)로 맞춘다 — 오더 수정은 이제 client도
+// 자기 소속 오더에 한해 직접 할 수 있다(상태변경/기사배정/관리자메모는 여전히
+// loadOrderInScope로 admin/branch_manager만 허용).
+async function loadOrderForEdit(req, res) {
+  const order = await db.get('SELECT * FROM orders WHERE id = ?', [req.params.id]);
+  if (!order) { res.status(404).send('오더를 찾을 수 없습니다.'); return null; }
+  const scope = scopeFilter(req);
+  if (scope.branch_id && order.branch_id !== scope.branch_id) { res.status(403).render('403', { title: '접근 권한 없음' }); return null; }
+  if (scope.group_id && order.requester_group_id !== scope.group_id) { res.status(403).render('403', { title: '접근 권한 없음' }); return null; }
+  return order;
+}
+
+const EDIT_FIELD_LABELS = [
+  ['origin', '출발지'], ['origin_contact', '출발지 연락처'],
+  ['destination', '도착지'], ['destination_contact', '도착지 연락처'],
+  ['vehicle', '차종/차량번호'], ['schedule', '예약일시'],
+  ['payment_method_id', '결제방식'], ['fare_amount', '요금'], ['ferry_fare_amount', '도선료'],
+  ['memo_customer', '고객사 메모'], ['memo_billing', '업체요청사항'], ['waypoints', '경유지'],
+];
+
 router.post('/:id', asyncHandler(async (req, res) => {
-  const order = await loadOrderInScope(req, res);
+  const order = await loadOrderForEdit(req, res);
   if (!order) return;
+  const u = req.session.user;
+  const isAdmin = u.role === 'admin';
+  const isClient = u.role === 'client';
   const {
     branch_id, requester_group_id, origin_address, origin_detail_address, origin_contact,
     destination_address, destination_detail_address, destination_contact, vehicle_number, reserved_date, reserved_time,
@@ -968,8 +992,13 @@ router.post('/:id', asyncHandler(async (req, res) => {
   const splitVehicle = splitTypeAndPlate(vehicle_type || null, vehicle_number || null);
   const effectiveReservedDate = String(pickup_reserved_date || reserved_date || '').trim();
   const effectiveReservedTime = String(pickup_reserved_time || reserved_time || '').trim();
-  const finalBranch = toPositiveIntOrNull(branch_id) || order.branch_id;
-  const finalGroup = toPositiveIntOrNull(requester_group_id);
+  // OrderForm.js는 branch_id 선택칸을 admin에게만, requester_group_id 선택칸을 client가
+  // 아닌 역할에게만 보여준다 — 서버도 그 UI의 진실을 그대로 강제한다. 그렇지 않으면
+  // branch_manager/client가 폼 필드 자체엔 없는 값을 요청 바디 조작으로 밀어넣어 오더를
+  // 다른 지사/법인으로 옮겨버릴 수 있다(scope 체크는 "지금" 소속만 확인하지, 수정 후
+  // 어디로 옮기는지는 막지 않았던 gap).
+  const finalBranch = isAdmin ? (toPositiveIntOrNull(branch_id) || order.branch_id) : order.branch_id;
+  const finalGroup = isClient ? order.requester_group_id : toPositiveIntOrNull(requester_group_id);
   const finalOriginAddress = combineAddress(origin_address, origin_detail_address);
   const finalDestinationAddress = combineAddress(destination_address, destination_detail_address);
 
@@ -982,6 +1011,32 @@ router.post('/:id', asyncHandler(async (req, res) => {
   else if (!String(origin_contact || '').trim()) formError = '출발지 연락처를 입력해주세요.';
   else if (!String(destination_contact || '').trim()) formError = '도착지 연락처를 입력해주세요.';
   if (formError) return res.status(400).json({ error: formError });
+
+  const existingWaypointsFull = await db.all('SELECT * FROM order_waypoints WHERE order_id = ? ORDER BY seq ASC', [req.params.id]);
+
+  // "수정이력" — 어떤 필드가 실제로 바뀌었는지 사람이 읽을 수 있는 라벨로 모아서
+  // order_status_history에 note로 남긴다(상태는 그대로 두고 old_status=new_status로
+  // 기록 — 별도 테이블/마이그레이션 없이 기존 변경이력 타임라인에 자연스럽게 얹힌다).
+  const changed = new Set();
+  if (finalOriginAddress !== order.origin_address || (origin_detail_address || null) !== order.origin_address_detail) changed.add('origin');
+  if ((origin_contact || null) !== order.origin_contact) changed.add('origin_contact');
+  if (finalDestinationAddress !== order.destination_address || (destination_detail_address || null) !== order.destination_address_detail) changed.add('destination');
+  if ((destination_contact || null) !== order.destination_contact) changed.add('destination_contact');
+  if (splitVehicle.vehicleType !== (order.vehicle_type || null) || splitVehicle.vehicleNumber !== (order.vehicle_number || null)) changed.add('vehicle');
+  if (effectiveReservedDate !== order.reserved_date || effectiveReservedTime !== order.reserved_time) changed.add('schedule');
+  if (String(payment_method_id || '') !== String(order.payment_method_id || '')) changed.add('payment_method_id');
+  if ((Number(fare_amount) || 0) !== (Number(order.fare_amount) || 0)) changed.add('fare_amount');
+  if ((Number(ferry_fare_amount) || 0) !== (Number(order.ferry_fare_amount) || 0)) changed.add('ferry_fare_amount');
+  if ((memo_customer || null) !== order.memo_customer) changed.add('memo_customer');
+  if ((memo_billing || null) !== order.memo_billing) changed.add('memo_billing');
+  if (
+    existingWaypointsFull.length !== finalWaypoints.length
+    || finalWaypoints.some((w, i) => {
+      const prev = existingWaypointsFull[i];
+      return !prev || w.address !== prev.address || (w.addressDetail || null) !== prev.address_detail
+        || (w.contact || null) !== prev.contact_phone || (w.vehicleNumber || null) !== prev.vehicle_number;
+    })
+  ) changed.add('waypoints');
 
   await db.run(`
     UPDATE orders SET branch_id = ?, requester_group_id = ?, origin_address = ?, origin_address_detail = ?, origin_contact = ?,
@@ -997,7 +1052,15 @@ router.post('/:id', asyncHandler(async (req, res) => {
     req.params.id,
   ]);
 
-  const existingWaypoints = await db.all('SELECT seq FROM order_waypoints WHERE order_id = ? ORDER BY seq ASC', [req.params.id]);
+  if (changed.size > 0) {
+    const note = EDIT_FIELD_LABELS.filter(([key]) => changed.has(key)).map(([, label]) => label).join(', ') + ' 수정';
+    await db.run(`
+      INSERT INTO order_status_history (order_id, actor_user_id, old_status, new_status, note)
+      VALUES (?, ?, ?, ?, ?)
+    `, [req.params.id, u.id, order.status, order.status, note]);
+  }
+
+  const existingWaypoints = existingWaypointsFull;
   const legCountUnchanged = existingWaypoints.length === finalWaypoints.length;
 
   await db.run('DELETE FROM order_waypoints WHERE order_id = ?', [req.params.id]);
