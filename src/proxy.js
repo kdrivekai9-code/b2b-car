@@ -43,6 +43,7 @@ const PATH_FLAGS = {
   '/faq': 'NEXT_FAQ_ENABLED',
   '/push/settings': 'NEXT_PUSH_SETTINGS_ENABLED',
   '/access-logs': 'NEXT_ACCESS_LOGS_ENABLED',
+  '/login': 'NEXT_LOGIN_ENABLED',
 };
 
 export function proxy(req) {
@@ -111,4 +112,4 @@ export function proxy(req) {
 
 // Next's proxy bundler statically analyzes this export, so it's kept as a literal array
 // (a computed expression like Object.keys(PATH_FLAGS) may not be statically evaluable).
-export const config = { matcher: ['/', '/orders', '/inquiries', '/chat/sessions', '/chat/sessions/:id', '/orders/new', '/orders/ai-intake', '/orders/:id', '/users', '/drivers', '/groups', '/branches', '/notices', '/location-aliases', '/settings', '/knowledge-base', '/faq', '/push/settings', '/access-logs'] };
+export const config = { matcher: ['/', '/orders', '/inquiries', '/chat/sessions', '/chat/sessions/:id', '/orders/new', '/orders/ai-intake', '/orders/:id', '/users', '/drivers', '/groups', '/branches', '/notices', '/location-aliases', '/settings', '/knowledge-base', '/faq', '/push/settings', '/access-logs', '/login'] };
