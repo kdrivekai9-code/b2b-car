@@ -132,6 +132,23 @@ function reducer(state, action) {
   }
 }
 
+// AddressField.js의 geocode()와 같은 엔드포인트 — edit 모드 진입 시 이미 저장된 주소
+// 문자열을 좌표 없이 그대로 보여주는데(위경도 자체가 저장된 적이 없어서), 사용자가 직접
+// 주소를 다시 검색/blur해야만 경로·요금이 계산되던 것을 페이지 진입과 동시에 자동으로
+// 한 번 해결하기 위한 헬퍼.
+async function geocodeAddressForEdit(query) {
+  const q = String(query || '').trim();
+  if (q.length < 3) return null;
+  try {
+    const res = await fetch('/kakao/search?' + new URLSearchParams({ q, mode: 'fallback' }));
+    const data = await res.json();
+    const best = (data.documents || [])[0];
+    return best && best.lat && best.lon ? { lat: parseFloat(best.lat), lon: parseFloat(best.lon) } : null;
+  } catch {
+    return null;
+  }
+}
+
 let waypointSeq = 0;
 
 export default function OrderForm({ initialData, chatSessionId, mode = 'create', orderId, externalPrefill }) {
@@ -171,6 +188,40 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
     ...state.waypoints.map((w) => ({ slot: w.id, lat: w.lat, lon: w.lon })),
     { slot: 'destination', lat: state.destination_lat, lon: state.destination_lon },
   ];
+
+  // edit 모드 진입 시 좌표 자동 해결 — 저장된 주소는 텍스트뿐이라(위경도 저장 이력 없음),
+  // 사용자가 직접 주소를 다시 검색/blur하기 전까지는 RouteCalculator가 동작할 두 점을
+  // 못 채운다. 오더 상세를 열자마자(오더 리스트에서 클릭해 들어왔을 때 포함) "거리" 표시가
+  // 바로 나오도록, 초기 주소들을 한 번씩 조용히 지오코딩해서 채워 넣는다. order.waypoints의
+  // id는 initialFieldState가 항상 'prefill-' + index로 결정적으로 만들므로 여기서도
+  // 그대로 재현할 수 있다 — 마운트 시 한 번만 실행(사용자가 입력 중인 값을 덮어쓰지 않음).
+  useEffect(() => {
+    if (mode !== 'edit') return;
+    let cancelled = false;
+    const targets = [
+      { kind: 'origin', address: order.origin_address },
+      { kind: 'destination', address: order.destination_address },
+      ...(Array.isArray(order.waypoints) ? order.waypoints.map((w, i) => ({ kind: 'waypoint', id: 'prefill-' + i, address: w.address })) : []),
+    ];
+    Promise.all(targets.map(async (t) => ({ ...t, coords: await geocodeAddressForEdit(t.address) }))).then((resolved) => {
+      if (cancelled) return;
+      resolved.forEach((t) => {
+        if (!t.coords) return;
+        if (t.kind === 'origin') {
+          dispatch({ type: 'SET_FIELD', name: 'origin_lat', value: t.coords.lat });
+          dispatch({ type: 'SET_FIELD', name: 'origin_lon', value: t.coords.lon });
+        } else if (t.kind === 'destination') {
+          dispatch({ type: 'SET_FIELD', name: 'destination_lat', value: t.coords.lat });
+          dispatch({ type: 'SET_FIELD', name: 'destination_lon', value: t.coords.lon });
+        } else {
+          dispatch({ type: 'SET_WAYPOINT_FIELD', id: t.id, field: 'lat', value: t.coords.lat });
+          dispatch({ type: 'SET_WAYPOINT_FIELD', id: t.id, field: 'lon', value: t.coords.lon });
+        }
+      });
+    });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // 예약기준 역산: order-form.js의 syncReservationBasisPreview/syncDeliveryReservationMemo를
   // 그대로 이식. routeInfo.durationSec(RouteMap이 실제 경로 확정 후 넘겨줌)에 의존하므로
