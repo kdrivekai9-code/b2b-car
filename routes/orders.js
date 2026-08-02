@@ -167,6 +167,40 @@ async function buildOrderFormInitData(scope, userId) {
   };
 }
 
+async function buildAiIntakeInitData(scope, userId) {
+  const data = await buildOrderFormInitData(scope, userId);
+  return {
+    ...data,
+    kakaoJsKey: process.env.KAKAO_JS_KEY || '',
+  };
+}
+
+async function loadAiIntakeRestoreData(userId, requestedSessionId) {
+  const existingSession = await (requestedSessionId
+    ? db.get(
+        `SELECT id, status, draft_json FROM chat_sessions WHERE id = ? AND user_id = ? AND user_hidden_at IS NULL`,
+        [requestedSessionId, userId]
+      )
+    : db.get(
+        `SELECT id, status, draft_json FROM chat_sessions WHERE user_id = ? AND status != 'closed' AND user_hidden_at IS NULL ORDER BY created_at DESC LIMIT 1`,
+        [userId]
+      ));
+
+  let existingMessages = [];
+  let existingDraft = null;
+  if (existingSession) {
+    existingMessages = await db.all(
+      `SELECT id, sender, message, created_at FROM chat_messages WHERE session_id = ? ORDER BY id ASC`,
+      [existingSession.id]
+    );
+    if (existingSession.draft_json) {
+      try { existingDraft = JSON.parse(existingSession.draft_json); } catch (e) { existingDraft = null; }
+    }
+  }
+
+  return { existingSession, existingMessages, existingDraft };
+}
+
 router.get('/new', asyncHandler(async (req, res) => {
   const scope = scopeFilter(req);
   const data = await buildOrderFormInitData(scope, req.session.user.id);
@@ -191,53 +225,43 @@ router.get('/new/data.json', asyncHandler(async (req, res) => {
   });
 }));
 
+// Next.js AI 접수 화면이 초기 표시용 공통 데이터만 따로 fetch할 수 있게 하는 JSON 버전.
+router.get('/ai-intake/data.json', asyncHandler(async (req, res) => {
+  const scope = scopeFilter(req);
+  const data = await buildAiIntakeInitData(scope, req.session.user.id);
+  res.json({
+    ...data,
+    currentUserRole: req.session.user.role,
+    currentUserPhone: req.session.user.phone || '',
+    currentUser: req.session.user,
+  });
+}));
+
+// 복원 대상 세션/메시지/draft를 화면 렌더와 분리해 JSON 계약으로 고정한다.
+router.get('/ai-intake/session/data.json', asyncHandler(async (req, res) => {
+  const requestedSessionId = Number(req.query.session) || null;
+  const data = await loadAiIntakeRestoreData(req.session.user.id, requestedSessionId);
+  res.json(data);
+}));
+
 router.get('/ai-intake', asyncHandler(async (req, res) => {
   const scope = scopeFilter(req);
   // 최근 대화 목록(햄버거 메뉴)에서 과거 세션을 클릭하면 ?session=<id>로 넘어온다 — 이때는
   // "가장 최근의 열린 세션" 대신 사용자가 직접 고른 그 세션을 복원한다(본인 소유일 때만).
   const requestedSessionId = Number(req.query.session) || null;
-  // 서로 의존관계 없는 조회들이라 병렬로 실행한다(오더 등록 화면과 동일한 이유) —
-  // existingMessages만 existingSession의 id가 있어야 조회할 수 있어 그 결과 이후로 남겨둔다.
-  const [branches, groups, paymentMethods, favorites, existingSession] = await Promise.all([
-    scope.branch_id
-      ? db.all('SELECT * FROM branches WHERE id = ?', [scope.branch_id])
-      : db.all("SELECT * FROM branches WHERE status='active' ORDER BY name"),
-    db.all('SELECT * FROM groups_tbl ORDER BY name'),
-    scope.branch_id
-      ? getEffectivePaymentMethods(scope.branch_id)
-      : db.all('SELECT * FROM payment_methods WHERE is_active = 1 ORDER BY id'),
-    db.all('SELECT * FROM favorite_addresses WHERE user_id = ? ORDER BY id DESC', [req.session.user.id]),
-    requestedSessionId
-      ? db.get(
-          `SELECT id, status, draft_json FROM chat_sessions WHERE id = ? AND user_id = ? AND user_hidden_at IS NULL`,
-          [requestedSessionId, req.session.user.id]
-        )
-      // 다른 메뉴로 이동했다 돌아와도 대화가 이어지도록, 아직 닫히지 않은 최근 세션이 있으면 그대로 재사용한다.
-      // 클라이언트 저장소(localStorage 등)에 의존하지 않고 서버가 로그인 세션만으로 판단한다.
-      : db.get(
-          `SELECT id, status, draft_json FROM chat_sessions WHERE user_id = ? AND status != 'closed' AND user_hidden_at IS NULL ORDER BY created_at DESC LIMIT 1`,
-          [req.session.user.id]
-        ),
+  const [initData, restoreData] = await Promise.all([
+    buildAiIntakeInitData(scope, req.session.user.id),
+    loadAiIntakeRestoreData(req.session.user.id, requestedSessionId),
   ]);
-  let existingMessages = [];
-  let existingDraft = null;
-  if (existingSession) {
-    existingMessages = await db.all(
-      `SELECT id, sender, message, created_at FROM chat_messages WHERE session_id = ? ORDER BY id ASC`,
-      [existingSession.id]
-    );
-    if (existingSession.draft_json) {
-      try { existingDraft = JSON.parse(existingSession.draft_json); } catch (e) { existingDraft = null; }
-    }
-  }
 
   req.session.aiLastInputAt = Date.now();
 
   res.render('orders/ai_intake', {
-    title: 'AI 챗봇', order: defaultReservedDateTime(), branches, groups, paymentMethods, favorites, mode: 'create', error: null,
-    defaultBranch: scope.branch_id || '', defaultGroup: scope.group_id || '',
-    kakaoJsKey: process.env.KAKAO_JS_KEY || '',
-    existingSession, existingMessages, existingDraft,
+    title: 'AI 챗봇',
+    ...initData,
+    ...restoreData,
+    mode: 'create',
+    error: null,
   });
 }));
 
@@ -830,6 +854,189 @@ async function buildOrderLegs(orderId, order, waypoints) {
     driverPhone: row.driver_phone,
   }));
 }
+
+// origin_address/destination_address는 combineAddress(main, detail)로 이미 합쳐진 문자열이라
+// (L591-595), OrderForm.js의 별도 "주소"/"상세주소" 두 칸에 되돌려 채우려면 detail 접미사를
+// 역산해서 잘라내야 한다. combineAddress가 항상 `main + ' ' + detail` 형태로만 합치므로
+// 안전하게 역산 가능하다.
+function splitCombinedAddress(combined, detail) {
+  const c = String(combined || '');
+  const d = String(detail || '').trim();
+  if (d && c.endsWith(' ' + d)) return c.slice(0, c.length - d.length - 1);
+  return c;
+}
+
+// GET /orders/:id/data.json + POST /orders/:id(수정)가 공유하는 스코프/조회 로직 —
+// loadOrderInScope와 별개인 이유는 client 역할도 "조회"는 허용해야 해서(client는 읽기전용
+// edit 폼이 아니라 OrderReadOnlyView를 보지만, 그 컴포넌트도 같은 data.json을 쓴다). 기존
+// GET /:id(EJS)와 같은 JOIN 형태를 그대로 재사용한다.
+async function loadOrderForView(req, res) {
+  const order = await db.get(`
+    SELECT o.*, b.name AS branch_name, g.name AS group_name, pm.name AS payment_method_name, d.name AS driver_name
+    FROM orders o
+    JOIN branches b ON b.id = o.branch_id
+    LEFT JOIN groups_tbl g ON g.id = o.requester_group_id
+    LEFT JOIN payment_methods pm ON pm.id = o.payment_method_id
+    LEFT JOIN drivers d ON d.id = o.assigned_driver_id
+    WHERE o.id = ?
+  `, [req.params.id]);
+  if (!order) { res.status(404); return null; }
+  const scope = scopeFilter(req);
+  if (scope.branch_id && order.branch_id !== scope.branch_id) { res.status(403); return null; }
+  if (scope.group_id && order.requester_group_id !== scope.group_id) { res.status(403); return null; }
+  return order;
+}
+
+// GET /:id(EJS)가 쓰는 것과 같은 부가 데이터(변경이력/드라이버/구간/사진/상태목록)를
+// 새 React 상세페이지의 관리자 패널(OrderDetailAdminPanels.js)에도 그대로 실어준다 —
+// 그 패널이 재사용하는 기존 라우트(/:id/status, /:id/driver, /:id/legs/drivers)가
+// 기대하는 것과 동일한 선택지 데이터다.
+router.get('/:id/data.json', asyncHandler(async (req, res) => {
+  const order = await loadOrderForView(req, res);
+  if (!order) return res.json({ error: '오더를 찾을 수 없거나 접근 권한이 없습니다.' });
+
+  const scope = scopeFilter(req);
+  const u = req.session.user;
+  const [waypoints, formInit, history, statusConfig, drivers, photoSettingsRow] = await Promise.all([
+    db.all('SELECT * FROM order_waypoints WHERE order_id = ? ORDER BY seq ASC', [req.params.id]),
+    buildOrderFormInitData(scope, u.id),
+    db.all(`
+      SELECT h.*, u.name AS actor_name
+      FROM order_status_history h
+      LEFT JOIN users u ON u.id = h.actor_user_id
+      WHERE h.order_id = ?
+      ORDER BY h.id ASC
+    `, [req.params.id]),
+    getEffectiveStatuses(order.branch_id),
+    db.all("SELECT * FROM drivers WHERE branch_id = ? AND status = 'active' ORDER BY name", [order.branch_id]),
+    db.get('SELECT * FROM branch_photo_settings WHERE branch_id = ?', [order.branch_id]),
+  ]);
+  const photoSettings = photoSettingsRow || {};
+  const canViewPhotos = u.role === 'admin'
+    || (u.role === 'branch_manager' && !!photoSettings.branch_manager_can_view)
+    || (u.role === 'client' && !!photoSettings.client_can_view);
+  const photos = canViewPhotos ? await db.all('SELECT * FROM order_photos WHERE order_id = ? ORDER BY id DESC', [req.params.id]) : [];
+  const legs = await buildOrderLegs(req.params.id, order, waypoints);
+
+  res.json({
+    ...formInit,
+    order: {
+      ...order,
+      origin_address: splitCombinedAddress(order.origin_address, order.origin_address_detail),
+      origin_detail_address: order.origin_address_detail || '',
+      destination_address: splitCombinedAddress(order.destination_address, order.destination_address_detail),
+      destination_detail_address: order.destination_address_detail || '',
+      waypoints: waypoints.map((w) => ({
+        address: splitCombinedAddress(w.address, w.address_detail),
+        detail: w.address_detail || '',
+        contact: w.contact_phone || '',
+        vehicleNumber: w.vehicle_number || '',
+      })),
+    },
+    rawWaypoints: waypoints,
+    history, drivers, photos, canViewPhotos, legs,
+    ORDER_STATUSES: statusConfig.map((s) => s.status_code),
+    baseUrl: req.protocol + '://' + req.get('host'),
+    currentUserRole: u.role,
+    currentUserPhone: u.phone || '',
+    currentUser: u,
+  });
+}));
+
+router.post('/:id', asyncHandler(async (req, res) => {
+  const order = await loadOrderInScope(req, res);
+  if (!order) return;
+  const {
+    branch_id, requester_group_id, origin_address, origin_detail_address, origin_contact,
+    destination_address, destination_detail_address, destination_contact, vehicle_number, reserved_date, reserved_time,
+    vehicle_type, payment_method_id, fare_amount, ferry_fare_amount, memo_customer, memo_billing,
+    pickup_reserved_date, pickup_reserved_time,
+  } = req.body;
+  const waypoints = [].concat(req.body.waypoints || []);
+  const waypointDetails = [].concat(req.body.waypoint_details || []);
+  const waypointContacts = [].concat(req.body.waypoint_contacts || []);
+  const waypointVehicleNumbers = [].concat(req.body.waypoint_vehicle_numbers || []);
+  const finalWaypoints = waypoints
+    .map((w, i) => ({
+      address: combineAddress(w, waypointDetails[i]),
+      addressDetail: waypointDetails[i] || null,
+      contact: waypointContacts[i] || null,
+      vehicleNumber: waypointVehicleNumbers[i] || null,
+    }))
+    .filter((w) => w.address);
+
+  const splitVehicle = splitTypeAndPlate(vehicle_type || null, vehicle_number || null);
+  const effectiveReservedDate = String(pickup_reserved_date || reserved_date || '').trim();
+  const effectiveReservedTime = String(pickup_reserved_time || reserved_time || '').trim();
+  const finalBranch = toPositiveIntOrNull(branch_id) || order.branch_id;
+  const finalGroup = toPositiveIntOrNull(requester_group_id);
+  const finalOriginAddress = combineAddress(origin_address, origin_detail_address);
+  const finalDestinationAddress = combineAddress(destination_address, destination_detail_address);
+
+  // 이 라우트는 OrderForm.js(React edit 모드)만 fetch()로 호출하므로 항상 JSON으로 응답한다
+  // — 생성 폼과 달리 legacy EJS 폴백 렌더링 대상이 아니다. 운영시간 체크는 일부러 생략한다
+  // (이미 접수된 오더의 오타 수정 같은 걸 "지금은 영업시간이 아니라서" 막는 건 신규 접수
+  // 차단과 다른 문제라 이번 계획 범위에서 제외).
+  let formError = null;
+  if (!finalBranch) formError = '지사를 선택해주세요.';
+  else if (!String(origin_contact || '').trim()) formError = '출발지 연락처를 입력해주세요.';
+  else if (!String(destination_contact || '').trim()) formError = '도착지 연락처를 입력해주세요.';
+  if (formError) return res.status(400).json({ error: formError });
+
+  await db.run(`
+    UPDATE orders SET branch_id = ?, requester_group_id = ?, origin_address = ?, origin_address_detail = ?, origin_contact = ?,
+      destination_address = ?, destination_address_detail = ?, destination_contact = ?, vehicle_number = ?,
+      vehicle_type = ?, reserved_date = ?, reserved_time = ?, payment_method_id = ?, fare_amount = ?, ferry_fare_amount = ?,
+      memo_customer = ?, memo_billing = ?, updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS')
+    WHERE id = ?
+  `, [
+    finalBranch, finalGroup, finalOriginAddress, origin_detail_address || null, origin_contact || null,
+    finalDestinationAddress, destination_detail_address || null, destination_contact || null, splitVehicle.vehicleNumber,
+    splitVehicle.vehicleType, effectiveReservedDate, effectiveReservedTime, payment_method_id || null,
+    Number(fare_amount) || 0, Number(ferry_fare_amount) || 0, memo_customer || null, memo_billing || null,
+    req.params.id,
+  ]);
+
+  const existingWaypoints = await db.all('SELECT seq FROM order_waypoints WHERE order_id = ? ORDER BY seq ASC', [req.params.id]);
+  const legCountUnchanged = existingWaypoints.length === finalWaypoints.length;
+
+  await db.run('DELETE FROM order_waypoints WHERE order_id = ?', [req.params.id]);
+  for (let i = 0; i < finalWaypoints.length; i++) {
+    await db.run(
+      'INSERT INTO order_waypoints (order_id, seq, address, address_detail, contact_phone, vehicle_number) VALUES (?, ?, ?, ?, ?, ?)',
+      [req.params.id, i + 1, finalWaypoints[i].address, finalWaypoints[i].addressDetail, finalWaypoints[i].contact, finalWaypoints[i].vehicleNumber]
+    );
+  }
+
+  // 경유지 개수가 안 바뀌면 기존 order_legs(구간별 기사 배정)를 그대로 둔다. 개수가
+  // 바뀌면 구간 구조 자체가 안 맞으므로 지우고 새 스켈레톤(전부 미배정)으로 재생성한다
+  // — 이 경우 기존 구간별 배정은 초기화된다(계획 단계에서 합의된 트레이드오프).
+  let legsReset = false;
+  if (!legCountUnchanged) {
+    try {
+      await db.run('DELETE FROM order_legs WHERE order_id = ?', [req.params.id]);
+      for (let i = 0; i < finalWaypoints.length + 1; i++) {
+        await db.run('INSERT INTO order_legs (order_id, seq, driver_id) VALUES (?, ?, NULL)', [req.params.id, i + 1]);
+      }
+      legsReset = true;
+    } catch (e) {
+      console.error('order_legs 재생성 실패(마이그레이션 미적용 가능성, 무시하고 진행):', e.message);
+    }
+  }
+
+  res.redirect('/orders/' + req.params.id + (legsReset ? '?notice=legs_reset' : ''));
+}));
+
+router.post('/:id/admin-memo', asyncHandler(async (req, res) => {
+  const order = await loadOrderInScope(req, res);
+  if (!order) return;
+  const { memo_admin } = req.body;
+  await db.run(
+    `UPDATE orders SET memo_admin = ?, updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') WHERE id = ?`,
+    [memo_admin || null, req.params.id]
+  );
+  res.redirect('/orders/' + req.params.id);
+}));
 
 router.get('/:id', asyncHandler(async (req, res) => {
   const order = await db.get(`

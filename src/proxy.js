@@ -63,6 +63,19 @@ export function proxy(req) {
     return NextResponse.rewrite(new URL('/api/index', req.url));
   }
 
+  // /orders/:id(오더 상세/수정, 신규) — 위 /chat/sessions/:id와 완전히 같은 이유로 같은
+  // 패턴을 쓴다. 같은 접두사를 쓰는 /orders/new, /orders/data.json,
+  // /orders/vehicle-type-suggest, /orders/fare-preview 등 고정 서브경로가 숫자 id로
+  // 잘못 취급되지 않도록 명시적으로 숫자 한 세그먼트일 때만 대상으로 삼는다.
+  const orderIdMatch = pathname.match(/^\/orders\/([^/]+)$/);
+  if (orderIdMatch) {
+    const isNumericId = /^\d+$/.test(orderIdMatch[1]);
+    if (isNumericId && process.env.NEXT_ORDER_DETAIL_EDIT_ENABLED === 'true') {
+      return NextResponse.next();
+    }
+    return NextResponse.rewrite(new URL('/api/index', req.url));
+  }
+
   const flagName = PATH_FLAGS[pathname];
   if (flagName && process.env[flagName] !== 'true') {
     return NextResponse.rewrite(new URL('/api/index', req.url));
@@ -72,4 +85,4 @@ export function proxy(req) {
 
 // Next's proxy bundler statically analyzes this export, so it's kept as a literal array
 // (a computed expression like Object.keys(PATH_FLAGS) may not be statically evaluable).
-export const config = { matcher: ['/', '/orders', '/inquiries', '/chat/sessions', '/chat/sessions/:id', '/orders/new'] };
+export const config = { matcher: ['/', '/orders', '/inquiries', '/chat/sessions', '/chat/sessions/:id', '/orders/new', '/orders/:id'] };

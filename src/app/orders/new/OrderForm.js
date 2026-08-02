@@ -47,7 +47,7 @@ function deriveMemoWithReservationLine(currentMemo, isDeliveryBasis, deliveryDat
 
 let prefillWaypointSeq = 0;
 
-function initialFieldState(order, defaultBranch) {
+function initialFieldState(order, defaultBranch, mode) {
   const reservedDate = order.reserved_date || '';
   const now = new Date();
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(reservedDate);
@@ -56,11 +56,12 @@ function initialFieldState(order, defaultBranch) {
   // order의 나머지 필드(origin_address 등)는 기본적으로 전부 빈 값이다(/orders/new 단독
   // 페이지는 buildOrderFormInitData가 항상 빈 order를 준다) — Stage 3 슬라이스 3에서
   // 카드뷰의 "접수 마무리" 탭이 GET /chat/sessions/:id/intake-order 응답을 그대로 이
-  // order 인자에 병합해서 넘기면 여기서 자동으로 prefill된다(필드명이 이미 1:1 대응).
+  // order 인자에 병합해서 넘기면 여기서 자동으로 prefill된다(필드명이 이미 1:1 대응),
+  // edit 모드에서는 GET /orders/:id/data.json이 같은 형태로 detail/vehicleNumber까지 채워준다.
   const prefillWaypoints = Array.isArray(order.waypoints)
     ? order.waypoints.map((w) => ({
       id: 'prefill-' + (prefillWaypointSeq += 1),
-      address: w.address || '', detail: '', contact: w.contact || '', vehicleNumber: '',
+      address: w.address || '', detail: w.detail || '', contact: w.contact || '', vehicleNumber: w.vehicleNumber || '',
       lat: null, lon: null,
     }))
     : [];
@@ -83,10 +84,16 @@ function initialFieldState(order, defaultBranch) {
     vehicle_type: order.vehicle_type || '', vehicle_number: order.vehicle_number || '',
     payment_method_id: order.payment_method_id || '',
     fare_amount: order.fare_amount || '',
-    ferry_fare_amount: 0,
+    // create 모드는 항상 0에서 시작해 fare-preview가 계산해줄 때만 채운다(기존 동작). edit
+    // 모드는 사용자가 경로를 다시 확정하지 않고 다른 필드만 고쳐 저장해도 기존 도선료가
+    // 조용히 0으로 사라지면 안 되므로 저장된 값으로 시작한다.
+    ferry_fare_amount: mode === 'edit' ? (order.ferry_fare_amount || 0) : 0,
     branch_id: order.branch_id || defaultBranch || '',
     requester_group_id: order.requester_group_id || '',
-    memo_customer: order.memo_customer || '', memo_billing: '',
+    memo_customer: order.memo_customer || '',
+    // 위 도선료와 같은 이유로, edit 모드에서는 저장된 업체 전달사항을 그대로 채운다(create
+    // 모드는 이 필드에 대응하는 상담 접수 데이터가 없어 항상 빈 값 — 기존 동작 유지).
+    memo_billing: mode === 'edit' ? (order.memo_billing || '') : '',
     sameAsMyPhone: false, sameAsOriginContact: false,
     chat_session_transition: 'agent_active',
   };
@@ -122,9 +129,9 @@ function reducer(state, action) {
 
 let waypointSeq = 0;
 
-export default function OrderForm({ initialData, chatSessionId }) {
+export default function OrderForm({ initialData, chatSessionId, mode = 'create', orderId }) {
   const { order, branches, groups, paymentMethods, defaultBranch, currentUserRole, currentUserPhone } = initialData;
-  const [state, dispatch] = useReducer(reducer, initialFieldState(order, defaultBranch));
+  const [state, dispatch] = useReducer(reducer, initialFieldState(order, defaultBranch, mode));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [routeInfo, setRouteInfo] = useState({ km: null, durationSec: null, toll: null, hasFerryLeg: false, isFinal: false });
@@ -321,7 +328,7 @@ export default function OrderForm({ initialData, chatSessionId }) {
 
     setSubmitting(true);
     try {
-      const res = await fetch('/orders', {
+      const res = await fetch(mode === 'edit' ? `/orders/${orderId}` : '/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'fetch' },
         body: params,
@@ -335,6 +342,10 @@ export default function OrderForm({ initialData, chatSessionId }) {
       if (!res.ok) {
         setError('저장에 실패했습니다. 다시 시도해주세요.');
         setSubmitting(false);
+        return;
+      }
+      if (mode === 'edit') {
+        window.location.assign('/orders/' + orderId);
         return;
       }
       const data = await res.json();
@@ -571,8 +582,10 @@ export default function OrderForm({ initialData, chatSessionId }) {
           {error && <div className="error-msg">{error}</div>}
 
           <div className="order-form-actions">
-            <a className="btn secondary" href="/orders">취소</a>
-            <button className="btn" type="submit" disabled={submitting}>{submitting ? '등록 중...' : '오더 등록'}</button>
+            <a className="btn secondary" href={mode === 'edit' ? `/orders/${orderId}` : '/orders'}>취소</a>
+            <button className="btn" type="submit" disabled={submitting}>
+              {submitting ? (mode === 'edit' ? '저장 중...' : '등록 중...') : (mode === 'edit' ? '오더 정보 저장' : '오더 등록')}
+            </button>
           </div>
         </section>
 
