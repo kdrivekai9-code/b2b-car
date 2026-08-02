@@ -956,13 +956,17 @@ async function loadOrderForEdit(req, res) {
   return order;
 }
 
-const EDIT_FIELD_LABELS = [
-  ['origin', '출발지'], ['origin_contact', '출발지 연락처'],
-  ['destination', '도착지'], ['destination_contact', '도착지 연락처'],
-  ['vehicle', '차종/차량번호'], ['schedule', '예약일시'],
-  ['payment_method_id', '결제방식'], ['fare_amount', '요금'], ['ferry_fare_amount', '도선료'],
-  ['memo_customer', '고객사 메모'], ['memo_billing', '업체요청사항'], ['waypoints', '경유지'],
-];
+function formatMoneyForHistory(n) {
+  return (Number(n) || 0).toLocaleString('ko-KR') + '원';
+}
+
+// 노트 한 줄이 지나치게 길어지지 않도록 메모류만 잘라낸다 — "무엇으로 바뀌었는지"는
+// 필요하지만 메모 전문을 이력 한 줄에 다 넣을 필요는 없다.
+function truncateForHistory(text, max) {
+  const s = String(text || '').trim();
+  if (!s) return '(빈 값)';
+  return s.length > max ? s.slice(0, max) + '…' : s;
+}
 
 router.post('/:id', asyncHandler(async (req, res) => {
   const order = await loadOrderForEdit(req, res);
@@ -1014,21 +1018,50 @@ router.post('/:id', asyncHandler(async (req, res) => {
 
   const existingWaypointsFull = await db.all('SELECT * FROM order_waypoints WHERE order_id = ? ORDER BY seq ASC', [req.params.id]);
 
-  // "수정이력" — 어떤 필드가 실제로 바뀌었는지 사람이 읽을 수 있는 라벨로 모아서
-  // order_status_history에 note로 남긴다(상태는 그대로 두고 old_status=new_status로
-  // 기록 — 별도 테이블/마이그레이션 없이 기존 변경이력 타임라인에 자연스럽게 얹힌다).
-  const changed = new Set();
-  if (finalOriginAddress !== order.origin_address || (origin_detail_address || null) !== order.origin_address_detail) changed.add('origin');
-  if ((origin_contact || null) !== order.origin_contact) changed.add('origin_contact');
-  if (finalDestinationAddress !== order.destination_address || (destination_detail_address || null) !== order.destination_address_detail) changed.add('destination');
-  if ((destination_contact || null) !== order.destination_contact) changed.add('destination_contact');
-  if (splitVehicle.vehicleType !== (order.vehicle_type || null) || splitVehicle.vehicleNumber !== (order.vehicle_number || null)) changed.add('vehicle');
-  if (effectiveReservedDate !== order.reserved_date || effectiveReservedTime !== order.reserved_time) changed.add('schedule');
-  if (String(payment_method_id || '') !== String(order.payment_method_id || '')) changed.add('payment_method_id');
-  if ((Number(fare_amount) || 0) !== (Number(order.fare_amount) || 0)) changed.add('fare_amount');
-  if ((Number(ferry_fare_amount) || 0) !== (Number(order.ferry_fare_amount) || 0)) changed.add('ferry_fare_amount');
-  if ((memo_customer || null) !== order.memo_customer) changed.add('memo_customer');
-  if ((memo_billing || null) !== order.memo_billing) changed.add('memo_billing');
+  // "수정이력" — 필드 이름뿐 아니라 실제로 "무엇에서 무엇으로" 바뀌었는지까지 사람이
+  // 읽을 수 있는 문장으로 모아서 order_status_history에 note로 남긴다(상태는 그대로 두고
+  // old_status=new_status로 기록 — 별도 테이블/마이그레이션 없이 기존 변경이력
+  // 타임라인에 자연스럽게 얹힌다).
+  const diffs = [];
+  if (finalOriginAddress !== order.origin_address || (origin_detail_address || null) !== order.origin_address_detail) {
+    diffs.push(`출발지: ${order.origin_address || '(빈 값)'} → ${finalOriginAddress || '(빈 값)'}`);
+  }
+  if ((origin_contact || null) !== order.origin_contact) {
+    diffs.push(`출발지 연락처: ${order.origin_contact || '(빈 값)'} → ${origin_contact || '(빈 값)'}`);
+  }
+  if (finalDestinationAddress !== order.destination_address || (destination_detail_address || null) !== order.destination_address_detail) {
+    diffs.push(`도착지: ${order.destination_address || '(빈 값)'} → ${finalDestinationAddress || '(빈 값)'}`);
+  }
+  if ((destination_contact || null) !== order.destination_contact) {
+    diffs.push(`도착지 연락처: ${order.destination_contact || '(빈 값)'} → ${destination_contact || '(빈 값)'}`);
+  }
+  if (splitVehicle.vehicleType !== (order.vehicle_type || null) || splitVehicle.vehicleNumber !== (order.vehicle_number || null)) {
+    const oldVehicle = [order.vehicle_type, order.vehicle_number].filter(Boolean).join('/') || '(빈 값)';
+    const newVehicle = [splitVehicle.vehicleType, splitVehicle.vehicleNumber].filter(Boolean).join('/') || '(빈 값)';
+    diffs.push(`차종/차량번호: ${oldVehicle} → ${newVehicle}`);
+  }
+  if (effectiveReservedDate !== order.reserved_date || effectiveReservedTime !== order.reserved_time) {
+    diffs.push(`예약일시: ${order.reserved_date} ${order.reserved_time} → ${effectiveReservedDate} ${effectiveReservedTime}`);
+  }
+  if (String(payment_method_id || '') !== String(order.payment_method_id || '')) {
+    const [oldPm, newPm] = await Promise.all([
+      order.payment_method_id ? db.get('SELECT name FROM payment_methods WHERE id = ?', [order.payment_method_id]) : null,
+      payment_method_id ? db.get('SELECT name FROM payment_methods WHERE id = ?', [payment_method_id]) : null,
+    ]);
+    diffs.push(`결제방식: ${oldPm ? oldPm.name : '(선택 안 함)'} → ${newPm ? newPm.name : '(선택 안 함)'}`);
+  }
+  if ((Number(fare_amount) || 0) !== (Number(order.fare_amount) || 0)) {
+    diffs.push(`요금: ${formatMoneyForHistory(order.fare_amount)} → ${formatMoneyForHistory(fare_amount)}`);
+  }
+  if ((Number(ferry_fare_amount) || 0) !== (Number(order.ferry_fare_amount) || 0)) {
+    diffs.push(`도선료: ${formatMoneyForHistory(order.ferry_fare_amount)} → ${formatMoneyForHistory(ferry_fare_amount)}`);
+  }
+  if ((memo_customer || null) !== order.memo_customer) {
+    diffs.push(`고객사 메모: ${truncateForHistory(order.memo_customer, 20)} → ${truncateForHistory(memo_customer, 20)}`);
+  }
+  if ((memo_billing || null) !== order.memo_billing) {
+    diffs.push(`업체요청사항: ${truncateForHistory(order.memo_billing, 20)} → ${truncateForHistory(memo_billing, 20)}`);
+  }
   if (
     existingWaypointsFull.length !== finalWaypoints.length
     || finalWaypoints.some((w, i) => {
@@ -1036,7 +1069,13 @@ router.post('/:id', asyncHandler(async (req, res) => {
       return !prev || w.address !== prev.address || (w.addressDetail || null) !== prev.address_detail
         || (w.contact || null) !== prev.contact_phone || (w.vehicleNumber || null) !== prev.vehicle_number;
     })
-  ) changed.add('waypoints');
+  ) {
+    if (existingWaypointsFull.length !== finalWaypoints.length) {
+      diffs.push(`경유지: ${existingWaypointsFull.length}개 → ${finalWaypoints.length}개`);
+    } else {
+      diffs.push('경유지 내용 수정');
+    }
+  }
 
   await db.run(`
     UPDATE orders SET branch_id = ?, requester_group_id = ?, origin_address = ?, origin_address_detail = ?, origin_contact = ?,
@@ -1052,12 +1091,11 @@ router.post('/:id', asyncHandler(async (req, res) => {
     req.params.id,
   ]);
 
-  if (changed.size > 0) {
-    const note = EDIT_FIELD_LABELS.filter(([key]) => changed.has(key)).map(([, label]) => label).join(', ') + ' 수정';
+  if (diffs.length > 0) {
     await db.run(`
       INSERT INTO order_status_history (order_id, actor_user_id, old_status, new_status, note)
       VALUES (?, ?, ?, ?, ?)
-    `, [req.params.id, u.id, order.status, order.status, note]);
+    `, [req.params.id, u.id, order.status, order.status, diffs.join('; ')]);
   }
 
   const existingWaypoints = existingWaypointsFull;
