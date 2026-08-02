@@ -34,6 +34,7 @@ const { accessLogMiddleware, getClientIp, writeAccessLog } = require('./lib/acce
 const app = express();
 const PORT = process.env.PORT || 3000;
 const isProduction = process.env.NODE_ENV === 'production';
+const isTest = process.env.NODE_ENV === 'test';
 
 if (isProduction && (!process.env.SESSION_SECRET || process.env.SESSION_SECRET === 'b2b-car-dev-secret-change-me')) {
   throw new Error('SESSION_SECRET 환경변수를 운영용 값으로 반드시 설정하세요.');
@@ -126,7 +127,9 @@ const loginLimiter = rateLimit({
 });
 // GET /login(폼 조회)은 세지 않는다 — 실제 위협은 비밀번호를 대입하는 POST뿐이고,
 // GET까지 같이 세면 로그인 페이지를 몇 번 새로고침한 정상 사용자도 금방 한도에 걸린다.
-app.post('/login', loginLimiter);
+if (!isTest) {
+  app.post('/login', loginLimiter);
+}
 
 // 로그인 없이 접근하는 기사 사진 업로드 페이지는 '/'에 마운트된(내부적으로 모든 경로를 가로채는)
 // authRoutes/dashboardRoutes보다 반드시 먼저 등록해야 requireAuth에 걸리지 않는다.
