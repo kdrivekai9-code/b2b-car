@@ -1,5 +1,14 @@
 # AI 전환 3단계 체크리스트
 
+참고: Next AI intake 상호작용 수동 검증 항목은 [ai-next-intake-e2e-checklist.md](ai-next-intake-e2e-checklist.md)를 사용한다.
+추가: 2026-08-02 기준 주소 병합 회귀 자동검증(`tests/manual/ai-intake-address-merge.playwright.spec.js`) 2건 PASS를 확인했다(로컬 `/orders/ai-intake` legacy EJS 렌더 기준).
+추가: 로컬 `next dev` 단독(3100)에서는 `/login` 404로 인증 플로우를 재현하지 못해 Next 화면 E2E는 통합 런타임(Preview/Staging)에서 수행해야 함을 확인했다.
+추가: 스테이징(`https://b2bcarkr-staging.vercel.app`)에서 `admin` 로그인 후 `/orders/ai-intake` 렌더 마커를 재확인한 결과 `NEXT_MARKER=false`, `LEGACY_MARKER=true`였고, 주소 병합 자동 스펙은 2건 PASS(`2 passed (3.5s)`)했다.
+추가: `npm run check:login:all`의 스테이징 false negative(307 리다이렉트 오판정)를 수정했다 — `scripts/check-login-all.js` health check 허용 상태를 `[302, 307]`으로 확장했고, 스테이징 재실행 결과 `pass=true`를 확인했다.
+추가: precheck 실패 경로는 대화 분기 의존 자동화 대신 독립 API 스펙(`tests/manual/ai-intake-precheck.playwright.spec.js`)으로 분리했고, 스테이징 실행 `1 passed (1.7s)`를 확인했다.
+추가: needs_agent 전환/세션 교체와 catch-up 보충도 독립 스펙(`tests/manual/ai-intake-session-behaviors.playwright.spec.js`)으로 분리했고, 스테이징 실행 `2 passed (4.4s)`를 확인했다.
+추가: AI intake 전용 통합 스크립트(`npm run e2e:ai-intake`)를 추가했고, 주소 병합/ precheck/세션동작 포함 총 5개 테스트 스테이징 실행 `5 passed (8.2s)`를 확인했다.
+
 ## 범위 (2026-08-02, 슬라이스 1 확정)
 - [x] 상담관리 **카드뷰**(`/chat/sessions`, view 없음 또는 `?view=card`) 세션 리스트/실시간
       대화 전환이 포함된다.

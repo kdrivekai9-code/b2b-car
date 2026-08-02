@@ -14,7 +14,8 @@
     "check:login": "node scripts/check-login.js",
     "check:login:all": "node scripts/check-login-all.js",
     "check:preflight": "PREFLIGHT_RETRY_ON_429=true PREFLIGHT_MAX_RETRIES=1 PREFLIGHT_RETRY_BASE_MS=1000 PREFLIGHT_RETRY_MAX_MS=900000 npm run check:login:all",
-    "e2e": "PLAYWRIGHT_BROWSERS_PATH=.playwright-browsers E2E_BASE_URL=http://127.0.0.1:3000 npx playwright test tests/manual --reporter=line --workers=1"
+    "e2e": "PLAYWRIGHT_BROWSERS_PATH=.playwright-browsers E2E_BASE_URL=http://127.0.0.1:3000 npx playwright test tests/manual --reporter=line --workers=1",
+    "e2e:ai-intake": "PLAYWRIGHT_BROWSERS_PATH=.playwright-browsers E2E_BASE_URL=${E2E_BASE_URL:-http://127.0.0.1:3000} npx playwright test tests/manual/ai-intake-address-merge.playwright.spec.js tests/manual/ai-intake-precheck.playwright.spec.js tests/manual/ai-intake-session-behaviors.playwright.spec.js --reporter=line --workers=1"
   },
   "engines": {
     "node": ">=18"

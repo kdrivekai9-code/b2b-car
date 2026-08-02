@@ -235,10 +235,14 @@ async function main() {
     results.push(result);
   }
 
+  // 런타임(Express 단독 / Next+Proxy 공존)과 배포 환경에 따라
+  // 비인증 리다이렉트가 302 또는 307로 달라질 수 있다.
+  const REDIRECT_STATUSES = [302, 307];
+
   const healthChecks = await Promise.all([
     checkHealth(baseUrl, '/login', [200]),
-    checkHealth(baseUrl, '/', [302]),
-    checkHealth(baseUrl, '/orders', [302]),
+    checkHealth(baseUrl, '/', REDIRECT_STATUSES),
+    checkHealth(baseUrl, '/orders', REDIRECT_STATUSES),
   ]);
 
   const pass = results.every((r) => r.pass) && healthChecks.every((h) => h.pass);

@@ -161,7 +161,10 @@ async function loginAsAdmin(page) {
 }
 
 async function openAiIntake(page) {
-  await page.goto(BASE_URL + '/orders/ai-intake');
+  // 서버가 query.session을 Number(...)로 파싱하므로, 비숫자 문자열은 null로 처리되어
+  // 오히려 최근 열린 세션 복원으로 되돌아간다. 항상 존재하지 않을 큰 숫자를 써서 격리한다.
+  const isolatedSessionId = String(9000000 + Math.floor(Math.random() * 100000));
+  await page.goto(BASE_URL + '/orders/ai-intake?session=' + encodeURIComponent(isolatedSessionId));
   await expect(page.locator('#aiIntakeText')).toBeVisible();
 }
 
@@ -307,4 +310,5 @@ test.describe('AI intake address detail merge', () => {
       expect(detailVal).toMatch(/주차장/);
     }
   });
+
 });

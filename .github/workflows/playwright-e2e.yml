@@ -159,3 +159,113 @@ jobs:
         run: |
           echo "DATABASE_URL secret is not configured."
           echo "Playwright E2E job was skipped."
+
+  e2e-ai-intake:
+    runs-on: ubuntu-latest
+    env:
+      NODE_ENV: test
+      NODE_OPTIONS: --dns-result-order=ipv4first
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      SESSION_SECRET: ${{ secrets.SESSION_SECRET != '' && secrets.SESSION_SECRET || 'ci-session-secret' }}
+      PLAYWRIGHT_BROWSERS_PATH: .playwright-browsers
+      E2E_BASE_URL: http://127.0.0.1:3000
+      LOGIN_BASE_URL: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.base_url || 'http://127.0.0.1:3000' }}
+      LOGIN_ID_ADMIN: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_id_admin || 'admin' }}
+      LOGIN_ID_BRANCH_MANAGER: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_id_branch_manager || 'seoul_manager' }}
+      LOGIN_ID_CLIENT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_id_client || 'seoulmotors' }}
+      LOGIN_PASSWORD_ADMIN: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_password_admin != '' && github.event.inputs.login_password_admin || secrets.LOGIN_PASSWORD_ADMIN != '' && secrets.LOGIN_PASSWORD_ADMIN || 'Admin!2345' }}
+      LOGIN_PASSWORD_BRANCH_MANAGER: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_password_branch_manager != '' && github.event.inputs.login_password_branch_manager || secrets.LOGIN_PASSWORD_BRANCH_MANAGER != '' && secrets.LOGIN_PASSWORD_BRANCH_MANAGER || 'Manager!2345' }}
+      LOGIN_PASSWORD_CLIENT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_password_client != '' && github.event.inputs.login_password_client || secrets.LOGIN_PASSWORD_CLIENT != '' && secrets.LOGIN_PASSWORD_CLIENT || 'Client!2345' }}
+
+    steps:
+      - name: Checkout
+        if: ${{ env.DATABASE_URL != '' }}
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        if: ${{ env.DATABASE_URL != '' }}
+        uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        if: ${{ env.DATABASE_URL != '' }}
+        run: npm ci
+
+      - name: Install Playwright browsers
+        if: ${{ env.DATABASE_URL != '' }}
+        run: npx playwright install --with-deps chromium
+
+      - name: Seed demo data
+        if: ${{ env.DATABASE_URL != '' }}
+        run: npm run seed
+
+      - name: Start server
+        if: ${{ env.DATABASE_URL != '' }}
+        run: |
+          npm start > server.log 2>&1 &
+          echo $! > server.pid
+
+      - name: Wait for server
+        if: ${{ env.DATABASE_URL != '' }}
+        run: |
+          for i in {1..60}; do
+            if curl -fsS http://127.0.0.1:3000/login > /dev/null; then
+              echo "Server is ready"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Server did not become ready in time"
+          cat server.log || true
+          exit 1
+
+      - name: Run preflight login gate
+        if: ${{ env.DATABASE_URL != '' }}
+        env:
+          PREFLIGHT_REPORT_PATH: artifacts/preflight-ai-intake-report.json
+          PREFLIGHT_SUMMARY_PATH: artifacts/preflight-ai-intake-summary.md
+        run: npm run check:preflight
+
+      - name: Run AI intake Playwright bundle
+        if: ${{ env.DATABASE_URL != '' }}
+        run: npm run e2e:ai-intake
+
+      - name: Upload server log on failure
+        if: ${{ failure() && env.DATABASE_URL != '' }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: server-log-ai-intake
+          path: server.log
+
+      - name: Upload preflight report
+        if: ${{ always() && env.DATABASE_URL != '' }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: preflight-ai-intake-report
+          path: artifacts/preflight-ai-intake-report.json
+          if-no-files-found: warn
+
+      - name: Upload preflight summary
+        if: ${{ always() && env.DATABASE_URL != '' }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: preflight-ai-intake-summary
+          path: artifacts/preflight-ai-intake-summary.md
+          if-no-files-found: warn
+
+      - name: Stop server
+        if: ${{ always() && env.DATABASE_URL != '' }}
+        run: |
+          if [ -f server.pid ]; then
+            kill "$(cat server.pid)" || true
+          fi
+
+      - name: Skip message
+        if: ${{ env.DATABASE_URL == '' }}
+        run: |
+          echo "DATABASE_URL secret is not configured."
+          echo "AI intake Playwright E2E job was skipped."
