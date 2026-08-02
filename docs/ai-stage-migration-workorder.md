@@ -92,6 +92,20 @@ Express+EJS 코드가 실제로는 안 타지만, 롤백 안전망으로 **당�
 정리는 production 플래그가 안정적으로 유지된 지 충분한 시간이 지난 뒤, 별도 작업으로
 재검토한다 — 지금 시점에 예정된 일정은 없다.
 
+## 0-3. Stage 이후 후속 기능: 오더 상세페이지 수정 가능화 (2026-08-02)
+Stage 1~3 완료 이후 별도로 요청된 기능 — `views/orders/detail.ejs`는 원래 순수 읽기전용
+(관리자용 상태변경/기사배정/요금 미니폼 3개만 예외)이었는데, 이미 전환된 접수폼
+(`OrderForm.js`, `/orders/new`)을 `mode="edit"`으로 확장 재사용해 오더 상세페이지
+자체를 수정 가능하게 만들었다. 새 플래그 `NEXT_ORDER_DETAIL_EDIT_ENABLED`(Stage 번호
+없음 — 워크오더 3단계는 이미 완료 처리됨)로 게이팅, production에 검증 후 ON. 신규
+라우트는 `POST /orders/:id`(수정), `GET /orders/:id/data.json`,
+`POST /orders/:id/admin-memo`(관리자 메모 단독) 3개뿐이고, 기존 `POST /:id/fare`와
+`views/orders/detail.ejs`는 완전히 그대로 남겨 플래그 OFF 시 100% 기존 동작으로
+롤백된다. 검증: 임시 Vercel Preview 배포로 prefill/저장/구간(order_legs) 배정 보존·
+경유지 개수 변경 시 재생성/client 읽기전용/`/orders/new` create 모드 회귀 없음을
+Playwright로 확인 → production 배포(플래그 OFF 상태로 먼저 반영해 legacy 무변경 확인)
+→ 플래그 ON + 재배포 → 동일 시나리오를 production에서 재확인, 전부 통과.
+
 ## 1. 공통 운영 규칙
 - 릴리스 단위: 단계 내에서도 화면/기능을 작은 배치로 분할 배포한다.
 - 배포 전략: `git push origin main` → Vercel GitHub 연동 자동 배포 → 별칭(`b2bcarkr.vercel.app`)
