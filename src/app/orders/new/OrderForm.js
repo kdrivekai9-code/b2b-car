@@ -586,7 +586,10 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
             </div>
           </div>
 
-          <div className="section-title small">결제 및 요금</div>
+          <div className="section-title small" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>결제 및 요금</span>
+            {routeInfo.km != null && <span style={{ fontWeight: 400 }}>거리 : {routeInfo.km.toFixed(1)} km</span>}
+          </div>
           <div className="field full">
             <label>결제방식 / 요금(원)</label>
             <div className="inline-duo">
