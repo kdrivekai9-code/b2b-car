@@ -14,6 +14,10 @@
 // 실시간 수신은 Supabase Realtime Broadcast를 서버가 SSE로 중계하는 방식 — 브라우저는
 // Supabase 키를 전혀 알 필요가 없다(EventSource + 우리 서버 세션 인증만 사용).
 (function () {
+  var api = window.AiIntakeApi;
+  var stateApi = window.AiIntakeState;
+  var renderApi = window.AiIntakeRender;
+  var flowApi = window.AiIntakeFlow;
   var textarea = document.getElementById('aiIntakeText');
   var sendBtn = document.getElementById('aiSendBtn');
   var messages = document.getElementById('aiChatMessages');
@@ -21,22 +25,22 @@
   var quickRepliesEl = document.getElementById('aiQuickReplies');
   var aiConnectionEl = document.getElementById('aiChatConnection');
   var aiConnectionTextEl = document.getElementById('aiChatConnectionText');
-  if (!textarea || !sendBtn || !messages) return;
+  if (!api || !stateApi || !renderApi || !flowApi || !textarea || !sendBtn || !messages) return;
 
   var CHAT_INPUT_COLLAPSED_HEIGHT = 64;
 
   function scrollMessagesToBottom() {
-    messages.scrollTop = messages.scrollHeight;
+    renderer.scrollMessagesToBottom();
   }
 
   function collapseChatInput() {
-    textarea.style.height = CHAT_INPUT_COLLAPSED_HEIGHT + 'px';
+    renderer.collapseChatInput();
   }
 
   // 대화가 한 번이라도 시작되면(첫 메시지 전송, 또는 재방문 시 기존 대화 복원) 안내용 예시
   // placeholder는 더 이상 보여줄 필요가 없다 — 그 뒤로는 빈 입력창만 보이게 한다.
   function clearGuidePlaceholder() {
-    textarea.placeholder = '';
+    renderer.clearGuidePlaceholder();
   }
 
   var REQUIRED_FIELDS = [
@@ -121,6 +125,43 @@
   var lastAiActivityPingAt = 0;
   var AI_ACTIVITY_PING_INTERVAL_MS = 15000;
   var AI_HEALTH_POLL_INTERVAL_MS = 60000;
+  var intakeState = stateApi.create({
+    pendingField: pendingField,
+    modifyFieldMode: modifyFieldMode,
+    lastModifiedFieldId: lastModifiedFieldId,
+    reservedDateTimeConfirmed: reservedDateTimeConfirmed,
+    vehicleNumberResolved: vehicleNumberResolved,
+    additionalRequestResolved: additionalRequestResolved,
+    confirmedOrderType: confirmedOrderType,
+    troubleStreak: troubleStreak,
+    preOfferState: preOfferState,
+    pendingFrustrationOffer: pendingFrustrationOffer,
+    phase: phase,
+    pendingDisambiguation: pendingDisambiguation,
+    disambiguationQueue: disambiguationQueue.slice(),
+    sessionId: sessionId,
+    sessionStatus: sessionStatus,
+    lastWaitingStatusShown: lastWaitingStatusShown,
+    lastPolledId: lastPolledId,
+    fareInquiryPendingField: fareInquiryPendingField,
+    pendingFareVehicleTypeRoute: pendingFareVehicleTypeRoute,
+    lastAnnouncedMemoText: lastAnnouncedMemoText,
+    lastAnnouncedBillingMemoText: lastAnnouncedBillingMemoText,
+    lastAiActivityPingAt: lastAiActivityPingAt,
+  });
+
+  function syncStatePatch(patch) {
+    intakeState.patch(patch);
+  }
+  var renderer = renderApi.create({
+    textarea: textarea,
+    messages: messages,
+    aiConnectionEl: aiConnectionEl,
+    aiConnectionTextEl: aiConnectionTextEl,
+    chatInputCollapsedHeight: CHAT_INPUT_COLLAPSED_HEIGHT,
+    getLastBotRow: function () { return lastBotRowInTurn; },
+    setLastBotRow: function (row) { lastBotRowInTurn = row; },
+  });
   var AI_HEALTH_REASON_MESSAGES = {
     session_missing: '로그인이 필요합니다. 다시 로그인해주세요.',
     idle: '세션이 만료되었습니다. 다시 로그인해주세요.',
@@ -149,56 +190,30 @@
   }
 
   function setAiConnectionStatus(state, detail) {
-    if (!aiConnectionEl || !aiConnectionTextEl) return;
-    aiConnectionEl.classList.remove('online', 'offline');
-    aiConnectionEl.removeAttribute('title');
-    if (state === 'online') {
-      aiConnectionEl.classList.add('online');
-      aiConnectionTextEl.textContent = 'AI 연결 정상';
-      aiConnectionEl.title = 'AI 연결 정상';
-      return;
-    }
-    if (state === 'offline') {
-      aiConnectionEl.classList.add('offline');
-      var reasonText = detail && detail.message ? detail.message : 'AI 연결 실패';
-      aiConnectionTextEl.textContent = 'AI 연결 실패';
-      aiConnectionEl.title = reasonText;
-      aiConnectionEl.setAttribute('aria-label', 'AI 연결 실패: ' + reasonText);
-      return;
-    }
-    aiConnectionTextEl.textContent = 'AI 연결 확인중';
-    aiConnectionEl.title = 'AI 연결 확인중';
+    renderer.setAiConnectionStatus(state, detail);
   }
 
   function touchAiActivity(force) {
     var now = Date.now();
     if (!force && now - lastAiActivityPingAt < AI_ACTIVITY_PING_INTERVAL_MS) return;
     lastAiActivityPingAt = now;
-    fetch('/orders/ai-intake/activity', {
-      method: 'POST',
-      headers: { 'X-Requested-With': 'fetch' },
-    }).catch(function () {});
+    api.pingActivity().catch(function () {});
   }
 
   function checkAiConnectionHealth() {
     if (!aiConnectionEl) return Promise.resolve(null);
     setAiConnectionStatus('checking');
-    return fetch('/orders/ai-intake/health', {
-      method: 'GET',
-      headers: { 'X-Requested-With': 'fetch' },
-    })
-      .then(function (res) {
-        return res.json().catch(function () { return { ok: false }; }).then(function (data) {
-          var ok = !!(res.ok && data && data.ok);
-          if (ok) {
-            setAiConnectionStatus('online');
-            return true;
-          }
-          var reason = data && data.reason ? String(data.reason) : 'ai_unavailable';
-          var message = data && data.message ? String(data.message) : (AI_HEALTH_REASON_MESSAGES[reason] || AI_HEALTH_REASON_MESSAGES.ai_unavailable);
-          setAiConnectionStatus('offline', { reason: reason, message: message });
-          return ok;
-        });
+    return api.checkHealth()
+      .then(function (result) {
+        if (result.ok) {
+          setAiConnectionStatus('online');
+          return true;
+        }
+        var data = result.data || {};
+        var reason = data.reason ? String(data.reason) : 'ai_unavailable';
+        var message = data.message ? String(data.message) : (AI_HEALTH_REASON_MESSAGES[reason] || AI_HEALTH_REASON_MESSAGES.ai_unavailable);
+        setAiConnectionStatus('offline', { reason: reason, message: message });
+        return false;
       })
       .catch(function () {
         setAiConnectionStatus('offline', { reason: 'ai_unavailable', message: AI_HEALTH_REASON_MESSAGES.ai_unavailable });
@@ -257,9 +272,7 @@
   }
 
   function formatRecentDateTime(raw) {
-    var d = parseKstDateTime(raw);
-    if (!d) return '';
-    return String(d.getMonth() + 1) + '.' + String(d.getDate());
+    return renderer.formatRecentDateTime(raw);
   }
 
   function streamPlainText(container, text, onDone) {
@@ -304,44 +317,7 @@
   // isQuestion: 사용자에게 다음 답을 요구하는 말풍선(필수항목 질문/확인질문/후보선택 등)에만
   // true로 넘긴다 — 정보 전달용 응답과 구분되도록 배경색을 다르게(하늘색) 표시한다.
   function addBubble(text, who, createdAt, isQuestion) {
-    var div = document.createElement('div');
-    div.className = 'ai-chat-bubble ' + (who === 'user' ? 'ai-user' : (who === 'agent' ? 'ai-agent' : 'ai-bot'));
-    if (who === 'bot' && isQuestion) div.className += ' ai-bot-question';
-    var timeText = formatBubbleTime(createdAt);
-
-    if (who === 'agent') {
-      var label = document.createElement('span');
-      label.className = 'bubble-label';
-      label.textContent = '상담원';
-      div.appendChild(label);
-      var agentBody = document.createElement('div');
-      agentBody.textContent = text;
-      div.appendChild(agentBody);
-    } else if (who === 'bot') {
-      var botBody = document.createElement('div');
-      var rawText = String(text == null ? '' : text);
-      streamPlainText(botBody, rawText, function () {
-        botBody.textContent = '';
-        appendTextWithAutoBold(botBody, rawText);
-        collapseChatInput();
-        scrollMessagesToBottom();
-      });
-      div.appendChild(botBody);
-    } else {
-      var userText = document.createElement('span');
-      userText.textContent = text;
-      div.appendChild(userText);
-    }
-    var row = appendBubbleRow(div, who, timeText);
-    if (who === 'bot') {
-      if (lastBotRowInTurn) {
-        var prevTimeEl = lastBotRowInTurn.querySelector('.bubble-time');
-        if (prevTimeEl) prevTimeEl.style.display = 'none';
-      }
-      lastBotRowInTurn = row;
-    }
-    if (who !== 'user') collapseChatInput();
-    scrollMessagesToBottom();
+    renderer.addBubble(text, who, createdAt, isQuestion);
   }
 
   // 필드 검증(주소/연락처/차량번호) 확인·재요청 말풍선은 화면에는 즉시 보여주면서도, 다음 정식
@@ -447,6 +423,7 @@
   // 빠른 답장 칩도 항상 최신 상태로 다시 그려지게 하기 위함(따로따로 챙기면 누락되기 쉽다).
   function setPendingField(value) {
     pendingField = value;
+    syncStatePatch({ pendingField: pendingField });
     updateQuickReplies();
   }
 
@@ -920,13 +897,7 @@
   }
 
   function createInquiryRecord(payload) {
-    return fetch('/inquiries', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'fetch' },
-      body: JSON.stringify(payload || {}),
-    })
-      .then(function (res) { return res.json().catch(function () { return {}; }); })
-      .then(function (data) { return data && data.id ? Number(data.id) : null; })
+    return api.createInquiryRecord(payload)
       .catch(function () {
         // 이전에는 이 catch가 announceFareGuideFromDb에만 있는 opts/distanceKm/origin/destination을
         // 참조하고 있었다(복사해오면서 남은 실수) — 실제로 요청이 실패하면 ReferenceError가 나서
@@ -939,11 +910,7 @@
 
   function updateInquiryEstimate(inquiryId, payload) {
     if (!inquiryId) return Promise.resolve(false);
-    return fetch('/inquiries/' + inquiryId + '/estimate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'fetch' },
-      body: JSON.stringify(payload || {}),
-    })
+    return api.updateInquiryEstimate(inquiryId, payload)
       .then(function () { return true; })
       .catch(function () { return false; });
   }
@@ -1083,9 +1050,7 @@
         qs.set('route_meta_json', JSON.stringify(routeMeta));
       }
 
-      return fetch('/orders/fare-preview?' + qs.toString())
-        .then(function (res) { return res.json(); })
-        .then(function (data) {
+      return api.fetchFarePreview(qs.toString()).then(function (data) {
           var role = String((document.getElementById('orderForm') || {}).dataset.myRole || '');
           if (data && data.representativeConfigMissing && role === 'admin') {
             addBubble('관리자 안내: 대표요금제 컬럼이 DB에 반영되지 않아, 일반 fallback 규칙으로 계산했습니다. 마이그레이션을 적용해주세요.', 'bot');
@@ -1186,8 +1151,7 @@
             };
           }
           return msg;
-        })
-        .catch(function () { return null; });
+        });
     });
   }
 
@@ -1207,9 +1171,7 @@
       if (Number.isFinite(extra.beforeMinutes)) qs.set('before_minutes', String(extra.beforeMinutes));
       if (Number.isFinite(extra.afterMinutes)) qs.set('after_minutes', String(extra.afterMinutes));
     }
-    return fetch('/orders/fare-preview?' + qs.toString())
-      .then(function (res) { return res.json(); })
-      .catch(function () { return null; });
+    return api.fetchFarePreview(qs.toString());
   }
 
   function formatHM(date) {
@@ -1512,6 +1474,16 @@
     'memo_customer', 'memo_billing',
   ];
   function buildDraftState() {
+    syncStatePatch({
+      phase: phase,
+      pendingField: pendingField,
+      modifyFieldMode: modifyFieldMode,
+      lastModifiedFieldId: lastModifiedFieldId,
+      reservedDateTimeConfirmed: reservedDateTimeConfirmed,
+      vehicleNumberResolved: vehicleNumberResolved,
+      additionalRequestResolved: additionalRequestResolved,
+      confirmedOrderType: confirmedOrderType,
+    });
     var fields = {};
     DRAFT_FIELD_IDS.forEach(function (id) { fields[id] = val(id); });
     var confirmedSlots = ['origin', 'destination'].filter(function (slot) {
@@ -1561,10 +1533,21 @@
     // 않음)는 복원할 수 없다 — 어중간하게 그 단계로 복원하면 다음 답변을 처리하다 오류가 나므로
     // 안전하게 되돌린다. pendingField는 그대로 살아있어서(offer_agent 진입 시 지우지 않음) 대부분
     // 원래 묻던 질문으로 자연스럽게 이어진다.
-    if (draft.phase && draft.phase !== 'choose_address_candidate' && draft.phase !== 'offer_agent') phase = draft.phase;
+    var restoredPhase = flowApi.getRestorableDraftPhase(draft.phase);
+    if (restoredPhase) phase = restoredPhase;
     pendingField = draft.pendingField || null;
     modifyFieldMode = !!draft.modifyFieldMode;
     lastModifiedFieldId = draft.lastModifiedFieldId || null;
+    syncStatePatch({
+      phase: phase,
+      pendingField: pendingField,
+      modifyFieldMode: modifyFieldMode,
+      lastModifiedFieldId: lastModifiedFieldId,
+      reservedDateTimeConfirmed: reservedDateTimeConfirmed,
+      vehicleNumberResolved: vehicleNumberResolved,
+      additionalRequestResolved: additionalRequestResolved,
+      confirmedOrderType: confirmedOrderType,
+    });
     updateQuickReplies();
   }
 
@@ -1952,6 +1935,17 @@
     // 봇으로 되돌아왔다가 다시 상담원을 요청하는 경우, 이전 대기 안내를 "이미 봤다"고 착각해
     // 이번 새 요청에 대한 안내를 건너뛰지 않도록 초기화한다.
     lastWaitingStatusShown = null;
+    syncStatePatch({
+      phase: phase,
+      pendingField: pendingField,
+      modifyFieldMode: modifyFieldMode,
+      lastModifiedFieldId: lastModifiedFieldId,
+      pendingDisambiguation: pendingDisambiguation,
+      disambiguationQueue: disambiguationQueue.slice(),
+      troubleStreak: troubleStreak,
+      preOfferState: preOfferState,
+      lastWaitingStatusShown: lastWaitingStatusShown,
+    });
     logBotMessage({ logText: null, needsAgent: true, requestedFeature: requestedFeature }).then(function (finalText) {
       if (finalText) addBubble(finalText, 'bot');
     });
@@ -1963,24 +1957,30 @@
   // 물어보고, 답변에 따라 연결하거나 원래 하던 질문으로 돌아간다.
   function noteTrouble() {
     troubleStreak += 1;
+    syncStatePatch({ troubleStreak: troubleStreak });
     if (troubleStreak >= TROUBLE_STREAK_LIMIT) {
       troubleStreak = 0;
+      syncStatePatch({ troubleStreak: troubleStreak });
       offerAgentConnection();
       return true;
     }
     return false;
   }
-  function noteProgress() { troubleStreak = 0; }
+  function noteProgress() {
+    troubleStreak = 0;
+    syncStatePatch({ troubleStreak: troubleStreak });
+  }
 
   function offerAgentConnection() {
     if (phase === 'offer_agent') return; // 이미 물어본 상태면 중복으로 다시 묻지 않는다
-    preOfferState = {
+    preOfferState = flowApi.buildOfferAgentResumeState({
       phase: phase,
       pendingField: pendingField,
       pendingDisambiguation: pendingDisambiguation,
       disambiguationQueue: disambiguationQueue.slice(),
-    };
+    });
     phase = 'offer_agent';
+    syncStatePatch({ preOfferState: preOfferState, phase: phase });
     var q = '더 빠른 처리를 위해 상담원 연결을 해드릴까요?';
     addBubble(q, 'bot', null, true);
     logBotMessage({ logText: q, needsAgent: false, requestedFeature: null });
@@ -1991,6 +1991,7 @@
   function maybeOfferForFrustration() {
     if (!pendingFrustrationOffer) return false;
     pendingFrustrationOffer = false;
+    syncStatePatch({ pendingFrustrationOffer: pendingFrustrationOffer });
     offerAgentConnection();
     return true;
   }
@@ -1998,33 +1999,39 @@
   function handleOfferAgentPhase(text) {
     if (isAffirmative(text) || isAgentRequest(text)) {
       preOfferState = null;
+      syncStatePatch({ preOfferState: preOfferState });
       escalateToAgent('상담원 연결');
       return;
     }
     if (isNegative(text) || /^(괜찮|계속|아니)/i.test(text.trim())) {
-      var resumed = preOfferState || { phase: 'collecting', pendingField: null, pendingDisambiguation: null, disambiguationQueue: [] };
+      var resumed = flowApi.normalizeOfferAgentResumeState(preOfferState);
       preOfferState = null;
       phase = resumed.phase;
       pendingField = resumed.pendingField;
       updateQuickReplies();
       pendingDisambiguation = resumed.pendingDisambiguation;
       disambiguationQueue = resumed.disambiguationQueue || [];
+      syncStatePatch({
+        preOfferState: preOfferState,
+        phase: phase,
+        pendingField: pendingField,
+        pendingDisambiguation: pendingDisambiguation,
+        disambiguationQueue: disambiguationQueue.slice(),
+      });
 
       var backText = '네, 계속 진행하겠습니다.';
       addBubble(backText, 'bot');
-      var followUp = null;
-      if (phase === 'collecting') {
-        var meta = fieldMetaFor(pendingField);
-        followUp = meta ? meta.question
-          : pendingField === 'memo_customer' ? '추가 요청사항이 있으시면 알려주세요? 없으시면 \'없음\'이라고 답해주세요.'
-          : null;
-      } else if (phase === 'confirming') {
-        followUp = '위 내용으로 등록해 드릴까요?';
-      } else if (phase === 'choose_field') {
-        followUp = CHOOSE_FIELD_CLARIFY;
-      } else if (phase === 'choose_address_candidate' && pendingDisambiguation) {
-        followUp = candidateListText(pendingDisambiguation);
-      }
+      var followUp = flowApi.getResumeFollowUpQuestion({
+        phase: phase,
+        pendingField: pendingField,
+        pendingDisambiguation: pendingDisambiguation,
+        chooseFieldClarify: CHOOSE_FIELD_CLARIFY,
+        getFieldQuestion: function (fieldId) {
+          var meta = fieldMetaFor(fieldId);
+          return meta ? meta.question : null;
+        },
+        candidateListText: candidateListText,
+      });
       logBotMessage({ logText: backText, needsAgent: false, requestedFeature: null });
       if (followUp) {
         addBubble(followUp, 'bot', null, true);
@@ -2032,7 +2039,7 @@
       }
       return;
     }
-    var clarify = '상담원 연결이 필요하시면 "네", 계속 진행하시려면 "아니요"라고 답해주세요.';
+    var clarify = flowApi.getOfferAgentClarifyText();
     addBubble(clarify, 'bot');
     logBotMessage({ logText: clarify, needsAgent: false, requestedFeature: null });
   }
@@ -2115,21 +2122,7 @@
     var form = document.getElementById('orderForm');
     if (!form) return;
     var params = new URLSearchParams(new FormData(form));
-    fetch(form.action, {
-      method: 'POST',
-      headers: { 'X-Requested-With': 'fetch', 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: params,
-    })
-      .then(function (res) {
-        // 서버가 항상 JSON으로 에러를 내려주도록 고쳤지만, 혹시 그 경로를 벗어난 예외적인 응답이
-        // 와도 "JSON이 아니다"라는 파싱 에러가 실제 에러 대신 노출되는 일이 없도록 안전하게 처리한다.
-        if (!res.ok) {
-          return res.json()
-            .catch(function () { return {}; })
-            .then(function (data) { throw new Error(data.error || '등록에 실패했습니다. (서버 응답 코드: ' + res.status + ')'); });
-        }
-        return res.json();
-      })
+    api.submitOrderForm(form.action, params)
       .then(function (data) {
         var okText = data.oid + ' 오더가 정상적으로 등록되었습니다. 새 오더 접수를 준비할게요.';
         addBubble(okText, 'bot');
@@ -2150,58 +2143,19 @@
     var form = document.getElementById('orderForm');
     if (!form) return Promise.resolve({ ok: false, error: '오더 등록 폼을 찾을 수 없습니다.' });
     var params = new URLSearchParams(new FormData(form));
-    // keepalive: "등록해 드릴까요?"에 "네"라고 답한 직후 탭을 새로고침/전환하는 경우가 실제로
-    // 있었는데, 이 요청이 keepalive 없이 진행 중이면 네비게이션과 함께 그대로 끊겨서 등록도 안
-    // 되고 실패 안내도 못 띄운 채 phase만 'confirming'에 멈춰버렸다 — 요청이 끝까지 가게 한다.
-    return fetch('/orders/ai-intake/submit-precheck', {
-      method: 'POST',
-      keepalive: true,
-      headers: { 'X-Requested-With': 'fetch', 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: params,
-    })
-      .then(function (res) {
-        if (res.status === 404) {
-          // 배포 전파 지연/캐시로 precheck 라우트가 아직 없는 서버를 만났을 때,
-          // 등록 자체를 막지 않고 기존 최종 등록 검증으로 폴백한다.
-          return { ok: true, skipped: true };
-        }
-        var contentType = String(res.headers.get('content-type') || '').toLowerCase();
-        var isJson = contentType.indexOf('application/json') >= 0;
-        if (!isJson) {
-          if (res.status === 401 || res.redirected) {
-            return { ok: false, error: '로그인 세션이 만료되었습니다. 다시 로그인해주세요.' };
-          }
-          return { ok: false, error: '등록 가능 여부 확인 응답 형식이 올바르지 않습니다. (HTTP ' + res.status + ')' };
-        }
-        return res.json().catch(function () { return {}; }).then(function (data) {
-          if (res.ok && data && data.ok) return { ok: true };
-          if (res.status === 401) {
-            return { ok: false, error: (data && (data.error || data.message)) || '로그인 세션이 만료되었습니다. 다시 로그인해주세요.' };
-          }
-          return { ok: false, error: (data && (data.error || data.message)) || ('등록 가능 여부를 확인하지 못했습니다. (HTTP ' + res.status + ')') };
-        });
-      })
-      .catch(function () {
-        return { ok: false, error: '등록 가능 여부를 확인하지 못했습니다. 네트워크 상태를 확인해주세요.' };
-      });
+    return api.precheckSubmit(params);
   }
 
   // 로컬 키워드로 판단이 애매할 때 쓰는 폴백 — 확인/수정/후보선택 단계 각각에서 방금 무엇을 물었는지와
   // 사용자의 답변을 Gemini에게 보내 분류받는다. 실패하면 'unclear'로 처리해 기존 안내 문구로 대체한다.
   function classifyPhaseReplyFallback(text, phaseName, candidateLabels) {
-    return fetch('/orders/ai-intake/classify-reply', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: text, phase: phaseName, candidates: candidateLabels || [] }),
-    })
-      .then(function (res) { return res.json(); })
-      .catch(function () { return { action: 'unclear' }; });
+    return api.classifyReply(text, phaseName, candidateLabels);
   }
 
   function startModifyFlow() {
     noteProgress();
     phase = 'choose_field';
-    var q = '어느 부분을 수정해드릴까요?';
+    var q = flowApi.getModifyFlowQuestion();
     addBubble(q, 'bot', null, true);
     logBotMessage({ logText: q, needsAgent: false, requestedFeature: null });
   }
@@ -2225,23 +2179,36 @@
   }
 
   function handleConfirmingPhase(text) {
-    if (isAgentRequest(text)) {
-      escalateToAgent('상담원 연결');
-      return null;
-    }
-    if (looksFrustrated(text)) { offerAgentConnection(); return null; }
-    if (isNegative(text)) { startModifyFlow(); return null; }
-    if (isAffirmative(text)) { confirmAndSubmit(); return null; }
-
-    // 로컬 키워드로 뭔지 못 알아들었을 때만 Gemini에게 물어본다(흔한 "네"/"아니요"는 여기까지 안 옴).
-    return classifyPhaseReplyFallback(text, 'confirming').then(function (result) {
-      if (result.action === 'agent') { escalateToAgent('상담원 연결'); return; }
-      if (result.action === 'no') { startModifyFlow(); return; }
-      if (result.action === 'yes') { confirmAndSubmit(); return; }
-      if (noteTrouble()) return;
-      var clarify = '등록해 드릴까요, 아니면 수정해 드릴까요?';
-      addBubble(clarify, 'bot');
-      logBotMessage({ logText: clarify, needsAgent: false, requestedFeature: null });
+    return flowApi.runConfirmingPhase({
+      text: text,
+      isAgentRequest: isAgentRequest,
+      looksFrustrated: looksFrustrated,
+      isNegative: isNegative,
+      isAffirmative: isAffirmative,
+      classifyFallback: classifyPhaseReplyFallback,
+      onAgent: function () {
+        escalateToAgent('상담원 연결');
+        return null;
+      },
+      onFrustrated: function () {
+        offerAgentConnection();
+        return null;
+      },
+      onNegative: function () {
+        startModifyFlow();
+        return null;
+      },
+      onAffirmative: function () {
+        confirmAndSubmit();
+        return null;
+      },
+      onTrouble: noteTrouble,
+      onClarify: function () {
+        var clarify = flowApi.getConfirmClarifyText();
+        addBubble(clarify, 'bot');
+        logBotMessage({ logText: clarify, needsAgent: false, requestedFeature: null });
+        return null;
+      },
     });
   }
 
@@ -2253,7 +2220,7 @@
     return null;
   }
 
-  var CHOOSE_FIELD_CLARIFY = '출발지 주소 / 출발지 연락처 / 차량번호 / 예약일시 / 도착지 주소 / 도착지 연락처 중 어느 항목을 수정할지 말씀해주세요?';
+  var CHOOSE_FIELD_CLARIFY = flowApi.getChooseFieldClarifyText();
 
   function applyFieldChoice(field, text) {
     noteProgress();
@@ -2278,12 +2245,7 @@
     setPendingField(field.id);
 
     function askAgain() {
-      var q = field.label + '를 다시 알려주세요?' + (
-        field.type === 'phone' ? ' (예: 010-1234-5678)'
-          : field.type === 'datetime' ? ' (예: 내일 오후 3시 / 00일 00시)'
-          : field.type === 'vehicle' ? ' (출발지 도착 후 확인 가능하면 "다음" 또는 "없어"라고 답해주셔도 됩니다)'
-          : ''
-      );
+      var q = flowApi.buildFieldAskAgainQuestion(field);
       addBubble(q, 'bot', null, true);
       logBotMessage({ logText: q, needsAgent: false, requestedFeature: null });
     }
@@ -2293,12 +2255,7 @@
     // 찾으면 바로 적용하고, 못 찾을 때만(예: "출발지" 한 마디만 온 경우) 재입력을 요청한다.
     if (field.type === 'address' || field.type === 'vehicle' || field.type === 'datetime') {
       showThinkingBubble();
-      return fetch('/orders/ai-intake/parse', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'fetch' },
-        body: JSON.stringify({ text: text, pendingField: field.id }),
-      })
-        .then(function (res) { return res.json().catch(function () { return {}; }); })
+      return api.parseText(text, field.id)
         .then(function (data) {
           hideThinkingBubble();
           var hasOrderIntent = data && isOrderIntent(data.intent);
@@ -2318,43 +2275,46 @@
   }
 
   function handleChooseFieldPhase(text) {
-    if (isAgentRequest(text)) {
-      escalateToAgent('상담원 연결');
-      return null;
-    }
-    if (looksFrustrated(text)) { offerAgentConnection(); return null; }
-    var field = matchFieldKeyword(text);
-    if (field) return applyFieldChoice(field, text);
-
-    // 로컬 키워드로 항목을 못 찾았을 때만 Gemini에게 물어본다 — "수정할 거 없어" 같은 예상 못 한
-    // 표현도 여기서 잡아낸다(action: 'none'이면 사실 수정할 게 없다는 뜻이므로 그냥 다시 확인 질문으로 돌아간다).
-    return classifyPhaseReplyFallback(text, 'choose_field').then(function (result) {
-      if (result.action === 'agent') { escalateToAgent('상담원 연결'); return; }
-      if (result.action === 'field' && result.field) {
-        var meta = fieldMetaFor(result.field);
-        if (meta) return applyFieldChoice(meta, text);
-      }
-      if (result.action === 'none') {
+    return flowApi.runChooseFieldPhase({
+      text: text,
+      isAgentRequest: isAgentRequest,
+      looksFrustrated: looksFrustrated,
+      matchFieldKeyword: matchFieldKeyword,
+      classifyFallback: classifyPhaseReplyFallback,
+      onAgent: function () {
+        escalateToAgent('상담원 연결');
+        return null;
+      },
+      onFrustrated: function () {
+        offerAgentConnection();
+        return null;
+      },
+      onField: function (field, sourceText) {
+        return applyFieldChoice(field, sourceText);
+      },
+      onClassifiedField: function (fieldId, sourceText) {
+        var meta = fieldMetaFor(fieldId);
+        if (meta) return applyFieldChoice(meta, sourceText);
+        return null;
+      },
+      onNone: function () {
         noteProgress();
         var doneText = proceedAfterCollecting();
         logBotMessage({ logText: doneText, needsAgent: false, requestedFeature: null });
-        return;
-      }
-      if (noteTrouble()) return;
-      addBubble(CHOOSE_FIELD_CLARIFY, 'bot', null, true);
-      logBotMessage({ logText: CHOOSE_FIELD_CLARIFY, needsAgent: false, requestedFeature: null });
+        return null;
+      },
+      onTrouble: noteTrouble,
+      onClarify: function () {
+        addBubble(CHOOSE_FIELD_CLARIFY, 'bot', null, true);
+        logBotMessage({ logText: CHOOSE_FIELD_CLARIFY, needsAgent: false, requestedFeature: null });
+        return null;
+      },
     });
   }
 
   // ---------------- "어느 곳이 맞을까요? 1)/2)" 응답 처리 ----------------
   function matchCandidateChoice(text, candidates) {
-    var t = text.trim();
-    if (/^1\s*(번|\.|\))?$/.test(t) || /^첫/.test(t)) return candidates[0];
-    if (/^2\s*(번|\.|\))?$/.test(t) || /^(둘|두\s?번)/.test(t)) return candidates[1];
-    for (var i = 0; i < candidates.length; i++) {
-      if (t.length >= 2 && candidates[i].label && candidates[i].label.indexOf(t) !== -1) return candidates[i];
-    }
-    return null;
+    return flowApi.matchCandidateChoice(text, candidates);
   }
 
   function applyDisambiguationChoice(chosen) {
@@ -2379,64 +2339,61 @@
   }
 
   function handleDisambiguationPhase(text) {
-    if (isAgentRequest(text)) {
-      escalateToAgent('상담원 연결'); // 이전 후보선택 상태 초기화는 escalateToAgent가 담당
-      return null;
-    }
-    if (looksFrustrated(text)) { offerAgentConnection(); return null; }
     var d = pendingDisambiguation;
-    var chosen = matchCandidateChoice(text, d.candidates);
-    if (chosen) { applyDisambiguationChoice(chosen); return null; }
-
-    // 로컬로 "1"/"2"/이름 일부를 못 찾았을 때만 Gemini에게 물어본다.
-    var candidateLabels = d.candidates.map(function (c) { return c.label; });
-    return classifyPhaseReplyFallback(text, 'choose_address_candidate', candidateLabels).then(function (result) {
-      if (result.action === 'agent') { escalateToAgent('상담원 연결'); return; }
-      if (result.action === 'choice1') { applyDisambiguationChoice(d.candidates[0]); return; }
-      if (result.action === 'choice2') { applyDisambiguationChoice(d.candidates[1]); return; }
-      if (noteTrouble()) return;
-      var clarify = '1번 또는 2번으로 답해주세요.';
-      addBubble(clarify, 'bot');
-      logBotMessage({ logText: clarify, needsAgent: false, requestedFeature: null });
+    return flowApi.runDisambiguationPhase({
+      text: text,
+      candidates: d ? d.candidates : [],
+      isAgentRequest: isAgentRequest,
+      looksFrustrated: looksFrustrated,
+      classifyFallback: classifyPhaseReplyFallback,
+      onAgent: function () {
+        escalateToAgent('상담원 연결');
+        return null;
+      },
+      onFrustrated: function () {
+        offerAgentConnection();
+        return null;
+      },
+      onChoice: function (chosen) {
+        if (!chosen) return null;
+        applyDisambiguationChoice(chosen);
+        return null;
+      },
+      onTrouble: noteTrouble,
+      onClarify: function () {
+        var clarify = flowApi.getDisambiguationClarifyText();
+        addBubble(clarify, 'bot');
+        logBotMessage({ logText: clarify, needsAgent: false, requestedFeature: null });
+        return null;
+      },
     });
   }
 
   function ensureSession() {
     if (sessionId) return Promise.resolve(sessionId);
-    return fetch('/chat/session', { method: 'POST' })
-      .then(function (res) { return res.json(); })
-      .then(function (data) { sessionId = data.sessionId; startStreaming(); return sessionId; })
+    return api.createChatSession()
+      .then(function (data) {
+        sessionId = data.sessionId;
+        syncStatePatch({ sessionId: sessionId });
+        startStreaming();
+        return sessionId;
+      })
       .catch(function () { return null; });
   }
 
   function logUserMessage(text) {
     if (!sessionId) return Promise.resolve(sessionStatus);
-    return fetch('/chat/' + sessionId + '/user-message', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: text }),
-    })
-      .then(function (res) { return res.json(); })
-      .then(function (data) { sessionStatus = data.status || sessionStatus; return sessionStatus; })
+    return api.postChatUserMessage(sessionId, text)
+      .then(function (data) {
+        sessionStatus = data.status || sessionStatus;
+        syncStatePatch({ sessionStatus: sessionStatus });
+        return sessionStatus;
+      })
       .catch(function () { return sessionStatus; });
   }
 
   function postBotMessage(payload) {
-    return fetch('/chat/' + sessionId + '/bot-message', {
-      method: 'POST',
-      keepalive: true,
-      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'fetch' },
-      body: JSON.stringify(payload),
-    }).then(function (res) {
-      return res.json().catch(function () {
-        return { error: '서버 응답을 읽는 중 문제가 발생했습니다. (상태 코드: ' + res.status + ')' };
-      }).then(function (data) {
-        if (!res.ok) {
-          throw new Error((data && (data.error || data.message)) || ('상태 코드 ' + res.status));
-        }
-        return data;
-      });
-    });
+    return api.postChatBotMessage(sessionId, payload);
   }
 
   function retryBotMessageSave(payload, retriesLeft) {
@@ -2470,7 +2427,10 @@
 
     return botMessageWriteChain
       .then(function (data) {
-        if (data.status) sessionStatus = data.status;
+        if (data.status) {
+          sessionStatus = data.status;
+          syncStatePatch({ sessionStatus: sessionStatus });
+        }
         return data.message || null;
       })
       .catch(function (err) {
@@ -2493,10 +2453,12 @@
 
   function catchUpMessages() {
     if (!sessionId) return;
-    fetch('/chat/' + sessionId + '/messages?since=' + lastPolledId)
-      .then(function (res) { return res.json(); })
+    api.fetchChatMessages(sessionId, lastPolledId)
       .then(function (data) {
-        if (data.status) sessionStatus = data.status;
+        if (data.status) {
+          sessionStatus = data.status;
+          syncStatePatch({ sessionStatus: sessionStatus });
+        }
         applyIncomingMessages(data.messages);
       })
       .catch(function () {});
@@ -2513,6 +2475,11 @@
     // 메모리에만 있어서 재접속/새로고침 때마다 초기화되면, 세션 상태는 그대로 needs_agent인데도
     // 다음 메시지에서 "접수되었습니다" 안내가 또 뜨는 문제가 있었다.
     if (existing.status === 'needs_agent') lastWaitingStatusShown = 'needs_agent';
+    syncStatePatch({
+      sessionId: sessionId,
+      sessionStatus: sessionStatus,
+      lastWaitingStatusShown: lastWaitingStatusShown,
+    });
     // 화면에는 항상 "오더접수 내용을 붙여넣거나..." 안내 말풍선이 서버 렌더링 시점에 이미 하나
     // 박혀 있는데(빈 대화 첫 진입을 위한 것), 복원할 이전 대화가 있으면 그 안내 위에 그냥
     // 이어붙이기만 해서 매번 재진입할 때마다 안내 문구가 또 나오는 것처럼 보였다 — 실제 대화를
@@ -2529,6 +2496,7 @@
       // 써서 복원 시에도 파란 질문 배경이 유지되게 한다(그렇지 않으면 새로고침할 때마다 사라짐).
       else addBubble(m.message, 'bot', m.created_at, /\?\s*$/.test(String(m.message || '').trim())); // 'bot' | 'system'
     });
+    syncStatePatch({ lastPolledId: lastPolledId });
     restoreDraftState(existing.draft);
     startStreaming();
   }
@@ -2593,17 +2561,26 @@
         // 아직 이 턴의 처리(예: 폴백 분류 왕복)가 안 끝난 상태에서 사용자가 다음 메시지를 보내
         // 두 턴이 겹쳐 상태(phase 등)가 꼬일 수 있었다. 버튼은 이 체인이 완전히 끝나는 지점
         // (아래 다음 .then 맨 앞)에서 한 번만 풀어준다.
-        if (phase === 'offer_agent') { handleOfferAgentPhase(text); return null; }
-        if (phase === 'confirming') return handleConfirmingPhase(text);
-        if (phase === 'choose_field') return handleChooseFieldPhase(text);
-        if (phase === 'choose_address_candidate') return handleDisambiguationPhase(text);
-        if (phase === 'collecting' && pendingField === 'memo_customer') {
-          handleAdditionalRequestPendingReply(text);
-          return null;
-        }
-        if (phase === 'collecting' && pendingField === 'vehicle_number' && handleVehicleNumberPendingReply(text)) {
-          return null;
-        }
+        var phaseDispatch = flowApi.dispatchPhase({
+          phase: phase,
+          pendingField: pendingField,
+          text: text,
+          onOfferAgent: function (value) {
+            handleOfferAgentPhase(value);
+            return null;
+          },
+          onConfirming: handleConfirmingPhase,
+          onChooseField: handleChooseFieldPhase,
+          onDisambiguation: handleDisambiguationPhase,
+          onAdditionalRequest: function (value) {
+            handleAdditionalRequestPendingReply(value);
+            return null;
+          },
+          onVehicleNumber: function (value) {
+            return handleVehicleNumberPendingReply(value);
+          },
+        });
+        if (phaseDispatch && phaseDispatch.handled) return phaseDispatch.value;
         if (handleFareVehicleTypePendingReply(text)) return null;
         if (handleFareInquiryPendingReply(text)) return null;
         // 명시적인 "상담원 연결" 요청은 Gemini 분류를 거치지 않고 바로 처리한다 — 이 요청만큼은
@@ -2652,18 +2629,7 @@
         // 못 정해진 경우) 힌트 없이 보내는 대신, 지금 실제로 비어있는 다음 필수 항목을 힌트로 대신
         // 채워 보낸다 — 라벨 없는 단답(지명 하나, 전화번호 하나 등)이 엉뚱한 의도로 분류되는 걸 줄인다.
         var hintField = pendingField || (getNextMissingField() || {}).id || null;
-        return fetch('/orders/ai-intake/parse', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'fetch' },
-          body: JSON.stringify({ text: text, pendingField: hintField }),
-        }).then(function (res) {
-          // 서버가 X-Requested-With: fetch 요청에는 항상 JSON으로 에러를 내려주지만,
-          // 혹시 모를 예외 상황에서도 "JSON이 아니다"라는 파싱 에러가 실제 에러 대신
-          // 노출되는 일이 없도록 안전하게 처리한다.
-          return res.json().catch(function () {
-            return { error: '서버 응답을 읽는 중 문제가 발생했습니다. (상태 코드: ' + res.status + ')' };
-          });
-        });
+        return api.parseText(text, hintField);
       })
       .then(function (data) {
         hideThinkingBubble();
@@ -2674,7 +2640,10 @@
         if (data.error) { addBubble('처리 실패: ' + data.error, 'bot'); return; }
         // 이번 메시지에서 화남/답답함이 감지됐으면, 지금 처리할 내용은 평소대로 처리하되 다음 필수
         // 질문 대신 상담원 연결을 먼저 제안하도록 표시해둔다(maybeOfferForFrustration이 소비한다).
-        if (data.seemsFrustrated) pendingFrustrationOffer = true;
+        if (data.seemsFrustrated) {
+          pendingFrustrationOffer = true;
+          syncStatePatch({ pendingFrustrationOffer: pendingFrustrationOffer });
+        }
 
         // Gemini는 "형식이 안 맞는 연락처"를 그냥 필드를 비운 채로 돌려준다(값을 몰라서가 아니라 못 알아봐서).
         // 지금 막 연락처를 물어본 상태이고 답변이 숫자/기호로만 되어 있으면(=전화번호를 시도한 것으로 보이면)
@@ -2824,23 +2793,7 @@
         // 문구는 사용자에게 익숙한 "삭제"로 보여주되 동작은 그대로 소프트 삭제를 유지한다.
         if (!window.confirm('이 항목을 삭제하시겠습니까?')) return;
         del.disabled = true;
-        fetch('/orders/ai-intake/sessions/' + encodeURIComponent(s.id) + '/delete', {
-          method: 'POST',
-          headers: { 'X-Requested-With': 'fetch' },
-        })
-          .then(function (res) {
-            return res.text().then(function (raw) {
-              var data = {};
-              try { data = raw ? JSON.parse(raw) : {}; } catch (e) { /* 서버가 JSON이 아닌 응답(플랫폼 타임아웃 등)을 준 경우 */ }
-              if (!res.ok) {
-                // 원인을 알 수 없는 일반 문구 대신, 실제 상태 코드/응답을 함께 보여준다 — 다음에
-                // 같은 문제가 재현되면 무엇이 실패했는지 바로 알 수 있어야 한다.
-                var detail = (data && data.error) || (raw ? raw.slice(0, 200) : ('상태 코드 ' + res.status));
-                throw new Error(detail);
-              }
-              return data;
-            });
-          })
+        api.deleteSessionHistory(s.id)
           .then(function () {
             if (String(s.id) === String(sessionId)) {
               window.location.href = '/orders/ai-intake';
@@ -2895,8 +2848,7 @@
       if (cursor) params.set('before', cursor);
       if (searchQuery) params.set('q', searchQuery);
 
-      fetch('/orders/ai-intake/sessions?' + params.toString())
-        .then(function (res) { return res.json(); })
+      api.fetchRecentSessions(params)
         .then(function (data) {
           if (mySeq !== requestSeq) return; // 이미 더 최신 요청이 나간 뒤라 이 응답은 버린다
           loadingEl.remove();
@@ -2930,11 +2882,7 @@
         e.stopPropagation();
         newChatBtn.disabled = true;
         var closePromise = sessionId
-          ? fetch('/chat/' + sessionId + '/bot-message', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ closeSession: true }),
-            }).catch(function () {})
+          ? api.closeChatSession(sessionId).catch(function () {})
           : Promise.resolve();
         closePromise.then(function () { window.location.href = '/orders/ai-intake'; });
       });
