@@ -7,10 +7,10 @@
     oid: 'OID', branch: '지사', group: '요청 법인', group_phone: '대표번호',
     origin: '출발지', waypoints: '경유지', destination: '도착지', vehicle: '차량번호',
     driver: '기사정보', reserved_at: '예약일시', payment_method: '결제방식',
-    fare: '요금', status: '상태', photo: '사진', created_at: '등록일시',
+    fare: '요금', status: '상태', voc: 'VOC', photo: '사진', created_at: '등록일시',
   };
   var ALWAYS_VISIBLE = ['oid'];
-  var DEFAULT_ORDER = ['oid', 'branch', 'group', 'group_phone', 'origin', 'waypoints', 'destination', 'vehicle', 'driver', 'reserved_at', 'payment_method', 'fare', 'status', 'photo', 'created_at'];
+  var DEFAULT_ORDER = ['oid', 'branch', 'group', 'group_phone', 'origin', 'waypoints', 'destination', 'vehicle', 'driver', 'reserved_at', 'payment_method', 'fare', 'status', 'voc', 'photo', 'created_at'];
   var DEFAULT_VISIBLE = ['oid', 'branch', 'group', 'group_phone', 'origin', 'destination', 'vehicle', 'reserved_at', 'payment_method', 'fare', 'status', 'created_at'];
 
   var STORAGE_KEY = 'orderList.columns.v1';

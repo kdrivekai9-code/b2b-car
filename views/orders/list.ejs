@@ -86,13 +86,14 @@
         <th data-column="payment_method">결제방식</th>
         <th data-column="fare">요금</th>
         <th data-column="status">상태</th>
+        <th data-column="voc">VOC</th>
         <th data-column="photo">사진</th>
         <th data-column="created_at">등록일시</th>
       </tr>
     </thead>
     <tbody>
       <% if (orders.length === 0) { %>
-        <tr><td colspan="15" class="empty">조건에 맞는 오더가 없습니다.</td></tr>
+        <tr><td colspan="16" class="empty">조건에 맞는 오더가 없습니다.</td></tr>
       <% } %>
       <% orders.forEach(function(o){ %>
         <%
@@ -116,6 +117,10 @@
           <td data-column="payment_method" data-label="결제방식" title="<%= o.payment_method_name || '-' %>"><%= o.payment_method_name || '-' %></td>
           <td data-column="fare" data-label="요금"><%= formatMoney(o.fare_amount) %></td>
           <td data-column="status" data-label="상태"><span class="badge <%= statusColor(o.status) %>"><%= o.status %></span></td>
+          <%
+            var vocLabels = [o.voc_accident_note ? '사고' : null, o.voc_fine_note ? '과태료' : null, o.voc_claim_note ? '클레임' : null].filter(Boolean).join(', ') || '-';
+          %>
+          <td data-column="voc" data-label="VOC"><%= vocLabels %></td>
           <td data-column="photo" data-label="사진"><%= Number(o.photo_count) > 0 ? ('📷 ' + o.photo_count) : '-' %></td>
           <td data-column="created_at" data-label="등록일시" title="<%= o.created_at %>"><%= String(o.created_at || '').slice(0, 16) %></td>
         </tr>

@@ -9,8 +9,8 @@ import { useEffect, useMemo, useState } from 'react';
 // 그 상태에 따라 매번 다시 그린다.
 
 const STATUS_COLORS = {
-  '오더등록': 'gray', '대기': 'gray', '접수': 'blue', '진행중': 'blue',
-  '배정중': 'amber', '기사배정': 'amber', '문의': 'purple', '사고': 'red',
+  '오더등록': 'gray', '대기': 'gray', '대기(확인중)': 'amber', '접수': 'blue',
+  '접수(배차중)': 'blue', '기사배정': 'amber', '문의': 'purple', '사고': 'red',
   '과태료': 'red', '취소요청': 'red', '취소': 'dark', '완료': 'green',
 };
 
@@ -29,10 +29,10 @@ const COLUMN_LABELS = {
   oid: 'OID', branch: '지사', group: '요청 법인', group_phone: '대표번호',
   origin: '출발지', waypoints: '경유지', destination: '도착지', vehicle: '차량번호',
   driver: '기사정보', reserved_at: '예약일시', payment_method: '결제방식',
-  fare: '요금', status: '상태', photo: '사진', created_at: '등록일시',
+  fare: '요금', status: '상태', voc: 'VOC', photo: '사진', created_at: '등록일시',
 };
 const ALWAYS_VISIBLE = ['oid'];
-const DEFAULT_ORDER = ['oid', 'branch', 'group', 'group_phone', 'origin', 'waypoints', 'destination', 'vehicle', 'driver', 'reserved_at', 'payment_method', 'fare', 'status', 'photo', 'created_at'];
+const DEFAULT_ORDER = ['oid', 'branch', 'group', 'group_phone', 'origin', 'waypoints', 'destination', 'vehicle', 'driver', 'reserved_at', 'payment_method', 'fare', 'status', 'voc', 'photo', 'created_at'];
 const DEFAULT_VISIBLE = ['oid', 'branch', 'group', 'group_phone', 'origin', 'destination', 'vehicle', 'reserved_at', 'payment_method', 'fare', 'status', 'created_at'];
 const NUMERIC_COLUMNS = ['oid', 'fare', 'photo'];
 
@@ -78,6 +78,7 @@ function cellValue(o, key) {
     case 'payment_method': return o.payment_method_name || '-';
     case 'fare': return formatMoney(o.fare_amount);
     case 'status': return o.status;
+    case 'voc': return [o.voc_accident_note ? '사고' : null, o.voc_fine_note ? '과태료' : null, o.voc_claim_note ? '클레임' : null].filter(Boolean).join(', ') || '-';
     case 'photo': return Number(o.photo_count) > 0 ? `📷 ${o.photo_count}` : '-';
     case 'created_at': return formatDateTimeNoSeconds(o.created_at);
     default: return '';

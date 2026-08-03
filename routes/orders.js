@@ -467,15 +467,15 @@ function getSmalltalkMessage(text) {
   if (!normalized) return null;
 
   if (!hasBusinessKeyword(normalized) && /(넌\s*누구(?:니|야)?|너(는|가)?\s*누구(?:니|야)?|누구(?:니|야)|정체|자기소개|소개해\s*줘|봇이야|ai야)/i.test(normalized)) {
-    return '저는 탁송 오더 접수와 업무 안내를 도와드리는 AI 챗봇입니다. 오더 접수 내용을 입력하시거나, 탁송 관련 궁금한 점을 질문해주세요.';
+    return '저는 탁송·대리운전(프리미엄) 오더 접수와 업무 안내를 도와드리는 AI 챗봇입니다. 오더 접수 내용을 입력하시거나, 궁금한 점을 질문해주세요.';
   }
 
   if (!hasBusinessKeyword(normalized) && /(뭘\s*할\s*수\s*있|무엇을\s*도와|어떤\s*업무|사용법|어떻게\s*써|도움\s*줘)/i.test(normalized)) {
-    return '오더 접수 내용 자동 입력, 탁송 FAQ 안내, 처리 어려운 요청의 상담원 연결을 도와드릴 수 있습니다. 원하시는 내용을 말씀해주세요.';
+    return '오더 접수 내용 자동 입력(탁송·대리운전), FAQ 안내, 처리 어려운 요청의 상담원 연결을 도와드릴 수 있습니다. 원하시는 내용을 말씀해주세요.';
   }
 
   if (/(^|\s)(안녕(?:하세요)?|하이|hello|hi|헬로|반가워)(\s|$)/i.test(normalized)) {
-    return '안녕하세요. 오더 접수 내용을 입력하시거나, 탁송 관련 궁금한 점을 질문해주세요.';
+    return '안녕하세요. 오더 접수 내용을 입력하시거나, 궁금한 점을 질문해주세요.';
   }
 
   return null;
@@ -497,7 +497,7 @@ router.post('/ai-intake/parse', asyncHandler(async (req, res) => {
   if (isGreeting(text)) {
     return res.json({
       intent: 'greeting',
-      message: '안녕하세요. 오더 접수 내용을 입력하시거나, 탁송 관련 궁금한 점을 질문해주세요.',
+      message: '안녕하세요. 오더 접수 내용을 입력하시거나, 궁금한 점을 질문해주세요.',
     });
   }
 
@@ -1014,12 +1014,14 @@ function splitCombinedAddress(combined, detail) {
 // GET /:id(EJS)와 같은 JOIN 형태를 그대로 재사용한다.
 async function loadOrderForView(req, res) {
   const order = await db.get(`
-    SELECT o.*, b.name AS branch_name, g.name AS group_name, pm.name AS payment_method_name, d.name AS driver_name
+    SELECT o.*, b.name AS branch_name, g.name AS group_name, pm.name AS payment_method_name, d.name AS driver_name,
+      au.name AS assigned_agent_name
     FROM orders o
     JOIN branches b ON b.id = o.branch_id
     LEFT JOIN groups_tbl g ON g.id = o.requester_group_id
     LEFT JOIN payment_methods pm ON pm.id = o.payment_method_id
     LEFT JOIN drivers d ON d.id = o.assigned_driver_id
+    LEFT JOIN users au ON au.id = o.assigned_agent_id
     WHERE o.id = ?
   `, [req.params.id]);
   if (!order) { res.status(404); return null; }
@@ -1283,14 +1285,61 @@ router.post('/:id/admin-memo', asyncHandler(async (req, res) => {
   res.redirect('/orders/' + req.params.id);
 }));
 
+// "내가 담당하기" — 오더등록 상태에서 누르면 상담원이 확인했다는 뜻으로 대기(확인중)으로
+// 전환. 이미 다른 상태로 넘어간 오더에 대해서도(담당자가 아직 없다면) 담당자만 지정할 수
+// 있게 해서 "누가 담당인지"는 항상 표시 가능하게 한다.
+router.post('/:id/assign-self', asyncHandler(async (req, res) => {
+  const order = await loadOrderInScope(req, res);
+  if (!order) return;
+  const u = req.session.user;
+
+  if (order.status === '오더등록') {
+    await db.run(
+      `UPDATE orders SET assigned_agent_id = ?, status = '대기(확인중)',
+        updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') WHERE id = ?`,
+      [u.id, req.params.id]
+    );
+    await db.run(
+      `INSERT INTO order_status_history (order_id, actor_user_id, old_status, new_status, note)
+       VALUES (?, ?, ?, ?, ?)`,
+      [req.params.id, u.id, order.status, '대기(확인중)', `담당자 지정: ${u.name}`]
+    );
+  } else if (!order.assigned_agent_id) {
+    await db.run('UPDATE orders SET assigned_agent_id = ? WHERE id = ?', [u.id, req.params.id]);
+  }
+
+  res.redirect('/orders/' + req.params.id);
+}));
+
+// VOC(사고/과태료/클레임) 접수 — 체크 해제하고 저장하면 해당 note가 다시 비워지므로
+// "체크 여부"를 따로 저장할 필요 없이 note 존재 자체가 체크 상태를 의미한다.
+router.post('/:id/voc', asyncHandler(async (req, res) => {
+  const order = await loadOrderInScope(req, res);
+  if (!order) return;
+  const { voc_accident, voc_accident_note, voc_fine, voc_fine_note, voc_claim, voc_claim_note } = req.body;
+  await db.run(
+    `UPDATE orders SET voc_accident_note = ?, voc_fine_note = ?, voc_claim_note = ?,
+      updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') WHERE id = ?`,
+    [
+      voc_accident ? (voc_accident_note || '') : null,
+      voc_fine ? (voc_fine_note || '') : null,
+      voc_claim ? (voc_claim_note || '') : null,
+      req.params.id,
+    ]
+  );
+  res.redirect('/orders/' + req.params.id);
+}));
+
 router.get('/:id', asyncHandler(async (req, res) => {
   const order = await db.get(`
-    SELECT o.*, b.name AS branch_name, g.name AS group_name, pm.name AS payment_method_name, d.name AS driver_name
+    SELECT o.*, b.name AS branch_name, g.name AS group_name, pm.name AS payment_method_name, d.name AS driver_name,
+      au.name AS assigned_agent_name
     FROM orders o
     JOIN branches b ON b.id = o.branch_id
     LEFT JOIN groups_tbl g ON g.id = o.requester_group_id
     LEFT JOIN payment_methods pm ON pm.id = o.payment_method_id
     LEFT JOIN drivers d ON d.id = o.assigned_driver_id
+    LEFT JOIN users au ON au.id = o.assigned_agent_id
     WHERE o.id = ?
   `, [req.params.id]);
   if (!order) return res.status(404).send('오더를 찾을 수 없습니다.');

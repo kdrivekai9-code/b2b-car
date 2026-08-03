@@ -71,6 +71,48 @@
   <div>
     <% if (currentUser.role !== 'client') { %>
     <div class="card">
+      <h2>담당자</h2>
+      <% if (order.status === '오더등록') { %>
+        <form method="POST" action="/orders/<%= order.id %>/assign-self">
+          <button class="btn" type="submit">내가 담당하기</button>
+        </form>
+      <% } else { %>
+        <div class="kv"><span class="k">담당자</span><span><%= order.assigned_agent_name || '미지정' %></span></div>
+      <% } %>
+    </div>
+
+    <div class="card">
+      <h2>VOC 접수</h2>
+      <form method="POST" action="/orders/<%= order.id %>/voc" id="vocForm">
+        <div class="row"><div class="field full">
+          <label><input type="checkbox" name="voc_accident" id="vocAccidentCheck" <%= order.voc_accident_note != null ? 'checked' : '' %>> 사고 접수</label>
+          <textarea name="voc_accident_note" id="vocAccidentNote" placeholder="사고 내용" style="display:<%= order.voc_accident_note != null ? '' : 'none' %>;"><%= order.voc_accident_note || '' %></textarea>
+        </div></div>
+        <div class="row"><div class="field full">
+          <label><input type="checkbox" name="voc_fine" id="vocFineCheck" <%= order.voc_fine_note != null ? 'checked' : '' %>> 과태료 접수</label>
+          <textarea name="voc_fine_note" id="vocFineNote" placeholder="과태료 내용" style="display:<%= order.voc_fine_note != null ? '' : 'none' %>;"><%= order.voc_fine_note || '' %></textarea>
+        </div></div>
+        <div class="row"><div class="field full">
+          <label><input type="checkbox" name="voc_claim" id="vocClaimCheck" <%= order.voc_claim_note != null ? 'checked' : '' %>> 클레임 접수</label>
+          <textarea name="voc_claim_note" id="vocClaimNote" placeholder="클레임 내용" style="display:<%= order.voc_claim_note != null ? '' : 'none' %>;"><%= order.voc_claim_note || '' %></textarea>
+        </div></div>
+        <button class="btn" type="submit">저장</button>
+      </form>
+      <script>
+        (function () {
+          [['vocAccidentCheck', 'vocAccidentNote'], ['vocFineCheck', 'vocFineNote'], ['vocClaimCheck', 'vocClaimNote']].forEach(function (pair) {
+            var check = document.getElementById(pair[0]);
+            var note = document.getElementById(pair[1]);
+            if (!check || !note) return;
+            check.addEventListener('change', function () {
+              note.style.display = check.checked ? '' : 'none';
+            });
+          });
+        })();
+      </script>
+    </div>
+
+    <div class="card">
       <h2>상태 변경</h2>
       <form method="POST" action="/orders/<%= order.id %>/status">
         <div class="row">

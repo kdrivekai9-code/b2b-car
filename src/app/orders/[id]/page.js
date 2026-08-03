@@ -17,8 +17,8 @@ export const preferredRegion = 'icn1';
 export const maxDuration = 30;
 
 const STATUS_COLORS = {
-  '오더등록': 'gray', '대기': 'gray', '접수': 'blue', '진행중': 'blue',
-  '배정중': 'amber', '기사배정': 'amber', '문의': 'purple', '사고': 'red',
+  '오더등록': 'gray', '대기': 'gray', '대기(확인중)': 'amber', '접수': 'blue',
+  '접수(배차중)': 'blue', '기사배정': 'amber', '문의': 'purple', '사고': 'red',
   '과태료': 'red', '취소요청': 'red', '취소': 'dark', '완료': 'green',
 };
 
