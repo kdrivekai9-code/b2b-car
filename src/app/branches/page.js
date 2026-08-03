@@ -1,6 +1,8 @@
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import AppShell from '../_components/AppShell';
+import { fetchExpressJson } from '../_lib/internalFetch';
+import BranchTabs from './_components/BranchTabs';
 
 export const dynamic = 'force-dynamic';
 export const preferredRegion = 'icn1';
@@ -11,10 +13,7 @@ export default async function BranchesPage() {
   const host = hdrs.get('host');
   const proto = hdrs.get('x-forwarded-proto') || 'https';
 
-  const res = await fetch(`${proto}://${host}/branches/data.json`, {
-    headers: { cookie: hdrs.get('cookie') || '', 'X-Requested-With': 'fetch' },
-    cache: 'no-store',
-  });
+  const res = await fetchExpressJson('/branches/data.json', { proto, host, cookie: hdrs.get('cookie') });
   if (res.status === 401) redirect('/login');
   if (!res.ok) throw new Error('지사 데이터를 불러오지 못했습니다 (' + res.status + ')');
 
@@ -31,6 +30,7 @@ export default async function BranchesPage() {
           <a className="btn" href="/branches/new">+ 지사 등록</a>
         </div>
       </div>
+      <BranchTabs active="list" branches={branches} />
       <div className="card">
         <div className="table-wrap">
           <table>
