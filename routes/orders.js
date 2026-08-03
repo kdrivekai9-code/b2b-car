@@ -1,6 +1,6 @@
 const express = require('express');
 const db = require('../db');
-const { requireAuth, scopeFilter, getSessionProblem } = require('../middleware/auth');
+const { requireAuth, requireRole, scopeFilter, getSessionProblem } = require('../middleware/auth');
 const asyncHandler = require('../middleware/asyncHandler');
 const { ORDER_STATUSES } = require('../config');
 const { getEffectivePaymentMethods, getEffectiveStatuses, checkOperatingHours, calculateFareWithFerry, calculatePremiumFare } = require('../lib/branchPolicy');
