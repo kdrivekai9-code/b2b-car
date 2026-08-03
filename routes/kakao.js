@@ -191,12 +191,15 @@ const ADDRESS_CORRECTION_SCHEMA = {
   required: ['searchQueries', 'isCorrection'],
 };
 
+// 후보를 여러 개 주면(예전엔 최대 4개) 클라이언트가 하나씩 순서대로 재검색을 시도하느라 왕복이
+// 그만큼 늘어나 챗봇 대기시간이 길어졌다 — 가장 가능성 높은 후보 딱 1개만 받고, 그것도 틀리면
+// 더 시도하지 않고 사용자에게 상호명/주소를 다시 확인해달라고 요청한다(클라이언트 쪽 폴백 메시지).
 const ADDRESS_CORRECTION_INSTRUCTION = `너는 한국 주소/상호명(장소명) 검색 오타 보정기다.
 사용자가 입력한 검색어로 지도 검색을 했지만 결과가 없었다. 오타나 잘못된 표기가 있었을 가능성이 있다.
-1) 가장 가능성 높은 정확한 공식 명칭(officialName), 2) 다시 검색해볼 검색어 후보 목록(searchQueries)을 만들어라.
-searchQueries는 검색 성공 가능성이 높은 순서대로 최대 4개만 넣어라 — 첫 후보에 공식 명칭을, 이후에는 띄어쓰기 보정형·대표 상호명·검색 친화 축약형을 넣어라.
-정확한 공식 명칭을 추정하기 어렵더라도 검색 성공 가능성이 높은 후보는 최대한 채워라.
-오타 교정이 필요 없어 보이면 isCorrection을 false로 하고 searchQueries에 원문만 넣어라.
+가장 가능성 높은 정확한 공식 명칭(officialName)을 추정하고, 그 명칭으로 다시 검색해볼 검색어를
+searchQueries에 정확히 1개만 넣어라(절대 여러 개 넣지 말 것).
+정확한 공식 명칭을 추정하기 어렵더라도 검색 성공 가능성이 가장 높은 후보 하나는 반드시 채워라.
+오타 교정이 필요 없어 보이면 isCorrection을 false로 하고 searchQueries에 원문만 1개 넣어라.
 확신이 낮으면 officialName은 비워두고, 설명 없이 JSON만 반환해라.`;
 
 // 카카오 검색이 0건일 때만 호출 — Gemini에게 오타 교정 후보를 물어 재검색 시도한다(Redis 캐시나
@@ -205,7 +208,7 @@ async function correctSearchQueryWithGemini(query) {
   try {
     const result = await generateJson(ADDRESS_CORRECTION_INSTRUCTION, query, ADDRESS_CORRECTION_SCHEMA);
     const searchQueries = Array.isArray(result.searchQueries)
-      ? result.searchQueries.map((v) => String(v || '').trim()).filter(Boolean).slice(0, 4)
+      ? result.searchQueries.map((v) => String(v || '').trim()).filter(Boolean).slice(0, 1)
       : [];
     if (!searchQueries.length) return null;
     return searchQueries;

@@ -251,7 +251,7 @@ function resolveBotDraft(parseData) {
     return {
       message:
         parseData.message ||
-        '안녕하세요. 오더 접수 내용을 입력하시거나, 탁송 관련 궁금한 점을 질문해주세요.',
+        '안녕하세요. 오더 접수 내용을 입력하시거나, 궁금한 점을 질문해주세요.',
       needsAgent: false,
       requestedFeature: null,
     };

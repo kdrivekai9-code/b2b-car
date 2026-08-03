@@ -98,6 +98,9 @@
   var currentWaypointAddrIdx = 0; // 지금 몇 번째 경유지를 수집 중인지
   var destinationWaitResolved = false; // 도착지 대기시간 질문 완료 여부
   var premiumWaitYnAsked = false; // 프리미엄 경유지 대기시간 1단계 질문 여부
+  // 예약시간 답변에 출발지/도착지/연락처가 한 메시지로 이미 함께 왔을 때(자주 있는 패턴) 그 값을
+  // 기억해뒀다가, 이후 해당 항목 질문 차례가 오면 다시 묻지 않고 곧바로 확인 처리로 넘어간다.
+  var premiumPrefill = { originAddress: null, destinationAddress: null, contact: null };
   var botMessageWriteChain = Promise.resolve();
   var isComposing = false;
   var submitAfterCompositionEnd = false;
@@ -454,7 +457,7 @@
     hideThinkingBubble();
     thinkingBubbleEl = document.createElement('div');
     thinkingBubbleEl.className = 'ai-chat-bubble ai-bot ai-thinking';
-    thinkingBubbleEl.innerHTML = '확인하고 있어요<span class="ai-thinking-dots"><span>.</span><span>.</span><span>.</span></span>';
+    thinkingBubbleEl.innerHTML = '확인하고 있어요<span class="ai-thinking-dots"><span>.</span><span>.</span><span>.</span><span>.</span><span>.</span><span>.</span><span>.</span><span>.</span><span>.</span></span>';
     messages.appendChild(thinkingBubbleEl);
     scrollMessagesToBottom();
   }
@@ -599,19 +602,18 @@
         // 새로고침/이탈하는 경우가 있었다 — retry_start가 올 때까지 대기 중임을 알려준다.
         showThinkingBubble();
       }
+      // retry_start는 "다시 검색하겠습니다" 안내만 하고 실제 첫 시도 메시지는 retry_attempt(1회차)가
+      // 대신 보여준다 — 둘 다 말풍선을 띄우면 "OOO로 다시 검색하겠습니다" / "OOO 검색을 시도합니다"가
+      // 사실상 같은 말을 두 번 하는 것처럼 보여서(중복) retry_start에서는 로딩 표시만 정리한다.
       if (status.type === 'retry_start' && !shownRetryStart) {
         shownRetryStart = true;
         hideThinkingBubble();
-        if (status.correctedQuery) sayBot(status.correctedQuery + '로 다시 검색하겠습니다.');
       }
+      // 서버(Gemini 보정)가 이제 후보를 최대 1개만 주므로 재시도는 항상 1회뿐이다 — 그 1회가
+      // 실패하면 더 시도하지 않고 validateAddressField의 최종 실패 안내("...확인 후 다시
+      // 알려주세요")로 넘어간다.
       if (status.type === 'retry_attempt' && status.correctedQuery) {
-        var attempt = Number(status.attempt || 0);
-        var total = Number(status.total || 0);
-        if (attempt > 0 && total > 0) {
-          sayBot(status.correctedQuery + ' 검색을 시도합니다. (' + attempt + '/' + total + ')');
-        } else {
-          sayBot(status.correctedQuery + ' 검색을 시도합니다.');
-        }
+        sayBot(status.correctedQuery + '로 다시 검색하겠습니다.');
       }
     }) : Promise.resolve({ success: false });
     return task.then(function (r) {
@@ -1611,18 +1613,25 @@
     if (phase === 'offer_agent') return null;
     // 이번 메시지에서 화남/답답함이 감지됐으면, 다음 필수 질문 대신 상담원 연결을 먼저 제안한다.
     if (maybeOfferForFrustration()) return null;
-    var missing = getNextMissingField();
-    if (missing) {
-      setPendingField(missing.id);
-      addBubble(missing.question, 'bot', null, true);
-      return missing.question;
-    }
 
-    if (!additionalRequestResolved) {
-      setPendingField('memo_customer');
-      var extraQ = '추가 요청사항이 있으시면 알려주세요? 없으시면 \'없음\'이라고 답해주세요.';
-      addBubble(extraQ, 'bot', null, true);
-      return extraQ;
+    // 프리미엄(대리) 전용 FSM은 애초에 차량번호/추가요청사항을 질문 순서에 두지 않는다(사용자
+    // 지정 시나리오라 그 항목들이 없음) — 수정 모드에서 필드 하나를 고친 뒤(예: 도착지 수정)
+    // 이 함수로 돌아왔을 때도 탁송 전용 getNextMissingField(차량번호 등)/추가요청사항 질문을
+    // 또 요구하지 않고 곧바로 요약·등록 확인으로 넘어간다.
+    if (orderCategory !== 'premium') {
+      var missing = getNextMissingField();
+      if (missing) {
+        setPendingField(missing.id);
+        addBubble(missing.question, 'bot', null, true);
+        return missing.question;
+      }
+
+      if (!additionalRequestResolved) {
+        setPendingField('memo_customer');
+        var extraQ = '추가 요청사항이 있으시면 알려주세요? 없으시면 \'없음\'이라고 답해주세요.';
+        addBubble(extraQ, 'bot', null, true);
+        return extraQ;
+      }
     }
 
     var prefix = '';
@@ -1694,6 +1703,14 @@
     syncReservedDateSelectsFromHidden();
     reservedDateTimeConfirmed = true;
 
+    // 예약시간 답변에 출발지/도착지/연락처까지 한 번에 왔으면(예: "토요일 9시 OO에서 출발해서
+    // XX 도착, 010-1111-2222") 기억해둔다 — 안 하면 이 값들이 그냥 버려져서 뒤에서 이미 답한
+    // 항목을 또 물어보게 된다.
+    if (data.origin_address) premiumPrefill.originAddress = data.origin_address;
+    if (data.destination_address) premiumPrefill.destinationAddress = data.destination_address;
+    var prefillContact = data.origin_contact || data.destination_contact || null;
+    if (prefillContact) premiumPrefill.contact = prefillContact;
+
     var now = new Date();
     var todayStr = now.getFullYear() + '-' + pad2(now.getMonth() + 1) + '-' + pad2(now.getDate());
     var reservedDate = val('reserved_date');
@@ -1712,11 +1729,71 @@
       return { logText: (dtMsg ? dtMsg + '\n' : '') + q2, needsAgent: false, requestedFeature: null };
     }
 
+    if (dtMsg) sayBot(dtMsg);
+    return askPremiumOriginAddress();
+  }
+
+  // 아래 askPremium*/resolvePremium* 헬퍼는 premiumPrefill에 이미 값이 있으면(같은 메시지에
+  // 함께 온 항목) 질문 없이 바로 그 값을 검증·적용하고 다음 단계로 넘어가며, 없으면 원래대로
+  // 물어본다 — handlePremiumReservedDateTime과 premium_trip_type 응답(편도) 양쪽에서 공용으로 쓴다.
+  function askPremiumOriginAddress() {
+    if (premiumPrefill.originAddress) {
+      var addr = premiumPrefill.originAddress;
+      premiumPrefill.originAddress = null;
+      return resolvePremiumOriginAddress(addr);
+    }
     setPendingField('premium_origin_address');
     var q3 = '출발지를 말씀해주세요? (예: 장소명이나, 주소)';
-    if (dtMsg) sayBot(dtMsg);
     sayBot(q3);
-    return { logText: (dtMsg ? dtMsg + '\n' : '') + q3, needsAgent: false, requestedFeature: null };
+    return { logText: q3, needsAgent: false, requestedFeature: null };
+  }
+
+  function resolvePremiumOriginAddress(addr) {
+    document.getElementById('origin_address').value = addr;
+    return validateAddressField('origin_address', '출발지 주소').then(function () {
+      return askPremiumOriginContact();
+    });
+  }
+
+  function askPremiumOriginContact() {
+    if (premiumPrefill.contact) {
+      var contact = premiumPrefill.contact;
+      premiumPrefill.contact = null;
+      return resolvePremiumOriginContact(contact);
+    }
+    setPendingField('premium_origin_contact');
+    var q4 = '연락처를 말씀해주세요? (예: 010-3333-4444)';
+    sayBot(q4);
+    return { logText: q4, needsAgent: false, requestedFeature: null };
+  }
+
+  function resolvePremiumOriginContact(contact) {
+    document.getElementById('origin_contact').value = contact;
+    return validatePhoneField('origin_contact', '출발지 연락처').then(function () {
+      return askPremiumDestinationAddress();
+    });
+  }
+
+  function askPremiumDestinationAddress() {
+    if (premiumPrefill.destinationAddress) {
+      var addr = premiumPrefill.destinationAddress;
+      premiumPrefill.destinationAddress = null;
+      return resolvePremiumDestinationAddress(addr);
+    }
+    setPendingField('premium_destination_address');
+    var q5 = '도착지를 말씀해주세요?';
+    sayBot(q5);
+    return { logText: q5, needsAgent: false, requestedFeature: null };
+  }
+
+  function resolvePremiumDestinationAddress(addr) {
+    document.getElementById('destination_address').value = addr;
+    return validateAddressField('destination_address', '도착지 주소').then(function () {
+      setPendingField('premium_waypoint_yn');
+      var q6 = '중간에 경유지가 있습니까?';
+      sayBot(q6);
+      return { logText: q6, needsAgent: false, requestedFeature: null };
+    });
   }
 
   // 프리미엄(대리) 편도 흐름 마무리 — 출발지/도착지/(선택)경유지 수집이 끝나면 호출된다.
@@ -1880,21 +1957,8 @@
         });
       }
 
-      var premiumFieldId = pendingField === 'premium_origin_address' ? 'origin_address' : 'destination_address';
-      var premiumFieldLabel = pendingField === 'premium_origin_address' ? '출발지 주소' : '도착지 주소';
-      document.getElementById(premiumFieldId).value = premiumAddr;
-      return validateAddressField(premiumFieldId, premiumFieldLabel).then(function () {
-        if (pendingField === 'premium_origin_address') {
-          setPendingField('premium_origin_contact');
-          var q4 = '연락처를 말씀해주세요? (예: 010-3333-4444)';
-          sayBot(q4);
-          return { logText: q4, needsAgent: false, requestedFeature: null };
-        }
-        setPendingField('premium_waypoint_yn');
-        var q6 = '중간에 경유지가 있습니까?';
-        sayBot(q6);
-        return { logText: q6, needsAgent: false, requestedFeature: null };
-      });
+      if (pendingField === 'premium_origin_address') return resolvePremiumOriginAddress(premiumAddr);
+      return resolvePremiumDestinationAddress(premiumAddr);
     }
 
     if (orderCategory === 'premium' && pendingField === 'premium_origin_contact') {
@@ -1904,13 +1968,7 @@
         sayBot(retryContactQ);
         return { logText: retryContactQ, needsAgent: false, requestedFeature: null };
       }
-      document.getElementById('origin_contact').value = premiumContact;
-      return validatePhoneField('origin_contact', '출발지 연락처').then(function () {
-        setPendingField('premium_destination_address');
-        var q5 = '도착지를 말씀해주세요?';
-        sayBot(q5);
-        return { logText: q5, needsAgent: false, requestedFeature: null };
-      });
+      return resolvePremiumOriginContact(premiumContact);
     }
     // ---- /프리미엄 전용 처리 끝 ----
 
@@ -1946,8 +2004,11 @@
       });
     }
 
+    // 프리미엄(대리) 시나리오는 요청사항을 별도로 확인해주는 질문 자체가 없다 — Gemini가 매 턴
+    // 맥락상 memo_customer를 계속 되돌려주면서 조용히 채워져 있던 값이, 관계없는 필드(예: 도착지)를
+    // 수정하는 순간 "요청사항은 ~"으로 갑자기 튀어나오는 오작동이 있었다.
     var resolvedMemo = val('memo_customer');
-    if (resolvedMemo && resolvedMemo !== lastAnnouncedMemoText) {
+    if (orderCategory !== 'premium' && resolvedMemo && resolvedMemo !== lastAnnouncedMemoText) {
       tasks.push(function () {
         additionalRequestResolved = true;
         lastAnnouncedMemoText = resolvedMemo;
@@ -2940,10 +3001,7 @@
             return logBotMessage({ logText: convMsg, needsAgent: false, requestedFeature: null });
           }
           if (premiumTripParsed === 'one_way') {
-            setPendingField('premium_origin_address');
-            var q3FromTrip = '출발지를 말씀해주세요? (예: 장소명이나, 주소)';
-            addBubble(q3FromTrip, 'bot', null, true);
-            return logBotMessage({ logText: q3FromTrip, needsAgent: false, requestedFeature: null });
+            return askPremiumOriginAddress();
           }
           var retryTripQ = '편도 또는 왕복 중 하나를 선택해 주세요.';
           addBubble(retryTripQ, 'bot', null, true);
