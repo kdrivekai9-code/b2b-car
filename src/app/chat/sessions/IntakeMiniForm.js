@@ -181,9 +181,16 @@ export default function IntakeMiniForm({ chatSessionId, branches, groups, paymen
   const [state, dispatch] = useReducer(reducer, initialState(order));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
+  // 이 세션에서 이미 오더를 등록했는지 — 있으면 제출 버튼이 "오더 등록" 대신 "오더 수정"으로
+  // 바뀌고 이후 제출은 새로 만들지 않고 그 오더를 갱신한다. 세션을 바꾸면(부모가
+  // key={selected.id}로 리마운트) 자연히 초기화된다.
+  const [createdOrder, setCreatedOrder] = useState(null); // { id, oid } | null
+  const [successMessage, setSuccessMessage] = useState('');
   const [routeInfo, setRouteInfo] = useState({ km: null, durationSec: null });
   const [vehicleTypeSuggestions, setVehicleTypeSuggestions] = useState([]);
+  const [fareHint, setFareHint] = useState('');
   const vehicleTypeDebounceRef = useRef(null);
+  const fareRequestIdRef = useRef(0);
   const vehicleTypeRequired = /제주/.test(state.destination_address || '');
 
   function setField(name, value) {
@@ -240,6 +247,54 @@ export default function IntakeMiniForm({ chatSessionId, branches, groups, paymen
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [order.origin_contact, order.destination_contact, order.memo_customer, order.fare_amount]);
 
+  // 요금 자동계산 — OrderForm.js와 동일 로직(경로 거리(routeInfo.km)가 나오면
+  // /orders/fare-preview 호출). 이 미니폼은 도선료 관련 안내 UI가 따로 없어서 결과의
+  // ferryFare는 화면에 안 보여주고 fare_amount에만 총액을 반영한다.
+  useEffect(() => {
+    if (routeInfo.km == null || !state.branch_id) {
+      setFareHint('');
+      return;
+    }
+    const requestId = ++fareRequestIdRef.current;
+    const timer = setTimeout(async () => {
+      const params = new URLSearchParams();
+      params.set('branch_id', state.branch_id);
+      params.set('distance_km', routeInfo.km.toFixed(2));
+      if (state.vehicle_type.trim()) params.set('vehicle_type', state.vehicle_type.trim());
+      if (state.origin_address.trim()) params.set('origin_address', state.origin_address.trim());
+      const fareReservedDate = state.reservation_basis === 'delivery' && state.pickup_reserved_date ? state.pickup_reserved_date : `${state.reservedDateYear}-${state.reservedDateMonth}-${state.reservedDateDay}`;
+      const fareReservedTime = state.reservation_basis === 'delivery' && state.pickup_reserved_time ? state.pickup_reserved_time : `${state.reservedTimeHour}:${state.reservedTimeMinute}`;
+      if (fareReservedDate) params.set('reserved_date', fareReservedDate);
+      if (fareReservedTime) params.set('reserved_time', fareReservedTime);
+      params.set('has_ferry_leg', routeInfo.hasFerryLeg ? '1' : '0');
+      if (routeInfo.ferrySegments) {
+        const seg = routeInfo.ferrySegments;
+        if (Number.isFinite(seg.beforeDistanceM)) params.set('before_km', (seg.beforeDistanceM / 1000).toFixed(2));
+        if (Number.isFinite(seg.afterDistanceM)) params.set('after_km', (seg.afterDistanceM / 1000).toFixed(2));
+        if (Number.isFinite(seg.beforeDurationS)) params.set('before_minutes', String(Math.round(seg.beforeDurationS / 60)));
+        if (Number.isFinite(seg.afterDurationS)) params.set('after_minutes', String(Math.round(seg.afterDurationS / 60)));
+      }
+
+      let data;
+      try {
+        const res = await fetch('/orders/fare-preview?' + params.toString());
+        data = await res.json();
+      } catch {
+        return;
+      }
+      if (requestId !== fareRequestIdRef.current) return; // stale 응답 무시
+
+      if (!data.enabled) {
+        setFareHint('이 지사는 구간요금표를 사용하지 않아 수동으로 입력합니다.');
+        return;
+      }
+      setField('fare_amount', String(data.totalFare != null ? data.totalFare : data.fare));
+      setFareHint(`구간요금 설정에 따라 자동 계산되었습니다 (${routeInfo.km.toFixed(1)}km 기준). 필요 시 직접 수정할 수 있습니다.`);
+    }, 250);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.branch_id, routeInfo.km, routeInfo.hasFerryLeg, JSON.stringify(routeInfo.ferrySegments), state.vehicle_type, state.origin_address, state.reservation_basis, state.pickup_reserved_date, state.pickup_reserved_time, state.reservedDateYear, state.reservedDateMonth, state.reservedDateDay, state.reservedTimeHour, state.reservedTimeMinute]);
+
   function handleVehicleTypeChange(value) {
     setField('vehicle_type', value);
     clearTimeout(vehicleTypeDebounceRef.current);
@@ -261,6 +316,7 @@ export default function IntakeMiniForm({ chatSessionId, branches, groups, paymen
   async function handleSubmit(e) {
     e.preventDefault();
     setError(null);
+    setSuccessMessage('');
 
     if (state.reservation_basis === 'delivery' && (!state.pickup_reserved_date || !state.pickup_reserved_time)) {
       window.alert('도착지 인도시간 기준은 경로가 확정되어야 출발지 픽업일시를 계산할 수 있습니다. 주소를 확인한 뒤 다시 시도해주세요.');
@@ -296,9 +352,10 @@ export default function IntakeMiniForm({ chatSessionId, branches, groups, paymen
       params.append('waypoint_vehicle_numbers[]', w.vehicleNumber);
     });
 
+    const isEdit = !!createdOrder;
     setSubmitting(true);
     try {
-      const res = await fetch('/orders', {
+      const res = await fetch(isEdit ? `/orders/${createdOrder.id}` : '/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'fetch' },
         body: params,
@@ -315,7 +372,13 @@ export default function IntakeMiniForm({ chatSessionId, branches, groups, paymen
         return;
       }
       const data = await res.json();
-      window.location.assign('/orders/' + data.orderId);
+      if (isEdit) {
+        setSuccessMessage(`${createdOrder.oid} 오더 정보를 수정했습니다.`);
+      } else {
+        setCreatedOrder({ id: data.orderId, oid: data.oid });
+        setSuccessMessage(`${data.oid} 오더가 정상적으로 등록되었습니다.`);
+      }
+      setSubmitting(false);
     } catch {
       setError('저장에 실패했습니다. 다시 시도해주세요.');
       setSubmitting(false);
@@ -495,10 +558,12 @@ export default function IntakeMiniForm({ chatSessionId, branches, groups, paymen
         <div className="field">
           <label>요금(원)</label>
           <input type="number" min="0" step="1000" placeholder="0" value={state.fare_amount} onChange={(e) => setField('fare_amount', e.target.value)} />
+          {fareHint && <p className="fare-calc-hint calculated">{fareHint}</p>}
         </div>
       </div>
 
       {error && <div className="error-msg">{error}</div>}
+      {successMessage && <div className="badge green" style={{ display: 'block', marginBottom: 14 }}>{successMessage}</div>}
 
       <div className="chat-order-actions">
         <div className="field" style={{ margin: 0, minWidth: 220 }}>
@@ -508,7 +573,12 @@ export default function IntakeMiniForm({ chatSessionId, branches, groups, paymen
             <option value="closed">상담 종료</option>
           </select>
         </div>
-        <button className="btn" type="submit" disabled={submitting}>{submitting ? '등록 중...' : '오더 등록'}</button>
+        <button className="btn" type="submit" disabled={submitting}>
+          {submitting ? (createdOrder ? '수정 중...' : '등록 중...') : (createdOrder ? '오더 수정' : '오더 등록')}
+        </button>
+        {createdOrder && (
+          <a className="btn small secondary" href={`/orders/${createdOrder.id}`} target="_blank" rel="noreferrer">오더 상세 열기</a>
+        )}
       </div>
     </form>
   );

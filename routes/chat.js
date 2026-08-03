@@ -9,6 +9,7 @@ const { requireAuth, requireRole } = require('../middleware/auth');
 const asyncHandler = require('../middleware/asyncHandler');
 const { notify } = require('../lib/push');
 const { kstNow } = require('../lib/period');
+const { getEffectivePaymentMethods } = require('../lib/branchPolicy');
 const {
   broadcastMessage, broadcastReadReceipt, broadcastSessionListChanged, openSessionStream, openSessionListStream, closeChannel,
   startAgentPresence, isAnyAgentOnline, listOnlineAgentNames,
@@ -502,7 +503,12 @@ router.get('/sessions/:id/messages', requireRole('admin'), asyncHandler(async (r
 }));
 
 router.get('/sessions/:id/intake-order', requireRole('admin'), asyncHandler(async (req, res) => {
-  const session = await db.get('SELECT id, status, draft_json FROM chat_sessions WHERE id = ?', [req.params.id]);
+  const session = await db.get(`
+    SELECT cs.id, cs.status, cs.draft_json, u.branch_id AS user_branch_id, u.group_id AS user_group_id
+    FROM chat_sessions cs
+    LEFT JOIN users u ON u.id = cs.user_id
+    WHERE cs.id = ?
+  `, [req.params.id]);
   if (!session) return res.status(404).json({ error: '세션을 찾을 수 없습니다.' });
 
   const messages = await db.all('SELECT id, sender, message FROM chat_messages WHERE session_id = ? ORDER BY id', [req.params.id]);
@@ -517,7 +523,19 @@ router.get('/sessions/:id/intake-order', requireRole('admin'), asyncHandler(asyn
   }
   const fields = (draft && draft.fields) ? draft.fields : {};
   const extractedWaypoints = extractWaypointsFromSummary(messages);
-  const branchId = fields.branch_id || (branches.length === 1 ? String(branches[0].id) : '');
+  // 채팅으로 접수한 고객(chat_sessions.user_id)이 소속된 지사/법인을 기본값으로 쓴다 —
+  // 초안에 이미 값이 있으면(예: 챗봇이 대화 중 물어서 받은 값) 그게 우선. 소속 지사가 없는
+  // 사용자(예: 지사 미배정 관리자)만 "활성 지사가 하나뿐이면 그걸로" 폴백을 쓴다.
+  const branchId = fields.branch_id || (session.user_branch_id ? String(session.user_branch_id) : '')
+    || (branches.length === 1 ? String(branches[0].id) : '');
+  const requesterGroupId = fields.requester_group_id || (session.user_group_id ? String(session.user_group_id) : '');
+
+  let paymentMethodId = fields.payment_method_id || '';
+  if (!paymentMethodId && branchId) {
+    const effectiveMethods = await getEffectivePaymentMethods(branchId);
+    const defaultMethod = effectiveMethods.find((pm) => pm.is_default);
+    if (defaultMethod) paymentMethodId = String(defaultMethod.id);
+  }
 
   const intakeOrder = {
     reserved_date: fields.reserved_date || defaults.reserved_date,
@@ -532,8 +550,8 @@ router.get('/sessions/:id/intake-order', requireRole('admin'), asyncHandler(asyn
     destination_contact: fields.destination_contact || '',
     memo_customer: fields.memo_customer || '',
     branch_id: branchId,
-    requester_group_id: fields.requester_group_id || '',
-    payment_method_id: fields.payment_method_id || '',
+    requester_group_id: requesterGroupId,
+    payment_method_id: paymentMethodId,
     fare_amount: fields.fare_amount || '',
     waypoints: extractedWaypoints,
     reservation_basis: (draft && draft.reservationBasis === 'delivery') ? 'delivery' : 'pickup',

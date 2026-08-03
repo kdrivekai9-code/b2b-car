@@ -1,0 +1,269 @@
+'use client';
+
+import { useEffect, useMemo, useState } from 'react';
+
+// public/js/order-list-columns.js를 React로 이식 — 서버에 저장하지 않고 이 브라우저
+// (localStorage)에만 저장한다는 계약과 저장 키(STORAGE_KEY/WIDTH_KEY/DENSITY_KEY)를
+// legacy와 그대로 맞춰서, 이미 legacy 화면을 쓰던 사용자의 설정이 그대로 이어지게 한다.
+// DOM을 직접 옮기는 대신(legacy 방식) 표시/순서/너비/정렬 전부 React state로 관리하고
+// 그 상태에 따라 매번 다시 그린다.
+
+const STATUS_COLORS = {
+  '오더등록': 'gray', '대기': 'gray', '접수': 'blue', '진행중': 'blue',
+  '배정중': 'amber', '기사배정': 'amber', '문의': 'purple', '사고': 'red',
+  '과태료': 'red', '취소요청': 'red', '취소': 'dark', '완료': 'green',
+};
+
+function formatMoney(n) {
+  return (Number(n) || 0).toLocaleString('ko-KR') + '원';
+}
+
+// "YYYY-MM-DD HH:MM:SS" -> "YYYY-MM-DD HH:MM" (초 단위는 목록에서 굳이 안 보여줘도 됨).
+function formatDateTimeNoSeconds(raw) {
+  const s = String(raw || '');
+  const m = /^(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}):\d{2}/.exec(s);
+  return m ? m[1] : s;
+}
+
+const COLUMN_LABELS = {
+  oid: 'OID', branch: '지사', group: '요청 법인', group_phone: '대표번호',
+  origin: '출발지', waypoints: '경유지', destination: '도착지', vehicle: '차량번호',
+  driver: '기사정보', reserved_at: '예약일시', payment_method: '결제방식',
+  fare: '요금', status: '상태', photo: '사진', created_at: '등록일시',
+};
+const ALWAYS_VISIBLE = ['oid'];
+const DEFAULT_ORDER = ['oid', 'branch', 'group', 'group_phone', 'origin', 'waypoints', 'destination', 'vehicle', 'driver', 'reserved_at', 'payment_method', 'fare', 'status', 'photo', 'created_at'];
+const DEFAULT_VISIBLE = ['oid', 'branch', 'group', 'group_phone', 'origin', 'destination', 'vehicle', 'reserved_at', 'payment_method', 'fare', 'status', 'created_at'];
+const NUMERIC_COLUMNS = ['oid', 'fare', 'photo'];
+
+const STORAGE_KEY = 'orderList.columns.v1';
+const WIDTH_KEY = 'orderList.widths.v1';
+const DENSITY_KEY = 'orderList.density.v1';
+
+function loadColumnState() {
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch { saved = null; }
+  if (!saved || !saved.order || !saved.visible) {
+    return { order: DEFAULT_ORDER.slice(), visible: DEFAULT_VISIBLE.slice() };
+  }
+  ['order', 'visible'].forEach((listKey) => {
+    const i = saved[listKey].indexOf('uid');
+    if (i !== -1) saved[listKey][i] = 'oid';
+  });
+  DEFAULT_ORDER.forEach((key) => {
+    if (saved.order.indexOf(key) === -1) saved.order.push(key);
+  });
+  return saved;
+}
+
+function cellValue(o, key) {
+  switch (key) {
+    case 'oid': return o.oid;
+    case 'branch': return o.branch_name;
+    case 'group': return o.group_name || '-';
+    case 'group_phone': return o.group_phone || '-';
+    case 'origin': return o.origin_address;
+    case 'waypoints': return o.waypoints_text || '-';
+    case 'destination': return o.destination_address;
+    case 'vehicle': return [o.vehicle_type, o.vehicle_number].filter(Boolean).join(' / ') || '-';
+    case 'driver': {
+      // 구간 릴레이: leg_count > 0이면(order_legs 마이그레이션 이후 생성된 오더) "N/M명 배정"
+      // 요약, 아니면(레거시 오더) 기존 단일 기사 표시 그대로.
+      if (Number(o.leg_count) > 0) {
+        return `기사 ${o.legs_assigned_count}/${o.leg_count}명 배정` + (o.leg_driver_names ? ` (${o.leg_driver_names})` : '');
+      }
+      return o.driver_name ? (o.driver_name + (o.driver_phone ? ` (${o.driver_phone})` : '')) : '미배정';
+    }
+    case 'reserved_at': return `${o.reserved_date} ${o.reserved_time}`;
+    case 'payment_method': return o.payment_method_name || '-';
+    case 'fare': return formatMoney(o.fare_amount);
+    case 'status': return o.status;
+    case 'photo': return Number(o.photo_count) > 0 ? `📷 ${o.photo_count}` : '-';
+    case 'created_at': return formatDateTimeNoSeconds(o.created_at);
+    default: return '';
+  }
+}
+
+function sortValue(o, key) {
+  const v = cellValue(o, key);
+  const text = String(v == null ? '' : v);
+  if (NUMERIC_COLUMNS.includes(key)) {
+    const digits = text.replace(/[^0-9]/g, '');
+    return digits ? Number(digits) : 0;
+  }
+  return text;
+}
+
+export default function OrderListTable({ orders }) {
+  const [columnOrder, setColumnOrder] = useState(DEFAULT_ORDER);
+  const [visibleColumns, setVisibleColumns] = useState(DEFAULT_VISIBLE);
+  const [widths, setWidths] = useState({});
+  const [density, setDensity] = useState('normal');
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [sortState, setSortState] = useState({ key: null, dir: null });
+  const [dragKey, setDragKey] = useState(null);
+
+  // localStorage는 클라이언트에만 있으므로 마운트 후에 불러온다 — legacy도 서버 렌더 HTML이
+  // 먼저 기본값으로 뜬 다음 JS가 저장된 설정을 적용했으니 동일한 동작(잠깐의 기본값 표시 후
+  // 저장된 설정으로 전환).
+  useEffect(() => {
+    const state = loadColumnState();
+    setColumnOrder(state.order);
+    setVisibleColumns(state.visible);
+    try { setWidths(JSON.parse(localStorage.getItem(WIDTH_KEY)) || {}); } catch { /* keep default */ }
+    setDensity(localStorage.getItem(DENSITY_KEY) || 'normal');
+  }, []);
+
+  function saveColumnState(order, visible) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ order, visible }));
+  }
+
+  function toggleVisible(key) {
+    setVisibleColumns((prev) => {
+      const next = prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key];
+      saveColumnState(columnOrder, next);
+      return next;
+    });
+  }
+
+  function handleDrop(targetKey) {
+    if (!dragKey || dragKey === targetKey) return;
+    setColumnOrder((prev) => {
+      const next = prev.filter((k) => k !== dragKey);
+      next.splice(next.indexOf(targetKey), 0, dragKey);
+      saveColumnState(next, visibleColumns);
+      return next;
+    });
+    setDragKey(null);
+  }
+
+  function handleResizeStart(key, e) {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = e.currentTarget.closest('th').offsetWidth;
+    function onMove(ev) {
+      const newWidth = Math.max(50, startWidth + (ev.clientX - startX));
+      setWidths((prev) => ({ ...prev, [key]: newWidth }));
+    }
+    function onUp() {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      setWidths((prev) => {
+        localStorage.setItem(WIDTH_KEY, JSON.stringify(prev));
+        return prev;
+      });
+    }
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }
+
+  function handleSetDensity(next) {
+    setDensity(next);
+    localStorage.setItem(DENSITY_KEY, next);
+  }
+
+  function handleReset() {
+    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(WIDTH_KEY);
+    localStorage.removeItem(DENSITY_KEY);
+    setColumnOrder(DEFAULT_ORDER.slice());
+    setVisibleColumns(DEFAULT_VISIBLE.slice());
+    setWidths({});
+    setDensity('normal');
+    setSortState({ key: null, dir: null });
+  }
+
+  function handleSort(key) {
+    setSortState((prev) => ({ key, dir: prev.key === key && prev.dir === 'asc' ? 'desc' : 'asc' }));
+  }
+
+  const sortedOrders = useMemo(() => {
+    if (!sortState.key) return orders;
+    const numeric = NUMERIC_COLUMNS.includes(sortState.key);
+    const list = orders.slice();
+    list.sort((a, b) => {
+      const va = sortValue(a, sortState.key);
+      const vb = sortValue(b, sortState.key);
+      const cmp = numeric ? va - vb : String(va).localeCompare(String(vb), 'ko');
+      return sortState.dir === 'asc' ? cmp : -cmp;
+    });
+    return list;
+  }, [orders, sortState]);
+
+  const activeColumns = columnOrder.filter((key) => visibleColumns.includes(key));
+  const densityClass = density === 'compact' ? ' density-compact' : density === 'comfortable' ? ' density-comfortable' : '';
+
+  return (
+    <>
+      <div className="page-head-actions" style={{ marginBottom: 14 }}>
+        <button type="button" className="btn secondary" onClick={() => setPanelOpen((v) => !v)}>⚙️ 항목 설정</button>
+      </div>
+
+      {panelOpen && (
+        <div className="card column-settings-panel">
+          <div className="section-title small">표시할 항목 (체크 해제하면 표에서 숨겨집니다. 표 헤더를 드래그하면 순서를, 헤더 오른쪽 경계를 드래그하면 너비를 바꿀 수 있습니다.)</div>
+          <div className="column-checkbox-grid">
+            {columnOrder.map((key) => {
+              const locked = ALWAYS_VISIBLE.includes(key);
+              return (
+                <label className="checkline" key={key}>
+                  <input type="checkbox" checked={visibleColumns.includes(key)} disabled={locked} onChange={() => toggleVisible(key)} />
+                  {' ' + COLUMN_LABELS[key] + (locked ? ' (고정)' : '')}
+                </label>
+              );
+            })}
+          </div>
+          <div className="section-title small">행 간격</div>
+          <div className="row-density-buttons">
+            <button type="button" className="btn small secondary" onClick={() => handleSetDensity('compact')}>좁게</button>
+            <button type="button" className="btn small secondary" onClick={() => handleSetDensity('normal')}>보통</button>
+            <button type="button" className="btn small secondary" onClick={() => handleSetDensity('comfortable')}>넓게</button>
+          </div>
+          <div style={{ marginTop: 14 }}>
+            <button type="button" className="btn small secondary" onClick={handleReset}>기본값으로 초기화</button>
+          </div>
+        </div>
+      )}
+
+      <div className="table-wrap">
+        <table id="ordersTable" className={densityClass.trim()}>
+          <thead>
+            <tr>
+              {activeColumns.map((key) => (
+                <th
+                  key={key}
+                  data-column={key}
+                  draggable
+                  style={{ position: 'relative', width: widths[key] ? widths[key] + 'px' : undefined }}
+                  onDragStart={() => setDragKey(key)}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={() => handleDrop(key)}
+                  onClick={(e) => { if (!e.target.closest('.col-resize-handle')) handleSort(key); }}
+                >
+                  {COLUMN_LABELS[key]}
+                  <span className={`sort-icon${sortState.key === key ? ' sort-icon-active' : ''}`}>
+                    {sortState.key === key ? (sortState.dir === 'asc' ? ' ▲' : ' ▼') : ' ⇅'}
+                  </span>
+                  <span className="col-resize-handle" onMouseDown={(e) => handleResizeStart(key, e)} />
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {sortedOrders.length === 0 && <tr><td colSpan={activeColumns.length} className="empty">조건에 맞는 오더가 없습니다.</td></tr>}
+            {sortedOrders.map((o) => (
+              <tr key={o.id}>
+                {activeColumns.map((key) => {
+                  const value = cellValue(o, key);
+                  if (key === 'oid') return <td key={key} data-column={key}><a href={`/orders/${o.id}`}>{value}</a></td>;
+                  if (key === 'status') return <td key={key} data-column={key}><span className={`badge ${STATUS_COLORS[o.status] || 'gray'}`}>{o.status}</span></td>;
+                  return <td key={key} data-column={key} title={typeof value === 'string' ? value : undefined}>{value}</td>;
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}

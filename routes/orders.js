@@ -82,18 +82,25 @@ async function buildOrdersListData(scope, query) {
   const page = Math.max(1, parseInt(query.page, 10) || 1);
   const offset = (page - 1) * ORDERS_PAGE_SIZE;
 
-  const where = [];
-  const params = [];
+  // status를 뺀 필터(지사/기간/검색)만 따로 모아둔다 — 상태별 집계(총/오더등록/완료/...)는
+  // 지금 어떤 상태를 골라 보고 있는지와 무관하게 "이 지사·기간·검색 조건에서 상태별로 몇 건씩
+  // 있는지"를 보여줘야 탭처럼 자연스럽게 동작한다(상태 필터를 걸어도 다른 상태 건수가 0으로
+  // 안 바뀜).
+  const whereNoStatus = [];
+  const paramsNoStatus = [];
+  if (scope.branch_id) { whereNoStatus.push('o.branch_id = ?'); paramsNoStatus.push(scope.branch_id); }
+  if (scope.group_id) { whereNoStatus.push('o.requester_group_id = ?'); paramsNoStatus.push(scope.group_id); }
+  if (!scope.branch_id && branch_id) { whereNoStatus.push('o.branch_id = ?'); paramsNoStatus.push(branch_id); }
+  if (from) { whereNoStatus.push('o.reserved_date >= ?'); paramsNoStatus.push(from); }
+  if (to) { whereNoStatus.push('o.reserved_date <= ?'); paramsNoStatus.push(to); }
+  if (q) { whereNoStatus.push('(o.oid LIKE ? OR o.origin_address LIKE ? OR o.destination_address LIKE ?)'); paramsNoStatus.push(`%${q}%`, `%${q}%`, `%${q}%`); }
 
-  if (scope.branch_id) { where.push('o.branch_id = ?'); params.push(scope.branch_id); }
-  if (scope.group_id) { where.push('o.requester_group_id = ?'); params.push(scope.group_id); }
-  if (!scope.branch_id && branch_id) { where.push('o.branch_id = ?'); params.push(branch_id); }
+  const where = whereNoStatus.slice();
+  const params = paramsNoStatus.slice();
   if (status) { where.push('o.status = ?'); params.push(status); }
-  if (from) { where.push('o.reserved_date >= ?'); params.push(from); }
-  if (to) { where.push('o.reserved_date <= ?'); params.push(to); }
-  if (q) { where.push('(o.oid LIKE ? OR o.origin_address LIKE ? OR o.destination_address LIKE ?)'); params.push(`%${q}%`, `%${q}%`, `%${q}%`); }
 
   const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : '';
+  const whereNoStatusSql = whereNoStatus.length ? 'WHERE ' + whereNoStatus.join(' AND ') : '';
 
   const sql = `
     SELECT o.*, b.name AS branch_name, g.name AS group_name, g.main_phone AS group_phone,
@@ -113,19 +120,38 @@ async function buildOrdersListData(scope, query) {
     LIMIT ? OFFSET ?
   `;
   const countSql = `SELECT COUNT(*) AS total FROM orders o ${whereSql}`;
+  // 상태별 집계 — 지사/기간/검색 필터는 그대로 반영하되 상태 필터는 뺀 whereNoStatusSql을 쓴다.
+  const summarySql = `
+    SELECT COUNT(*) AS total,
+      COUNT(*) FILTER (WHERE o.status = '오더등록') AS registered,
+      COUNT(*) FILTER (WHERE o.status = '완료') AS completed,
+      COUNT(*) FILTER (WHERE o.status = '대기') AS pending,
+      COUNT(*) FILTER (WHERE o.status = '취소') AS cancelled,
+      COUNT(*) FILTER (WHERE o.status = '문의') AS inquiry
+    FROM orders o ${whereNoStatusSql}
+  `;
 
   // 서로 의존관계 없는 조회라 병렬로 실행한다 — 순차로 기다리면 왕복시간이 그대로 더해진다.
-  const [orders, countRow, branches] = await Promise.all([
+  const [orders, countRow, summaryRow, branches] = await Promise.all([
     db.all(sql, [...params, ORDERS_PAGE_SIZE, offset]),
     db.get(countSql, params),
+    db.get(summarySql, paramsNoStatus),
     db.all('SELECT * FROM branches ORDER BY name'),
   ]);
 
   const totalCount = Number(countRow.total);
   const totalPages = Math.max(1, Math.ceil(totalCount / ORDERS_PAGE_SIZE));
+  const statusSummary = {
+    total: Number(summaryRow.total) || 0,
+    registered: Number(summaryRow.registered) || 0,
+    completed: Number(summaryRow.completed) || 0,
+    pending: Number(summaryRow.pending) || 0,
+    cancelled: Number(summaryRow.cancelled) || 0,
+    inquiry: Number(summaryRow.inquiry) || 0,
+  };
 
   return {
-    orders, branches, ORDER_STATUSES,
+    orders, branches, ORDER_STATUSES, statusSummary,
     filters: { branch_id: branch_id || '', status: status || '', from: from || '', to: to || '', q: q || '' },
     pagination: { page, pageSize: ORDERS_PAGE_SIZE, totalCount, totalPages },
   };
@@ -1090,6 +1116,7 @@ router.post('/:id', asyncHandler(async (req, res) => {
   const u = req.session.user;
   const isAdmin = u.role === 'admin';
   const isClient = u.role === 'client';
+  const wantsJson = req.get('X-Requested-With') === 'fetch';
   const {
     branch_id, requester_group_id, origin_address, origin_detail_address, origin_contact,
     destination_address, destination_detail_address, destination_contact, vehicle_number, reserved_date, reserved_time,
@@ -1241,6 +1268,7 @@ router.post('/:id', asyncHandler(async (req, res) => {
     }
   }
 
+  if (wantsJson) return res.json({ orderId: Number(req.params.id), oid: order.oid, legsReset });
   res.redirect('/orders/' + req.params.id + (legsReset ? '?notice=legs_reset' : ''));
 }));
 

@@ -485,7 +485,11 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
         return;
       }
       const data = await res.json();
-      window.location.assign('/orders/' + data.orderId);
+      // AI 접수 워크스페이스(chatSessionId가 있을 때만)에서 등록을 마치면 오더 상세 대신
+      // 오더 리스트로 보낸다 — 챗봇으로 계속 새 오더를 접수하는 흐름이라 목록에서 방금 등록한
+      // 건을 바로 확인하는 게 자연스럽다. /orders/new 단독 페이지(chatSessionId 없음)는
+      // 기존처럼 상세 페이지로 이동.
+      window.location.assign(chatSessionId ? '/orders' : '/orders/' + data.orderId);
     } catch {
       setError('저장에 실패했습니다. 다시 시도해주세요.');
       setSubmitting(false);

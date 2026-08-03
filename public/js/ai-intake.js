@@ -2368,7 +2368,7 @@
         // 이 세션은 완료된 것으로 닫는다 — 안 그러면 새로고침 후 세션 복원 기능이 방금 끝난
         // 오더의 phase/필드 값을 그대로 되살려서 새 오더 접수를 방해하게 된다.
         logBotMessage({ logText: okText, needsAgent: false, requestedFeature: null, closeSession: true });
-        setTimeout(function () { window.location.href = '/orders/ai-intake'; }, 2000);
+        setTimeout(function () { window.location.href = '/orders'; }, 2000);
       })
       .catch(function (err) {
         var failText = '오더 등록에 실패했습니다. (' + err.message + ') 다시 확인 후 시도해주세요.';

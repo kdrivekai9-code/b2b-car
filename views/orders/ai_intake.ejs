@@ -115,13 +115,13 @@
           </div>
           <div class="addr-input-row">
             <input type="text" class="addr-input" id="origin_address" name="origin_address" required placeholder="도로명, 지번 또는 상호명으로 검색" value="<%= order.origin_address || '' %>">
-            <button type="button" class="btn small secondary addr-search-btn" data-target="origin_address">🔍 검색</button>
-            <button type="button" class="btn small secondary map-view-btn" data-slot="origin" title="지도보기">지도보기</button>
+            <button type="button" class="btn small secondary addr-search-btn addr-icon-btn" data-target="origin_address" title="검색">🔍</button>
+            <button type="button" class="btn small secondary registered-addr-btn" data-target="origin_address">등록주소</button>
+            <button type="button" class="btn small secondary map-view-btn addr-icon-btn" data-slot="origin" title="지도보기">📍</button>
           </div>
           <div id="origin_address_results" class="addr-results"></div>
           <div class="addr-detail-row">
             <input type="text" class="addr-detail-input" id="origin_detail_address" name="origin_detail_address" placeholder="상세주소 입력 (건물명, 동/호수)" <%- order.origin_detail_address ? '' : 'disabled style="display:none;"' %> value="<%= order.origin_detail_address || '' %>">
-            <button type="button" class="btn small secondary registered-addr-btn" data-target="origin_address">등록주소</button>
           </div>
           <div class="row contact-check-row" style="margin-top:8px;">
             <div class="field" style="flex:0 0 calc((100% - 14px) / 2);max-width:calc((100% - 14px) / 2);"><label class="field-label-strong">출발지 연락처 <span class="required-mark" aria-hidden="true">*</span></label><input type="text" class="phone-input" id="origin_contact" name="origin_contact" placeholder="010-0000-0000" value="<%= order.origin_contact || '' %>"></div>
@@ -152,13 +152,13 @@
           </div>
           <div class="addr-input-row">
             <input type="text" class="addr-input" id="destination_address" name="destination_address" required placeholder="도로명, 지번 또는 상호명으로 검색" value="<%= order.destination_address || '' %>">
-            <button type="button" class="btn small secondary addr-search-btn" data-target="destination_address">🔍 검색</button>
-            <button type="button" class="btn small secondary map-view-btn" data-slot="destination" title="지도보기">지도보기</button>
+            <button type="button" class="btn small secondary addr-search-btn addr-icon-btn" data-target="destination_address" title="검색">🔍</button>
+            <button type="button" class="btn small secondary registered-addr-btn" data-target="destination_address">등록주소</button>
+            <button type="button" class="btn small secondary map-view-btn addr-icon-btn" data-slot="destination" title="지도보기">📍</button>
           </div>
           <div id="destination_address_results" class="addr-results"></div>
           <div class="addr-detail-row">
             <input type="text" class="addr-detail-input" id="destination_detail_address" name="destination_detail_address" placeholder="상세주소 입력 (건물명, 동/호수)" <%- order.destination_detail_address ? '' : 'disabled style="display:none;"' %> value="<%= order.destination_detail_address || '' %>">
-            <button type="button" class="btn small secondary registered-addr-btn" data-target="destination_address">등록주소</button>
           </div>
           <div class="row contact-check-row" style="margin-top:8px;">
             <div class="field" style="flex:0 0 calc((100% - 14px) / 2);max-width:calc((100% - 14px) / 2);">

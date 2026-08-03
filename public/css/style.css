@@ -134,6 +134,7 @@ tr:hover td{background:var(--tint);}
 
 .toast{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:12px 22px;border-radius:8px;font-size:14px;font-weight:600;box-shadow:0 6px 20px rgba(0,0,0,.18);z-index:1000;opacity:1;transition:opacity .5s ease;}
 .toast.toast-hide{opacity:0;}
+.toast.toast-top{bottom:auto;top:28px;}
 
 table.density-compact th,table.density-compact td{padding:4px 10px;font-size:12px;}
 table.density-comfortable th,table.density-comfortable td{padding:16px 14px;}
@@ -565,6 +566,7 @@ form .field.full{flex-basis:100%;}
 
 .addr-input-row{display:flex;gap:6px;}
 .addr-input-row input{flex:1;}
+.addr-icon-btn{flex-shrink:0;font-size:20px;line-height:1;padding:6px 11px;}
 .addr-results{position:relative;z-index:5;margin-top:2px;background:#fff;border:1px solid var(--border);border-radius:8px;overflow:hidden;}
 .addr-results:empty{border:none;}
 .addr-result-item{padding:8px 10px;font-size:12px;cursor:pointer;border-bottom:1px solid var(--border);}
@@ -581,9 +583,8 @@ form .field.full{flex-basis:100%;}
 .addr-detail-input{margin-top:6px;background:#f4f6f9;}
 .addr-detail-input:not(:disabled){background:#fff;}
 .addr-detail-input:disabled{color:var(--gray);cursor:not-allowed;}
-.addr-detail-row{position:relative;margin-top:6px;min-height:34px;}
-.addr-detail-row .addr-detail-input{width:100%;margin-top:0;padding-right:84px;}
-.addr-detail-row .registered-addr-btn{position:absolute;right:4px;top:50%;transform:translateY(-50%);padding:5px 9px;white-space:nowrap;}
+.addr-detail-row{margin-top:6px;}
+.addr-detail-row .addr-detail-input{width:100%;margin-top:0;}
 .contact-check-row{align-items:flex-end;}
 .contact-check-row .checkline{margin:0 0 16px;}
 
@@ -669,6 +670,7 @@ form .field.full{flex-basis:100%;}
   .period-custom input[type=date]{min-width:0;flex:1;}
   .modal-box{width:calc(100vw - 28px);max-height:calc(100dvh - 28px);padding:18px;}
   .toast{bottom:16px;width:calc(100vw - 28px);padding:12px 16px;text-align:center;}
+  .toast.toast-top{bottom:auto;top:16px;}
 }
 
 @media (prefers-reduced-motion:reduce){

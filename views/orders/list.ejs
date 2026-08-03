@@ -5,7 +5,6 @@
     <p class="page-sub">등록된 오더를 조회하고 상태를 관리합니다. 컬럼 표시/순서/너비/행간격은 이 브라우저에만 저장됩니다.</p>
   </div>
   <div class="page-head-actions">
-    <button class="btn secondary" type="button" id="columnSettingsBtn">⚙️ 항목 설정</button>
     <a class="btn" href="/orders/new">+ 오더 등록</a>
   </div>
 </div>
@@ -40,11 +39,19 @@
   </div>
 </form>
 
-<div style="margin-bottom:14px;">
-  <% if (filters.branch_id) { %><span class="chip">지사 필터 적용중</span><% } else { %><span class="chip">전체 지사 표시중</span><% } %>
-  <% if (filters.status) { %><span class="chip">상태: <%= filters.status %></span><% } %>
-  <% if (filters.from || filters.to) { %><span class="chip">기간: <%= filters.from || '전체' %> ~ <%= filters.to || '전체' %></span><% } %>
-  <span class="chip">총 <%= pagination.totalCount %>건</span>
+<div style="margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+  <div>
+    <% if (filters.branch_id) { %><span class="chip">지사 필터 적용중</span><% } else { %><span class="chip">전체 지사 표시중</span><% } %>
+    <% if (filters.status) { %><span class="chip">상태: <%= filters.status %></span><% } %>
+    <% if (filters.from || filters.to) { %><span class="chip">기간: <%= filters.from || '전체' %> ~ <%= filters.to || '전체' %></span><% } %>
+    <span class="chip">총 <%= statusSummary.total %>건</span>
+    <span class="chip">오더등록 <%= statusSummary.registered %>건</span>
+    <span class="chip">완료 <%= statusSummary.completed %>건</span>
+    <span class="chip">대기 <%= statusSummary.pending %>건</span>
+    <span class="chip">취소 <%= statusSummary.cancelled %>건</span>
+    <span class="chip">문의 <%= statusSummary.inquiry %>건</span>
+  </div>
+  <button class="btn secondary" type="button" id="columnSettingsBtn">⚙️ 항목 설정</button>
 </div>
 
 <div id="columnSettingsPanel" class="card column-settings-panel" style="display:none;">
@@ -62,13 +69,6 @@
 </div>
 
 <section class="card list-section-card">
-  <div class="card-section-head">
-    <div>
-      <span class="section-kicker">ORDER OVERVIEW</span>
-      <h2>오더 현황</h2>
-    </div>
-    <span class="count-badge"><%= pagination.totalCount %>건</span>
-  </div>
   <div class="table-wrap">
   <table id="ordersTable">
     <thead>
@@ -117,7 +117,7 @@
           <td data-column="fare" data-label="요금"><%= formatMoney(o.fare_amount) %></td>
           <td data-column="status" data-label="상태"><span class="badge <%= statusColor(o.status) %>"><%= o.status %></span></td>
           <td data-column="photo" data-label="사진"><%= Number(o.photo_count) > 0 ? ('📷 ' + o.photo_count) : '-' %></td>
-          <td data-column="created_at" data-label="등록일시" title="<%= o.created_at %>"><%= o.created_at %></td>
+          <td data-column="created_at" data-label="등록일시" title="<%= o.created_at %>"><%= String(o.created_at || '').slice(0, 16) %></td>
         </tr>
       <% }) %>
     </tbody>
