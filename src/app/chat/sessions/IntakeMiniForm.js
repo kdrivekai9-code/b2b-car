@@ -1,0 +1,502 @@
+'use client';
+
+import { useEffect, useReducer, useRef, useState } from 'react';
+import RouteCalculator from '../../orders/new/RouteCalculator';
+
+// views/chat/session_list.ejs의 #cardOrderForm(전용 접수 미니폼)을 그대로 React로 이식한
+// 것 — public/js/chat-session-cards.js의 관련 로직(주소검색/차종 자동완성/경유지 추가/
+// 픽업-인도 자동계산)을 필드 단위로 재현한다. /orders/new의 OrderForm과는 완전히 다른,
+// 채팅 접수 전용의 더 단순한 폼(지도·프리미엄/일일기사 필드·즐겨찾기·요금 자동계산 없음 —
+// legacy에도 없던 것들이라 여기서도 안 넣는다)이라 별도 컴포넌트로 둔다. 제출은 legacy처럼
+// 순수 form POST로 다른 화면(주문 등록 폼)으로 튕겨나가지 않도록 fetch 기반으로 하되,
+// 최종적으로 POST /orders에 legacy와 동일한 필드/이름으로 보내고 성공 시 /orders/:id로
+// 이동한다(서버 응답은 legacy의 res.redirect와 완전히 동일한 목적지).
+
+const DELIVERY_BUFFER_SECONDS = 30 * 60;
+
+function pad2(n) {
+  return String(n).padStart(2, '0');
+}
+
+function getLastDayOfMonth(year, month) {
+  const y = Number(year);
+  const m = Number(month);
+  if (!Number.isFinite(y) || !Number.isFinite(m) || m < 1 || m > 12) return 31;
+  return new Date(y, m, 0).getDate();
+}
+
+function roundDateToNearestTenMinutes(dt) {
+  const roundedMs = Math.round(dt.getTime() / 600000) * 600000;
+  return new Date(roundedMs);
+}
+
+function formatLocalDateTime(dt) {
+  if (!dt || Number.isNaN(dt.getTime())) return '-';
+  return `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())} ${pad2(dt.getHours())}:${pad2(dt.getMinutes())}`;
+}
+
+function formatDuration(seconds) {
+  const totalMin = Math.round(Number(seconds || 0) / 60);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return h > 0 ? `${h}시간 ${m}분` : `${m}분`;
+}
+
+// chat-session-cards.js의 normalizePhoneInput을 그대로 이식(controlled input이라 값을
+// 리턴하는 형태로 바꿈).
+function normalizePhone(raw) {
+  const digits = String(raw || '').replace(/\D/g, '').slice(0, 11);
+  if (!digits) return '';
+  if (digits.length === 8) return digits.slice(0, 4) + '-' + digits.slice(4);
+  if (digits.indexOf('02') === 0) {
+    if (digits.length <= 5) return digits.slice(0, 2) + '-' + digits.slice(2);
+    if (digits.length <= 9) return digits.slice(0, 2) + '-' + digits.slice(2, 5) + '-' + digits.slice(5);
+    return digits.slice(0, 2) + '-' + digits.slice(2, 6) + '-' + digits.slice(6, 10);
+  }
+  if (digits.length <= 6) return digits.slice(0, 3) + '-' + digits.slice(3);
+  if (digits.length <= 10) return digits.slice(0, 3) + '-' + digits.slice(3, 6) + '-' + digits.slice(6);
+  return digits.slice(0, 3) + '-' + digits.slice(3, 7) + '-' + digits.slice(7, 11);
+}
+
+async function geocode(query) {
+  try {
+    const res = await fetch('/kakao/search?q=' + encodeURIComponent(query));
+    const data = await res.json();
+    return data.documents || [];
+  } catch {
+    return [];
+  }
+}
+
+function mainAddressOf(r) {
+  return r.road_address || r.jibun_address || '';
+}
+
+function resultLabel(r) {
+  if (r.type === 'place') {
+    const addr = mainAddressOf(r);
+    return r.place_name + (addr ? ' · ' + addr : '');
+  }
+  const main = mainAddressOf(r);
+  const sub = r.road_address && r.jibun_address && r.road_address !== r.jibun_address ? r.jibun_address : null;
+  return main + (sub ? ' (' + sub + ')' : '');
+}
+
+// 출발지/도착지/경유지 공용 — legacy와 동일하게 입력 중 실시간 검색은 없고(검색 버튼/Enter만),
+// 2글자 이상, 최대 5건, 하이라이트 없음(legacy도 없음).
+function MiniAddressSearch({ address, onAddressChange, onResolved }) {
+  const [results, setResults] = useState(null); // null=숨김, []=결과없음, [...]=결과
+
+  async function runSearch() {
+    const q = String(address || '').trim();
+    if (q.length < 2) {
+      setResults([]);
+      return;
+    }
+    setResults('loading');
+    const docs = await geocode(q);
+    setResults(docs.slice(0, 5));
+  }
+
+  return (
+    <>
+      <div className="addr-input-row">
+        <input
+          type="text"
+          value={address}
+          onChange={(e) => onAddressChange(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); runSearch(); } }}
+          placeholder="도로명/지번/상호"
+        />
+        <button type="button" className="btn small secondary" onClick={runSearch}>🔍 검색</button>
+      </div>
+      <div className="addr-results">
+        {results === 'loading' && <div className="addr-result-item muted">검색 중...</div>}
+        {Array.isArray(results) && results.length === 0 && <div className="addr-result-item muted">검색 결과가 없습니다.</div>}
+        {Array.isArray(results) && results.map((r, i) => (
+          <div className="addr-result-item" key={i} onClick={() => { onAddressChange(mainAddressOf(r)); onResolved(parseFloat(r.lat), parseFloat(r.lon)); setResults(null); }}>
+            {resultLabel(r)}
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+function initialState(order) {
+  const now = new Date();
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(order.reserved_date || '');
+  const t = /^(\d{2}):(\d{2})$/.exec(order.reserved_time || '');
+  const waypoints = Array.isArray(order.waypoints)
+    ? order.waypoints.map((w, i) => ({ id: 'prefill-' + i, address: w.address || '', detail: w.detail || '', contact: w.contact || '', vehicleNumber: w.vehicleNumber || '', lat: null, lon: null }))
+    : [];
+  return {
+    branch_id: order.branch_id || '',
+    requester_group_id: order.requester_group_id || '',
+    reservation_basis: order.reservation_basis === 'delivery' ? 'delivery' : 'pickup',
+    reservedDateYear: m ? m[1] : String(now.getFullYear()),
+    reservedDateMonth: m ? m[2] : pad2(now.getMonth() + 1),
+    reservedDateDay: m ? m[3] : pad2(now.getDate()),
+    reservedTimeHour: t ? t[1] : pad2(now.getHours()),
+    reservedTimeMinute: t ? t[2] : pad2(now.getMinutes()),
+    pickup_reserved_date: '',
+    pickup_reserved_time: '',
+    origin_address: order.origin_address || '', origin_detail_address: order.origin_detail_address || '', origin_contact: order.origin_contact || '',
+    origin_lat: null, origin_lon: null,
+    vehicle_type: order.vehicle_type || '', vehicle_number: order.vehicle_number || '',
+    waypoints,
+    destination_address: order.destination_address || '', destination_detail_address: order.destination_detail_address || '', destination_contact: order.destination_contact || '',
+    destination_lat: null, destination_lon: null,
+    memo_customer: order.memo_customer || '',
+    payment_method_id: order.payment_method_id || '',
+    fare_amount: order.fare_amount || '',
+    chat_session_transition: 'agent_active',
+  };
+}
+
+function reducer(state, action) {
+  switch (action.type) {
+    case 'SET_FIELD':
+      return { ...state, [action.name]: action.value };
+    case 'SET_RESERVED_DATE_PART': {
+      const next = { ...state, [action.name]: action.value };
+      const lastDay = getLastDayOfMonth(next.reservedDateYear, next.reservedDateMonth);
+      if (Number(next.reservedDateDay || 1) > lastDay) next.reservedDateDay = pad2(lastDay);
+      return next;
+    }
+    case 'ADD_WAYPOINT':
+      return { ...state, waypoints: [...state.waypoints, { id: action.id, address: '', detail: '', contact: '', vehicleNumber: '', lat: null, lon: null }] };
+    case 'REMOVE_WAYPOINT':
+      return { ...state, waypoints: state.waypoints.filter((w) => w.id !== action.id) };
+    case 'SET_WAYPOINT_FIELD':
+      return { ...state, waypoints: state.waypoints.map((w) => (w.id === action.id ? { ...w, [action.field]: action.value } : w)) };
+    default:
+      return state;
+  }
+}
+
+let waypointSeq = 0;
+
+export default function IntakeMiniForm({ chatSessionId, branches, groups, paymentMethods, order }) {
+  const [state, dispatch] = useReducer(reducer, initialState(order));
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+  const [routeInfo, setRouteInfo] = useState({ km: null, durationSec: null });
+  const [vehicleTypeSuggestions, setVehicleTypeSuggestions] = useState([]);
+  const vehicleTypeDebounceRef = useRef(null);
+  const vehicleTypeRequired = /제주/.test(state.destination_address || '');
+
+  function setField(name, value) {
+    dispatch({ type: 'SET_FIELD', name, value });
+  }
+
+  const routePoints = [
+    { slot: 'origin', lat: state.origin_lat, lon: state.origin_lon },
+    ...state.waypoints.map((w) => ({ slot: w.id, lat: w.lat, lon: w.lon })),
+    { slot: 'destination', lat: state.destination_lat, lon: state.destination_lon },
+  ];
+
+  // 예약기준 역산 — OrderForm.js와 동일 로직(도착지 인도시간 기준일 때만 출발지 픽업시간을
+  // 경로탐색 소요시간 + 30분 여유로 역산). legacy는 여기에 더해 메모에 "**도착지 예약**:" 줄을
+  // 자동으로 넣지만, 이 미니폼은 메모 필드가 자유 텍스트라 사용자가 직접 적는 걸 존중하고
+  // 자동 삽입은 하지 않는다(레이스 없이 명확한 편이 낫다는 판단 — legacy만큼의 자동화가
+  // 필요하면 후속으로 추가 가능).
+  useEffect(() => {
+    if (state.reservation_basis !== 'delivery') {
+      const nextDate = `${state.reservedDateYear}-${state.reservedDateMonth}-${state.reservedDateDay}`;
+      const nextTime = `${state.reservedTimeHour}:${state.reservedTimeMinute}`;
+      if (state.pickup_reserved_date !== nextDate) setField('pickup_reserved_date', nextDate);
+      if (state.pickup_reserved_time !== nextTime) setField('pickup_reserved_time', nextTime);
+      return;
+    }
+    const deliveryDateTime = new Date(
+      Number(state.reservedDateYear), Number(state.reservedDateMonth) - 1, Number(state.reservedDateDay),
+      Number(state.reservedTimeHour), Number(state.reservedTimeMinute), 0, 0
+    );
+    const durationSec = routeInfo.durationSec;
+    if (!Number.isFinite(durationSec) || durationSec <= 0) {
+      if (state.pickup_reserved_date) setField('pickup_reserved_date', '');
+      if (state.pickup_reserved_time) setField('pickup_reserved_time', '');
+      return;
+    }
+    const rounded = roundDateToNearestTenMinutes(new Date(deliveryDateTime.getTime() - (durationSec + DELIVERY_BUFFER_SECONDS) * 1000));
+    const nextDate = `${rounded.getFullYear()}-${pad2(rounded.getMonth() + 1)}-${pad2(rounded.getDate())}`;
+    const nextTime = `${pad2(rounded.getHours())}:${pad2(rounded.getMinutes())}`;
+    if (state.pickup_reserved_date !== nextDate) setField('pickup_reserved_date', nextDate);
+    if (state.pickup_reserved_time !== nextTime) setField('pickup_reserved_time', nextTime);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.reservation_basis, state.reservedDateYear, state.reservedDateMonth, state.reservedDateDay, state.reservedTimeHour, state.reservedTimeMinute, routeInfo.durationSec]);
+
+  function handleVehicleTypeChange(value) {
+    setField('vehicle_type', value);
+    clearTimeout(vehicleTypeDebounceRef.current);
+    if (!value.trim()) {
+      setVehicleTypeSuggestions([]);
+      return;
+    }
+    vehicleTypeDebounceRef.current = setTimeout(async () => {
+      try {
+        const res = await fetch('/orders/vehicle-type-suggest?q=' + encodeURIComponent(value.trim()));
+        const data = await res.json();
+        setVehicleTypeSuggestions(data.suggestions || []);
+      } catch {
+        setVehicleTypeSuggestions([]);
+      }
+    }, 200);
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setError(null);
+
+    if (state.reservation_basis === 'delivery' && (!state.pickup_reserved_date || !state.pickup_reserved_time)) {
+      window.alert('도착지 인도시간 기준은 경로가 확정되어야 출발지 픽업일시를 계산할 수 있습니다. 주소를 확인한 뒤 다시 시도해주세요.');
+      return;
+    }
+
+    const reservedDate = `${state.reservedDateYear}-${state.reservedDateMonth}-${state.reservedDateDay}`;
+    const reservedTime = `${state.reservedTimeHour}:${state.reservedTimeMinute}`;
+    const params = new URLSearchParams();
+    params.set('branch_id', state.branch_id);
+    params.set('requester_group_id', state.requester_group_id);
+    params.set('origin_address', state.origin_address);
+    params.set('origin_detail_address', state.origin_detail_address);
+    params.set('origin_contact', state.origin_contact);
+    params.set('destination_address', state.destination_address);
+    params.set('destination_detail_address', state.destination_detail_address);
+    params.set('destination_contact', state.destination_contact);
+    params.set('vehicle_type', state.vehicle_type);
+    params.set('vehicle_number', state.vehicle_number);
+    params.set('reserved_date', reservedDate);
+    params.set('reserved_time', reservedTime);
+    params.set('pickup_reserved_date', state.pickup_reserved_date || reservedDate);
+    params.set('pickup_reserved_time', state.pickup_reserved_time || reservedTime);
+    params.set('payment_method_id', state.payment_method_id);
+    params.set('fare_amount', state.fare_amount);
+    params.set('memo_customer', state.memo_customer);
+    params.set('chat_session_id', String(chatSessionId));
+    params.set('chat_session_transition', state.chat_session_transition);
+    state.waypoints.forEach((w) => {
+      params.append('waypoints[]', w.address);
+      params.append('waypoint_details[]', w.detail);
+      params.append('waypoint_contacts[]', w.contact);
+      params.append('waypoint_vehicle_numbers[]', w.vehicleNumber);
+    });
+
+    setSubmitting(true);
+    try {
+      const res = await fetch('/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'fetch' },
+        body: params,
+      });
+      if (res.status === 400) {
+        const data = await res.json().catch(() => ({ error: '입력값을 확인해주세요.' }));
+        setError(data.error || '입력값을 확인해주세요.');
+        setSubmitting(false);
+        return;
+      }
+      if (!res.ok) {
+        setError('저장에 실패했습니다. 다시 시도해주세요.');
+        setSubmitting(false);
+        return;
+      }
+      const data = await res.json();
+      window.location.assign('/orders/' + data.orderId);
+    } catch {
+      setError('저장에 실패했습니다. 다시 시도해주세요.');
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <form className="chat-order-form chat-admin-order-form" onSubmit={handleSubmit}>
+      <RouteCalculator points={routePoints} originAddress={state.origin_address} destinationAddress={state.destination_address} onRouteUpdate={setRouteInfo} />
+
+      <div className="row">
+        <div className="field">
+          <label>지사 선택 <span className="required-mark" aria-hidden="true">*</span></label>
+          <select required value={state.branch_id} onChange={(e) => setField('branch_id', e.target.value)}>
+            <option value="">선택하세요</option>
+            {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        </div>
+        <div className="field">
+          <label>요청 법인(고객사)</label>
+          <select value={state.requester_group_id} onChange={(e) => setField('requester_group_id', e.target.value)}>
+            <option value="">선택 안 함</option>
+            {groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+          </select>
+        </div>
+      </div>
+
+      <div className="inline-duo" style={{ marginBottom: 8, alignItems: 'center' }}>
+        <label className="checkline">
+          <input type="radio" name="reservation_basis" checked={state.reservation_basis === 'pickup'} onChange={() => setField('reservation_basis', 'pickup')} /> 출발지 픽업시간 기준
+        </label>
+        <label className="checkline">
+          <input type="radio" name="reservation_basis" checked={state.reservation_basis === 'delivery'} onChange={() => setField('reservation_basis', 'delivery')} /> 도착지 인도시간 기준
+        </label>
+      </div>
+
+      <div className="row">
+        <div className="field">
+          <label>예약일시 <span className="required-mark" aria-hidden="true">*</span></label>
+          <div className="inline-duo reservation-date-row">
+            <select className="date-select" aria-label="예약 연도" value={state.reservedDateYear}
+              onChange={(e) => dispatch({ type: 'SET_RESERVED_DATE_PART', name: 'reservedDateYear', value: e.target.value })}>
+              {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 1 + i).map((y) => <option key={y} value={String(y)}>{y}년</option>)}
+            </select>
+            <select className="date-select" aria-label="예약 월" value={state.reservedDateMonth}
+              onChange={(e) => dispatch({ type: 'SET_RESERVED_DATE_PART', name: 'reservedDateMonth', value: e.target.value })}>
+              {Array.from({ length: 12 }, (_, i) => pad2(i + 1)).map((mm) => <option key={mm} value={mm}>{mm}월</option>)}
+            </select>
+            <select className="date-select" aria-label="예약 일" value={state.reservedDateDay}
+              onChange={(e) => dispatch({ type: 'SET_RESERVED_DATE_PART', name: 'reservedDateDay', value: e.target.value })}>
+              {Array.from({ length: getLastDayOfMonth(state.reservedDateYear, state.reservedDateMonth) }, (_, i) => pad2(i + 1)).map((dd) => <option key={dd} value={dd}>{dd}일</option>)}
+            </select>
+          </div>
+        </div>
+        <div className="field">
+          <label>예약 시간 <span className="required-mark" aria-hidden="true">*</span></label>
+          <div className="time-inline-row">
+            <div className="time-inline-cell">
+              <select aria-label="예약 시간 시" value={state.reservedTimeHour} onChange={(e) => setField('reservedTimeHour', e.target.value)}>
+                {Array.from({ length: 24 }, (_, h) => pad2(h)).map((hh) => <option key={hh} value={hh}>{hh}시</option>)}
+              </select>
+            </div>
+            <div className="time-inline-cell">
+              <select aria-label="예약 시간 분" value={state.reservedTimeMinute} onChange={(e) => setField('reservedTimeMinute', e.target.value)}>
+                {Array.from({ length: 60 }, (_, m) => pad2(m)).map((mm) => <option key={mm} value={mm}>{mm}분</option>)}
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="field full">
+        <label>출발지 주소 <span className="required-mark" aria-hidden="true">*</span></label>
+        <MiniAddressSearch address={state.origin_address} onAddressChange={(v) => setField('origin_address', v)}
+          onResolved={(lat, lon) => { setField('origin_lat', lat); setField('origin_lon', lon); }} />
+      </div>
+      <div className="field full">
+        <label>출발지 상세주소</label>
+        <input type="text" value={state.origin_detail_address} onChange={(e) => setField('origin_detail_address', e.target.value)} placeholder="건물명, 동/호수, 주차위치" />
+      </div>
+      <div className="row">
+        <div className="field">
+          <label>출발지 연락처 <span className="required-mark" aria-hidden="true">*</span></label>
+          <input type="text" required placeholder="010-0000-0000" value={state.origin_contact}
+            onChange={(e) => setField('origin_contact', e.target.value)} onBlur={(e) => setField('origin_contact', normalizePhone(e.target.value))} />
+        </div>
+      </div>
+
+      {state.reservation_basis === 'delivery' && (
+        <div className="card-reservation-summary">
+          <div className="card-reservation-summary-title">도착지 인도시간 기준 자동 계산</div>
+          <div className="card-reservation-summary-main">
+            <span className="label">예상 픽업시간</span>
+            <strong>{state.pickup_reserved_date && state.pickup_reserved_time ? `${state.pickup_reserved_date} ${state.pickup_reserved_time}` : '경로 확정 후 자동 계산'}</strong>
+          </div>
+          <div className="card-reservation-summary-sub">
+            {routeInfo.durationSec ? `(경로탐색 : ${formatDuration(routeInfo.durationSec)} +30분여유)` : '(경로탐색 : 경로 확정 후 자동 계산)'}
+          </div>
+        </div>
+      )}
+
+      <div className="row">
+        <div className="field" style={{ position: 'relative' }}>
+          <label>
+            차종{vehicleTypeRequired && <span className="required-mark" aria-hidden="true"> *</span>} ({vehicleTypeRequired ? '필수' : '선택'})
+          </label>
+          <input type="text" autoComplete="off" required={vehicleTypeRequired} placeholder="예: 카니발, 1톤"
+            value={state.vehicle_type} onChange={(e) => handleVehicleTypeChange(e.target.value)} />
+          {vehicleTypeSuggestions.length > 0 && (
+            <div className="addr-results">
+              {vehicleTypeSuggestions.map((s) => (
+                <div className="addr-result-item" key={s} onClick={() => { setField('vehicle_type', s); setVehicleTypeSuggestions([]); }}>{s}</div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="field">
+          <label>출발지 차량번호 (선택)</label>
+          <input type="text" placeholder="예: 12가3456" value={state.vehicle_number} onChange={(e) => setField('vehicle_number', e.target.value)} />
+        </div>
+      </div>
+
+      <div className="field full" style={{ marginTop: 4 }}>
+        <div className="chat-order-waypoint-head">
+          <button type="button" className="btn small secondary" onClick={() => dispatch({ type: 'ADD_WAYPOINT', id: `wp-${++waypointSeq}` })}>+ 경유지 추가</button>
+        </div>
+        <div className="chat-waypoint-list">
+          {state.waypoints.map((w) => (
+            <div className="chat-waypoint-item" key={w.id}>
+              <div className="chat-waypoint-address-col">
+                <MiniAddressSearch address={w.address}
+                  onAddressChange={(v) => dispatch({ type: 'SET_WAYPOINT_FIELD', id: w.id, field: 'address', value: v })}
+                  onResolved={(lat, lon) => {
+                    dispatch({ type: 'SET_WAYPOINT_FIELD', id: w.id, field: 'lat', value: lat });
+                    dispatch({ type: 'SET_WAYPOINT_FIELD', id: w.id, field: 'lon', value: lon });
+                  }} />
+              </div>
+              <input type="text" placeholder="경유지 연락처 (선택)" value={w.contact}
+                onChange={(e) => dispatch({ type: 'SET_WAYPOINT_FIELD', id: w.id, field: 'contact', value: e.target.value })}
+                onBlur={(e) => dispatch({ type: 'SET_WAYPOINT_FIELD', id: w.id, field: 'contact', value: normalizePhone(e.target.value) })} />
+              <input type="text" placeholder="경유지 차량번호 (선택)" value={w.vehicleNumber}
+                onChange={(e) => dispatch({ type: 'SET_WAYPOINT_FIELD', id: w.id, field: 'vehicleNumber', value: e.target.value })} />
+              <button type="button" className="btn small secondary" onClick={() => dispatch({ type: 'REMOVE_WAYPOINT', id: w.id })}>삭제</button>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="field full">
+        <label>도착지 주소 <span className="required-mark" aria-hidden="true">*</span></label>
+        <MiniAddressSearch address={state.destination_address} onAddressChange={(v) => setField('destination_address', v)}
+          onResolved={(lat, lon) => { setField('destination_lat', lat); setField('destination_lon', lon); }} />
+      </div>
+      <div className="field full">
+        <label>도착지 상세주소</label>
+        <input type="text" value={state.destination_detail_address} onChange={(e) => setField('destination_detail_address', e.target.value)} placeholder="건물명, 동/호수, 주차위치" />
+      </div>
+      <div className="field">
+        <label>도착지 연락처 <span className="required-mark" aria-hidden="true">*</span></label>
+        <input type="text" required placeholder="010-0000-0000" value={state.destination_contact}
+          onChange={(e) => setField('destination_contact', e.target.value)} onBlur={(e) => setField('destination_contact', normalizePhone(e.target.value))} />
+      </div>
+
+      <div className="field full">
+        <label>메모</label>
+        <textarea value={state.memo_customer} onChange={(e) => setField('memo_customer', e.target.value)} placeholder="요청사항, 차량 상태, 전달 메모" />
+      </div>
+
+      <div className="row">
+        <div className="field">
+          <label>결제방식</label>
+          <select value={state.payment_method_id} onChange={(e) => setField('payment_method_id', e.target.value)}>
+            <option value="">선택 안 함</option>
+            {paymentMethods.map((pm) => <option key={pm.id} value={pm.id}>{pm.name}</option>)}
+          </select>
+        </div>
+        <div className="field">
+          <label>요금(원)</label>
+          <input type="number" min="0" step="1000" placeholder="0" value={state.fare_amount} onChange={(e) => setField('fare_amount', e.target.value)} />
+        </div>
+      </div>
+
+      {error && <div className="error-msg">{error}</div>}
+
+      <div className="chat-order-actions">
+        <div className="field" style={{ margin: 0, minWidth: 220 }}>
+          <label style={{ margin: '0 0 6px' }}>등록 후 상담 상태</label>
+          <select value={state.chat_session_transition} onChange={(e) => setField('chat_session_transition', e.target.value)}>
+            <option value="agent_active">상담 계속 진행</option>
+            <option value="closed">상담 종료</option>
+          </select>
+        </div>
+        <button className="btn" type="submit" disabled={submitting}>{submitting ? '등록 중...' : '오더 등록'}</button>
+      </div>
+    </form>
+  );
+}
