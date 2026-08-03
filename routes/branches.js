@@ -414,4 +414,59 @@ router.post('/:id/extra-settings', asyncHandler(async (req, res) => {
   res.redirect('/branches/' + req.params.id + '/extra-settings');
 }));
 
+// ---------------- 프리미엄 요금표 ----------------
+router.get('/:id/premium-fare-rules', asyncHandler(async (req, res) => {
+  const [branch, tiers, branches] = await Promise.all([
+    db.get('SELECT * FROM branches WHERE id = ?', [req.params.id]),
+    db.all('SELECT * FROM premium_fare_rules WHERE branch_id = ? ORDER BY tier_seq', [req.params.id]),
+    db.all('SELECT id, name FROM branches ORDER BY id'),
+  ]);
+  if (!branch) return res.status(404).send('지사를 찾을 수 없습니다.');
+  res.render('branches/premium_fare_rules', {
+    title: '프리미엄 요금표 - ' + branch.name,
+    branch, tiers, branches,
+    saved: req.query.saved === '1',
+  });
+}));
+
+router.post('/:id/premium-fare-rules', asyncHandler(async (req, res) => {
+  const branchId = Number(req.params.id);
+  const b = (v) => [].concat(v || []);
+  const baseHours = b(req.body.base_hours);
+  const fareAmount = b(req.body.fare_amount);
+  const extraPerHour = b(req.body.extra_per_hour);
+  const note = b(req.body.note);
+
+  const client = await db.pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('DELETE FROM premium_fare_rules WHERE branch_id = $1', [branchId]);
+    for (let i = 0; i < baseHours.length; i++) {
+      const bh = Number(baseHours[i]);
+      if (!Number.isFinite(bh) || bh < 0) continue;
+      await client.query(
+        `INSERT INTO premium_fare_rules (branch_id, tier_seq, base_hours, fare_amount, extra_per_hour, note)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [branchId, i + 1, bh, Number(fareAmount[i]) || 0, Number(extraPerHour[i]) || 0, note[i] || null]
+      );
+    }
+    await client.query('COMMIT');
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
+  res.redirect('/branches/' + branchId + '/premium-fare-rules?saved=1');
+}));
+
+router.get('/:id/premium-fare-rules/data.json', asyncHandler(async (req, res) => {
+  const [branch, tiers] = await Promise.all([
+    db.get('SELECT * FROM branches WHERE id = ?', [req.params.id]),
+    db.all('SELECT * FROM premium_fare_rules WHERE branch_id = ? ORDER BY tier_seq', [req.params.id]),
+  ]);
+  if (!branch) return res.status(404).json({ error: '지사를 찾을 수 없습니다.' });
+  res.json({ currentUser: req.session.user, branch, tiers });
+}));
+
 module.exports = router;
