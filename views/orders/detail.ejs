@@ -34,6 +34,21 @@
     <div class="kv"><span class="k">도선료</span><span><%= formatMoney(order.ferry_fare_amount || 0) %></span></div>
     <div class="kv"><span class="k">배정 기사</span><span><%= order.driver_name || '미배정' %></span></div>
 
+    <%
+      const orderTypeLabels = { dispatch: '탁송', premium: '프리미엄', daily_driver: '일일기사' };
+      const tripTypeLabels = { round_trip: '왕복', one_way: '편도' };
+    %>
+    <div class="kv"><span class="k">오더 타입</span><span><%= orderTypeLabels[order.order_type] || order.order_type || 'dispatch' %></span></div>
+    <% if (order.trip_type) { %>
+      <div class="kv"><span class="k">이용 형태</span><span><%= tripTypeLabels[order.trip_type] || order.trip_type %></span></div>
+    <% } %>
+    <% if (order.destination_wait_minutes != null) { %>
+      <div class="kv"><span class="k">도착지 대기시간</span><span><%= order.destination_wait_minutes %>분</span></div>
+    <% } %>
+    <% if (order.final_destination_address) { %>
+      <div class="kv"><span class="k">최종 목적지</span><span><%= order.final_destination_address %><%= order.final_destination_address_detail ? ' ' + order.final_destination_address_detail : '' %></span></div>
+    <% } %>
+
     <div class="section-title">메모</div>
     <div class="kv"><span class="k">고객사 메모</span><span><%= order.memo_customer || '작성된 메모가 없습니다.' %></span></div>
     <div class="kv"><span class="k">업체요청사항</span><span><%= order.memo_billing || '작성된 내용이 없습니다.' %></span></div>

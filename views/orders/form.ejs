@@ -185,6 +185,53 @@
       </div>
       <% } %>
 
+      <div class="section-title small">오더 타입</div>
+      <div class="row">
+        <div class="field">
+          <label>오더 타입</label>
+          <select name="order_type">
+            <option value="dispatch" <%= (order.order_type || 'dispatch') === 'dispatch' ? 'selected' : '' %>>탁송</option>
+            <option value="premium" <%= order.order_type === 'premium' ? 'selected' : '' %>>프리미엄</option>
+            <option value="daily_driver" <%= order.order_type === 'daily_driver' ? 'selected' : '' %>>일일기사</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>이용 형태 (일일기사)</label>
+          <select name="trip_type">
+            <option value="">해당 없음</option>
+            <option value="round_trip" <%= order.trip_type === 'round_trip' ? 'selected' : '' %>>왕복</option>
+            <option value="one_way" <%= order.trip_type === 'one_way' ? 'selected' : '' %>>편도</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>도착지 대기시간(분)</label>
+          <input type="number" name="destination_wait_minutes" min="0" step="5"
+            placeholder="대기 없으면 비워두세요"
+            value="<%= order.destination_wait_minutes != null ? order.destination_wait_minutes : '' %>">
+        </div>
+      </div>
+      <div id="finalDestinationSection" style="<%= (order.trip_type === 'round_trip') ? '' : 'display:none' %>">
+        <div class="section-title small">최종 목적지 (왕복 일일기사)</div>
+        <div class="field full">
+          <label>최종 목적지 주소</label>
+          <input type="text" id="final_destination_address" name="final_destination_address"
+            placeholder="기사가 최종적으로 복귀할 주소" value="<%= order.final_destination_address || '' %>">
+          <input type="text" id="final_destination_address_detail" name="final_destination_address_detail"
+            placeholder="상세주소" value="<%= order.final_destination_address_detail || '' %>" style="margin-top:4px">
+        </div>
+      </div>
+      <script>
+        document.addEventListener('DOMContentLoaded', function() {
+          var tripSel = document.querySelector('select[name="trip_type"]');
+          var finalSec = document.getElementById('finalDestinationSection');
+          if (tripSel && finalSec) {
+            tripSel.addEventListener('change', function() {
+              finalSec.style.display = tripSel.value === 'round_trip' ? '' : 'none';
+            });
+          }
+        });
+      </script>
+
       <div class="section-title small">요청 메모</div>
       <div class="field full"><label>메모(기사전달사항)</label><textarea name="memo_customer" placeholder="예) 사고 이력 안내&#10;예) 스크래치 등 차량 관련 내용"><%= order.memo_customer || '' %></textarea></div>
       <div class="field full"><label>업체 전달사항</label><textarea name="memo_billing" placeholder="예) 계산서/내역서 비고란에 'OOO'로 기재 요청"><%= order.memo_billing || '' %></textarea></div>

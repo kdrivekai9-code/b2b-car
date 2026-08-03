@@ -99,6 +99,12 @@ function initialFieldState(order, defaultBranch, mode) {
     // 위 도선료와 같은 이유로, edit 모드에서는 저장된 업체 전달사항을 그대로 채운다(create
     // 모드는 이 필드에 대응하는 상담 접수 데이터가 없어 항상 빈 값 — 기존 동작 유지).
     memo_billing: mode === 'edit' ? (order.memo_billing || '') : '',
+    order_type: order.order_type || 'dispatch',
+    trip_type: order.trip_type || '',
+    final_destination_address: order.final_destination_address || '',
+    final_destination_address_detail: order.final_destination_address_detail || '',
+    destination_wait_minutes: order.destination_wait_minutes != null ? String(order.destination_wait_minutes) : '',
+    reservation_hours_bracket: order.reservation_hours_bracket || '',
     sameAsMyPhone: false, sameAsOriginContact: false,
     chat_session_transition: 'agent_active',
   };
@@ -344,6 +350,12 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
     setIfFilled('vehicle_number', p.vehicle_number);
     setIfFilled('memo_customer', p.memo_customer);
     setIfFilled('memo_billing', p.memo_billing);
+    setIfFilled('order_type', p.order_type);
+    setIfFilled('trip_type', p.trip_type);
+    setIfFilled('final_destination_address', p.final_destination_address);
+    setIfFilled('final_destination_address_detail', p.final_destination_address_detail);
+    if (p.destination_wait_minutes != null) setIfFilled('destination_wait_minutes', String(p.destination_wait_minutes));
+    setIfFilled('reservation_hours_bracket', p.reservation_hours_bracket);
 
     const date = String(p.reserved_date || '').trim();
     const time = String(p.reserved_time || '').trim();
@@ -410,6 +422,12 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
     params.set('ferry_fare_amount', String(state.ferry_fare_amount || 0));
     params.set('memo_customer', state.memo_customer);
     params.set('memo_billing', state.memo_billing);
+    params.set('order_type', state.order_type || 'dispatch');
+    if (state.trip_type) params.set('trip_type', state.trip_type);
+    if (state.final_destination_address) params.set('final_destination_address', state.final_destination_address);
+    if (state.final_destination_address_detail) params.set('final_destination_address_detail', state.final_destination_address_detail);
+    if (state.destination_wait_minutes) params.set('destination_wait_minutes', state.destination_wait_minutes);
+    if (state.reservation_hours_bracket) params.set('reservation_hours_bracket', state.reservation_hours_bracket);
     if (chatSessionId) {
       params.set('chat_session_id', String(chatSessionId));
       params.set('chat_session_transition', state.chat_session_transition);
@@ -682,6 +700,46 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
               </select>
             </div>
           ) : null}
+
+          <div className="section-title small">오더 타입</div>
+          <div className="row">
+            <div className="field">
+              <label>오더 타입</label>
+              <select value={state.order_type || 'dispatch'} onChange={(e) => setField('order_type', e.target.value)}>
+                <option value="dispatch">탁송</option>
+                <option value="premium">프리미엄</option>
+                <option value="daily_driver">일일기사</option>
+              </select>
+            </div>
+            <div className="field">
+              <label>이용 형태 (일일기사)</label>
+              <select value={state.trip_type || ''} onChange={(e) => setField('trip_type', e.target.value)}>
+                <option value="">해당 없음</option>
+                <option value="round_trip">왕복</option>
+                <option value="one_way">편도</option>
+              </select>
+            </div>
+            <div className="field">
+              <label>도착지 대기시간(분)</label>
+              <input type="number" min={0} step={5} placeholder="없으면 비워두세요"
+                value={state.destination_wait_minutes || ''}
+                onChange={(e) => setField('destination_wait_minutes', e.target.value)} />
+            </div>
+          </div>
+          {state.trip_type === 'round_trip' && (
+            <>
+              <div className="section-title small">최종 목적지 (왕복 일일기사)</div>
+              <div className="field full">
+                <label>최종 목적지 주소</label>
+                <input type="text" placeholder="기사가 최종적으로 복귀할 주소"
+                  value={state.final_destination_address || ''}
+                  onChange={(e) => setField('final_destination_address', e.target.value)} />
+                <input type="text" placeholder="상세주소" style={{ marginTop: 4 }}
+                  value={state.final_destination_address_detail || ''}
+                  onChange={(e) => setField('final_destination_address_detail', e.target.value)} />
+              </div>
+            </>
+          )}
 
           <div className="section-title small">요청 메모</div>
           <div className="field full">
