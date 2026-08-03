@@ -367,6 +367,10 @@ router.get('/:sessionId/messages', asyncHandler(async (req, res) => {
 }));
 
 // ---------------- 관리자: 세션 목록 ----------------
+router.get('/guide/data.json', requireRole('admin'), asyncHandler(async (req, res) => {
+  res.json({ currentUser: req.session.user });
+}));
+
 router.get('/guide', requireRole('admin'), asyncHandler(async (req, res) => {
   res.render('chat/guide', { title: '상담 운영안' });
 }));
