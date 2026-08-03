@@ -82,20 +82,8 @@ export default async function OrdersListPage({ searchParams }) {
         </div>
       </form>
 
-      <div style={{ marginBottom: 14 }}>
-        {filters.branch_id ? <span className="chip">지사 필터 적용중</span> : <span className="chip">전체 지사 표시중</span>}
-        {filters.status && <span className="chip">상태: {filters.status}</span>}
-        {(filters.from || filters.to) && <span className="chip">기간: {filters.from || '전체'} ~ {filters.to || '전체'}</span>}
-        <span className="chip">총 {statusSummary.total}건</span>
-        <span className="chip">오더등록 {statusSummary.registered}건</span>
-        <span className="chip">완료 {statusSummary.completed}건</span>
-        <span className="chip">대기 {statusSummary.pending}건</span>
-        <span className="chip">취소 {statusSummary.cancelled}건</span>
-        <span className="chip">문의 {statusSummary.inquiry}건</span>
-      </div>
-
       <section className="card list-section-card">
-        <OrderListTable orders={orders} />
+        <OrderListTable orders={orders} filters={filters} statusSummary={statusSummary} />
         {pagination.totalPages > 1 && (
           <div className="pagination-bar">
             {pagination.page > 1
