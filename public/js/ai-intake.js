@@ -1667,6 +1667,60 @@
     return { logText: q, needsAgent: false, requestedFeature: null };
   }
 
+  // 프리미엄(대리) 전용 — 예약시간(+요청사항) 답변을 받은 직후 호출된다. 값을 폼 필드에
+  // 반영하고, "당일 예약이 아니거나(=평소처럼 미래 예약) 당일이라도 오전 출발"일 때만
+  // 편도/왕복을 확인한다(당일 오후 이후 출발은 편도로 간주하고 바로 출발지 질문으로).
+  function handlePremiumReservedDateTime(data) {
+    setField('reserved_date', data.reserved_date);
+    setField('reserved_time', data.reserved_time ? roundToTenMinutes(data.reserved_time) : data.reserved_time);
+    syncReservedTimeSelectsFromHidden();
+    reservedDateTimeConfirmed = true;
+
+    var now = new Date();
+    var todayStr = now.getFullYear() + '-' + pad2(now.getMonth() + 1) + '-' + pad2(now.getDate());
+    var reservedDate = val('reserved_date');
+    var reservedHour = Number((val('reserved_time') || '').split(':')[0]);
+    var isSameDay = reservedDate === todayStr;
+    var isMorning = Number.isFinite(reservedHour) && reservedHour < 12;
+
+    var formattedDateTime = formatReservedDateTime(reservedDate, val('reserved_time'));
+    var dtMsg = formattedDateTime ? (formattedDateTime + '으로 예약을 확인했습니다.') : null;
+
+    if (!isSameDay || isMorning) {
+      setPendingField('premium_trip_type');
+      var q2 = '편도이용인지 왕복 이용인지 알려주세요?';
+      if (dtMsg) sayBot(dtMsg);
+      sayBot(q2);
+      return { logText: (dtMsg ? dtMsg + '\n' : '') + q2, needsAgent: false, requestedFeature: null };
+    }
+
+    setPendingField('premium_origin_address');
+    var q3 = '출발지를 말씀해주세요? (예: 장소명이나, 주소)';
+    if (dtMsg) sayBot(dtMsg);
+    sayBot(q3);
+    return { logText: (dtMsg ? dtMsg + '\n' : '') + q3, needsAgent: false, requestedFeature: null };
+  }
+
+  // 프리미엄(대리) 편도 흐름 마무리 — 출발지/도착지/(선택)경유지 수집이 끝나면 호출된다.
+  // 도착지 연락처는 이 시나리오에서 따로 묻지 않으므로(사용자 지정 흐름에 없음) 출발지
+  // 연락처로 자동 채운다 — 서버(POST /orders)가 필수값으로 검증하기 때문에 비워두면 등록이
+  // 막힌다. 이후 요금안내 → 요약 → 확인질문까지는 탁송/일일기사와 동일한 phase='confirming'
+  // 파이프라인을 그대로 탄다(전달사항/추가요청 질문만 이 흐름엔 없어서 건너뛴다).
+  function finishPremiumCollection() {
+    if (!val('destination_contact')) setField('destination_contact', val('origin_contact'));
+    setPendingField(null);
+    return announceFareGuideFromDb().then(function () {
+      phase = 'confirming';
+      var summary = buildSummaryText();
+      addBubble(summary, 'bot');
+      logBotMessage({ logText: summary, needsAgent: false, requestedFeature: null });
+      var confirmQ = '위 내용으로 등록해 드릴까요?';
+      addBubble(confirmQ, 'bot', null, true);
+      logBotMessage({ logText: confirmQ, needsAgent: false, requestedFeature: null });
+      return null;
+    });
+  }
+
   function handleOrderIntent(data, sourceText) {
     var dateTimeChanged = !!(data.reserved_date || data.reserved_time);
     // 오더유형(탁송/대리/일일기사)은 대화당 한 번만 판별해 알려준다 — 이미 확정된 뒤에는
@@ -1681,7 +1735,13 @@
       else orderCategory = 'dispatch';
     }
 
-    // 일일기사/프리미엄 진입 — 오더유형이 최초로 확정되었고 탁송이 아닐 때
+    // 일일기사/프리미엄 진입 — 오더유형이 최초로 확정되었고 탁송이 아닐 때.
+    // 일일기사는 왕복/편도부터 반드시 확인해야 하므로 여기서 멈춘다(trip_type 대기).
+    // 프리미엄은 탁송과 완전히 다른 전용 FSM(사용자 지정 시나리오)을 탄다 — 인사 후 예약
+    // 시간을 포함한 요청사항을 먼저 묻고(premium_reserved_datetime), 트리거 메시지에 이미
+    // 예약시간이 함께 왔으면 그 질문을 건너뛰고 바로 handlePremiumReservedDateTime의
+    // 당일/오전 판정으로 들어간다. 나머지 단계(출발지→연락처→도착지→경유지…)는 아래
+    // premium_* pendingField 조기 반환 분기와 extractAndProcess의 로컬 파싱 인터셉트가 담당.
     if (newOrderType && orderCategory !== 'dispatch') {
       var greetMsg = orderCategory === 'daily_driver'
         ? '안녕하세요. 일일기사 예약을 도와드리겠습니다.\n이용 형태를 선택해 주세요.\n1. 왕복  2. 편도'
@@ -1689,8 +1749,15 @@
       sayBot(greetMsg);
       if (orderCategory === 'daily_driver') {
         pendingField = 'trip_type';
+        return { logText: greetMsg, needsAgent: false, requestedFeature: null };
       }
-      return { logText: greetMsg, needsAgent: false, requestedFeature: null };
+      if (data.reserved_date || data.reserved_time) {
+        return handlePremiumReservedDateTime(data);
+      }
+      setPendingField('premium_reserved_datetime');
+      var premiumQ1 = '예약시간을 포함해서 요청사항을 말씀해 주세요? (예: 지금 즉시, 내일 오후 4시)';
+      sayBot(premiumQ1);
+      return { logText: premiumQ1, needsAgent: false, requestedFeature: null };
     }
 
     setField('reserved_date', data.reserved_date);
@@ -1752,6 +1819,81 @@
       return { logText: retryFdQ, needsAgent: false, requestedFeature: null };
     }
     // ---- /일일기사 전용 처리 끝 ----
+
+    // ---- 프리미엄(대리) 전용 pendingField 처리 ----
+    // Gemini 응답은 항상 스네이크케이스로 정규화되어 온다(routes/orders.js의
+    // normalizeGeminiOrderFields) — origin_address/destination_address/waypoints[].address 중
+    // 어디에 채워질지는 방향 표현이 없는 한 글자 그대로는 알 수 없어서, 셋 다 순서대로 확인한다.
+    if (orderCategory === 'premium' && pendingField === 'premium_reserved_datetime') {
+      if (!data.reserved_date && !data.reserved_time) {
+        var retryQ1 = '예약시간을 다시 말씀해주세요? (예: 지금 즉시, 내일 오후 4시)';
+        sayBot(retryQ1);
+        return { logText: retryQ1, needsAgent: false, requestedFeature: null };
+      }
+      return handlePremiumReservedDateTime(data);
+    }
+
+    if (orderCategory === 'premium' && (pendingField === 'premium_origin_address' || pendingField === 'premium_destination_address' || pendingField === 'premium_waypoint_address')) {
+      var premiumAddr = data.origin_address || data.destination_address || (data.waypoints && data.waypoints[0] && data.waypoints[0].address) || null;
+      if (!premiumAddr) {
+        var retryAddrQ = '주소를 다시 말씀해주세요?';
+        sayBot(retryAddrQ);
+        return { logText: retryAddrQ, needsAgent: false, requestedFeature: null };
+      }
+
+      if (pendingField === 'premium_waypoint_address') {
+        if (!addWaypointBtn) {
+          var noWpQ = '경유지 입력란을 찾을 수 없어 경유지 없이 진행하겠습니다.';
+          sayBot(noWpQ);
+          return finishPremiumCollection();
+        }
+        addWaypointBtn.click();
+        var pwRows = document.querySelectorAll('#waypointsWrap .waypoint-row');
+        var pwRow = pwRows[pwRows.length - 1];
+        var pwSlot = pwRow.dataset.slot;
+        var pwAddrEl = document.getElementById(pwSlot + '_address');
+        if (pwAddrEl) pwAddrEl.value = premiumAddr;
+        return validateAddressField(pwSlot + '_address', '경유지 주소').then(function () {
+          setPendingField('premium_waypoint_wait_yn');
+          var q8 = '경유지 대기 시간이 있습니까?';
+          sayBot(q8);
+          return { logText: q8, needsAgent: false, requestedFeature: null };
+        });
+      }
+
+      var premiumFieldId = pendingField === 'premium_origin_address' ? 'origin_address' : 'destination_address';
+      var premiumFieldLabel = pendingField === 'premium_origin_address' ? '출발지 주소' : '도착지 주소';
+      document.getElementById(premiumFieldId).value = premiumAddr;
+      return validateAddressField(premiumFieldId, premiumFieldLabel).then(function () {
+        if (pendingField === 'premium_origin_address') {
+          setPendingField('premium_origin_contact');
+          var q4 = '연락처를 말씀해주세요? (예: 010-3333-4444)';
+          sayBot(q4);
+          return { logText: q4, needsAgent: false, requestedFeature: null };
+        }
+        setPendingField('premium_waypoint_yn');
+        var q6 = '중간에 경유지가 있습니까?';
+        sayBot(q6);
+        return { logText: q6, needsAgent: false, requestedFeature: null };
+      });
+    }
+
+    if (orderCategory === 'premium' && pendingField === 'premium_origin_contact') {
+      var premiumContact = data.origin_contact || data.destination_contact || null;
+      if (!premiumContact) {
+        var retryContactQ = '연락처를 다시 말씀해주세요? (예: 010-3333-4444)';
+        sayBot(retryContactQ);
+        return { logText: retryContactQ, needsAgent: false, requestedFeature: null };
+      }
+      document.getElementById('origin_contact').value = premiumContact;
+      return validatePhoneField('origin_contact', '출발지 연락처').then(function () {
+        setPendingField('premium_destination_address');
+        var q5 = '도착지를 말씀해주세요?';
+        sayBot(q5);
+        return { logText: q5, needsAgent: false, requestedFeature: null };
+      });
+    }
+    // ---- /프리미엄 전용 처리 끝 ----
 
     // 오더유형 안내(및 그와 함께 온 예약일시)와 요청사항 확인은 다른 필드들과 마찬가지로
     // runValidationChain에 태워서, 분석되는 순서대로 하나씩 말풍선이 나타나게 한다(한꺼번에 표시 X).
@@ -2343,7 +2485,11 @@
               : !!data[field.id]
           );
           if (!hasValue) { askAgain(); return; }
-          return handleOrderIntent(data, text).then(function (result) { logBotMessage(result); });
+          // handleOrderIntent는 대부분 runValidationChain을 거쳐 Promise를 반환하지만, 일부
+          // 조기 종료 분기(프리미엄/일일기사 안내, 경유지·최종목적지 재질문 등)는 처리를 이미
+          // 끝낸 뒤 결과 객체를 그대로 return한다 — Promise.resolve()로 감싸 항상 thenable을
+          // 보장한다(실제로 "handleOrderIntent(...).then is not a function"으로 터졌던 버그).
+          return Promise.resolve(handleOrderIntent(data, text)).then(function (result) { logBotMessage(result); });
         })
         .catch(function () { hideThinkingBubble(); askAgain(); });
     }
@@ -2758,6 +2904,81 @@
         }
         // ---- /일일기사 인터셉트 끝 ----
 
+        // ---- 프리미엄(대리) 전용 로컬 파싱 인터셉트 (Gemini 안 거침, daily_driver와 동일 패턴) ----
+        if (pendingField === 'premium_trip_type' && orderCategory === 'premium') {
+          var premiumTripParsed = flowApi.parseTripTypeResponse(text);
+          if (premiumTripParsed === 'round_trip') {
+            // 이미 받은 예약시간을 그대로 이어받아 일일기사 흐름의 다음 질문(출발지)부터 진행한다
+            // (사용자 확정 사항 — 예약일시를 다시 묻지 않음).
+            orderCategory = 'daily_driver';
+            tripType = 'round_trip';
+            updateOrderTypeBadge('daily_driver_order');
+            var ddFieldsFromPremium = flowApi.getDailyDriverFields(tripType);
+            var nextDdField = ddFieldsFromPremium[2]; // 0=trip_type, 1=reserved_date(이미 확보), 2=origin_address
+            setPendingField(nextDdField.id);
+            var convMsg = '왕복으로 확인했습니다. 예약시간은 그대로 이어받아 일일기사 예약으로 진행하겠습니다.\n' + nextDdField.question;
+            addBubble(convMsg, 'bot', null, true);
+            return logBotMessage({ logText: convMsg, needsAgent: false, requestedFeature: null });
+          }
+          if (premiumTripParsed === 'one_way') {
+            setPendingField('premium_origin_address');
+            var q3FromTrip = '출발지를 말씀해주세요? (예: 장소명이나, 주소)';
+            addBubble(q3FromTrip, 'bot', null, true);
+            return logBotMessage({ logText: q3FromTrip, needsAgent: false, requestedFeature: null });
+          }
+          var retryTripQ = '편도 또는 왕복 중 하나를 선택해 주세요.';
+          addBubble(retryTripQ, 'bot', null, true);
+          return logBotMessage({ logText: retryTripQ, needsAgent: false, requestedFeature: null });
+        }
+
+        if (pendingField === 'premium_waypoint_yn' && orderCategory === 'premium') {
+          var hasWaypoint = flowApi.parseWaitYesNo(text);
+          if (hasWaypoint === true) {
+            setPendingField('premium_waypoint_address');
+            var q7 = '경유지를 말씀해주세요?';
+            addBubble(q7, 'bot', null, true);
+            return logBotMessage({ logText: q7, needsAgent: false, requestedFeature: null });
+          }
+          if (hasWaypoint === false) return finishPremiumCollection();
+          var retryWpYnQ = '경유지가 있는지 없는지 알려주세요.';
+          addBubble(retryWpYnQ, 'bot', null, true);
+          return logBotMessage({ logText: retryWpYnQ, needsAgent: false, requestedFeature: null });
+        }
+
+        if (pendingField === 'premium_waypoint_wait_yn' && orderCategory === 'premium') {
+          var hasWpWait = flowApi.parseWaitYesNo(text);
+          if (hasWpWait === true) {
+            setPendingField('premium_waypoint_wait_minutes');
+            var q9 = '경유지 대기 시간을 말씀해주세요 (예: 1시간 30분, 30분이상)';
+            addBubble(q9, 'bot', null, true);
+            return logBotMessage({ logText: q9, needsAgent: false, requestedFeature: null });
+          }
+          if (hasWpWait === false) return finishPremiumCollection();
+          var retryWpWaitYnQ = '경유지 대기 시간이 있는지 없는지 알려주세요.';
+          addBubble(retryWpWaitYnQ, 'bot', null, true);
+          return logBotMessage({ logText: retryWpWaitYnQ, needsAgent: false, requestedFeature: null });
+        }
+
+        if (pendingField === 'premium_waypoint_wait_minutes' && orderCategory === 'premium') {
+          var wpWaitMins = flowApi.parseWaitMinutes(text);
+          if (wpWaitMins === null) {
+            var retryWpWaitMinQ = '대기시간을 다시 알려주세요. (예: 1시간 30분, 30분이상)';
+            addBubble(retryWpWaitMinQ, 'bot', null, true);
+            return logBotMessage({ logText: retryWpWaitMinQ, needsAgent: false, requestedFeature: null });
+          }
+          if (wpWaitMins >= 10) {
+            var feeNotice1 = '대기 시간이 10분 이상이면 대기 요금이 발생합니다.';
+            addBubble(feeNotice1, 'bot');
+            logBotMessage({ logText: feeNotice1, needsAgent: false, requestedFeature: null });
+          }
+          if (wpWaitMins >= 30) {
+            var feeNotice2 = '30분 이상 대기시간 요금은 추후 별도 안내드립니다.';
+            addBubble(feeNotice2, 'bot');
+            logBotMessage({ logText: feeNotice2, needsAgent: false, requestedFeature: null });
+          }
+          return finishPremiumCollection();
+        }
+        // ---- /프리미엄 로컬 파싱 인터셉트 끝 ----
 
         if (handleFareInquiryPendingReply(text)) return null;
         // 명시적인 "상담원 연결" 요청은 Gemini 분류를 거치지 않고 바로 처리한다 — 이 요청만큼은
@@ -2856,7 +3077,8 @@
           maybeOfferForFrustration();
           return;
         }
-        handleOrderIntent(data, text).then(function (result) { logBotMessage(result); });
+        // 위 extractAndProcess 경로와 동일한 이유로 Promise.resolve()로 감싼다.
+        Promise.resolve(handleOrderIntent(data, text)).then(function (result) { logBotMessage(result); });
       })
       .catch(function (err) {
         hideThinkingBubble();
