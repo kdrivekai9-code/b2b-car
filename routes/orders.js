@@ -3,7 +3,7 @@ const db = require('../db');
 const { requireAuth, scopeFilter, getSessionProblem } = require('../middleware/auth');
 const asyncHandler = require('../middleware/asyncHandler');
 const { ORDER_STATUSES } = require('../config');
-const { getEffectivePaymentMethods, getEffectiveStatuses, checkOperatingHours, calculateFareWithFerry } = require('../lib/branchPolicy');
+const { getEffectivePaymentMethods, getEffectiveStatuses, checkOperatingHours, calculateFareWithFerry, calculatePremiumFare } = require('../lib/branchPolicy');
 const { notify } = require('../lib/push');
 const { kstNow } = require('../lib/period');
 const { parseIntakeText } = require('../lib/aiIntakeParser');
@@ -556,6 +556,17 @@ router.post('/ai-intake/classify-reply', asyncHandler(async (req, res) => {
     console.error('단계 응답 분류 실패:', e.message);
     res.json({ action: 'unclear' });
   }
+}));
+
+// 프리미엄/일일기사 시간 구간 기반 요금 미리보기
+router.get('/premium-fare-preview', requireAuth, asyncHandler(async (req, res) => {
+  const branchId = req.query.branch_id || null;
+  const hoursBracket = req.query.hours_bracket || '';
+  const HOURS_MAP = { within_4h: 4, within_8h: 8, over_8h: 10 };
+  const hours = HOURS_MAP[hoursBracket];
+  if (!hours) return res.json({ enabled: false });
+  const result = await calculatePremiumFare(branchId, hours);
+  res.json(result);
 }));
 
 router.get('/fare-preview', asyncHandler(async (req, res) => {

@@ -1703,6 +1703,56 @@
     if (data.origin_detail_address) setField('origin_detail_address', data.origin_detail_address);
     if (data.destination_detail_address) setField('destination_detail_address', data.destination_detail_address);
 
+    // ---- 일일기사 전용 pendingField 처리 ----
+    // 경유지 주소 답변: Gemini가 파싱한 주소를 DOM 폼에 추가하고 대기시간 질문으로 전환
+    if (orderCategory !== 'dispatch' && pendingField && /^waypoint_address_\d+$/.test(pendingField)) {
+      var wpAddr = data.waypointAddress || data.originAddress || null;
+      if (wpAddr) {
+        waypointsList[currentWaypointAddrIdx] = waypointsList[currentWaypointAddrIdx] || {};
+        waypointsList[currentWaypointAddrIdx].address = wpAddr;
+        if (addWaypointBtn) {
+          addWaypointBtn.click();
+          var wpRows = document.querySelectorAll('#waypointsWrap .waypoint-row');
+          var wpRow = wpRows[wpRows.length - 1];
+          if (wpRow) {
+            var wpSlot = wpRow.dataset.slot;
+            var wpAddrEl = document.getElementById(wpSlot + '_address');
+            if (wpAddrEl) wpAddrEl.value = wpAddr;
+            return validateAddressField(wpSlot + '_address', '경유지 주소').then(function () {
+              setPendingField('waypoint_wait_yn');
+              var wq = '이 경유지에서 대기 시간이 있으신가요?';
+              sayBot(wq);
+              return { logText: wq, needsAgent: false, requestedFeature: null };
+            });
+          }
+        }
+        setPendingField('waypoint_wait_yn');
+        var wq2 = '이 경유지에서 대기 시간이 있으신가요?';
+        sayBot(wq2);
+        return { logText: wq2, needsAgent: false, requestedFeature: null };
+      }
+      var retryWpQ = '경유지 주소를 다시 알려주세요.';
+      sayBot(retryWpQ);
+      return { logText: retryWpQ, needsAgent: false, requestedFeature: null };
+    }
+
+    // 최종 목적지 답변(왕복 일일기사)
+    if (orderCategory === 'daily_driver' && pendingField === 'final_destination_address') {
+      var finalAddr = data.destinationAddress || data.waypointAddress || null;
+      if (finalAddr) {
+        var fdEl = document.getElementById('final_destination_address');
+        if (fdEl) fdEl.value = finalAddr;
+        setPendingField('memo_customer');
+        var fdMemoQ = '기사 전달사항이 있으시면 알려주세요? (없으면 "없어"라고 답해주세요)';
+        sayBot(finalAddr + '(으)로 최종 목적지가 확인되었습니다.\n' + fdMemoQ);
+        return { logText: fdMemoQ, needsAgent: false, requestedFeature: null };
+      }
+      var retryFdQ = '최종 목적지 주소를 다시 알려주세요.';
+      sayBot(retryFdQ);
+      return { logText: retryFdQ, needsAgent: false, requestedFeature: null };
+    }
+    // ---- /일일기사 전용 처리 끝 ----
+
     // 오더유형 안내(및 그와 함께 온 예약일시)와 요청사항 확인은 다른 필드들과 마찬가지로
     // runValidationChain에 태워서, 분석되는 순서대로 하나씩 말풍선이 나타나게 한다(한꺼번에 표시 X).
     var tasks = [];
