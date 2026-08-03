@@ -227,6 +227,19 @@ export default function IntakeMiniForm({ chatSessionId, branches, groups, paymen
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.reservation_basis, state.reservedDateYear, state.reservedDateMonth, state.reservedDateDay, state.reservedTimeHour, state.reservedTimeMinute, routeInfo.durationSec]);
 
+  // 고객이 AI 접수 챗봇에서 계속 답변하면 CardBoard가 접수 초안을 다시 불러와 order prop을
+  // 갱신한다(handleNewCustomerMessage) — 세션을 다시 선택한 게 아니라 컴포넌트가 리마운트되지
+  // 않으므로, 여기서 최신 값을 상태에 반영한다. 주소는 검색/좌표확정이 얽혀있어 자동 덮어쓰기
+  // 대상에서 뺐고, 상담원이 이미 손댔을 수 있는 값을 무조건 덮지 않도록 폼이 아직 비어있거나
+  // 챗봇 쪽 값이 더 최신(다른 값)일 때만 반영한다.
+  useEffect(() => {
+    if (order.origin_contact && order.origin_contact !== state.origin_contact) setField('origin_contact', order.origin_contact);
+    if (order.destination_contact && order.destination_contact !== state.destination_contact) setField('destination_contact', order.destination_contact);
+    if (order.memo_customer && order.memo_customer !== state.memo_customer) setField('memo_customer', order.memo_customer);
+    if (order.fare_amount && String(order.fare_amount) !== String(state.fare_amount)) setField('fare_amount', order.fare_amount);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [order.origin_contact, order.destination_contact, order.memo_customer, order.fare_amount]);
+
   function handleVehicleTypeChange(value) {
     setField('vehicle_type', value);
     clearTimeout(vehicleTypeDebounceRef.current);

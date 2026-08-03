@@ -84,6 +84,7 @@ export default function SessionViewer({
   autoLoadAll = false,
   onStatusChange,
   onDeleted,
+  onNewMessage,
   extraActions,
 }) {
   const [messages, setMessages] = useState([]);
@@ -99,6 +100,8 @@ export default function SessionViewer({
   const streamRef = useRef(null);
   const messagesElRef = useRef(null);
   const sessionIdRef = useRef(null);
+  const onNewMessageRef = useRef(onNewMessage);
+  onNewMessageRef.current = onNewMessage;
 
   function scrollToBottom() {
     const el = messagesElRef.current;
@@ -123,6 +126,10 @@ export default function SessionViewer({
       knownMessageIdsRef.current.add(payload.id);
       setMessages((prev) => [...prev, payload]);
       requestAnimationFrame(scrollToBottom);
+      // 고객이 AI 접수 챗봇에서 계속 답변하면 chat_sessions.draft_json이 갱신되는데, 접수
+      // 마무리 패널(IntakeMiniForm)은 세션 선택 시 한 번만 불러오므로 새 메시지가 올 때마다
+      // 호출부(CardBoard)가 draft를 다시 조회해 반영할 수 있도록 신호를 준다.
+      if (payload.sender === 'user' && onNewMessageRef.current) onNewMessageRef.current(payload);
     };
     streamRef.current = es;
   }

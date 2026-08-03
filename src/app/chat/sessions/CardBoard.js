@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import SessionViewer, { STATUS_LABEL, fetchJson } from './SessionViewer';
 import IntakeMiniForm from './IntakeMiniForm';
 
@@ -35,6 +35,9 @@ export default function CardBoard({ initialSessions, initialOnlineAgents, curren
   const [orderMasterData, setOrderMasterData] = useState(null); // branches/groups/paymentMethods/favorites (한 번만 fetch)
   const [intakePrefill, setIntakePrefill] = useState(null);
   const [intakeLoading, setIntakeLoading] = useState(false);
+  const intakeRefreshTimerRef = useRef(null);
+  const selectedIdRef = useRef(null);
+  selectedIdRef.current = selected ? selected.id : null;
 
   useEffect(() => {
     function onNeedsCount(e) {
@@ -78,6 +81,25 @@ export default function CardBoard({ initialSessions, initialOnlineAgents, curren
       })
       .catch(() => setIntakePrefill({}))
       .finally(() => setIntakeLoading(false));
+  }
+
+  // 고객이 AI 접수 챗봇에서 계속 답변하면 chat_sessions.draft_json이 바뀌는데, 접수 마무리
+  // 패널은 세션을 선택한 시점에 한 번만 로드해서 이후 답변(연락처/요청사항/요금 등)이 반영되지
+  // 않았다 — SessionViewer가 새 고객 메시지를 받을 때마다(onNewMessage) 초안을 조용히
+  // 다시 불러와 갱신한다(로딩 상태로 폼을 가리지 않음, 여러 메시지가 연달아 와도 한 번만
+  // 반영되도록 짧게 디바운스).
+  function handleNewCustomerMessage() {
+    if (!intakeEnabled || !selected) return;
+    const sessionId = selected.id;
+    clearTimeout(intakeRefreshTimerRef.current);
+    intakeRefreshTimerRef.current = setTimeout(() => {
+      fetchJson(`/chat/sessions/${sessionId}/intake-order`)
+        .then((intake) => {
+          if (selectedIdRef.current !== sessionId) return; // 그 사이 다른 세션으로 전환됨
+          setIntakePrefill((intake && intake.intakeOrder) || {});
+        })
+        .catch(() => {});
+    }, 600);
   }
 
   function handleStatusChange(patch) {
@@ -197,6 +219,7 @@ export default function CardBoard({ initialSessions, initialOnlineAgents, curren
                 currentUser={currentUser}
                 onStatusChange={handleStatusChange}
                 onDeleted={handleDeleted}
+                onNewMessage={handleNewCustomerMessage}
                 extraActions={selected && (
                   <>
                     <a className="btn small" href={`/chat/sessions/${selected.id}`}>상세 페이지 열기</a>
