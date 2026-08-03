@@ -6,8 +6,8 @@ import IntakeMiniForm from './IntakeMiniForm';
 
 // public/js/chat-session-cards.js(1111줄)를 React로 이식 — 상담 카드뷰의 핵심 화면.
 // 메시지/SSE/답장/담당지정(self)/삭제는 SessionViewer.js(슬라이스 2에서 상세페이지와
-// 공유하도록 추출)가 담당하고, 이 파일은 좌측 카드 목록 + 상단 헤더 + 새 상담 업데이트
-// 알림 + "접수 마무리" 패널(슬라이스 3)을 소유한다.
+// 공유하도록 추출)가 담당하고, 이 파일은 좌측 카드 목록(신규/변경 시 자동 갱신) + 상단
+// 헤더 + "접수 마무리" 패널(슬라이스 3)을 소유한다.
 //
 // "접수 마무리"(임베드 오더등록 폼) — legacy와 동일하게 대화창 옆에 상시 2단으로 나란히
 // 띄운다(.chat-admin-viewer-shell의 공유 2열 그리드, style.css). 폼 자체도 /orders/new의
@@ -23,29 +23,37 @@ import IntakeMiniForm from './IntakeMiniForm';
 // 커스텀 이벤트를 재사용해 "새 상담 업데이트 보기" 버튼만 띄우고 전체 새로고침으로
 // 반영했다(SSE 이중연결 방지). 이 컴포넌트도 같은 이벤트를 재사용하되, 전체 페이지
 // 리로드 대신 카드 목록만 다시 fetch한다 — 현재 선택된 대화가 끊기지 않는 개선.
+// 버튼을 다시 눌러야 반영되는 게 불편하다는 피드백으로, 신호가 오면 목록만 자동으로
+// 다시 fetch한다(짧은 시간에 여러 신호가 연달아 오면 debounce로 한 번만 반영). 선택된
+// 대화(selected)는 이 fetch로 건드리지 않으므로 답장 입력 중이어도 끊기지 않는다.
 
 const STATUS_BADGE = { bot: 'gray', needs_agent: 'red', agent_active: 'blue', closed: 'dark' };
 
 export default function CardBoard({ initialSessions, initialOnlineAgents, currentUser, intakeEnabled }) {
   const [sessions, setSessions] = useState(initialSessions || []);
   const [onlineAgents, setOnlineAgents] = useState(initialOnlineAgents || []);
-  const [showRefreshBtn, setShowRefreshBtn] = useState(false);
   // { id, status, assignedAgentId, assignedAgentName, userName, userRole, userPhone, requestedFeature, updatedAt }
   const [selected, setSelected] = useState(null);
   const [orderMasterData, setOrderMasterData] = useState(null); // branches/groups/paymentMethods/favorites (한 번만 fetch)
   const [intakePrefill, setIntakePrefill] = useState(null);
   const [intakeLoading, setIntakeLoading] = useState(false);
   const intakeRefreshTimerRef = useRef(null);
+  const listRefreshTimerRef = useRef(null);
   const selectedIdRef = useRef(null);
   selectedIdRef.current = selected ? selected.id : null;
 
   useEffect(() => {
     function onNeedsCount(e) {
       if (e.detail && e.detail.initial) return;
-      setShowRefreshBtn(true);
+      clearTimeout(listRefreshTimerRef.current);
+      listRefreshTimerRef.current = setTimeout(refreshList, 400);
     }
     window.addEventListener('agent-needs-count', onNeedsCount);
-    return () => window.removeEventListener('agent-needs-count', onNeedsCount);
+    return () => {
+      window.removeEventListener('agent-needs-count', onNeedsCount);
+      clearTimeout(listRefreshTimerRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // legacy(public/js/chat-session-cards.js L1061)는 페이지 진입 시 첫 번째 카드를 자동으로
@@ -134,7 +142,6 @@ export default function CardBoard({ initialSessions, initialOnlineAgents, curren
       .then((data) => {
         setSessions(data.sessions || []);
         setOnlineAgents(data.onlineAgents || []);
-        setShowRefreshBtn(false);
       })
       .catch(() => {});
   }
@@ -255,17 +262,6 @@ export default function CardBoard({ initialSessions, initialOnlineAgents, curren
           </div>
         </div>
       </div>
-
-      {showRefreshBtn && (
-        <button
-          type="button"
-          className="btn"
-          style={{ position: 'fixed', right: 20, bottom: 20, zIndex: 1000 }}
-          onClick={refreshList}
-        >
-          새 상담 업데이트 보기
-        </button>
-      )}
     </>
   );
 }

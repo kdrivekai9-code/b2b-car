@@ -9,7 +9,7 @@ const { kstNow } = require('../lib/period');
 const { parseIntakeText } = require('../lib/aiIntakeParser');
 const { classifyAndExtract, classifyPhaseReply } = require('../lib/hybridChat');
 const { searchKnowledgeBase } = require('../lib/knowledgeSearch');
-const { broadcastMessage, broadcastSessionListChanged } = require('../lib/realtimeChat');
+const { broadcastMessage, broadcastSessionListChanged, broadcastOrderListChanged, openOrderListStream, closeChannel } = require('../lib/realtimeChat');
 const { splitTypeAndPlate } = require('../lib/vehicleInfo');
 
 function defaultReservedDateTime() {
@@ -71,6 +71,22 @@ function broadcastMessageAsync(sessionId, message) {
 
 function broadcastSessionListChangedAsync(payload) {
   broadcastSessionListChanged(payload).catch((e) => console.error('오더 등록 후 상담 목록 갱신 신호 실패:', e.message));
+}
+
+// 오더 리스트 화면(고객/관리자 공용) 실시간 갱신 신호 — fire-and-forget(응답을 기다리게 하지 않음).
+// 생성/수정/상태변경/배정/VOC 등 리스트에 영향을 줄 수 있는 지점마다 호출한다.
+function broadcastOrderListChangedAsync() {
+  broadcastOrderListChanged().catch((e) => console.error('오더 목록 갱신 신호 실패:', e.message));
+}
+
+function sseHeaders(res) {
+  res.set({
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  res.flushHeaders();
 }
 
 const ORDERS_PAGE_SIZE = 50;
@@ -169,6 +185,41 @@ router.get('/data.json', asyncHandler(async (req, res) => {
   // EJS 버전은 res.locals.currentUser(서버 전역)로 지사 필터 노출 여부를 판단한다 —
   // JSON 응답에는 그 값이 없으므로 role만 별도로 실어준다(다른 정보는 안 실음).
   res.json({ ...data, currentUserRole: req.session.user.role, currentUser: req.session.user });
+}));
+
+// 오더 리스트 화면(고객/관리자 공용) 실시간 갱신 — 상담 세션 목록(routes/chat.js의
+// /agent-presence/stream)과 동일한 패턴: Supabase Realtime Broadcast를 서버가 SSE로
+// 중계한다. 페이로드 없이 "뭔가 바뀌었다"는 신호만 보내고, 브라우저는 이미 인증/스코프가
+// 적용된 자기 화면의 /orders/data.json을 다시 불러온다 — 그래서 전체 공용 채널 하나만으로도
+// 고객마다 자기 오더만 다시 보이는 게 안전하게 유지된다.
+// 반드시 아래 '/:id' 와일드카드 라우트보다 먼저 등록해야 한다(그렇지 않으면 '/stream'
+// 요청이 '/:id'에 매칭되어 "stream"이 오더 id로 잘못 쓰인다 — chat.js의 agent-presence/stream과
+// 같은 이유로 겪었던 버그를 여기서도 피한다).
+router.get('/stream', asyncHandler(async (req, res) => {
+  sseHeaders(res);
+  res.write(':\n\n');
+
+  let cleaned = false;
+  let keepAlive = null;
+  let streamHandle = null;
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
+    if (keepAlive) clearInterval(keepAlive);
+    if (streamHandle) closeChannel(streamHandle);
+  };
+  req.on('close', cleanup);
+  res.on('close', cleanup);
+
+  keepAlive = setInterval(() => {
+    if (res.writableEnded || res.destroyed || !res.writable) return cleanup();
+    try { res.write(':\n\n'); } catch (e) { cleanup(); }
+  }, 20000);
+
+  streamHandle = openOrderListStream(() => {
+    if (cleaned) return;
+    try { res.write(`data: ${JSON.stringify({ type: 'changed' })}\n\n`); } catch (e) { cleanup(); }
+  });
 }));
 
 // EJS 생성폼 라우트와 Next.js Stage 2 프리뷰(GET /orders/new/data.json)가 완전히 동일한
@@ -962,6 +1013,7 @@ router.post('/', asyncHandler(async (req, res) => {
     console.error('오더 등록 후 상담 세션 상태 연동 실패:', e.message);
   }
 
+  broadcastOrderListChangedAsync();
   if (wantsJson) return res.json({ orderId: newId, oid });
   res.redirect('/orders/' + newId);
 }));
@@ -1270,6 +1322,7 @@ router.post('/:id', asyncHandler(async (req, res) => {
     }
   }
 
+  broadcastOrderListChangedAsync();
   if (wantsJson) return res.json({ orderId: Number(req.params.id), oid: order.oid, legsReset });
   res.redirect('/orders/' + req.params.id + (legsReset ? '?notice=legs_reset' : ''));
 }));
@@ -1282,6 +1335,7 @@ router.post('/:id/admin-memo', asyncHandler(async (req, res) => {
     `UPDATE orders SET memo_admin = ?, updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') WHERE id = ?`,
     [memo_admin || null, req.params.id]
   );
+  broadcastOrderListChangedAsync();
   res.redirect('/orders/' + req.params.id);
 }));
 
@@ -1308,6 +1362,7 @@ router.post('/:id/assign-self', asyncHandler(async (req, res) => {
     await db.run('UPDATE orders SET assigned_agent_id = ? WHERE id = ?', [u.id, req.params.id]);
   }
 
+  broadcastOrderListChangedAsync();
   res.redirect('/orders/' + req.params.id);
 }));
 
@@ -1327,6 +1382,7 @@ router.post('/:id/voc', asyncHandler(async (req, res) => {
       req.params.id,
     ]
   );
+  broadcastOrderListChangedAsync();
   res.redirect('/orders/' + req.params.id);
 }));
 
@@ -1410,6 +1466,7 @@ router.post('/:id/driver', asyncHandler(async (req, res) => {
     } catch (e) { console.error('알림 발송 실패:', e.message); }
   }
 
+  broadcastOrderListChangedAsync();
   res.redirect('/orders/' + req.params.id);
 }));
 
@@ -1439,6 +1496,7 @@ router.post('/:id/legs/drivers', asyncHandler(async (req, res) => {
     } catch (e) { console.error('알림 발송 실패:', e.message); }
   }
 
+  broadcastOrderListChangedAsync();
   res.redirect('/orders/' + req.params.id);
 }));
 
@@ -1455,6 +1513,7 @@ router.post('/:id/order-type', requireRole('admin'), asyncHandler(async (req, re
      VALUES (?, ?, NULL, NULL, ?)`,
     [order.id, req.session.user.id, `오더 타입 변경: ${newType}`]
   );
+  broadcastOrderListChangedAsync();
   if (req.get('X-Requested-With') === 'fetch') return res.json({ ok: true });
   res.redirect('/orders/' + req.params.id);
 }));
@@ -1481,6 +1540,7 @@ router.post('/:id/status', asyncHandler(async (req, res) => {
     });
   } catch (e) { console.error('알림 발송 실패:', e.message); }
 
+  broadcastOrderListChangedAsync();
   res.redirect('/orders/' + req.params.id);
 }));
 
@@ -1518,6 +1578,7 @@ router.post('/:id/fare', asyncHandler(async (req, res) => {
       );
     }
   }
+  broadcastOrderListChangedAsync();
   res.redirect('/orders/' + req.params.id);
 }));
 

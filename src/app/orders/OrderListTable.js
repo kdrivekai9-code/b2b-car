@@ -1,12 +1,19 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 
 // public/js/order-list-columns.js를 React로 이식 — 서버에 저장하지 않고 이 브라우저
 // (localStorage)에만 저장한다는 계약과 저장 키(STORAGE_KEY/WIDTH_KEY/DENSITY_KEY)를
 // legacy와 그대로 맞춰서, 이미 legacy 화면을 쓰던 사용자의 설정이 그대로 이어지게 한다.
 // DOM을 직접 옮기는 대신(legacy 방식) 표시/순서/너비/정렬 전부 React state로 관리하고
 // 그 상태에 따라 매번 다시 그린다.
+//
+// 실시간 갱신: 오더 생성/상태변경/배정 등은 서버(routes/orders.js)가 /orders/stream으로
+// "뭔가 바뀌었다" 신호만 보낸다(상담 카드뷰의 agent-needs-count와 동일한 패턴). 여기서는
+// fetch로 데이터를 직접 다시 받는 대신 router.refresh()로 부모 서버 컴포넌트(page.js)의
+// /orders/data.json 재조회를 트리거한다 — 필터/페이지네이션은 URL에 이미 있으니 그대로
+// 유지되고, 이 컴포넌트의 클라이언트 상태(컬럼/정렬/펼침 등)는 리마운트 없이 보존된다.
 
 const STATUS_COLORS = {
   '오더등록': 'gray', '대기': 'gray', '대기(확인중)': 'amber', '접수': 'blue',
@@ -96,6 +103,7 @@ function sortValue(o, key) {
 }
 
 export default function OrderListTable({ orders, filters, statusSummary }) {
+  const router = useRouter();
   const [columnOrder, setColumnOrder] = useState(DEFAULT_ORDER);
   const [visibleColumns, setVisibleColumns] = useState(DEFAULT_VISIBLE);
   const [widths, setWidths] = useState({});
@@ -103,6 +111,7 @@ export default function OrderListTable({ orders, filters, statusSummary }) {
   const [panelOpen, setPanelOpen] = useState(false);
   const [sortState, setSortState] = useState({ key: null, dir: null });
   const [dragKey, setDragKey] = useState(null);
+  const refreshTimerRef = useRef(null);
 
   // localStorage는 클라이언트에만 있으므로 마운트 후에 불러온다 — legacy도 서버 렌더 HTML이
   // 먼저 기본값으로 뜬 다음 JS가 저장된 설정을 적용했으니 동일한 동작(잠깐의 기본값 표시 후
@@ -113,6 +122,30 @@ export default function OrderListTable({ orders, filters, statusSummary }) {
     setVisibleColumns(state.visible);
     try { setWidths(JSON.parse(localStorage.getItem(WIDTH_KEY)) || {}); } catch { /* keep default */ }
     setDensity(localStorage.getItem(DENSITY_KEY) || 'normal');
+  }, []);
+
+  // 실시간 갱신: /orders/stream 신호가 오면 목록을 다시 조회한다. 짧은 시간에 신호가
+  // 연달아 오면(연속 상태변경 등) debounce로 한 번만 반영한다. 재연결(onopen) 시에도 한 번
+  // 새로고침해서, 연결이 끊겨 있던 동안 놓친 변경을 따라잡는다 — 단, 최초 연결(마운트 직후)은
+  // 이미 서버 렌더 데이터가 최신이므로 건너뛴다.
+  useEffect(() => {
+    if (!window.EventSource) return;
+    let openedOnce = false;
+    const scheduleRefresh = () => {
+      clearTimeout(refreshTimerRef.current);
+      refreshTimerRef.current = setTimeout(() => router.refresh(), 400);
+    };
+    const es = new EventSource('/orders/stream');
+    es.onmessage = scheduleRefresh;
+    es.onopen = () => {
+      if (!openedOnce) { openedOnce = true; return; }
+      scheduleRefresh();
+    };
+    return () => {
+      es.close();
+      clearTimeout(refreshTimerRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function saveColumnState(order, visible) {
