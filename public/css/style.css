@@ -300,6 +300,11 @@ form .field.full{flex-basis:100%;}
   .ai-intake-grid > .card,.ai-intake-side{min-height:0;}
   .ai-chat-card{position:sticky;top:12px;}
   .ai-intake-scroll-panel{height:calc(100vh - 120px);overflow-y:auto;overscroll-behavior:contain;}
+  /* 오더 접수 내용 칼럼은 독립 스크롤 대상에서 제외 — 자체 높이 제한 없이 내용 전체를
+     보여주고(메모 등 하단 필드가 잘려서 스크롤해야 보이던 문제), 페이지 자체가 그만큼
+     길어져서 스크롤된다. 챗봇 칼럼(.ai-chat-card)은 그대로 고정 높이 + 자체 스크롤 유지 —
+     position:sticky라 페이지가 스크롤되는 동안에도 화면에 계속 붙어있는다. */
+  .ai-intake-order-card.ai-intake-scroll-panel{height:auto;overflow-y:visible;}
   .ai-intake-order-card{padding-right:16px;}
   .ai-intake-order-card.ai-intake-scroll-panel{scrollbar-width:thin;scrollbar-color:#c2cbda #eef1f6;}
   .ai-intake-order-card.ai-intake-scroll-panel::-webkit-scrollbar{width:10px;}

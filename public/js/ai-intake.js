@@ -492,6 +492,22 @@
     if (parts[1]) minuteSelect.value = parts[1];
   }
 
+  // 위 시간 동기화와 같은 이유로 날짜(연/월/일) 드롭다운도 맞춰준다 — 이게 없어서 챗봇이
+  // reserved_date 히든 필드는 정확히 채워도(예: 내일 날짜) 화면의 연/월/일 select는 페이지
+  // 로드 시점의 기본값(오늘)에 그대로 머물러 있는 버그가 있었다.
+  function syncReservedDateSelectsFromHidden() {
+    var hidden = document.getElementById('reserved_date');
+    var yearSelect = document.getElementById('reserved_date_year');
+    var monthSelect = document.getElementById('reserved_date_month');
+    var daySelect = document.getElementById('reserved_date_day');
+    if (!hidden || !yearSelect || !monthSelect || !daySelect || !hidden.value) return;
+    var match = String(hidden.value).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) return;
+    if (yearSelect.querySelector('option[value="' + match[1] + '"]')) yearSelect.value = match[1];
+    if (monthSelect.querySelector('option[value="' + match[2] + '"]')) monthSelect.value = match[2];
+    if (daySelect.querySelector('option[value="' + match[3] + '"]')) daySelect.value = match[3];
+  }
+
   function kindForAddressId(id) {
     if (id === 'origin_address') return 'origin';
     if (id === 'destination_address') return 'destination';
@@ -1511,6 +1527,7 @@
     });
     if (window.__updateVehicleTypeRequirement) window.__updateVehicleTypeRequirement();
     syncReservedTimeSelectsFromHidden();
+    syncReservedDateSelectsFromHidden();
     if (draft.reservationBasis === 'delivery') {
       var deliveryRadio = document.getElementById('reservation_basis_delivery');
       if (deliveryRadio) { deliveryRadio.checked = true; deliveryRadio.dispatchEvent(new Event('change', { bubbles: true })); }
@@ -1674,6 +1691,7 @@
     setField('reserved_date', data.reserved_date);
     setField('reserved_time', data.reserved_time ? roundToTenMinutes(data.reserved_time) : data.reserved_time);
     syncReservedTimeSelectsFromHidden();
+    syncReservedDateSelectsFromHidden();
     reservedDateTimeConfirmed = true;
 
     var now = new Date();
@@ -1763,6 +1781,7 @@
     setField('reserved_date', data.reserved_date);
     setField('reserved_time', data.reserved_time ? roundToTenMinutes(data.reserved_time) : data.reserved_time);
     syncReservedTimeSelectsFromHidden();
+    syncReservedDateSelectsFromHidden();
     if (dateTimeChanged) applyReservationBasisByText(sourceText);
     setField('memo_customer', data.memo_customer);
     setField('memo_billing', data.memo_billing);
