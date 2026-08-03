@@ -23,6 +23,14 @@ router.get('/', asyncHandler(async (req, res) => {
 
 // 카테고리 관리 — 아래 '/:id', '/:id/edit' 라우트보다 반드시 먼저 등록해야
 // '/categories'가 :id 파라미터로 잘못 매칭되지 않는다.
+router.get('/categories/data.json', asyncHandler(async (req, res) => {
+  const categories = await db.all(`
+    SELECT c.*, (SELECT COUNT(*) FROM knowledge_base k WHERE k.category = c.name) AS entry_count
+    FROM knowledge_categories c ORDER BY c.name
+  `);
+  res.json({ currentUser: req.session.user, categories });
+}));
+
 router.get('/categories', asyncHandler(async (req, res) => {
   const categories = await db.all(`
     SELECT c.*, (SELECT COUNT(*) FROM knowledge_base k WHERE k.category = c.name) AS entry_count
@@ -51,6 +59,12 @@ router.post('/categories/:id/delete', asyncHandler(async (req, res) => {
   res.redirect('/knowledge-base/categories');
 }));
 
+router.get('/new/data.json', asyncHandler(async (req, res) => {
+  const categories = await db.all('SELECT * FROM knowledge_categories ORDER BY name');
+  const entry = req.query.category ? { category: req.query.category } : {};
+  res.json({ currentUser: req.session.user, entry, categories });
+}));
+
 router.get('/new', asyncHandler(async (req, res) => {
   const categories = await db.all('SELECT * FROM knowledge_categories ORDER BY name');
   const entry = req.query.category ? { category: req.query.category } : {};
@@ -73,6 +87,15 @@ router.post('/', asyncHandler(async (req, res) => {
       error: '임베딩 생성 중 오류가 발생했습니다: ' + e.message,
     });
   }
+}));
+
+router.get('/:id/edit/data.json', asyncHandler(async (req, res) => {
+  const [entry, categories] = await Promise.all([
+    db.get('SELECT * FROM knowledge_base WHERE id = ?', [req.params.id]),
+    db.all('SELECT * FROM knowledge_categories ORDER BY name'),
+  ]);
+  if (!entry) return res.status(404).json({ error: 'not_found' });
+  res.json({ currentUser: req.session.user, entry, categories });
 }));
 
 router.get('/:id/edit', asyncHandler(async (req, res) => {

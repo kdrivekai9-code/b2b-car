@@ -25,6 +25,11 @@ router.get('/', asyncHandler(async (req, res) => {
   res.render('groups/list', { title: '법인 관리', groups });
 }));
 
+router.get('/new/data.json', asyncHandler(async (req, res) => {
+  const branches = await db.all('SELECT * FROM branches WHERE status = ? ORDER BY name', ['active']);
+  res.json({ currentUser: req.session.user, branches });
+}));
+
 router.get('/new', asyncHandler(async (req, res) => {
   const branches = await db.all('SELECT * FROM branches WHERE status = ? ORDER BY name', ['active']);
   res.render('groups/form', { title: '법인 등록', group: {}, branches, mode: 'create' });
@@ -63,6 +68,15 @@ router.post('/', asyncHandler(async (req, res) => {
     ]
   );
   res.redirect('/groups');
+}));
+
+router.get('/:id/edit/data.json', asyncHandler(async (req, res) => {
+  const [group, branches] = await Promise.all([
+    db.get('SELECT * FROM groups_tbl WHERE id = ?', [req.params.id]),
+    db.all('SELECT * FROM branches ORDER BY name'),
+  ]);
+  if (!group) return res.status(404).json({ error: 'not_found' });
+  res.json({ currentUser: req.session.user, group, branches });
 }));
 
 router.get('/:id/edit', asyncHandler(async (req, res) => {
@@ -109,6 +123,26 @@ router.post('/:id', asyncHandler(async (req, res) => {
     ]
   );
   res.redirect('/groups');
+}));
+
+router.get('/:id/users/data.json', asyncHandler(async (req, res) => {
+  const [group, users] = await Promise.all([
+    db.get(`
+      SELECT g.*, b.name AS branch_name
+      FROM groups_tbl g
+      LEFT JOIN branches b ON b.id = g.branch_id
+      WHERE g.id = ?
+    `, [req.params.id]),
+    db.all(`
+      SELECT u.*, b.name AS branch_name
+      FROM users u
+      LEFT JOIN branches b ON b.id = u.branch_id
+      WHERE u.group_id = ?
+      ORDER BY u.id DESC
+    `, [req.params.id]),
+  ]);
+  if (!group) return res.status(404).json({ error: 'not_found' });
+  res.json({ currentUser: req.session.user, group, users });
 }));
 
 router.get('/:id/users', asyncHandler(async (req, res) => {

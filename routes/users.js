@@ -40,6 +40,14 @@ router.post('/:id/revoke-session', asyncHandler(async (req, res) => {
   res.redirect('/users');
 }));
 
+router.get('/new/data.json', asyncHandler(async (req, res) => {
+  const [branches, groups] = await Promise.all([
+    db.all("SELECT * FROM branches WHERE status='active' ORDER BY name"),
+    db.all('SELECT * FROM groups_tbl ORDER BY name'),
+  ]);
+  res.json({ currentUser: req.session.user, branches, groups });
+}));
+
 router.get('/new', asyncHandler(async (req, res) => {
   const [branches, groups] = await Promise.all([
     db.all("SELECT * FROM branches WHERE status='active' ORDER BY name"),
@@ -57,6 +65,16 @@ router.post('/', asyncHandler(async (req, res) => {
     [login_id, hash, name, phone, role, branch_id || null, group_id || null, role === 'client' ? grade : null]
   );
   res.redirect('/users');
+}));
+
+router.get('/:id/edit/data.json', asyncHandler(async (req, res) => {
+  const [user, branches, groups] = await Promise.all([
+    db.get('SELECT * FROM users WHERE id = ?', [req.params.id]),
+    db.all('SELECT * FROM branches ORDER BY name'),
+    db.all('SELECT * FROM groups_tbl ORDER BY name'),
+  ]);
+  if (!user) return res.status(404).json({ error: 'not_found' });
+  res.json({ currentUser: req.session.user, user, branches, groups });
 }));
 
 router.get('/:id/edit', asyncHandler(async (req, res) => {

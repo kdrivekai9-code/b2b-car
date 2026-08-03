@@ -24,6 +24,11 @@ router.get('/', asyncHandler(async (req, res) => {
   res.render('location_aliases/list', { title: '거점 별칭 관리', aliases });
 }));
 
+router.get('/new/data.json', asyncHandler(async (req, res) => {
+  const branches = await db.all('SELECT * FROM branches ORDER BY name');
+  res.json({ currentUser: req.session.user, branches });
+}));
+
 router.get('/new', asyncHandler(async (req, res) => {
   const branches = await db.all('SELECT * FROM branches ORDER BY name');
   res.render('location_aliases/form', { title: '거점 별칭 등록', alias: {}, branches, mode: 'create' });
@@ -36,6 +41,15 @@ router.post('/', asyncHandler(async (req, res) => {
     [branch_id, canonical_name, address, aliases || null]
   );
   res.redirect('/location-aliases');
+}));
+
+router.get('/:id/edit/data.json', asyncHandler(async (req, res) => {
+  const [alias, branches] = await Promise.all([
+    db.get('SELECT * FROM location_aliases WHERE id = ?', [req.params.id]),
+    db.all('SELECT * FROM branches ORDER BY name'),
+  ]);
+  if (!alias) return res.status(404).json({ error: 'not_found' });
+  res.json({ currentUser: req.session.user, alias, branches });
 }));
 
 router.get('/:id/edit', asyncHandler(async (req, res) => {

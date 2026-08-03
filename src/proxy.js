@@ -33,13 +33,21 @@ const PATH_FLAGS = {
   '/orders/new': 'NEXT_STAGE2_ORDER_FORM_ENABLED',
   '/orders/ai-intake': 'NEXT_STAGE3_AI_INTAKE_ENABLED',
   '/users': 'NEXT_USERS_ENABLED',
+  '/users/new': 'NEXT_USERS_ENABLED',
   '/drivers': 'NEXT_DRIVERS_ENABLED',
+  '/drivers/new': 'NEXT_DRIVERS_ENABLED',
   '/groups': 'NEXT_GROUPS_ENABLED',
+  '/groups/new': 'NEXT_GROUPS_ENABLED',
   '/branches': 'NEXT_BRANCHES_ENABLED',
   '/notices': 'NEXT_NOTICES_ENABLED',
+  '/notices/new': 'NEXT_NOTICES_ENABLED',
+  '/chat/guide': 'NEXT_CHAT_GUIDE_ENABLED',
   '/location-aliases': 'NEXT_LOCATION_ALIASES_ENABLED',
+  '/location-aliases/new': 'NEXT_LOCATION_ALIASES_ENABLED',
   '/settings': 'NEXT_SETTINGS_ENABLED',
   '/knowledge-base': 'NEXT_KNOWLEDGE_BASE_ENABLED',
+  '/knowledge-base/new': 'NEXT_KNOWLEDGE_BASE_ENABLED',
+  '/knowledge-base/categories': 'NEXT_KNOWLEDGE_BASE_ENABLED',
   '/faq': 'NEXT_FAQ_ENABLED',
   '/push/settings': 'NEXT_PUSH_SETTINGS_ENABLED',
   '/access-logs': 'NEXT_ACCESS_LOGS_ENABLED',
@@ -95,13 +103,44 @@ export function proxy(req) {
   // 패턴을 쓴다. 같은 접두사를 쓰는 /orders/new, /orders/data.json,
   // /orders/vehicle-type-suggest, /orders/fare-preview 등 고정 서브경로가 숫자 id로
   // 잘못 취급되지 않도록 명시적으로 숫자 한 세그먼트일 때만 대상으로 삼는다.
+  // 'new'는 반드시 제외해야 한다 — 제외하지 않으면 이 블록이 먼저 매치돼 버려서(캡처값
+  // "new"는 숫자가 아니므로) 무조건 toExpress()로 빠지고, 맨 아래 PATH_FLAGS['/orders/new']
+  // 검사(NEXT_STAGE2_ORDER_FORM_ENABLED)까지 도달하지 못한 채 항상 legacy로 가버리는
+  // 버그가 있었다(실제로 겪음 — 플래그를 켜도 /orders/new는 계속 legacy로 서빙됐다).
   const orderIdMatch = pathname.match(/^\/orders\/([^/]+)$/);
-  if (orderIdMatch) {
+  if (orderIdMatch && orderIdMatch[1] !== 'new') {
     const isNumericId = /^\d+$/.test(orderIdMatch[1]);
     if (isNumericId && process.env.NEXT_ORDER_DETAIL_EDIT_ENABLED === 'true') {
       return NextResponse.next();
     }
     return toExpress(req);
+  }
+
+  // /notices/:id(공지 상세) — 위와 같은 이유로 'new'를 제외한 숫자 한 세그먼트만 대상.
+  const noticeIdMatch = pathname.match(/^\/notices\/([^/]+)$/);
+  if (noticeIdMatch && noticeIdMatch[1] !== 'new') {
+    const isNumericId = /^\d+$/.test(noticeIdMatch[1]);
+    if (isNumericId && process.env.NEXT_NOTICES_ENABLED === 'true') {
+      return NextResponse.next();
+    }
+    return toExpress(req);
+  }
+
+  // 엔티티별 :id/edit, :id/users — 끝에 고정 세그먼트가 붙어 있어 /new 등 형제 정적
+  // 경로와 겹칠 일이 없으므로 숫자 여부만 확인한다.
+  const idSuffixRoutes = [
+    { re: /^\/location-aliases\/(\d+)\/edit$/, flag: 'NEXT_LOCATION_ALIASES_ENABLED' },
+    { re: /^\/drivers\/(\d+)\/edit$/, flag: 'NEXT_DRIVERS_ENABLED' },
+    { re: /^\/users\/(\d+)\/edit$/, flag: 'NEXT_USERS_ENABLED' },
+    { re: /^\/groups\/(\d+)\/edit$/, flag: 'NEXT_GROUPS_ENABLED' },
+    { re: /^\/groups\/(\d+)\/users$/, flag: 'NEXT_GROUPS_ENABLED' },
+    { re: /^\/knowledge-base\/(\d+)\/edit$/, flag: 'NEXT_KNOWLEDGE_BASE_ENABLED' },
+    { re: /^\/notices\/(\d+)\/edit$/, flag: 'NEXT_NOTICES_ENABLED' },
+  ];
+  for (const { re, flag } of idSuffixRoutes) {
+    if (re.test(pathname)) {
+      return process.env[flag] === 'true' ? NextResponse.next() : toExpress(req);
+    }
   }
 
   // /upload/:token — 공개 사진 업로드 페이지. 토큰은 임의 문자열(숫자 아님)이므로
@@ -125,4 +164,4 @@ export function proxy(req) {
 
 // Next's proxy bundler statically analyzes this export, so it's kept as a literal array
 // (a computed expression like Object.keys(PATH_FLAGS) may not be statically evaluable).
-export const config = { matcher: ['/', '/orders', '/inquiries', '/chat/sessions', '/chat/sessions/:id', '/orders/new', '/orders/ai-intake', '/orders/:id', '/users', '/drivers', '/groups', '/branches', '/notices', '/location-aliases', '/settings', '/knowledge-base', '/faq', '/push/settings', '/access-logs', '/login', '/ferry-fares', '/upload/:token'] };
+export const config = { matcher: ['/', '/orders', '/inquiries', '/chat/sessions', '/chat/sessions/:id', '/chat/guide', '/orders/new', '/orders/ai-intake', '/orders/:id', '/users', '/users/new', '/users/:id/edit', '/drivers', '/drivers/new', '/drivers/:id/edit', '/groups', '/groups/new', '/groups/:id/edit', '/groups/:id/users', '/branches', '/notices', '/notices/new', '/notices/:id', '/notices/:id/edit', '/location-aliases', '/location-aliases/new', '/location-aliases/:id/edit', '/settings', '/knowledge-base', '/knowledge-base/new', '/knowledge-base/categories', '/knowledge-base/:id/edit', '/faq', '/push/settings', '/access-logs', '/login', '/ferry-fares', '/upload/:token'] };

@@ -24,6 +24,11 @@ router.get('/', asyncHandler(async (req, res) => {
   res.render('drivers/list', { title: '기사 관리', drivers });
 }));
 
+router.get('/new/data.json', asyncHandler(async (req, res) => {
+  const branches = await db.all('SELECT * FROM branches ORDER BY name');
+  res.json({ currentUser: req.session.user, branches });
+}));
+
 router.get('/new', asyncHandler(async (req, res) => {
   const branches = await db.all('SELECT * FROM branches ORDER BY name');
   res.render('drivers/form', { title: '기사 등록', driver: {}, branches, mode: 'create' });
@@ -33,6 +38,15 @@ router.post('/', asyncHandler(async (req, res) => {
   const { branch_id, name, phone } = req.body;
   await db.run(`INSERT INTO drivers (branch_id, name, phone, status) VALUES (?, ?, ?, 'active')`, [branch_id, name, phone || null]);
   res.redirect('/drivers');
+}));
+
+router.get('/:id/edit/data.json', asyncHandler(async (req, res) => {
+  const [driver, branches] = await Promise.all([
+    db.get('SELECT * FROM drivers WHERE id = ?', [req.params.id]),
+    db.all('SELECT * FROM branches ORDER BY name'),
+  ]);
+  if (!driver) return res.status(404).json({ error: 'not_found' });
+  res.json({ currentUser: req.session.user, driver, branches });
 }));
 
 router.get('/:id/edit', asyncHandler(async (req, res) => {
