@@ -46,6 +46,8 @@ const NUMERIC_COLUMNS = ['oid', 'fare', 'photo'];
 const STORAGE_KEY = 'orderList.columns.v1';
 const WIDTH_KEY = 'orderList.widths.v1';
 const DENSITY_KEY = 'orderList.density.v1';
+// 새로 등록/변경된 오더 행을 강조해서 보여주는 시간(사용자 확정 사항: 5초)
+const HIGHLIGHT_MS = 5000;
 
 function loadColumnState() {
   let saved = null;
@@ -112,6 +114,10 @@ export default function OrderListTable({ orders, filters, statusSummary }) {
   const [sortState, setSortState] = useState({ key: null, dir: null });
   const [dragKey, setDragKey] = useState(null);
   const refreshTimerRef = useRef(null);
+  // seenRef: 직전에 화면에 있던 오더의 id -> updated_at 스냅샷. null이면 아직 최초 렌더 전.
+  const seenRef = useRef(null);
+  const highlightTimersRef = useRef(new Map());
+  const [highlightIds, setHighlightIds] = useState(() => new Set());
 
   // localStorage는 클라이언트에만 있으므로 마운트 후에 불러온다 — legacy도 서버 렌더 HTML이
   // 먼저 기본값으로 뜬 다음 JS가 저장된 설정을 적용했으니 동일한 동작(잠깐의 기본값 표시 후
@@ -147,6 +153,58 @@ export default function OrderListTable({ orders, filters, statusSummary }) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 새로 등록되거나 내용이 바뀐 오더 행을 5초간 배경색으로 강조한다 — SSE(router.refresh())로
+  // 목록이 조용히 갱신되면 무엇이 새로 들어왔는지 알아채기 어려웠다. 직전 스냅샷(id -> updated_at)과
+  // 비교해서 새 id이거나 updated_at이 달라진 행만 고른다. 최초 렌더는 전체가 "새 것"이 되어버리니
+  // 스냅샷만 기록하고 강조하지 않는다.
+  useEffect(() => {
+    const snapshot = new Map(orders.map((o) => [o.id, o.updated_at || '']));
+    if (seenRef.current === null) {
+      seenRef.current = snapshot;
+      return;
+    }
+    const prev = seenRef.current;
+    const changedIds = orders.filter((o) => prev.get(o.id) !== (o.updated_at || '')).map((o) => o.id);
+    seenRef.current = snapshot;
+    if (changedIds.length === 0) return;
+
+    setHighlightIds((cur) => {
+      const next = new Set(cur);
+      changedIds.forEach((id) => next.add(id));
+      return next;
+    });
+    const timers = highlightTimersRef.current;
+    changedIds.forEach((id) => {
+      clearTimeout(timers.get(id));
+      timers.set(id, setTimeout(() => {
+        setHighlightIds((cur) => {
+          const next = new Set(cur);
+          next.delete(id);
+          return next;
+        });
+        timers.delete(id);
+      }, HIGHLIGHT_MS));
+    });
+  }, [orders]);
+
+  // 언마운트 시 남아있는 강조 타이머 정리
+  useEffect(() => {
+    const timers = highlightTimersRef.current;
+    return () => {
+      timers.forEach((t) => clearTimeout(t));
+      timers.clear();
+    };
+  }, []);
+
+  // 행 아무 곳이나 클릭하면 상세페이지로 이동한다(OID 링크만 눌러야 했던 걸 개선 — legacy
+  // EJS 목록은 이미 같은 동작이다). 셀 안의 링크/버튼/입력요소를 누른 경우는 그쪽 동작을
+  // 그대로 살리고, 사용자가 텍스트를 드래그해 선택한 경우에도 이동하지 않는다.
+  function handleRowClick(e, orderId) {
+    if (e.target.closest('a, button, input, select, textarea, label')) return;
+    if (window.getSelection && String(window.getSelection()).length > 0) return;
+    router.push(`/orders/${orderId}`);
+  }
 
   function saveColumnState(order, visible) {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ order, visible }));
@@ -297,7 +355,10 @@ export default function OrderListTable({ orders, filters, statusSummary }) {
           <tbody>
             {sortedOrders.length === 0 && <tr><td colSpan={activeColumns.length} className="empty">조건에 맞는 오더가 없습니다.</td></tr>}
             {sortedOrders.map((o) => (
-              <tr key={o.id}>
+              <tr key={o.id}
+                data-clickable="1"
+                className={highlightIds.has(o.id) ? 'order-row-updated' : undefined}
+                onClick={(e) => handleRowClick(e, o.id)}>
                 {activeColumns.map((key) => {
                   const value = cellValue(o, key);
                   if (key === 'oid') return <td key={key} data-column={key}><a href={`/orders/${o.id}`}>{value}</a></td>;

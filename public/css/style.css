@@ -111,6 +111,13 @@ th,td{padding:11px 12px;border-bottom:1px solid var(--border);text-align:left;wh
 th{background:#f8fafc;color:var(--muted);font-weight:700;font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;position:sticky;top:0;}
 tr{transition:var(--transition);}
 tr:hover td{background:var(--tint);}
+
+/* 실시간으로 새로 등록되거나 내용이 바뀐 오더 행을 5초간 강조한다(OrderListTable.js) —
+   목록이 SSE로 조용히 갱신되면 무엇이 바뀐지 눈치채기 어려웠다. 클래스가 제거될 때
+   transition으로 서서히 사라진다. hover(같은 특이도)보다 뒤에 선언해 강조가 우선한다. */
+tr.order-row-updated td{background:#fff3c4;transition:background 1.2s ease;}
+tr.order-row-updated:hover td{background:#ffeba3;}
+tbody tr[data-clickable="1"]{cursor:pointer;}
 .table-wrap{overflow-x:auto;overscroll-behavior-inline:contain;border-radius:var(--radius-sm);}
 .tier-label{font-weight:700;color:var(--navy);white-space:nowrap;}
 .table-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}

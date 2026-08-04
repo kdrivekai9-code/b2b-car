@@ -139,7 +139,11 @@ async function buildOrdersListData(scope, query) {
     LEFT JOIN payment_methods pm ON pm.id = o.payment_method_id
     LEFT JOIN drivers d ON d.id = o.assigned_driver_id
     ${whereSql}
-    ORDER BY o.reserved_date DESC, o.reserved_time DESC
+    -- 기본 정렬은 "가장 최근에 등록된 오더가 맨 위"(사용자 확정 사항). 예전에는 예약일시
+    -- 기준이라 방금 등록한 오더가 예약이 먼 미래가 아니면 목록 중간에 묻혀서 찾기 어려웠다.
+    -- created_at은 'YYYY-MM-DD HH24:MI:SS' 텍스트라 사전식 정렬이 곧 시간순이고, 같은 초에
+    -- 등록된 오더는 id로 안정적으로 갈라준다(NULLS LAST는 방어용 — 현재 null은 없음).
+    ORDER BY o.created_at DESC NULLS LAST, o.id DESC
     LIMIT ? OFFSET ?
   `;
   const countSql = `SELECT COUNT(*) AS total FROM orders o ${whereSql}`;
