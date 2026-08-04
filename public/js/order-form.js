@@ -1613,18 +1613,24 @@
   };
 
   // 챗봇이 모호한 주소 후보 중 하나를 사용자로부터 확인받은 뒤 실제로 필드에 반영할 때 사용.
+  // Promise를 반환 — applyResult가 좌표/행정구역 hidden input을 다 채운 뒤에야 resolve된다.
+  // 예전에는 이 반환값(당시엔 문자열)을 그냥 동기로 돌려줘서, 호출부(ai-intake.js의
+  // applyDisambiguationChoice)가 곧바로 다음 질문/오더 등록으로 넘어가버리는 경쟁 상태가
+  // 있었다 — confirmWith(일반 검색 확정) 쪽만 고치고 후보선택(모호주소 disambiguation)
+  // 경로는 놓쳤던 부분(실제로 OID1118~1120에서 재현됨).
   window.__aiIntakeApplyCandidate = function (mainId, kind, candidateResult) {
     var mainInput = document.getElementById(mainId);
-    if (!mainInput) return null;
+    if (!mainInput) return Promise.resolve(null);
     var detailInput = document.getElementById(detailIdFor(mainId));
     var slot = (kind === 'waypoint') ? mainId.replace('_address', '') : (kind === 'origin' ? 'origin' : 'destination');
     var query = mainInput.value;
     var genericSuffix = extractGenericSuffix(mainInput.value);
-    applyResult(candidateResult, mainInput, detailInput, slot, kind, document.getElementById(slot + 'Preview'));
-    var detailHint = extractDetailHintFromResolved(query, candidateResult);
-    if (genericSuffix) appendDetailToken(detailInput, genericSuffix);
-    if (detailHint) appendDetailToken(detailInput, detailHint);
-    return buildResolvedText(resultLabel(candidateResult), detailInput ? detailInput.value : '');
+    return applyResult(candidateResult, mainInput, detailInput, slot, kind, document.getElementById(slot + 'Preview')).then(function () {
+      var detailHint = extractDetailHintFromResolved(query, candidateResult);
+      if (genericSuffix) appendDetailToken(detailInput, genericSuffix);
+      if (detailHint) appendDetailToken(detailInput, detailHint);
+      return buildResolvedText(resultLabel(candidateResult), detailInput ? detailInput.value : '');
+    });
   };
 
   // AI 챗봇이 전화번호 응답을 형식 검사 + 하이픈 포맷팅해서 확인 메시지를 만들 때 사용.

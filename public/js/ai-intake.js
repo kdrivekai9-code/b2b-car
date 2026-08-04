@@ -2696,29 +2696,34 @@
     noteProgress();
     var d = pendingDisambiguation;
     var applyFn = window.__aiIntakeApplyCandidate;
-    var resolvedText = applyFn ? applyFn(d.fieldId, kindForAddressId(d.fieldId), chosen.result) : chosen.label;
-    addBubble(d.label + '는 \'' + resolvedText + '\'(으)로 확인했습니다.', 'bot');
+    // applyFn은 좌표/행정구역 hidden input이 실제로 채워진 뒤에야 resolve되는 Promise를
+    // 돌려준다 — 이걸 기다리지 않고 다음 질문/오더 등록으로 넘어가면 confirmWith(일반 검색
+    // 확정) 쪽과 같은 경쟁 상태가 후보선택 경로에서도 재현된다(실제로 OID1118~1120 원인).
+    var applyPromise = applyFn ? applyFn(d.fieldId, kindForAddressId(d.fieldId), chosen.result) : Promise.resolve(chosen.label);
+    applyPromise.then(function (resolvedText) {
+      addBubble(d.label + '는 \'' + (resolvedText || chosen.label) + '\'(으)로 확인했습니다.', 'bot');
 
-    if (disambiguationQueue.length) {
-      pendingDisambiguation = disambiguationQueue.shift();
-      var nextQ = candidateListText(pendingDisambiguation);
-      addBubble(nextQ, 'bot', null, true);
-      logBotMessage({ logText: nextQ, needsAgent: false, requestedFeature: null });
-      return;
-    }
+      if (disambiguationQueue.length) {
+        pendingDisambiguation = disambiguationQueue.shift();
+        var nextQ = candidateListText(pendingDisambiguation);
+        addBubble(nextQ, 'bot', null, true);
+        logBotMessage({ logText: nextQ, needsAgent: false, requestedFeature: null });
+        return;
+      }
 
-    pendingDisambiguation = null;
-    phase = 'collecting';
-    // 프리미엄 흐름 중 모호주소였다면(startPremiumAddressDisambiguation이 기억해둔 콜백)
-    // 탁송 전용 proceedAfterCollecting 대신 원래 이어가려던 다음 질문으로 돌아간다.
-    if (premiumDisambiguationResume) {
-      var resume = premiumDisambiguationResume;
-      premiumDisambiguationResume = null;
-      Promise.resolve(resume()).then(function (result) { if (result) logBotMessage(result); });
-      return;
-    }
-    var doneText = proceedAfterCollecting();
-    logBotMessage({ logText: doneText, needsAgent: false, requestedFeature: null });
+      pendingDisambiguation = null;
+      phase = 'collecting';
+      // 프리미엄 흐름 중 모호주소였다면(startPremiumAddressDisambiguation이 기억해둔 콜백)
+      // 탁송 전용 proceedAfterCollecting 대신 원래 이어가려던 다음 질문으로 돌아간다.
+      if (premiumDisambiguationResume) {
+        var resume = premiumDisambiguationResume;
+        premiumDisambiguationResume = null;
+        Promise.resolve(resume()).then(function (result) { if (result) logBotMessage(result); });
+        return;
+      }
+      var doneText = proceedAfterCollecting();
+      logBotMessage({ logText: doneText, needsAgent: false, requestedFeature: null });
+    });
   }
 
   function handleDisambiguationPhase(text) {
