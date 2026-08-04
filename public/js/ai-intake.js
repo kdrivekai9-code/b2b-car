@@ -1568,6 +1568,16 @@
     pendingField = draft.pendingField || null;
     modifyFieldMode = !!draft.modifyFieldMode;
     lastModifiedFieldId = draft.lastModifiedFieldId || null;
+
+    // draft_json에는 주소 텍스트만 저장되고 콜마너 연동용 좌표/행정구역(origin_lat 등, hidden
+    // input)은 저장되지 않는다 — 세션을 나갔다가 복원한 경우 이 값들이 비어 있어 오더 등록 시
+    // 콜마너 오더접수가 항상 실패한다(주소 검증 말풍선 없이 조용히 재조회만 한다).
+    ['origin_address', 'destination_address'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el && el.value.trim() && window.__aiIntakeResolveAddress) {
+        window.__aiIntakeResolveAddress(id, kindForAddressId(id), function () {});
+      }
+    });
     syncStatePatch({
       phase: phase,
       pendingField: pendingField,
