@@ -11,6 +11,7 @@ const { classifyAndExtract, classifyPhaseReply } = require('../lib/hybridChat');
 const { searchKnowledgeBase } = require('../lib/knowledgeSearch');
 const { broadcastMessage, broadcastSessionListChanged, broadcastOrderListChanged, openOrderListStream, closeChannel } = require('../lib/realtimeChat');
 const { splitTypeAndPlate } = require('../lib/vehicleInfo');
+const callmaner = require('../lib/callmaner');
 
 function defaultReservedDateTime() {
   const now = kstNow();
@@ -776,6 +777,8 @@ router.post('/', asyncHandler(async (req, res) => {
     pickup_reserved_date, pickup_reserved_time,
     order_type, trip_type, final_destination_address, final_destination_address_detail,
     destination_wait_minutes, reservation_hours_bracket,
+    origin_lat, origin_lon, origin_sido, origin_sigugun, origin_dong,
+    destination_lat, destination_lon, destination_sido, destination_sigugun, destination_dong,
   } = req.body;
   const validOrderTypes = ['dispatch', 'premium', 'daily_driver'];
   const finalOrderType = validOrderTypes.includes(order_type) ? order_type : 'dispatch';
@@ -831,6 +834,12 @@ router.post('/', asyncHandler(async (req, res) => {
   const finalOriginAddress = combineAddress(origin_address, origin_detail_address);
   const finalDestinationAddress = combineAddress(destination_address, destination_detail_address);
 
+  const toNumOrNull = (v) => (v !== undefined && v !== null && v !== '' && Number.isFinite(Number(v)) ? Number(v) : null);
+  const originLat = toNumOrNull(origin_lat);
+  const originLon = toNumOrNull(origin_lon);
+  const destinationLat = toNumOrNull(destination_lat);
+  const destinationLon = toNumOrNull(destination_lon);
+
   const tempOid = 'PENDING-' + Date.now();
   let inserted;
   try {
@@ -840,8 +849,10 @@ router.post('/', asyncHandler(async (req, res) => {
         vehicle_type, reserved_date, reserved_time, payment_method_id, fare_amount, ferry_fare_amount,
         order_type, trip_type, final_destination_address, final_destination_address_detail,
         destination_wait_minutes, reservation_hours_bracket,
+        origin_lat, origin_lon, origin_sido, origin_sigugun, origin_dong,
+        destination_lat, destination_lon, destination_sido, destination_sigugun, destination_dong,
         status, memo_customer, memo_billing, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '오더등록', ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '오더등록', ?, ?, ?)
       RETURNING id
     `, [
       tempOid, finalBranch, finalGroup, finalOriginAddress, origin_detail_address || null, origin_contact || null,
@@ -850,11 +861,13 @@ router.post('/', asyncHandler(async (req, res) => {
       finalOrderType, trip_type || null, final_destination_address || null, final_destination_address_detail || null,
       destination_wait_minutes ? Number(destination_wait_minutes) : null,
       ['within_4h', 'within_8h', 'over_8h'].includes(reservation_hours_bracket) ? reservation_hours_bracket : null,
+      originLat, originLon, origin_sido || null, origin_sigugun || null, origin_dong || null,
+      destinationLat, destinationLon, destination_sido || null, destination_sigugun || null, destination_dong || null,
       memo_customer || null, memo_billing || null, u.id,
     ]);
   } catch (e) {
     const msg = String((e && e.message) || '');
-    const missingCompatColumns = e && e.code === '42703' && /(vehicle_type|ferry_fare_amount|memo_billing|order_type|trip_type|final_destination|destination_wait|reservation_hours)/.test(msg);
+    const missingCompatColumns = e && e.code === '42703' && /(vehicle_type|ferry_fare_amount|memo_billing|order_type|trip_type|final_destination|destination_wait|reservation_hours|origin_lat|origin_lon|origin_sido|origin_sigugun|origin_dong|destination_lat|destination_lon|destination_sido|destination_sigugun|destination_dong)/.test(msg);
     if (!missingCompatColumns) throw e;
 
     // 구버전 DB(마이그레이션 미적용)에서는 vehicle_type/ferry_fare_amount/memo_billing 없이 저장해도 기본 흐름을 유지한다.
@@ -900,13 +913,49 @@ router.post('/', asyncHandler(async (req, res) => {
     VALUES (?, ?, NULL, '오더등록', '최초 등록')
   `, [newId, u.id]);
 
+  // 콜마너 오더접수 연동 — 지사가 콜마너를 사용 설정한 경우에만, fire-and-forget으로 등록한다.
+  // 좌표/행정구역이 없거나 API가 실패해도 로컬 오더 생성 자체는 이미 끝난 뒤라 실패는
+  // callmaner_last_error에 남기고 넘어간다(재시도는 하지 않음 — 다음 폴링 주기가 상태를
+  // 채워주지 않으니 필요하면 관리자가 직접 콜마너에 재등록해야 한다).
+  (async () => {
+    try {
+      const branchRow = await db.get('SELECT * FROM branches WHERE id = ?', [finalBranch]);
+      if (!branchRow || !branchRow.callmaner_enabled) return;
+      const paymentMethodRow = payment_method_id
+        ? await db.get('SELECT name FROM payment_methods WHERE id = ?', [payment_method_id])
+        : null;
+      const orderForCallmaner = {
+        origin_lat: originLat, origin_lon: originLon,
+        origin_sido, origin_sigugun, origin_dong,
+        origin_address: finalOriginAddress, origin_address_detail: origin_detail_address || null,
+        destination_lat: destinationLat, destination_lon: destinationLon,
+        destination_sido, destination_sigugun, destination_dong,
+        destination_address: finalDestinationAddress, destination_address_detail: destination_detail_address || null,
+        fare_amount: Number(fare_amount) || 0,
+        memo_customer: memo_customer || '',
+        order_type: finalOrderType,
+        reserved_date: effectiveReservedDate, reserved_time: effectiveReservedTime,
+      };
+      const result = await callmaner.orderReceipt(orderForCallmaner, branchRow, paymentMethodRow && paymentMethodRow.name);
+      await db.run(
+        `UPDATE orders SET callmaner_conf_slip = ?, callmaner_status = '접수', callmaner_status_code = '01',
+         callmaner_synced_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS'), callmaner_last_error = NULL
+         WHERE id = ?`,
+        [result.confSlip || null, newId]
+      );
+    } catch (e) {
+      console.error('콜마너 오더접수 실패:', e.message);
+      await db.run('UPDATE orders SET callmaner_last_error = ? WHERE id = ?', [String(e.message || '').slice(0, 500), newId]).catch(() => {});
+    }
+  })();
+
   // §7-2 자동 승격 판정 — premium 오더 접수 후 실제 소요시간이 8시간 이상이면 daily_driver로 전환
   // fire-and-forget: 경로탐색 실패/지연은 오더 등록 자체를 막지 않는다.
   if (finalOrderType === 'premium') {
     (async () => {
       try {
         const UPGRADE_THRESHOLD_SECONDS = 8 * 3600;
-        const originCoord = await db.get('SELECT lat, lon FROM orders WHERE id = ?', [newId])
+        const originCoord = await db.get('SELECT origin_lat AS lat, origin_lon AS lon FROM orders WHERE id = ?', [newId])
           .catch(() => null);
 
         // 좌표 미확보 시 1순위(계산값) 불가 → 2순위(사용자 답변 시간구간) 판정

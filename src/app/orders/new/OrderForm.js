@@ -72,9 +72,9 @@ function initialFieldState(order, defaultBranch, mode) {
     : [];
   return {
     origin_address: order.origin_address || '', origin_detail_address: order.origin_detail_address || '', origin_contact: order.origin_contact || '',
-    origin_lat: null, origin_lon: null,
+    origin_lat: null, origin_lon: null, origin_sido: '', origin_sigugun: '', origin_dong: '',
     destination_address: order.destination_address || '', destination_detail_address: order.destination_detail_address || '', destination_contact: order.destination_contact || '',
-    destination_lat: null, destination_lon: null,
+    destination_lat: null, destination_lon: null, destination_sido: '', destination_sigugun: '', destination_dong: '',
     waypoints: prefillWaypoints,
     reservation_basis: order.reservation_basis === 'delivery' ? 'delivery' : 'pickup',
     // 아직 실제 역산 계산이 안 붙어 있어(경로/지도 레이어 이후 추가 예정) 항상 빈 값으로
@@ -411,6 +411,17 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
     params.set('destination_address', state.destination_address);
     params.set('destination_detail_address', state.destination_detail_address);
     params.set('destination_contact', state.destination_contact);
+    // 콜마너 오더접수 연동에 필요한 좌표/행정구역 — AddressField가 주소 확정 시 채워준다.
+    if (state.origin_lat != null) params.set('origin_lat', String(state.origin_lat));
+    if (state.origin_lon != null) params.set('origin_lon', String(state.origin_lon));
+    if (state.origin_sido) params.set('origin_sido', state.origin_sido);
+    if (state.origin_sigugun) params.set('origin_sigugun', state.origin_sigugun);
+    if (state.origin_dong) params.set('origin_dong', state.origin_dong);
+    if (state.destination_lat != null) params.set('destination_lat', String(state.destination_lat));
+    if (state.destination_lon != null) params.set('destination_lon', String(state.destination_lon));
+    if (state.destination_sido) params.set('destination_sido', state.destination_sido);
+    if (state.destination_sigugun) params.set('destination_sigugun', state.destination_sigugun);
+    if (state.destination_dong) params.set('destination_dong', state.destination_dong);
     params.set('vehicle_type', state.vehicle_type);
     params.set('vehicle_number', state.vehicle_number);
     params.set('reserved_date', reservedDate);
@@ -516,7 +527,10 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
               address={state.origin_address} detail={state.origin_detail_address}
               onAddressChange={(v) => setField('origin_address', v)}
               onDetailChange={(v) => setField('origin_detail_address', v)}
-              onResolved={(lat, lon) => { setField('origin_lat', lat); setField('origin_lon', lon); }} />
+              onResolved={(lat, lon, region) => {
+                setField('origin_lat', lat); setField('origin_lon', lon);
+                if (region) { setField('origin_sido', region.sido); setField('origin_sigugun', region.sigugun); setField('origin_dong', region.dong); }
+              }} />
             <div className="field">
               <label>출발지 연락처 <span className="required-mark" aria-hidden="true">*</span></label>
               <input type="text" className="phone-input" required placeholder="010-0000-0000"
@@ -561,7 +575,10 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
               address={state.destination_address} detail={state.destination_detail_address}
               onAddressChange={(v) => setField('destination_address', v)}
               onDetailChange={(v) => setField('destination_detail_address', v)}
-              onResolved={(lat, lon) => { setField('destination_lat', lat); setField('destination_lon', lon); }} />
+              onResolved={(lat, lon, region) => {
+                setField('destination_lat', lat); setField('destination_lon', lon);
+                if (region) { setField('destination_sido', region.sido); setField('destination_sigugun', region.sigugun); setField('destination_dong', region.dong); }
+              }} />
             <div className="field">
               <label>도착지 연락처 <span className="required-mark" aria-hidden="true">*</span></label>
               <input type="text" className="phone-input" required placeholder="010-0000-0000"

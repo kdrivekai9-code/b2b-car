@@ -29,6 +29,7 @@ const faqRoutes = require('./routes/faq');
 const chatRoutes = require('./routes/chat');
 const inquiryRoutes = require('./routes/inquiries');
 const accessLogRoutes = require('./routes/accessLogs');
+const callmanerSyncRoutes = require('./routes/callmanerSync');
 const { accessLogMiddleware, getClientIp, writeAccessLog } = require('./lib/accessLog');
 
 const app = express();
@@ -134,6 +135,9 @@ if (!isTest) {
 // 로그인 없이 접근하는 기사 사진 업로드 페이지는 '/'에 마운트된(내부적으로 모든 경로를 가로채는)
 // authRoutes/dashboardRoutes보다 반드시 먼저 등록해야 requireAuth에 걸리지 않는다.
 app.use('/upload', photoUploadRoutes);
+// 콜마너 상태동기화 크론도 세션 로그인 없는 서버 대 서버 호출이라 같은 이유로 먼저 등록한다
+// (자체 CRON_SECRET 검증은 routes/callmanerSync.js 안에서 한다).
+app.use('/callmaner', callmanerSyncRoutes);
 
 app.use('/', authRoutes);
 app.use('/', dashboardRoutes);

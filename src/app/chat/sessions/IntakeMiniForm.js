@@ -68,6 +68,17 @@ async function geocode(query) {
   }
 }
 
+// 콜마너 오더접수 연동에 필요한 시도/시구군/동 — 주소 확정(위경도 확보) 시점에 1회만 조회한다.
+async function resolveRegion(lat, lon) {
+  try {
+    const res = await fetch(`/kakao/region?lat=${lat}&lng=${lon}`);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
 function mainAddressOf(r) {
   return r.road_address || r.jibun_address || '';
 }
@@ -114,7 +125,13 @@ function MiniAddressSearch({ address, onAddressChange, onResolved }) {
         {results === 'loading' && <div className="addr-result-item muted">검색 중...</div>}
         {Array.isArray(results) && results.length === 0 && <div className="addr-result-item muted">검색 결과가 없습니다.</div>}
         {Array.isArray(results) && results.map((r, i) => (
-          <div className="addr-result-item" key={i} onClick={() => { onAddressChange(mainAddressOf(r)); onResolved(parseFloat(r.lat), parseFloat(r.lon)); setResults(null); }}>
+          <div className="addr-result-item" key={i} onClick={async () => {
+            onAddressChange(mainAddressOf(r));
+            const lat = parseFloat(r.lat);
+            const lon = parseFloat(r.lon);
+            onResolved(lat, lon, await resolveRegion(lat, lon));
+            setResults(null);
+          }}>
             {resultLabel(r)}
           </div>
         ))}
@@ -142,11 +159,11 @@ function initialState(order) {
     pickup_reserved_date: '',
     pickup_reserved_time: '',
     origin_address: order.origin_address || '', origin_detail_address: order.origin_detail_address || '', origin_contact: order.origin_contact || '',
-    origin_lat: null, origin_lon: null,
+    origin_lat: null, origin_lon: null, origin_sido: '', origin_sigugun: '', origin_dong: '',
     vehicle_type: order.vehicle_type || '', vehicle_number: order.vehicle_number || '',
     waypoints,
     destination_address: order.destination_address || '', destination_detail_address: order.destination_detail_address || '', destination_contact: order.destination_contact || '',
-    destination_lat: null, destination_lon: null,
+    destination_lat: null, destination_lon: null, destination_sido: '', destination_sigugun: '', destination_dong: '',
     memo_customer: order.memo_customer || '',
     payment_method_id: order.payment_method_id || '',
     fare_amount: order.fare_amount || '',
@@ -334,6 +351,16 @@ export default function IntakeMiniForm({ chatSessionId, branches, groups, paymen
     params.set('destination_address', state.destination_address);
     params.set('destination_detail_address', state.destination_detail_address);
     params.set('destination_contact', state.destination_contact);
+    if (state.origin_lat != null) params.set('origin_lat', String(state.origin_lat));
+    if (state.origin_lon != null) params.set('origin_lon', String(state.origin_lon));
+    if (state.origin_sido) params.set('origin_sido', state.origin_sido);
+    if (state.origin_sigugun) params.set('origin_sigugun', state.origin_sigugun);
+    if (state.origin_dong) params.set('origin_dong', state.origin_dong);
+    if (state.destination_lat != null) params.set('destination_lat', String(state.destination_lat));
+    if (state.destination_lon != null) params.set('destination_lon', String(state.destination_lon));
+    if (state.destination_sido) params.set('destination_sido', state.destination_sido);
+    if (state.destination_sigugun) params.set('destination_sigugun', state.destination_sigugun);
+    if (state.destination_dong) params.set('destination_dong', state.destination_dong);
     params.set('vehicle_type', state.vehicle_type);
     params.set('vehicle_number', state.vehicle_number);
     params.set('reserved_date', reservedDate);
@@ -453,7 +480,10 @@ export default function IntakeMiniForm({ chatSessionId, branches, groups, paymen
       <div className="field full">
         <label>출발지 주소 <span className="required-mark" aria-hidden="true">*</span></label>
         <MiniAddressSearch address={state.origin_address} onAddressChange={(v) => setField('origin_address', v)}
-          onResolved={(lat, lon) => { setField('origin_lat', lat); setField('origin_lon', lon); }} />
+          onResolved={(lat, lon, region) => {
+            setField('origin_lat', lat); setField('origin_lon', lon);
+            if (region) { setField('origin_sido', region.sido); setField('origin_sigugun', region.sigugun); setField('origin_dong', region.dong); }
+          }} />
       </div>
       <div className="field full">
         <label>출발지 상세주소</label>
@@ -530,7 +560,10 @@ export default function IntakeMiniForm({ chatSessionId, branches, groups, paymen
       <div className="field full">
         <label>도착지 주소 <span className="required-mark" aria-hidden="true">*</span></label>
         <MiniAddressSearch address={state.destination_address} onAddressChange={(v) => setField('destination_address', v)}
-          onResolved={(lat, lon) => { setField('destination_lat', lat); setField('destination_lon', lon); }} />
+          onResolved={(lat, lon, region) => {
+            setField('destination_lat', lat); setField('destination_lon', lon);
+            if (region) { setField('destination_sido', region.sido); setField('destination_sigugun', region.sigugun); setField('destination_dong', region.dong); }
+          }} />
       </div>
       <div className="field full">
         <label>도착지 상세주소</label>

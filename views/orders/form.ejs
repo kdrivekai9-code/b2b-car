@@ -37,6 +37,11 @@
           <button type="button" class="btn small secondary addr-search-btn" data-target="origin_address">🔍 검색</button>
         </div>
         <div id="origin_address_results" class="addr-results"></div>
+        <input type="hidden" id="origin_lat" name="origin_lat">
+        <input type="hidden" id="origin_lon" name="origin_lon">
+        <input type="hidden" id="origin_sido" name="origin_sido">
+        <input type="hidden" id="origin_sigugun" name="origin_sigugun">
+        <input type="hidden" id="origin_dong" name="origin_dong">
         <input type="text" class="addr-detail-input" id="origin_detail_address" name="origin_detail_address" placeholder="상세주소 입력 (건물명, 동/호수)" <%= order.origin_detail_address ? '' : 'disabled' %> value="<%= order.origin_detail_address || '' %>">
         <div class="addr-tools">
           <label class="checkline"><input type="checkbox" class="direct-input-toggle" data-target="origin_address"> 직접 입력 (주소 검색 안됨)</label>
@@ -62,6 +67,11 @@
           <button type="button" class="btn small secondary addr-search-btn" data-target="destination_address">🔍 검색</button>
         </div>
         <div id="destination_address_results" class="addr-results"></div>
+        <input type="hidden" id="destination_lat" name="destination_lat">
+        <input type="hidden" id="destination_lon" name="destination_lon">
+        <input type="hidden" id="destination_sido" name="destination_sido">
+        <input type="hidden" id="destination_sigugun" name="destination_sigugun">
+        <input type="hidden" id="destination_dong" name="destination_dong">
         <input type="text" class="addr-detail-input" id="destination_detail_address" name="destination_detail_address" placeholder="상세주소 입력 (건물명, 동/호수)" <%= order.destination_detail_address ? '' : 'disabled' %> value="<%= order.destination_detail_address || '' %>">
         <div class="addr-tools">
           <label class="checkline"><input type="checkbox" class="direct-input-toggle" data-target="destination_address"> 직접 입력 (주소 검색 안됨)</label>

@@ -471,6 +471,28 @@
       .catch(function () { onDone([], null); });
   }
 
+  // 콜마너 오더접수 연동에 필요한 좌표/시도/시구군/동 — 출발지/도착지 확정 시 hidden input에
+  // 채워서 폼 제출에 포함시킨다(경유지는 콜마너 viaList 연동 대상이 아니라 채우지 않음).
+  function resolveRegionAndFill(kind, lat, lon) {
+    if (kind !== 'origin' && kind !== 'destination') return;
+    var latInput = document.getElementById(kind + '_lat');
+    var lonInput = document.getElementById(kind + '_lon');
+    if (latInput) latInput.value = lat;
+    if (lonInput) lonInput.value = lon;
+    fetch('/kakao/region?lat=' + lat + '&lng=' + lon)
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (region) {
+        if (!region) return;
+        var sidoInput = document.getElementById(kind + '_sido');
+        var sigugunInput = document.getElementById(kind + '_sigugun');
+        var dongInput = document.getElementById(kind + '_dong');
+        if (sidoInput) sidoInput.value = region.sido || '';
+        if (sigugunInput) sigugunInput.value = region.sigugun || '';
+        if (dongInput) dongInput.value = region.dong || '';
+      })
+      .catch(function () {});
+  }
+
   function mainAddressOf(r) { return r.road_address || r.jibun_address || ''; }
   function resultLabel(r) {
     if (r.type === 'place') {
@@ -1066,7 +1088,10 @@
       else { detailInput.value = ''; detailInput.focus(); }
     }
     if (preview) preview.textContent = resultLabel(r);
-    if (r.lat && r.lon) placeMarker(slot, kind, [parseFloat(r.lat), parseFloat(r.lon)]);
+    if (r.lat && r.lon) {
+      placeMarker(slot, kind, [parseFloat(r.lat), parseFloat(r.lon)]);
+      resolveRegionAndFill(kind, parseFloat(r.lat), parseFloat(r.lon));
+    }
   }
 
   function handleAddressBlur(input, detailInput, slot, kind) {
@@ -1082,7 +1107,10 @@
         return;
       }
       if (preview) preview.textContent = resultLabel(best);
-      if (best.lat && best.lon) placeMarker(slot, kind, [parseFloat(best.lat), parseFloat(best.lon)]);
+      if (best.lat && best.lon) {
+        placeMarker(slot, kind, [parseFloat(best.lat), parseFloat(best.lon)]);
+        resolveRegionAndFill(kind, parseFloat(best.lat), parseFloat(best.lon));
+      }
     });
   }
 

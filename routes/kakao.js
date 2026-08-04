@@ -42,6 +42,31 @@ async function fetchMergedDocuments(query) {
   return [...addressResults, ...placeResults];
 }
 
+// 콜마너 오더접수 API가 요구하는 시도(약어)/시구군/동 분리값을 얻기 위한 역지오코딩.
+// 카카오 주소검색(address.json)/키워드검색(keyword.json)은 검색 방식에 따라 region depth
+// 필드 유무가 달라 일관되지 않으므로, 주소 선택 시 이미 알고 있는 위경도로 좌표->행정구역
+// API를 한 번 더 호출해 항상 같은 방식으로 얻는다("콜마너 외부연동 인터페이스 정의서"
+// "바. 공통주의사항" 2/3 참조).
+const SIDO_ABBREVIATIONS = {
+  서울특별시: '서울', 부산광역시: '부산', 대구광역시: '대구', 인천광역시: '인천',
+  광주광역시: '광주', 대전광역시: '대전', 울산광역시: '울산', 경기도: '경기',
+  강원도: '강원', 강원특별자치도: '강원', 충청북도: '충북', 충청남도: '충남',
+  전라북도: '전북', 전북특별자치도: '전북', 전라남도: '전남',
+  경상북도: '경북', 경상남도: '경남', 제주특별자치도: '제주', 세종특별자치시: '세종',
+};
+
+function abbreviateSido(name) {
+  const s = String(name || '').trim();
+  if (!s) return '';
+  if (SIDO_ABBREVIATIONS[s]) return SIDO_ABBREVIATIONS[s];
+  return s.slice(0, 2);
+}
+
+// "성남시 분당구" -> "성남시분당구" (공통주의사항 3 - 시구는 한 필드로, 공백 없이 합쳐서 사용)
+function formatSigugun(name) {
+  return String(name || '').trim().replace(/\s+/g, '');
+}
+
 function firstNonEmptyString() {
   for (let i = 0; i < arguments.length; i += 1) {
     const v = arguments[i];
@@ -259,6 +284,28 @@ router.get('/search', asyncHandler(async (req, res) => {
   // 다시 검색하겠습니다" 안내 말풍선을 보여줄 수 있도록 내려주는 것 — 일반 오더 등록 화면의
   // 수동 검색에서는 사용하지 않는다.
   res.json({ documents, originalQuery: query, triedFallback, correctedQuery, candidates: [] });
+}));
+
+// 좌표 -> 시도/시구군/동 (콜마너 오더접수 연동용). 법정동(B) 결과를 우선 사용한다.
+router.get('/region', asyncHandler(async (req, res) => {
+  const lat = Number(req.query.lat);
+  const lng = Number(req.query.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return res.status(400).json({ error: 'lat, lng가 필요합니다.' });
+  if (!process.env.KAKAO_REST_API_KEY) return res.status(500).json({ error: 'KAKAO_REST_API_KEY가 설정되어 있지 않습니다.' });
+
+  const url = `https://dapi.kakao.com/v2/local/geo/coord2regioncode.json?x=${lng}&y=${lat}`;
+  const kakaoRes = await fetch(url, { headers: { Authorization: 'KakaoAK ' + process.env.KAKAO_REST_API_KEY } });
+  if (!kakaoRes.ok) return res.status(502).json({ error: '행정구역 조회 실패' });
+  const data = await kakaoRes.json();
+  const docs = data.documents || [];
+  const region = docs.find((d) => d.region_type === 'B') || docs[0];
+  if (!region) return res.json({ sido: '', sigugun: '', dong: '' });
+
+  res.json({
+    sido: abbreviateSido(region.region_1depth_name),
+    sigugun: formatSigugun(region.region_2depth_name),
+    dong: String(region.region_3depth_name || '').trim(),
+  });
 }));
 
 // 카카오모빌리티 자동차 길찾기(유료 API, 별도 키/계약 필요) — 실제 도로 경로/거리/톨비 조회

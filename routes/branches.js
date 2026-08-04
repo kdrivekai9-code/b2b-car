@@ -392,6 +392,25 @@ router.post('/:id/photo-settings', asyncHandler(async (req, res) => {
   res.redirect('/branches/' + req.params.id + '/photo-settings');
 }));
 
+router.get('/:id/callmaner', asyncHandler(async (req, res) => {
+  const [branch, branches] = await Promise.all([
+    db.get('SELECT * FROM branches WHERE id = ?', [req.params.id]),
+    db.all('SELECT id, name FROM branches ORDER BY id'),
+  ]);
+  if (!branch) return res.status(404).send('지사를 찾을 수 없습니다.');
+  res.render('branches/callmaner', { title: '콜마너 연동 - ' + branch.name, branch, branches });
+}));
+
+router.post('/:id/callmaner', asyncHandler(async (req, res) => {
+  const { callmaner_provider_id } = req.body;
+  const callmanerEnabled = req.body.callmaner_enabled === '1';
+  await db.run(
+    'UPDATE branches SET callmaner_enabled = ?, callmaner_provider_id = ? WHERE id = ?',
+    [callmanerEnabled, callmaner_provider_id || null, req.params.id]
+  );
+  res.redirect('/branches/' + req.params.id + '/callmaner');
+}));
+
 // ---------------- 추가기능 (사진 보기 권한) ----------------
 router.get('/:id/extra-settings', asyncHandler(async (req, res) => {
   const [branch, settingsRow, branches] = await Promise.all([

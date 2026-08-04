@@ -51,6 +51,17 @@ async function geocode(query, mode) {
   }
 }
 
+// 콜마너 오더접수 연동에 필요한 시도/시구군/동 — 주소 확정(위경도 확보) 시점에 1회만 조회한다.
+async function resolveRegion(lat, lon) {
+  try {
+    const res = await fetch(`/kakao/region?lat=${lat}&lng=${lon}`);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
 // 출발지/도착지/경유지 공용 주소 입력 컴포넌트. 기존 order-form.js의 wireAddressField/
 // handleAddressBlur/applyResult를 React 컨트롤드-인풋 형태로 이식했다.
 export default function AddressField({ label, required, address, detail, onAddressChange, onDetailChange, onResolved, favorites }) {
@@ -72,19 +83,27 @@ export default function AddressField({ label, required, address, detail, onAddre
     clearResults();
     const docs = await geocode(f.address, 'fallback');
     const best = docs[0];
-    if (best && best.lat && best.lon) onResolved(parseFloat(best.lat), parseFloat(best.lon));
+    if (best && best.lat && best.lon) {
+      const lat = parseFloat(best.lat);
+      const lon = parseFloat(best.lon);
+      onResolved(lat, lon, await resolveRegion(lat, lon));
+    }
   }
 
   function clearResults() {
     setResults([]);
   }
 
-  function applyResult(r) {
+  async function applyResult(r) {
     onAddressChange(mainAddressOf(r));
     setDetailEnabled(true);
     if (r.type === 'place') onDetailChange(r.place_name || '');
     else onDetailChange('');
-    if (r.lat && r.lon) onResolved(parseFloat(r.lat), parseFloat(r.lon));
+    if (r.lat && r.lon) {
+      const lat = parseFloat(r.lat);
+      const lon = parseFloat(r.lon);
+      onResolved(lat, lon, await resolveRegion(lat, lon));
+    }
     clearResults();
   }
 
@@ -135,7 +154,11 @@ export default function AddressField({ label, required, address, detail, onAddre
       if (q.length < MIN_ADDRESS_QUERY_LENGTH) return;
       const docs = await geocode(q, 'fallback');
       const best = docs[0];
-      if (best && best.lat && best.lon) onResolved(parseFloat(best.lat), parseFloat(best.lon));
+      if (best && best.lat && best.lon) {
+        const lat = parseFloat(best.lat);
+        const lon = parseFloat(best.lon);
+        onResolved(lat, lon, await resolveRegion(lat, lon));
+      }
     }, 150);
   }
 
