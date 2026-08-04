@@ -52,7 +52,9 @@ async function geocode(query, mode) {
 }
 
 // 콜마너 오더접수 연동에 필요한 시도/시구군/동 — 주소 확정(위경도 확보) 시점에 1회만 조회한다.
-async function resolveRegion(lat, lon) {
+// OrderForm도 그대로 쓴다(AI 챗봇이 주소를 프로그램으로 밀어넣는 경로는 이 컴포넌트를 거치지
+// 않아 onResolved가 호출되지 않으므로, 거기서 직접 호출해 좌표/행정구역을 채운다).
+export async function resolveRegion(lat, lon) {
   try {
     const res = await fetch(`/kakao/region?lat=${lat}&lng=${lon}`);
     if (!res.ok) return null;

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useReducer, useRef, useState } from 'react';
-import AddressField from './AddressField';
+import AddressField, { resolveRegion } from './AddressField';
 import RouteMap from './RouteMap';
 import RouteCalculator from './RouteCalculator';
 import OrderSidePanel from '../[id]/OrderSidePanel';
@@ -379,6 +379,27 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
       dispatch({ type: 'SET_FIELD', name: 'reservedTimeHour', value: timeMatch[1] });
       dispatch({ type: 'SET_FIELD', name: 'reservedTimeMinute', value: timeMatch[2] });
     }
+
+    // 챗봇이 밀어넣는 값은 주소 "텍스트"뿐이라 콜마너 오더접수 필수값인 좌표/행정구역이 비어
+    // 있었다 — 이 경로는 AddressField를 사용자가 직접 조작하지 않아 onResolved가 호출되지
+    // 않기 때문(AI 접수화면에서 등록한 오더가 계속 "출발지 좌표/행정구역 정보가 없어..."로
+    // 실패한 원인). 여기서 지오코딩 + 역지오코딩해 직접 채운다(실패 시 조용히 넘어감).
+    let cancelled = false;
+    Promise.all([
+      { kind: 'origin', address: p.origin_address },
+      { kind: 'destination', address: p.destination_address },
+    ].filter((t) => String(t.address || '').trim()).map(async (t) => {
+      const coords = await geocodeAddressForEdit(t.address);
+      if (cancelled || !coords) return;
+      dispatch({ type: 'SET_FIELD', name: `${t.kind}_lat`, value: coords.lat });
+      dispatch({ type: 'SET_FIELD', name: `${t.kind}_lon`, value: coords.lon });
+      const region = await resolveRegion(coords.lat, coords.lon);
+      if (cancelled || !region) return;
+      dispatch({ type: 'SET_FIELD', name: `${t.kind}_sido`, value: region.sido || '' });
+      dispatch({ type: 'SET_FIELD', name: `${t.kind}_sigugun`, value: region.sigugun || '' });
+      dispatch({ type: 'SET_FIELD', name: `${t.kind}_dong`, value: region.dong || '' });
+    }));
+    return () => { cancelled = true; };
   }, [externalPrefill]);
 
   function setField(name, value) {
@@ -411,6 +432,21 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
     const pickupDate = state.reservation_basis === 'delivery' ? state.pickup_reserved_date : reservedDate;
     const pickupTime = state.reservation_basis === 'delivery' ? state.pickup_reserved_time : reservedTime;
 
+    // 좌표/행정구역이 아직 비어 있으면(챗봇이 주소를 밀어넣은 직후 바로 등록을 누른 경우 등)
+    // 제출 직전에 마지막으로 한 번 더 채운다 — 콜마너 오더접수는 이 값이 없으면 아예 호출도
+    // 못 하고 실패하므로, 등록이 조금 늦어지더라도 값을 확보하는 쪽이 낫다.
+    const geo = { origin: null, destination: null };
+    await Promise.all(['origin', 'destination'].map(async (kind) => {
+      if (state[`${kind}_lat`] != null && state[`${kind}_sido`]) return;
+      const address = state[`${kind}_address`];
+      if (!String(address || '').trim()) return;
+      const coords = await geocodeAddressForEdit(address);
+      if (!coords) return;
+      geo[kind] = { ...coords, region: await resolveRegion(coords.lat, coords.lon) };
+    }));
+    const coordOf = (kind, key) => (geo[kind] ? geo[kind][key] : state[`${kind}_${key}`]);
+    const regionOf = (kind, key) => (geo[kind] && geo[kind].region ? geo[kind].region[key] : state[`${kind}_${key}`]);
+
     const params = new URLSearchParams();
     params.set('branch_id', state.branch_id);
     params.set('requester_group_id', state.requester_group_id);
@@ -420,17 +456,18 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
     params.set('destination_address', state.destination_address);
     params.set('destination_detail_address', state.destination_detail_address);
     params.set('destination_contact', state.destination_contact);
-    // 콜마너 오더접수 연동에 필요한 좌표/행정구역 — AddressField가 주소 확정 시 채워준다.
-    if (state.origin_lat != null) params.set('origin_lat', String(state.origin_lat));
-    if (state.origin_lon != null) params.set('origin_lon', String(state.origin_lon));
-    if (state.origin_sido) params.set('origin_sido', state.origin_sido);
-    if (state.origin_sigugun) params.set('origin_sigugun', state.origin_sigugun);
-    if (state.origin_dong) params.set('origin_dong', state.origin_dong);
-    if (state.destination_lat != null) params.set('destination_lat', String(state.destination_lat));
-    if (state.destination_lon != null) params.set('destination_lon', String(state.destination_lon));
-    if (state.destination_sido) params.set('destination_sido', state.destination_sido);
-    if (state.destination_sigugun) params.set('destination_sigugun', state.destination_sigugun);
-    if (state.destination_dong) params.set('destination_dong', state.destination_dong);
+    // 콜마너 오더접수 연동에 필요한 좌표/행정구역 — AddressField가 주소 확정 시 채워주고,
+    // 비어 있으면 바로 위에서 보강한 값(geo)을 쓴다.
+    for (const kind of ['origin', 'destination']) {
+      const lat = coordOf(kind, 'lat');
+      const lon = coordOf(kind, 'lon');
+      if (lat != null) params.set(`${kind}_lat`, String(lat));
+      if (lon != null) params.set(`${kind}_lon`, String(lon));
+      for (const key of ['sido', 'sigugun', 'dong']) {
+        const v = regionOf(kind, key);
+        if (v) params.set(`${kind}_${key}`, v);
+      }
+    }
     params.set('vehicle_type', state.vehicle_type);
     params.set('vehicle_number', state.vehicle_number);
     params.set('reserved_date', reservedDate);
