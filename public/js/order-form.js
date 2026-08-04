@@ -1542,6 +1542,15 @@
         if (!fullTop && !strippedTop) { resolve({ success: false, resolvedText: null }); return; }
         if (!strippedTop || sameSpot(fullTop, strippedTop)) { resolve(confirmWith(fullTop, genericSuffix, fullMeta)); return; }
         if (!fullTop) { resolve(confirmWith(strippedTop, genericSuffix, strippedMeta)); return; }
+        // 원문 그대로가 이미 카카오에 정식 등록된 장소명과 정확히 일치하면(예: "세종대학교 정문"이
+        // 접미어가 붙은 별칭이 아니라 그 자체로 등록된 POI 이름) 접미어 제거는 불필요하다 — 핵심
+        // 지명(stripped) 결과와 비교해서 갈릴지 말지 따질 것 없이 원문 결과로 바로 확정한다.
+        // genericSuffix를 상세주소로 또 붙이면("...능동로 209 정문"처럼) place_name에 이미 있는
+        // 단어가 중복되므로 빈 문자열로 넘긴다.
+        if (fullTop.type === 'place' && normalizeSearchText(fullTop.place_name) === normalizeSearchText(query)) {
+          resolve(confirmWith(fullTop, '', fullMeta));
+          return;
+        }
         if (shouldAutoConfirmPrimaryCandidate(stripped, strippedTop, fullTop)) {
           resolve(confirmWith(strippedTop, genericSuffix, strippedMeta));
           return;

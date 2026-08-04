@@ -101,6 +101,11 @@
   // 예약시간 답변에 출발지/도착지/연락처가 한 메시지로 이미 함께 왔을 때(자주 있는 패턴) 그 값을
   // 기억해뒀다가, 이후 해당 항목 질문 차례가 오면 다시 묻지 않고 곧바로 확인 처리로 넘어간다.
   var premiumPrefill = { originAddress: null, destinationAddress: null, contact: null };
+  // 프리미엄 흐름 중 주소가 모호해(검색결과 여러 개) 후보를 고르게 했을 때, 고른 뒤 어디로
+  // 돌아가 이어갈지 기억해두는 콜백 — 일반 탁송 흐름의 모호주소 확인은 항상
+  // proceedAfterCollecting()으로 돌아가지만, 프리미엄은 항목마다 다음 질문이 다르다
+  // (출발지 모호 → 연락처 질문, 도착지 모호 → 경유지 질문 등).
+  var premiumDisambiguationResume = null;
   var botMessageWriteChain = Promise.resolve();
   var isComposing = false;
   var submitAfterCompositionEnd = false;
@@ -1496,6 +1501,8 @@
       vehicleNumberResolved: vehicleNumberResolved,
       additionalRequestResolved: additionalRequestResolved,
       confirmedOrderType: confirmedOrderType,
+      orderCategory: orderCategory,
+      tripType: tripType,
     });
     var fields = {};
     DRAFT_FIELD_IDS.forEach(function (id) { fields[id] = val(id); });
@@ -1514,6 +1521,13 @@
       vehicleNumberResolved: vehicleNumberResolved,
       additionalRequestResolved: additionalRequestResolved,
       confirmedOrderType: confirmedOrderType,
+      // orderCategory/tripType은 confirmedOrderType에서 파생되지만(§상단 주석), 프리미엄
+      // 왕복→일일기사 전환처럼 confirmedOrderType은 그대로 두고 orderCategory만 바뀌는
+      // 경로가 있어(handleOrderIntent의 premium_trip_type round_trip 분기) 파생만으로는
+      // 복원 시 어긋날 수 있다 — 값 자체를 직접 저장해 새로고침/재진입 후에도
+      // pendingField가 가리키는 프리미엄/일일기사 전용 분기가 계속 매칭되게 한다.
+      orderCategory: orderCategory,
+      tripType: tripType,
       // 라디오 버튼(reservation_basis_pickup/delivery)은 단일 id로 값을 읽을 수 없어
       // DRAFT_FIELD_IDS와 별개로 저장한다 — 이게 없으면 상담관리 카드뷰에서 이 세션을 열었을 때
       // 도착지 인도시간 기준으로 판별했던 결과가 이어지지 않고 기본값(픽업 기준)으로 되돌아간다.
@@ -1542,6 +1556,8 @@
     vehicleNumberResolved = !!draft.vehicleNumberResolved;
     additionalRequestResolved = !!draft.additionalRequestResolved;
     confirmedOrderType = draft.confirmedOrderType || null;
+    orderCategory = draft.orderCategory || 'dispatch';
+    tripType = draft.tripType || null;
     updateOrderTypeBadge(confirmedOrderType);
     // choose_address_candidate(후보 목록을 저장하지 않음)와 offer_agent(제안 직전 상태를 저장하지
     // 않음)는 복원할 수 없다 — 어중간하게 그 단계로 복원하면 다음 답변을 처리하다 오류가 나므로
@@ -1561,6 +1577,8 @@
       vehicleNumberResolved: vehicleNumberResolved,
       additionalRequestResolved: additionalRequestResolved,
       confirmedOrderType: confirmedOrderType,
+      orderCategory: orderCategory,
+      tripType: tripType,
     });
     updateQuickReplies();
   }
@@ -1748,9 +1766,23 @@
     return { logText: q3, needsAgent: false, requestedFeature: null };
   }
 
+  // 검색결과가 갈려 후보 선택이 필요한 경우, 일반 탁송 흐름의 candidateListText/phase 전환을
+  // 그대로 재사용하되 "다 고른 뒤 어디로 돌아갈지"만 콜백으로 넘긴다(applyDisambiguationChoice가 소비).
+  function startPremiumAddressDisambiguation(ambiguous, resumeFn) {
+    premiumDisambiguationResume = resumeFn;
+    return startDisambiguation([ambiguous]);
+  }
+
   function resolvePremiumOriginAddress(addr) {
     document.getElementById('origin_address').value = addr;
-    return validateAddressField('origin_address', '출발지 주소').then(function () {
+    return validateAddressField('origin_address', '출발지 주소').then(function (r) {
+      if (r && r.ambiguous) return startPremiumAddressDisambiguation(r, askPremiumOriginContact);
+      // 검색 자체가 실패한 경우 validateAddressField가 이미 실패 안내를 띄웠다 — 다음 질문으로
+      // 그냥 넘어가면 빈/틀린 주소가 조용히 등록되므로, 같은 항목을 다시 받도록 멈춘다.
+      if (!r || !r.success) {
+        setPendingField('premium_origin_address');
+        return { logText: null, needsAgent: false, requestedFeature: null };
+      }
       return askPremiumOriginContact();
     });
   }
@@ -1769,7 +1801,11 @@
 
   function resolvePremiumOriginContact(contact) {
     document.getElementById('origin_contact').value = contact;
-    return validatePhoneField('origin_contact', '출발지 연락처').then(function () {
+    return validatePhoneField('origin_contact', '출발지 연락처').then(function (ok) {
+      if (!ok) {
+        setPendingField('premium_origin_contact');
+        return { logText: null, needsAgent: false, requestedFeature: null };
+      }
       return askPremiumDestinationAddress();
     });
   }
@@ -1786,13 +1822,22 @@
     return { logText: q5, needsAgent: false, requestedFeature: null };
   }
 
+  function askPremiumWaypointYn() {
+    setPendingField('premium_waypoint_yn');
+    var q6 = '중간에 경유지가 있습니까?';
+    sayBot(q6);
+    return { logText: q6, needsAgent: false, requestedFeature: null };
+  }
+
   function resolvePremiumDestinationAddress(addr) {
     document.getElementById('destination_address').value = addr;
-    return validateAddressField('destination_address', '도착지 주소').then(function () {
-      setPendingField('premium_waypoint_yn');
-      var q6 = '중간에 경유지가 있습니까?';
-      sayBot(q6);
-      return { logText: q6, needsAgent: false, requestedFeature: null };
+    return validateAddressField('destination_address', '도착지 주소').then(function (r) {
+      if (r && r.ambiguous) return startPremiumAddressDisambiguation(r, askPremiumWaypointYn);
+      if (!r || !r.success) {
+        setPendingField('premium_destination_address');
+        return { logText: null, needsAgent: false, requestedFeature: null };
+      }
+      return askPremiumWaypointYn();
     });
   }
 
@@ -1949,11 +1994,19 @@
         var pwSlot = pwRow.dataset.slot;
         var pwAddrEl = document.getElementById(pwSlot + '_address');
         if (pwAddrEl) pwAddrEl.value = premiumAddr;
-        return validateAddressField(pwSlot + '_address', '경유지 주소').then(function () {
+        var askPremiumWaypointWaitYn = function () {
           setPendingField('premium_waypoint_wait_yn');
           var q8 = '경유지 대기 시간이 있습니까?';
           sayBot(q8);
           return { logText: q8, needsAgent: false, requestedFeature: null };
+        };
+        return validateAddressField(pwSlot + '_address', '경유지 주소').then(function (r) {
+          if (r && r.ambiguous) return startPremiumAddressDisambiguation(r, askPremiumWaypointWaitYn);
+          if (!r || !r.success) {
+            setPendingField('premium_waypoint_address');
+            return { logText: null, needsAgent: false, requestedFeature: null };
+          }
+          return askPremiumWaypointWaitYn();
         });
       }
 
@@ -2638,6 +2691,14 @@
 
     pendingDisambiguation = null;
     phase = 'collecting';
+    // 프리미엄 흐름 중 모호주소였다면(startPremiumAddressDisambiguation이 기억해둔 콜백)
+    // 탁송 전용 proceedAfterCollecting 대신 원래 이어가려던 다음 질문으로 돌아간다.
+    if (premiumDisambiguationResume) {
+      var resume = premiumDisambiguationResume;
+      premiumDisambiguationResume = null;
+      Promise.resolve(resume()).then(function (result) { if (result) logBotMessage(result); });
+      return;
+    }
     var doneText = proceedAfterCollecting();
     logBotMessage({ logText: doneText, needsAgent: false, requestedFeature: null });
   }

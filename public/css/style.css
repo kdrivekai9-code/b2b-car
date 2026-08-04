@@ -139,11 +139,19 @@ tr:hover td{background:var(--tint);}
 table.density-compact th,table.density-compact td{padding:4px 10px;font-size:12px;}
 table.density-comfortable th,table.density-comfortable td{padding:16px 14px;}
 
+/* table-layout:fixed는 첫 렌더 시점 너비만 쓰므로, 항목설정에서 새로 체크해 처음 나타나는
+   컬럼은(widths에 저장된 값이 없어 width가 지정 안 됨) 이미 너비를 지정해둔 다른 컬럼들에
+   공간을 다 뺏겨 사실상 0px에 가깝게 그려질 수 있었다 — min-width로 바닥을 깔아 항상
+   보이게 한다(수동 리사이즈 최소값 50px과 동일하게 맞춤). */
+#ordersTable th,#ordersTable td{min-width:50px;}
 #ordersTable th{cursor:grab;user-select:none;}
 #ordersTable th .sort-icon{font-size:10px;color:rgba(255,255,255,.4);}
 #ordersTable th .sort-icon.sort-icon-active{color:#ff5a5a;font-weight:800;}
 #ordersTable th.dragging{opacity:.4;}
-.col-resize-handle{position:absolute;top:0;right:0;width:6px;height:100%;cursor:col-resize;}
+/* right:0 6px 폭이면 감지 영역이 실제 경계선(border-right)보다 안쪽(왼쪽)에만 있어서, 딱
+   경계선 위에 마우스를 올리면 반응하지 않았다 — 경계선을 가운데 두고 좌우로 걸치도록
+   넓히고, 옆 컬럼(<th>) 위로 z-index를 올려 그 컬럼의 hover/클릭에 가로채이지 않게 한다. */
+.col-resize-handle{position:absolute;top:0;right:-5px;width:10px;height:100%;cursor:col-resize;z-index:2;}
 .col-resize-handle:hover{background:var(--blue);opacity:.4;}
 
 .column-settings-panel{margin-bottom:14px;}
