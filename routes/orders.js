@@ -1614,7 +1614,10 @@ router.post('/:id/status', asyncHandler(async (req, res) => {
     VALUES (?, ?, ?, ?, ?)
   `, [req.params.id, u.id, order.status, status, note || null]);
 
-  if (status === '접수') registerOrderWithCallmaner(order.id, order.branch_id);
+  // '대기'도 '접수'와 마찬가지로 콜마너 등록을 트리거한다(사용자 확정 사항) — 로컬 status
+  // 컬럼은 그대로 '대기'/'접수'로 남고, registerOrderWithCallmaner는 콜마너 쪽 상태만
+  // (callmaner_status='접수', 콜마너 자체 라벨) 기록하므로 서로 안 섞인다.
+  if (status === '접수' || status === '대기') registerOrderWithCallmaner(order.id, order.branch_id);
 
   try {
     await notify({
