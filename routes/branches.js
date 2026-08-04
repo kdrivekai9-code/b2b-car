@@ -96,8 +96,23 @@ router.get('/:id/operating-hours', asyncHandler(async (req, res) => {
   res.render('branches/operating_hours', { title: '운영시간 설정 - ' + branch.name, branch, hours, exceptions, branches });
 }));
 
+// 운영시간 입력은 24시간제 시/분 select 두 개로 나뉘어 온다(views/branches/operating_hours.ejs
+// 의 timeSelects — <input type="time">이 로케일에 따라 오전/오후로 표시돼 "오후 12:00"을
+// 자정으로 오해하는 문제가 있어 바꿨다). 시가 비어 있으면(--) 해당 시간 미설정 = 제한 없음이라
+// null로 저장한다. 시만 고르고 분을 안 건드린 경우는 select 기본값이 '00'이라 정시로 저장된다.
+function combineHourMinute(hour, minute) {
+  const hh = String(hour || '').trim();
+  if (!/^\d{1,2}$/.test(hh)) return null;
+  const mm = String(minute || '').trim();
+  return `${hh.padStart(2, '0')}:${(/^\d{1,2}$/.test(mm) ? mm : '0').padStart(2, '0')}`;
+}
+
 router.post('/:id/operating-hours', asyncHandler(async (req, res) => {
-  const { weekday_open, weekday_close, weekday_closed, weekend_open, weekend_close, weekend_closed } = req.body;
+  const { weekday_closed, weekend_closed } = req.body;
+  const weekday_open = combineHourMinute(req.body.weekday_open_hour, req.body.weekday_open_minute);
+  const weekday_close = combineHourMinute(req.body.weekday_close_hour, req.body.weekday_close_minute);
+  const weekend_open = combineHourMinute(req.body.weekend_open_hour, req.body.weekend_open_minute);
+  const weekend_close = combineHourMinute(req.body.weekend_close_hour, req.body.weekend_close_minute);
   await db.run(`
     INSERT INTO operating_hours (branch_id, day_type, open_time, close_time, is_closed)
     VALUES (?, 'weekday', ?, ?, ?)
@@ -112,7 +127,9 @@ router.post('/:id/operating-hours', asyncHandler(async (req, res) => {
 }));
 
 router.post('/:id/operating-hours/exceptions', asyncHandler(async (req, res) => {
-  const { date, is_closed, open_time, close_time, note } = req.body;
+  const { date, is_closed, note } = req.body;
+  const open_time = combineHourMinute(req.body.open_time_hour, req.body.open_time_minute);
+  const close_time = combineHourMinute(req.body.close_time_hour, req.body.close_time_minute);
   if (date) {
     await db.run(`
       INSERT INTO operating_hour_exceptions (branch_id, date, is_closed, open_time, close_time, note)

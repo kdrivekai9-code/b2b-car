@@ -1,8 +1,31 @@
+<%
+  // 시/분 드롭다운(24시간제) — <input type="time">은 브라우저·OS 로케일에 따라 오전/오후로
+  // 표시돼서 "오후 12:00"을 자정으로 오해하는 일이 실제로 있었다. 오더 등록 폼이 이미 쓰고
+  // 있는 00시~23시 select 방식(views/orders/form.ejs)에 맞춰 항상 24시간제로 보여준다.
+  // 시를 "--"(빈값)로 두면 해당 시간 미설정 = 시간 제한 없음으로 저장된다.
+  function timeSelects(namePrefix, value) {
+    const hh = String(value || '').slice(0, 2);
+    const mm = String(value || '').slice(3, 5);
+    let out = '<select name="' + namePrefix + '_hour" class="time-select">';
+    out += '<option value=""' + (hh ? '' : ' selected') + '>--</option>';
+    for (let h = 0; h < 24; h++) {
+      const v = String(h).padStart(2, '0');
+      out += '<option value="' + v + '"' + (hh === v ? ' selected' : '') + '>' + v + '시</option>';
+    }
+    out += '</select> <select name="' + namePrefix + '_minute" class="time-select">';
+    for (let m = 0; m < 60; m++) {
+      const v = String(m).padStart(2, '0');
+      out += '<option value="' + v + '"' + (mm === v ? ' selected' : '') + '>' + v + '분</option>';
+    }
+    out += '</select>';
+    return out;
+  }
+%>
 <%- include('../partials/header') %>
 <div class="page-head-row">
   <div>
     <h1 class="page-title"><%= branch.name %> · 운영시간 설정</h1>
-    <p class="page-sub">운영시간 외에는 오더 등록이 자동으로 차단됩니다. 설정하지 않으면 제한 없이 등록 가능합니다.</p>
+    <p class="page-sub">운영시간 외에는 오더 등록이 자동으로 차단됩니다. 시간을 <b>--</b>로 비워두면 제한 없이 24시간 등록 가능합니다. 모든 시간은 <b>24시간제</b>(00시~23시)로 입력합니다 — 예) 낮 12시 = 12시, 자정 = 00시.</p>
   </div>
   <div class="page-head-actions">
     <a class="btn secondary" href="/branches">지사 목록으로</a>
@@ -15,13 +38,13 @@
   <form id="hoursForm" method="POST" action="/branches/<%= branch.id %>/operating-hours">
     <div class="section-title">🕒 평일 / 주말</div>
     <div class="row">
-      <div class="field"><label>평일 오픈</label><input type="time" name="weekday_open" value="<%= hours.weekday.open_time || '' %>"></div>
-      <div class="field"><label>평일 마감</label><input type="time" name="weekday_close" value="<%= hours.weekday.close_time || '' %>"></div>
+      <div class="field"><label>평일 오픈</label><%- timeSelects('weekday_open', hours.weekday.open_time) %></div>
+      <div class="field"><label>평일 마감</label><%- timeSelects('weekday_close', hours.weekday.close_time) %></div>
       <div class="field"><label class="checkline" style="margin-top:24px;"><input type="checkbox" name="weekday_closed" <%= hours.weekday.is_closed ? 'checked' : '' %>> 평일 휴무</label></div>
     </div>
     <div class="row">
-      <div class="field"><label>주말 오픈</label><input type="time" name="weekend_open" value="<%= hours.weekend.open_time || '' %>"></div>
-      <div class="field"><label>주말 마감</label><input type="time" name="weekend_close" value="<%= hours.weekend.close_time || '' %>"></div>
+      <div class="field"><label>주말 오픈</label><%- timeSelects('weekend_open', hours.weekend.open_time) %></div>
+      <div class="field"><label>주말 마감</label><%- timeSelects('weekend_close', hours.weekend.close_time) %></div>
       <div class="field"><label class="checkline" style="margin-top:24px;"><input type="checkbox" name="weekend_closed" <%= hours.weekend.is_closed ? 'checked' : '' %>> 주말 휴무</label></div>
     </div>
   </form>
@@ -59,8 +82,8 @@
       <div class="field"><label class="checkline" style="margin-top:24px;"><input type="checkbox" name="is_closed" value="1" checked onchange="document.getElementById('excOpenClose').style.display=this.checked?'none':'flex'"> 휴무</label></div>
     </div>
     <div class="row" id="excOpenClose" style="display:none;">
-      <div class="field"><label>오픈</label><input type="time" name="open_time"></div>
-      <div class="field"><label>마감</label><input type="time" name="close_time"></div>
+      <div class="field"><label>오픈</label><%- timeSelects('open_time', '') %></div>
+      <div class="field"><label>마감</label><%- timeSelects('close_time', '') %></div>
     </div>
     <div class="row">
       <div class="field full"><label>메모 (선택)</label><input type="text" name="note" placeholder="예) 창립기념일 임시휴무"></div>
