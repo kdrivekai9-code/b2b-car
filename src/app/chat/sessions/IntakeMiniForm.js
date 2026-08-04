@@ -404,6 +404,9 @@ export default function IntakeMiniForm({ chatSessionId, branches, groups, paymen
       } else {
         setCreatedOrder({ id: data.orderId, oid: data.oid });
         setSuccessMessage(`${data.oid} 오더가 정상적으로 등록되었습니다.`);
+        // 콜마너 오더접수는 fire-and-forget이라 이 시점엔 아직 결과가 안 나왔을 수 있다 —
+        // 실패하면 짧게 폴링해서 팝업으로 알려준다(public/js/callmaner-alert.js).
+        if (typeof window !== 'undefined' && window.__callmanerAlert) window.__callmanerAlert.poll(data.orderId);
       }
       setSubmitting(false);
     } catch {

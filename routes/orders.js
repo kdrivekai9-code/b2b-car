@@ -1484,6 +1484,29 @@ router.get('/:id', asyncHandler(async (req, res) => {
   });
 }));
 
+// 오더 등록 직후 화면(오더 상세/AI 인테이크 챗봇)에서 콜마너 오더접수 결과를 짧게 폴링해
+// 실패 시 팝업으로 알려주기 위한 상태 조회 — 등록 자체는 fire-and-forget이라 등록 응답
+// 시점에는 아직 콜마너 API 호출이 끝나지 않았을 수 있다(public/js/callmaner-alert.js 참고).
+router.get('/:id/callmaner-status.json', asyncHandler(async (req, res) => {
+  const order = await db.get(`
+    SELECT o.id, o.branch_id, o.requester_group_id, o.callmaner_conf_slip, o.callmaner_last_error, b.callmaner_enabled
+    FROM orders o JOIN branches b ON b.id = o.branch_id
+    WHERE o.id = ?
+  `, [req.params.id]);
+  if (!order) return res.status(404).json({ error: '오더를 찾을 수 없습니다.' });
+
+  const scope = scopeFilter(req);
+  if (scope.branch_id && order.branch_id !== scope.branch_id) return res.status(403).json({ error: '접근 권한 없음' });
+  if (scope.group_id && order.requester_group_id !== scope.group_id) return res.status(403).json({ error: '접근 권한 없음' });
+
+  res.json({
+    enabled: !!order.callmaner_enabled,
+    pending: order.callmaner_enabled && !order.callmaner_conf_slip && !order.callmaner_last_error,
+    error: order.callmaner_last_error || null,
+    confSlip: order.callmaner_conf_slip || null,
+  });
+}));
+
 // client는 세 작업 모두 금지, branch_manager는 자기 지사 소속 오더만 — 지금까지는 role만
 // 확인하고 지사 소속은 확인하지 않아서, branch_manager 계정이 URL의 오더 id만 바꾸면 다른
 // 지사 오더의 기사/상태/요금까지 마음대로 바꿀 수 있는 권한 우회(IDOR)가 있었다.

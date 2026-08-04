@@ -72,6 +72,7 @@ export default function AppShell({ currentUser, activePath, topNav = false, chil
       </aside>
       <div className="main">
         <Script src="/js/push.js" strategy="afterInteractive" />
+        <Script src="/js/callmaner-alert.js" strategy="afterInteractive" />
         {isAdmin && <AgentPresenceScripts />}
         <div className="content">{children}</div>
       </div>

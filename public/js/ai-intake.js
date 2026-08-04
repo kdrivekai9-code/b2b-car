@@ -2492,7 +2492,15 @@
         // 이 세션은 완료된 것으로 닫는다 — 안 그러면 새로고침 후 세션 복원 기능이 방금 끝난
         // 오더의 phase/필드 값을 그대로 되살려서 새 오더 접수를 방해하게 된다.
         logBotMessage({ logText: okText, needsAgent: false, requestedFeature: null, closeSession: true });
-        setTimeout(function () { window.location.href = '/orders'; }, 2000);
+        // 콜마너 오더접수는 fire-and-forget이라 이 시점엔 아직 결과가 안 나왔을 수 있다 —
+        // 폴링이 끝나야(성공/실패/미사용 확인) 페이지를 이동한다. 실패 시 뜨는 팝업이 페이지
+        // 전환 때문에 끊기지 않도록 이동을 그 뒤로 미룬다.
+        var goToOrders = function () { window.location.href = '/orders'; };
+        if (window.__callmanerAlert) {
+          window.__callmanerAlert.poll(data.orderId, { onDone: goToOrders });
+        } else {
+          setTimeout(goToOrders, 2000);
+        }
       })
       .catch(function (err) {
         var failText = '오더 등록에 실패했습니다. (' + err.message + ') 다시 확인 후 시도해주세요.';

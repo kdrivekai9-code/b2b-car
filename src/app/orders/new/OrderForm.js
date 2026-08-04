@@ -229,6 +229,15 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 오더 상세(edit 모드) 진입 시 콜마너 오더접수 결과를 짧게 폴링 — 등록 자체가
+  // fire-and-forget이라 오더 리스트에서 방금 만든 오더를 클릭해 들어온 경우 아직 결과가
+  // 안 나와 있을 수 있다. 실패했을 때만 팝업으로 알려준다(public/js/callmaner-alert.js).
+  useEffect(() => {
+    if (mode !== 'edit' || !orderId) return;
+    if (typeof window !== 'undefined' && window.__callmanerAlert) window.__callmanerAlert.poll(orderId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // 예약기준 역산: order-form.js의 syncReservationBasisPreview/syncDeliveryReservationMemo를
   // 그대로 이식. routeInfo.durationSec(RouteMap이 실제 경로 확정 후 넘겨줌)에 의존하므로
   // 지도 레이어보다 먼저 만들 수 없었던 부분 — 이제 둘 다 있으니 여기서 연결한다.
