@@ -113,24 +113,6 @@
     </div>
 
     <div class="card">
-      <h2>상태 변경</h2>
-      <form method="POST" action="/orders/<%= order.id %>/status">
-        <div class="row">
-          <div class="field">
-            <label>새 상태</label>
-            <select name="status">
-              <% ORDER_STATUSES.forEach(function(s){ %>
-                <option value="<%= s %>" <%= order.status === s ? 'selected' : '' %>><%= s %></option>
-              <% }) %>
-            </select>
-          </div>
-        </div>
-        <div class="row"><div class="field full"><label>사유/메모 (선택)</label><input type="text" name="note" placeholder="변경 사유"></div></div>
-        <button class="btn" type="submit">상태 변경 저장</button>
-      </form>
-    </div>
-
-    <div class="card">
       <h2>🧑‍✈️ 기사 배정</h2>
       <% if (typeof legs !== 'undefined' && legs.length > 0) { %>
         <!-- 구간 릴레이: 구간(leg)마다 다른 기사를 배정할 수 있다. order_legs 마이그레이션
@@ -201,6 +183,24 @@
           </li>
         <% }) %>
       </ul>
+    </div>
+
+    <div class="card">
+      <h2>상태 변경</h2>
+      <form method="POST" action="/orders/<%= order.id %>/status">
+        <div class="row">
+          <div class="field">
+            <label>새 상태</label>
+            <select name="status">
+              <% ORDER_STATUSES.forEach(function(s){ %>
+                <option value="<%= s %>" <%= order.status === s ? 'selected' : '' %>><%= s %></option>
+              <% }) %>
+            </select>
+          </div>
+        </div>
+        <div class="row"><div class="field full"><label>사유/메모 (선택)</label><input type="text" name="note" placeholder="변경 사유"></div></div>
+        <button class="btn" type="submit">상태 변경 저장</button>
+      </form>
     </div>
   </div>
 </div>

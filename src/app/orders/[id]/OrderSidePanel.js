@@ -12,7 +12,7 @@ function historyLabel(h) {
 }
 
 export default function OrderSidePanel({ data, orderId }) {
-  const { order, legs, drivers, history, baseUrl, currentUserRole } = data;
+  const { order, legs, drivers, history, baseUrl, currentUserRole, ORDER_STATUSES } = data;
   const canManageDriver = currentUserRole === 'admin' || currentUserRole === 'branch_manager';
 
   return (
@@ -94,6 +94,32 @@ export default function OrderSidePanel({ data, orderId }) {
           </li>
         ))}
       </ul>
+
+      {/* 상태 변경은 페이지 맨 아래 관리자 패널에 따로 있었는데, 기사배정·수정이력을 보고
+          바로 상태를 바꾸는 흐름이 자연스러워서 이 패널 아래로 옮겼다(사용자 요청).
+          POST /:id/status는 콜마너 등록 트리거이기도 하다(routes/orders.js). */}
+      {canManageDriver && (
+        <>
+          <div className="section-title small">오더 상태 변경</div>
+          <form method="POST" action={`/orders/${orderId}/status`}>
+            <div className="row">
+              <div className="field">
+                <label>새 상태</label>
+                <select name="status" defaultValue={order.status}>
+                  {(ORDER_STATUSES || []).map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="row">
+              <div className="field full">
+                <label>사유/메모 (선택)</label>
+                <input type="text" name="note" placeholder="변경 사유" />
+              </div>
+            </div>
+            <button className="btn" type="submit">상태 변경 저장</button>
+          </form>
+        </>
+      )}
     </section>
   );
 }
