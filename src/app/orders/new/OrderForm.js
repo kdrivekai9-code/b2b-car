@@ -825,6 +825,12 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
           />
         )}
       </div>
+      {isEdit && order.callmaner_last_error && (
+        <div className="callmaner-error-badge" role="alert">
+          <strong>⚠️ 콜마너 연동 실패</strong>
+          <div>{order.callmaner_last_error}</div>
+        </div>
+      )}
     </div>
   );
 }

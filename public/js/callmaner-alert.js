@@ -1,6 +1,23 @@
 // 오더 등록 직후 콜마너 오더접수(fire-and-forget) 결과를 짧게 폴링해서, 실패했을 때만
 // 화면에 팝업으로 알려준다. 성공/미사용 지사는 조용히 넘어간다(요청 범위가 "실패 알림"이라).
 (function () {
+  // 오더 상세페이지는 서버 렌더 시점의 order.callmaner_last_error로 이 배지를 이미 그려두지만
+  // (새로고침하면 항상 보임), 폴링 도중 새로고침 없이 막 실패를 감지한 경우에도 같은 배지가
+  // 바로 나타나도록 만들어 둔다(className으로 중복 삽입 방지).
+  function showBadge(message) {
+    if (document.querySelector('.callmaner-error-badge')) return;
+    var badge = document.createElement('div');
+    badge.className = 'callmaner-error-badge';
+    badge.setAttribute('role', 'alert');
+    var strong = document.createElement('strong');
+    strong.textContent = '⚠️ 콜마너 연동 실패';
+    var body = document.createElement('div');
+    body.textContent = message;
+    badge.appendChild(strong);
+    badge.appendChild(body);
+    document.body.appendChild(badge);
+  }
+
   function showPopup(message, onClose) {
     var overlay = document.createElement('div');
     overlay.className = 'callmaner-alert-overlay';
@@ -50,7 +67,7 @@
         .then(function (res) { return res.ok ? res.json() : null; })
         .then(function (data) {
           if (!data || !data.enabled) { onDone(); return; } // 콜마너 미사용 지사 - 아무 것도 하지 않음
-          if (data.error) { showPopup(data.error, onDone); return; } // 팝업의 "확인"을 눌러야 onDone(페이지 이동 등) 진행
+          if (data.error) { showBadge(data.error); showPopup(data.error, onDone); return; } // 팝업의 "확인"을 눌러야 onDone(페이지 이동 등) 진행
           if (data.confSlip) { onDone(); return; } // 정상 등록 - 팝업 없음(요청 범위 밖)
           attempts += 1;
           if (attempts < maxAttempts) setTimeout(tick, intervalMs);
@@ -61,5 +78,5 @@
     tick();
   }
 
-  window.__callmanerAlert = { poll: poll, showPopup: showPopup };
+  window.__callmanerAlert = { poll: poll, showPopup: showPopup, showBadge: showBadge };
 })();

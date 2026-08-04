@@ -473,13 +473,17 @@
 
   // 콜마너 오더접수 연동에 필요한 좌표/시도/시구군/동 — 출발지/도착지 확정 시 hidden input에
   // 채워서 폼 제출에 포함시킨다(경유지는 콜마너 viaList 연동 대상이 아니라 채우지 않음).
+  // 반환하는 Promise를 호출부(applyResult)가 이어받아 __aiIntakeResolveAddress까지 타고
+  // 올라간다 — 이걸 기다리지 않고(fire-and-forget) 다음 질문으로 넘어가면, AI 챗봇처럼 확인
+  // 직후 곧바로 오더를 등록하는 흐름에서 이 fetch가 끝나기 전에 제출되어 origin_lat 등
+  // hidden input이 빈 채로 나가는 경쟁 상태가 생긴다(실제로 재현됨 — 콜마너 연동 실패 원인).
   function resolveRegionAndFill(kind, lat, lon) {
-    if (kind !== 'origin' && kind !== 'destination') return;
+    if (kind !== 'origin' && kind !== 'destination') return Promise.resolve();
     var latInput = document.getElementById(kind + '_lat');
     var lonInput = document.getElementById(kind + '_lon');
     if (latInput) latInput.value = lat;
     if (lonInput) lonInput.value = lon;
-    fetch('/kakao/region?lat=' + lat + '&lng=' + lon)
+    return fetch('/kakao/region?lat=' + lat + '&lng=' + lon)
       .then(function (res) { return res.ok ? res.json() : null; })
       .then(function (region) {
         if (!region) return;
@@ -1079,6 +1083,10 @@
   var mapShowAllBtn = document.getElementById('mapShowAllBtn');
   if (mapShowAllBtn) mapShowAllBtn.addEventListener('click', refreshMapView);
 
+  // 반환하는 Promise는 좌표/행정구역 hidden input이 실제로 채워진 뒤에 resolve된다(콜마너
+  // 연동에 필요 — resolveRegionAndFill 주석 참고). 클릭/blur로 호출하는 곳(selectResult,
+  // handleAddressBlur)은 반환값을 기다리지 않아도 되지만(사용자가 바로 제출하기까지 시간차가
+  // 있음), __aiIntakeResolveAddress는 이 Promise를 반드시 이어받아 기다린다.
   function applyResult(r, mainInput, detailInput, slot, kind, preview) {
     mainInput.value = mainAddressOf(r);
     if (detailInput) {
@@ -1090,8 +1098,9 @@
     if (preview) preview.textContent = resultLabel(r);
     if (r.lat && r.lon) {
       placeMarker(slot, kind, [parseFloat(r.lat), parseFloat(r.lon)]);
-      resolveRegionAndFill(kind, parseFloat(r.lat), parseFloat(r.lon));
+      return resolveRegionAndFill(kind, parseFloat(r.lat), parseFloat(r.lon));
     }
+    return Promise.resolve();
   }
 
   function handleAddressBlur(input, detailInput, slot, kind) {
@@ -1488,20 +1497,25 @@
     // searchedQuery: 오타 보정 재검색(예: "알파동타워"→"알파돔타워")으로 찾은 결과일 때는, 남은
     // 상세주소 힌트를 원문(query)이 아니라 실제로 검색에 성공한 보정된 문구 기준으로 뽑아야 한다 —
     // 원문 그대로 쓰면 보정 전 오타 토큰이 best의 라벨과 매칭되지 않아 그대로 상세주소에 남는다.
+    // Promise를 반환 — applyResult가 좌표/행정구역 hidden input을 실제로 다 채운 뒤에야
+    // { success: true, ... }로 resolve된다. 호출부(아래 confirmWith(...).then(resolve))가 이
+    // 완료를 기다리지 않으면, AI 챗봇이 확인 직후 곧바로 다음 질문/제출로 넘어가버려 hidden
+    // input이 빈 채로 오더가 등록되는 경쟁 상태가 생긴다.
     function confirmWith(best, detailToken, meta, searchedQuery) {
-      if (!best) return { success: false, resolvedText: null };
-      applyResult(best, mainInput, detailInput, slot, kind, document.getElementById(slot + 'Preview'));
-      var detailHint = extractDetailHintFromResolved(searchedQuery || query, best);
-      if (detailToken) appendDetailToken(detailInput, detailToken);
-      if (detailHint) appendDetailToken(detailInput, detailHint);
-      return {
-        success: true,
-        resolvedText: buildResolvedText(resultLabel(best), detailInput ? detailInput.value : ''),
-        // 원문 검색이 0건이라 Gemini 보정 검색어로 재시도해서 찾은 결과인 경우, 챗봇이 그 과정을
-        // 안내 말풍선으로 보여줄 수 있도록 원문/보정 검색어를 함께 돌려준다.
-        triedFallback: !!(meta && meta.triedFallback),
-        correctedQuery: (meta && meta.correctedQuery) || null,
-      };
+      if (!best) return Promise.resolve({ success: false, resolvedText: null });
+      return applyResult(best, mainInput, detailInput, slot, kind, document.getElementById(slot + 'Preview')).then(function () {
+        var detailHint = extractDetailHintFromResolved(searchedQuery || query, best);
+        if (detailToken) appendDetailToken(detailInput, detailToken);
+        if (detailHint) appendDetailToken(detailInput, detailHint);
+        return {
+          success: true,
+          resolvedText: buildResolvedText(resultLabel(best), detailInput ? detailInput.value : ''),
+          // 원문 검색이 0건이라 Gemini 보정 검색어로 재시도해서 찾은 결과인 경우, 챗봇이 그 과정을
+          // 안내 말풍선으로 보여줄 수 있도록 원문/보정 검색어를 함께 돌려준다.
+          triedFallback: !!(meta && meta.triedFallback),
+          correctedQuery: (meta && meta.correctedQuery) || null,
+        };
+      });
     }
 
     var stripped = stripGenericSuffix(query);
@@ -1512,7 +1526,7 @@
       return new Promise(function (resolve) {
         geocodeWithMode(query, 'plain', function (results) {
           if (results.length) {
-            resolve(confirmWith(results[0], '', { triedFallback: false, correctedQuery: null }));
+            confirmWith(results[0], '', { triedFallback: false, correctedQuery: null }).then(resolve);
             return;
           }
           if (onStatus) onStatus({ type: 'no_result', query: query });
@@ -1540,7 +1554,7 @@
               }
               geocodeWithMode(candidate, 'plain', function (candidateResults) {
                 if (candidateResults.length) {
-                  resolve(confirmWith(candidateResults[0], '', { triedFallback: true, correctedQuery: candidate }, candidate));
+                  confirmWith(candidateResults[0], '', { triedFallback: true, correctedQuery: candidate }, candidate).then(resolve);
                   return;
                 }
                 tryNext();
@@ -1568,19 +1582,19 @@
         var fullTop = fullResults[0];
         var strippedTop = strippedResults[0];
         if (!fullTop && !strippedTop) { resolve({ success: false, resolvedText: null }); return; }
-        if (!strippedTop || sameSpot(fullTop, strippedTop)) { resolve(confirmWith(fullTop, genericSuffix, fullMeta)); return; }
-        if (!fullTop) { resolve(confirmWith(strippedTop, genericSuffix, strippedMeta)); return; }
+        if (!strippedTop || sameSpot(fullTop, strippedTop)) { confirmWith(fullTop, genericSuffix, fullMeta).then(resolve); return; }
+        if (!fullTop) { confirmWith(strippedTop, genericSuffix, strippedMeta).then(resolve); return; }
         // 원문 그대로가 이미 카카오에 정식 등록된 장소명과 정확히 일치하면(예: "세종대학교 정문"이
         // 접미어가 붙은 별칭이 아니라 그 자체로 등록된 POI 이름) 접미어 제거는 불필요하다 — 핵심
         // 지명(stripped) 결과와 비교해서 갈릴지 말지 따질 것 없이 원문 결과로 바로 확정한다.
         // genericSuffix를 상세주소로 또 붙이면("...능동로 209 정문"처럼) place_name에 이미 있는
         // 단어가 중복되므로 빈 문자열로 넘긴다.
         if (fullTop.type === 'place' && normalizeSearchText(fullTop.place_name) === normalizeSearchText(query)) {
-          resolve(confirmWith(fullTop, '', fullMeta));
+          confirmWith(fullTop, '', fullMeta).then(resolve);
           return;
         }
         if (shouldAutoConfirmPrimaryCandidate(stripped, strippedTop, fullTop)) {
-          resolve(confirmWith(strippedTop, genericSuffix, strippedMeta));
+          confirmWith(strippedTop, genericSuffix, strippedMeta).then(resolve);
           return;
         }
         // 핵심 지명(부속어 제거)만으로 검색한 결과가 대체로 더 신뢰할 만해서 1번으로 먼저 보여준다.

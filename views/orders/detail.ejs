@@ -204,6 +204,12 @@
     </div>
   </div>
 </div>
+<% if (order.callmaner_last_error) { %>
+<div class="callmaner-error-badge" role="alert">
+  <strong>⚠️ 콜마너 연동 실패</strong>
+  <div><%= order.callmaner_last_error %></div>
+</div>
+<% } %>
 <script>
   document.addEventListener('DOMContentLoaded', function () {
     if (window.__callmanerAlert) window.__callmanerAlert.poll(<%= order.id %>);

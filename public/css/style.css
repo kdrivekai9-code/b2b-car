@@ -136,6 +136,14 @@ tr:hover td{background:var(--tint);}
 .toast.toast-hide{opacity:0;}
 .toast.toast-top{bottom:auto;top:28px;}
 
+/* 콜마너 오더접수 실패 사유 — 오더 상세페이지 우측 하단에 계속 떠 있는 알림(사용자가
+   화면을 벗어나지 않아도 항상 보이도록, 팝업과 달리 닫기 버튼 없이 페이지 체류 중 유지). */
+.callmaner-error-badge{position:fixed;right:16px;bottom:16px;max-width:320px;background:#fdecea;border:1px solid #f1948a;color:#922b21;padding:12px 14px;border-radius:8px;font-size:13px;line-height:1.5;box-shadow:0 6px 20px rgba(0,0,0,.18);z-index:900;}
+.callmaner-error-badge strong{display:block;margin-bottom:4px;}
+@media (max-width:600px){
+  .callmaner-error-badge{left:16px;right:16px;max-width:none;bottom:16px;}
+}
+
 table.density-compact th,table.density-compact td{padding:4px 10px;font-size:12px;}
 table.density-comfortable th,table.density-comfortable td{padding:16px 14px;}
 
