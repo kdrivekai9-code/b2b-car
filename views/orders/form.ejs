@@ -31,7 +31,7 @@
       <div class="route-stop origin-stop">
         <div class="route-stop-title"><span class="route-marker">출발</span></div>
         <div class="field full">
-          <label>출발지 주소 <span class="required-mark" aria-hidden="true">*</span></label>
+          <label>출발지 주소 <span class="required-mark" aria-hidden="true">*</span><span class="confirm-badge" id="originCoordBadge">✓ 좌표</span><span class="confirm-badge" id="originRegionBadge">✓ 행정구역</span></label>
         <div class="addr-input-row">
           <input type="text" class="addr-input" id="origin_address" name="origin_address" required placeholder="도로명, 지번 또는 상호명으로 검색" value="<%= order.origin_address || '' %>">
           <button type="button" class="btn small secondary addr-search-btn" data-target="origin_address">🔍 검색</button>
@@ -61,7 +61,7 @@
       <div class="route-stop destination-stop">
         <div class="route-stop-title"><span class="route-marker">도착</span></div>
         <div class="field full">
-          <label>도착지 주소 <span class="required-mark" aria-hidden="true">*</span></label>
+          <label>도착지 주소 <span class="required-mark" aria-hidden="true">*</span><span class="confirm-badge" id="destinationCoordBadge">✓ 좌표</span><span class="confirm-badge" id="destinationRegionBadge">✓ 행정구역</span></label>
         <div class="addr-input-row">
           <input type="text" class="addr-input" id="destination_address" name="destination_address" required placeholder="도로명, 지번 또는 상호명으로 검색" value="<%= order.destination_address || '' %>">
           <button type="button" class="btn small secondary addr-search-btn" data-target="destination_address">🔍 검색</button>

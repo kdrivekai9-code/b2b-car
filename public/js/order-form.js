@@ -252,7 +252,10 @@
     var destLegendRow = document.getElementById('destLegendRow');
     var hasLegend = !!destLegendRow;
     row.innerHTML =
-      '<label>경유지 주소 <span class="confirm-badge" id="' + id + 'ConfirmBadge">✓ 지도확정</span></label>' +
+      '<label>경유지 주소 <span class="confirm-badge" id="' + id + 'ConfirmBadge">✓ 지도확정</span>' +
+      '<span class="confirm-badge" id="' + id + 'CoordBadge">✓ 좌표</span></label>' +
+      '<input type="hidden" id="' + id + '_lat" name="waypoint_lats[]">' +
+      '<input type="hidden" id="' + id + '_lon" name="waypoint_lons[]">' +
       '<div class="addr-input-row">' +
       '<input type="text" class="addr-input" id="' + id + '_address" name="waypoints[]" placeholder="경유지 주소">' +
       '<button type="button" class="btn small secondary addr-search-btn" data-target="' + id + '_address">🔍 검색</button>' +
@@ -479,26 +482,39 @@
   // 그래야 hidden input이 빈 채로(콜마너 연동 실패) 제출되는 일이 없으면서도, 대화 중간
   // 매 메시지가 이 API 응답을 기다리느라 느려지지 않는다.
   var pendingRegionResolutions = [];
-  function resolveRegionAndFill(kind, lat, lon) {
-    if (kind !== 'origin' && kind !== 'destination') return Promise.resolve();
-    var latInput = document.getElementById(kind + '_lat');
-    var lonInput = document.getElementById(kind + '_lon');
+  function resolveRegionAndFill(slot, kind, lat, lon) {
+    var latInput = document.getElementById(slot + '_lat');
+    var lonInput = document.getElementById(slot + '_lon');
     if (latInput) latInput.value = lat;
     if (lonInput) lonInput.value = lon;
+    updateGeoBadges(slot);
+    // 행정구역은 콜마너 오더접수가 요구하는 출발지/도착지만 조회한다(경유지는 viaList 미연동).
+    if (kind !== 'origin' && kind !== 'destination') return Promise.resolve();
     var promise = fetch('/kakao/region?lat=' + lat + '&lng=' + lon)
       .then(function (res) { return res.ok ? res.json() : null; })
       .then(function (region) {
         if (!region) return;
-        var sidoInput = document.getElementById(kind + '_sido');
-        var sigugunInput = document.getElementById(kind + '_sigugun');
-        var dongInput = document.getElementById(kind + '_dong');
+        var sidoInput = document.getElementById(slot + '_sido');
+        var sigugunInput = document.getElementById(slot + '_sigugun');
+        var dongInput = document.getElementById(slot + '_dong');
         if (sidoInput) sidoInput.value = region.sido || '';
         if (sigugunInput) sigugunInput.value = region.sigugun || '';
         if (dongInput) dongInput.value = region.dong || '';
+        updateGeoBadges(slot);
       })
       .catch(function () {});
     pendingRegionResolutions.push(promise);
     return promise;
+  }
+
+  // 주소가 지워지거나 확정이 풀리면 좌표/행정구역도 함께 비운다 — 안 그러면 예전 주소의 좌표가
+  // hidden input에 남아 배지는 켜져 있는데 실제로는 다른 주소가 제출되는 상태가 된다.
+  function clearGeoFields(slot) {
+    ['_lat', '_lon', '_sido', '_sigugun', '_dong'].forEach(function (suffix) {
+      var el = document.getElementById(slot + suffix);
+      if (el) el.value = '';
+    });
+    updateGeoBadges(slot);
   }
 
   // 오더 등록 직전(precheck/제출 시작 시)에 호출 — 그때까지 안 끝난 좌표/행정구역 조회를
@@ -582,9 +598,27 @@
     var badge = document.getElementById(slot + 'ConfirmBadge');
     if (badge) badge.classList.toggle('visible', !!on);
   }
+
+  // 콜마너 오더접수에 필요한 좌표/행정구역은 hidden input이라 화면에서 확인할 방법이 없었다 —
+  // "지도확정" 배지와 같은 방식으로 실제 hidden input 값을 읽어 켜고 끈다(추측이 아니라 실제로
+  // 제출될 값을 그대로 반영). 경유지는 행정구역을 수집하지 않으므로(order_waypoints에 sido/
+  // sigugun/dong 컬럼 없음 + 콜마너 viaList 미연동) 좌표 배지만 존재한다.
+  function updateGeoBadges(slot) {
+    var val = function (id) {
+      var el = document.getElementById(id);
+      return el ? String(el.value || '').trim() : '';
+    };
+    var coordBadge = document.getElementById(slot + 'CoordBadge');
+    if (coordBadge) coordBadge.classList.toggle('visible', !!(val(slot + '_lat') && val(slot + '_lon')));
+    var regionBadge = document.getElementById(slot + 'RegionBadge');
+    if (regionBadge) {
+      regionBadge.classList.toggle('visible', !!(val(slot + '_sido') && val(slot + '_sigugun') && val(slot + '_dong')));
+    }
+  }
   function removeMarker(slot) {
     if (markers[slot]) { markers[slot].setMap(null); delete markers[slot]; }
     toggleConfirmBadge(slot, false);
+    clearGeoFields(slot);
     refreshMapView();
   }
   function placeMarker(slot, kind, latlng) {
@@ -1111,7 +1145,7 @@
     if (preview) preview.textContent = resultLabel(r);
     if (r.lat && r.lon) {
       placeMarker(slot, kind, [parseFloat(r.lat), parseFloat(r.lon)]);
-      return resolveRegionAndFill(kind, parseFloat(r.lat), parseFloat(r.lon));
+      return resolveRegionAndFill(slot, kind, parseFloat(r.lat), parseFloat(r.lon));
     }
     return Promise.resolve();
   }
@@ -1131,7 +1165,7 @@
       if (preview) preview.textContent = resultLabel(best);
       if (best.lat && best.lon) {
         placeMarker(slot, kind, [parseFloat(best.lat), parseFloat(best.lon)]);
-        resolveRegionAndFill(kind, parseFloat(best.lat), parseFloat(best.lon));
+        resolveRegionAndFill(slot, kind, parseFloat(best.lat), parseFloat(best.lon));
       }
     });
   }
@@ -1653,6 +1687,11 @@
   // 그 경로를 타지 않고 브라우저 기본 submit으로 바로 나가버려서, 진행 중인 조회가 있으면
   // origin_lat 등이 빈 채로 등록될 수 있었다(콜마너 연동 실패 원인).
   // form.submit()은 submit 이벤트를 다시 발생시키지 않으므로 무한 루프가 되지 않는다.
+  // 오더 수정 화면처럼 좌표/행정구역이 이미 채워진 채로 열리는 경우에도 배지가 맞게 보이도록
+  // 최초 1회 동기화한다(경유지 행은 동적으로 만들어질 때 resolveRegionAndFill이 갱신한다).
+  updateGeoBadges('origin');
+  updateGeoBadges('destination');
+
   var orderFormEl = document.getElementById('orderForm');
   if (orderFormEl) {
     orderFormEl.addEventListener('submit', function (e) {

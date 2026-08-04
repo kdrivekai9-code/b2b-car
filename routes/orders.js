@@ -13,6 +13,12 @@ const { broadcastMessage, broadcastSessionListChanged, broadcastOrderListChanged
 const { splitTypeAndPlate } = require('../lib/vehicleInfo');
 const callmaner = require('../lib/callmaner');
 
+// 폼에서 온 좌표 문자열을 숫자로 — 빈 문자열/미입력/숫자 아님은 전부 null(컬럼이 numeric이라
+// 빈 문자열을 그대로 넣으면 22P02로 터진다). 출발·도착지와 경유지 양쪽에서 같이 쓴다.
+function toNumOrNullShared(v) {
+  return v !== undefined && v !== null && v !== '' && Number.isFinite(Number(v)) ? Number(v) : null;
+}
+
 function defaultReservedDateTime() {
   const now = kstNow();
   const pad = (n) => String(n).padStart(2, '0');
@@ -786,12 +792,19 @@ router.post('/', asyncHandler(async (req, res) => {
   const waypointDetails = [].concat(req.body.waypoint_details || []);
   const waypointContacts = [].concat(req.body.waypoint_contacts || []);
   const waypointVehicleNumbers = [].concat(req.body.waypoint_vehicle_numbers || []);
+  // 경유지 좌표는 그동안 폼에서 보내지도, 저장하지도 않아서 §7-2 자동승격 판정이 읽는
+  // order_waypoints.lat/lon이 항상 NULL이었다 — 주소 확정 시 화면에 "✓ 좌표" 배지로 보여주는
+  // 값과 실제 저장값이 어긋나지 않도록 함께 저장한다(콜마너 viaList 연동은 여전히 범위 밖).
+  const waypointLats = [].concat(req.body.waypoint_lats || []);
+  const waypointLons = [].concat(req.body.waypoint_lons || []);
   const finalWaypoints = waypoints
     .map((w, i) => ({
       address: combineAddress(w, waypointDetails[i]),
       addressDetail: waypointDetails[i] || null,
       contact: waypointContacts[i] || null,
       vehicleNumber: waypointVehicleNumbers[i] || null,
+      lat: toNumOrNullShared(waypointLats[i]),
+      lon: toNumOrNullShared(waypointLons[i]),
     }))
     .filter((w) => w.address);
 
@@ -834,7 +847,7 @@ router.post('/', asyncHandler(async (req, res) => {
   const finalOriginAddress = combineAddress(origin_address, origin_detail_address);
   const finalDestinationAddress = combineAddress(destination_address, destination_detail_address);
 
-  const toNumOrNull = (v) => (v !== undefined && v !== null && v !== '' && Number.isFinite(Number(v)) ? Number(v) : null);
+  const toNumOrNull = toNumOrNullShared;
   const originLat = toNumOrNull(origin_lat);
   const originLon = toNumOrNull(origin_lon);
   const destinationLat = toNumOrNull(destination_lat);
@@ -890,8 +903,8 @@ router.post('/', asyncHandler(async (req, res) => {
 
   for (let i = 0; i < finalWaypoints.length; i++) {
     await db.run(
-      'INSERT INTO order_waypoints (order_id, seq, address, address_detail, contact_phone, vehicle_number) VALUES (?, ?, ?, ?, ?, ?)',
-      [newId, i + 1, finalWaypoints[i].address, finalWaypoints[i].addressDetail, finalWaypoints[i].contact, finalWaypoints[i].vehicleNumber]
+      'INSERT INTO order_waypoints (order_id, seq, address, address_detail, contact_phone, vehicle_number, lat, lon) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [newId, i + 1, finalWaypoints[i].address, finalWaypoints[i].addressDetail, finalWaypoints[i].contact, finalWaypoints[i].vehicleNumber, finalWaypoints[i].lat, finalWaypoints[i].lon]
     );
   }
 
@@ -1200,12 +1213,19 @@ router.post('/:id', asyncHandler(async (req, res) => {
   const waypointDetails = [].concat(req.body.waypoint_details || []);
   const waypointContacts = [].concat(req.body.waypoint_contacts || []);
   const waypointVehicleNumbers = [].concat(req.body.waypoint_vehicle_numbers || []);
+  // 경유지 좌표는 그동안 폼에서 보내지도, 저장하지도 않아서 §7-2 자동승격 판정이 읽는
+  // order_waypoints.lat/lon이 항상 NULL이었다 — 주소 확정 시 화면에 "✓ 좌표" 배지로 보여주는
+  // 값과 실제 저장값이 어긋나지 않도록 함께 저장한다(콜마너 viaList 연동은 여전히 범위 밖).
+  const waypointLats = [].concat(req.body.waypoint_lats || []);
+  const waypointLons = [].concat(req.body.waypoint_lons || []);
   const finalWaypoints = waypoints
     .map((w, i) => ({
       address: combineAddress(w, waypointDetails[i]),
       addressDetail: waypointDetails[i] || null,
       contact: waypointContacts[i] || null,
       vehicleNumber: waypointVehicleNumbers[i] || null,
+      lat: toNumOrNullShared(waypointLats[i]),
+      lon: toNumOrNullShared(waypointLons[i]),
     }))
     .filter((w) => w.address);
 
@@ -1320,8 +1340,8 @@ router.post('/:id', asyncHandler(async (req, res) => {
   await db.run('DELETE FROM order_waypoints WHERE order_id = ?', [req.params.id]);
   for (let i = 0; i < finalWaypoints.length; i++) {
     await db.run(
-      'INSERT INTO order_waypoints (order_id, seq, address, address_detail, contact_phone, vehicle_number) VALUES (?, ?, ?, ?, ?, ?)',
-      [req.params.id, i + 1, finalWaypoints[i].address, finalWaypoints[i].addressDetail, finalWaypoints[i].contact, finalWaypoints[i].vehicleNumber]
+      'INSERT INTO order_waypoints (order_id, seq, address, address_detail, contact_phone, vehicle_number, lat, lon) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [req.params.id, i + 1, finalWaypoints[i].address, finalWaypoints[i].addressDetail, finalWaypoints[i].contact, finalWaypoints[i].vehicleNumber, finalWaypoints[i].lat, finalWaypoints[i].lon]
     );
   }
 

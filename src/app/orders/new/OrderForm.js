@@ -570,6 +570,8 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
           <div className="route-stop origin-stop">
             <div className="route-stop-title"><span className="route-marker">출발</span></div>
             <AddressField label="출발지 주소" required favorites={initialData.favorites}
+              hasCoord={state.origin_lat != null && state.origin_lon != null}
+              hasRegion={!!(state.origin_sido && state.origin_sigugun && state.origin_dong)}
               address={state.origin_address} detail={state.origin_detail_address}
               onAddressChange={(v) => setField('origin_address', v)}
               onDetailChange={(v) => setField('origin_detail_address', v)}
@@ -591,6 +593,7 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
             {state.waypoints.map((w, idx) => (
               <div className="field full waypoint-row" key={w.id}>
                 <AddressField label={`경유지 주소 ${idx + 1}`}
+                  hasCoord={w.lat != null && w.lon != null}
                   address={w.address} detail={w.detail}
                   onAddressChange={(v) => dispatch({ type: 'SET_WAYPOINT_FIELD', id: w.id, field: 'address', value: v })}
                   onDetailChange={(v) => dispatch({ type: 'SET_WAYPOINT_FIELD', id: w.id, field: 'detail', value: v })}
@@ -618,6 +621,8 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
           <div className="route-stop destination-stop">
             <div className="route-stop-title"><span className="route-marker">도착</span></div>
             <AddressField label="도착지 주소" required favorites={initialData.favorites}
+              hasCoord={state.destination_lat != null && state.destination_lon != null}
+              hasRegion={!!(state.destination_sido && state.destination_sigugun && state.destination_dong)}
               address={state.destination_address} detail={state.destination_detail_address}
               onAddressChange={(v) => setField('destination_address', v)}
               onDetailChange={(v) => setField('destination_detail_address', v)}

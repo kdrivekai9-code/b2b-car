@@ -66,7 +66,11 @@ export async function resolveRegion(lat, lon) {
 
 // 출발지/도착지/경유지 공용 주소 입력 컴포넌트. 기존 order-form.js의 wireAddressField/
 // handleAddressBlur/applyResult를 React 컨트롤드-인풋 형태로 이식했다.
-export default function AddressField({ label, required, address, detail, onAddressChange, onDetailChange, onResolved, favorites }) {
+// hasCoord/hasRegion: 콜마너 오더접수에 필요한 좌표·행정구역이 실제로 잡혔는지 라벨 옆에
+// 배지로 보여준다(hidden 값이라 화면에서 확인할 방법이 없었다). hasRegion에 null을 넘기면
+// 배지를 아예 숨긴다 — 경유지는 order_waypoints에 sido/sigugun/dong 컬럼이 없고 콜마너
+// viaList도 미연동이라 행정구역을 수집하지 않으므로, 항상 꺼진 배지를 띄우지 않기 위함.
+export default function AddressField({ label, required, address, detail, onAddressChange, onDetailChange, onResolved, favorites, hasCoord = false, hasRegion = null }) {
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
   const [skipGeocode, setSkipGeocode] = useState(false);
@@ -172,7 +176,10 @@ export default function AddressField({ label, required, address, detail, onAddre
 
   return (
     <div className="field full">
-      <label>{label} {required && <span className="required-mark" aria-hidden="true">*</span>}</label>
+      <label>{label} {required && <span className="required-mark" aria-hidden="true">*</span>}
+        {hasCoord && <span className="confirm-badge visible">✓ 좌표</span>}
+        {hasRegion === true && <span className="confirm-badge visible">✓ 행정구역</span>}
+      </label>
       <div className="addr-input-row">
         <input type="text" className="addr-input" required={required} placeholder="도로명, 지번 또는 상호명으로 검색"
           value={address} onChange={handleChange} onKeyDown={handleKeyDown} onBlur={handleBlur} />
