@@ -473,17 +473,19 @@
 
   // 콜마너 오더접수 연동에 필요한 좌표/시도/시구군/동 — 출발지/도착지 확정 시 hidden input에
   // 채워서 폼 제출에 포함시킨다(경유지는 콜마너 viaList 연동 대상이 아니라 채우지 않음).
-  // 반환하는 Promise를 호출부(applyResult)가 이어받아 __aiIntakeResolveAddress까지 타고
-  // 올라간다 — 이걸 기다리지 않고(fire-and-forget) 다음 질문으로 넘어가면, AI 챗봇처럼 확인
-  // 직후 곧바로 오더를 등록하는 흐름에서 이 fetch가 끝나기 전에 제출되어 origin_lat 등
-  // hidden input이 빈 채로 나가는 경쟁 상태가 생긴다(실제로 재현됨 — 콜마너 연동 실패 원인).
+  // 채팅 응답 체감속도를 위해 이 fetch 자체는 fire-and-forget으로 두되(각 확인 말풍선을
+  // 지연시키지 않음), 반환하는 Promise를 pendingRegionResolutions에 모아뒀다가 실제 오더
+  // "제출" 직전(ai-intake.js의 window.__aiIntakeWaitPendingRegions)에만 전부 기다린다 —
+  // 그래야 hidden input이 빈 채로(콜마너 연동 실패) 제출되는 일이 없으면서도, 대화 중간
+  // 매 메시지가 이 API 응답을 기다리느라 느려지지 않는다.
+  var pendingRegionResolutions = [];
   function resolveRegionAndFill(kind, lat, lon) {
     if (kind !== 'origin' && kind !== 'destination') return Promise.resolve();
     var latInput = document.getElementById(kind + '_lat');
     var lonInput = document.getElementById(kind + '_lon');
     if (latInput) latInput.value = lat;
     if (lonInput) lonInput.value = lon;
-    return fetch('/kakao/region?lat=' + lat + '&lng=' + lon)
+    var promise = fetch('/kakao/region?lat=' + lat + '&lng=' + lon)
       .then(function (res) { return res.ok ? res.json() : null; })
       .then(function (region) {
         if (!region) return;
@@ -495,7 +497,18 @@
         if (dongInput) dongInput.value = region.dong || '';
       })
       .catch(function () {});
+    pendingRegionResolutions.push(promise);
+    return promise;
   }
+
+  // 오더 등록 직전(precheck/제출 시작 시)에 호출 — 그때까지 안 끝난 좌표/행정구역 조회를
+  // 전부 기다린 뒤 큐를 비운다. 개별 주소 확인 시점이 아니라 여기서만 기다리므로 대화
+  // 진행 자체는 각 API 응답을 기다리지 않고 바로바로 이어진다.
+  window.__aiIntakeWaitPendingRegions = function () {
+    var all = Promise.all(pendingRegionResolutions);
+    pendingRegionResolutions = [];
+    return all;
+  };
 
   function mainAddressOf(r) { return r.road_address || r.jibun_address || ''; }
   function resultLabel(r) {
@@ -1497,25 +1510,23 @@
     // searchedQuery: 오타 보정 재검색(예: "알파동타워"→"알파돔타워")으로 찾은 결과일 때는, 남은
     // 상세주소 힌트를 원문(query)이 아니라 실제로 검색에 성공한 보정된 문구 기준으로 뽑아야 한다 —
     // 원문 그대로 쓰면 보정 전 오타 토큰이 best의 라벨과 매칭되지 않아 그대로 상세주소에 남는다.
-    // Promise를 반환 — applyResult가 좌표/행정구역 hidden input을 실제로 다 채운 뒤에야
-    // { success: true, ... }로 resolve된다. 호출부(아래 confirmWith(...).then(resolve))가 이
-    // 완료를 기다리지 않으면, AI 챗봇이 확인 직후 곧바로 다음 질문/제출로 넘어가버려 hidden
-    // input이 빈 채로 오더가 등록되는 경쟁 상태가 생긴다.
+    // 좌표/행정구역 조회(resolveRegionAndFill)는 여기서 기다리지 않는다 — 채팅 응답 체감속도를
+    // 위해 fire-and-forget으로 보내고, pendingRegionResolutions에 쌓아뒀다가 실제 오더 제출
+    // 직전에만 한꺼번에 기다린다(window.__aiIntakeWaitPendingRegions, ai-intake.js에서 호출).
     function confirmWith(best, detailToken, meta, searchedQuery) {
-      if (!best) return Promise.resolve({ success: false, resolvedText: null });
-      return applyResult(best, mainInput, detailInput, slot, kind, document.getElementById(slot + 'Preview')).then(function () {
-        var detailHint = extractDetailHintFromResolved(searchedQuery || query, best);
-        if (detailToken) appendDetailToken(detailInput, detailToken);
-        if (detailHint) appendDetailToken(detailInput, detailHint);
-        return {
-          success: true,
-          resolvedText: buildResolvedText(resultLabel(best), detailInput ? detailInput.value : ''),
-          // 원문 검색이 0건이라 Gemini 보정 검색어로 재시도해서 찾은 결과인 경우, 챗봇이 그 과정을
-          // 안내 말풍선으로 보여줄 수 있도록 원문/보정 검색어를 함께 돌려준다.
-          triedFallback: !!(meta && meta.triedFallback),
-          correctedQuery: (meta && meta.correctedQuery) || null,
-        };
-      });
+      if (!best) return { success: false, resolvedText: null };
+      applyResult(best, mainInput, detailInput, slot, kind, document.getElementById(slot + 'Preview'));
+      var detailHint = extractDetailHintFromResolved(searchedQuery || query, best);
+      if (detailToken) appendDetailToken(detailInput, detailToken);
+      if (detailHint) appendDetailToken(detailInput, detailHint);
+      return {
+        success: true,
+        resolvedText: buildResolvedText(resultLabel(best), detailInput ? detailInput.value : ''),
+        // 원문 검색이 0건이라 Gemini 보정 검색어로 재시도해서 찾은 결과인 경우, 챗봇이 그 과정을
+        // 안내 말풍선으로 보여줄 수 있도록 원문/보정 검색어를 함께 돌려준다.
+        triedFallback: !!(meta && meta.triedFallback),
+        correctedQuery: (meta && meta.correctedQuery) || null,
+      };
     }
 
     var stripped = stripGenericSuffix(query);
@@ -1526,7 +1537,7 @@
       return new Promise(function (resolve) {
         geocodeWithMode(query, 'plain', function (results) {
           if (results.length) {
-            confirmWith(results[0], '', { triedFallback: false, correctedQuery: null }).then(resolve);
+            resolve(confirmWith(results[0], '', { triedFallback: false, correctedQuery: null }));
             return;
           }
           if (onStatus) onStatus({ type: 'no_result', query: query });
@@ -1554,7 +1565,7 @@
               }
               geocodeWithMode(candidate, 'plain', function (candidateResults) {
                 if (candidateResults.length) {
-                  confirmWith(candidateResults[0], '', { triedFallback: true, correctedQuery: candidate }, candidate).then(resolve);
+                  resolve(confirmWith(candidateResults[0], '', { triedFallback: true, correctedQuery: candidate }, candidate));
                   return;
                 }
                 tryNext();
@@ -1582,19 +1593,19 @@
         var fullTop = fullResults[0];
         var strippedTop = strippedResults[0];
         if (!fullTop && !strippedTop) { resolve({ success: false, resolvedText: null }); return; }
-        if (!strippedTop || sameSpot(fullTop, strippedTop)) { confirmWith(fullTop, genericSuffix, fullMeta).then(resolve); return; }
-        if (!fullTop) { confirmWith(strippedTop, genericSuffix, strippedMeta).then(resolve); return; }
+        if (!strippedTop || sameSpot(fullTop, strippedTop)) { resolve(confirmWith(fullTop, genericSuffix, fullMeta)); return; }
+        if (!fullTop) { resolve(confirmWith(strippedTop, genericSuffix, strippedMeta)); return; }
         // 원문 그대로가 이미 카카오에 정식 등록된 장소명과 정확히 일치하면(예: "세종대학교 정문"이
         // 접미어가 붙은 별칭이 아니라 그 자체로 등록된 POI 이름) 접미어 제거는 불필요하다 — 핵심
         // 지명(stripped) 결과와 비교해서 갈릴지 말지 따질 것 없이 원문 결과로 바로 확정한다.
         // genericSuffix를 상세주소로 또 붙이면("...능동로 209 정문"처럼) place_name에 이미 있는
         // 단어가 중복되므로 빈 문자열로 넘긴다.
         if (fullTop.type === 'place' && normalizeSearchText(fullTop.place_name) === normalizeSearchText(query)) {
-          confirmWith(fullTop, '', fullMeta).then(resolve);
+          resolve(confirmWith(fullTop, '', fullMeta));
           return;
         }
         if (shouldAutoConfirmPrimaryCandidate(stripped, strippedTop, fullTop)) {
-          confirmWith(strippedTop, genericSuffix, strippedMeta).then(resolve);
+          resolve(confirmWith(strippedTop, genericSuffix, strippedMeta));
           return;
         }
         // 핵심 지명(부속어 제거)만으로 검색한 결과가 대체로 더 신뢰할 만해서 1번으로 먼저 보여준다.
@@ -1613,24 +1624,20 @@
   };
 
   // 챗봇이 모호한 주소 후보 중 하나를 사용자로부터 확인받은 뒤 실제로 필드에 반영할 때 사용.
-  // Promise를 반환 — applyResult가 좌표/행정구역 hidden input을 다 채운 뒤에야 resolve된다.
-  // 예전에는 이 반환값(당시엔 문자열)을 그냥 동기로 돌려줘서, 호출부(ai-intake.js의
-  // applyDisambiguationChoice)가 곧바로 다음 질문/오더 등록으로 넘어가버리는 경쟁 상태가
-  // 있었다 — confirmWith(일반 검색 확정) 쪽만 고치고 후보선택(모호주소 disambiguation)
-  // 경로는 놓쳤던 부분(실제로 OID1118~1120에서 재현됨).
+  // 좌표/행정구역 조회는 여기서도 기다리지 않는다(confirmWith와 동일한 이유 — pendingRegionResolutions
+  // 참고, 제출 직전에만 기다림).
   window.__aiIntakeApplyCandidate = function (mainId, kind, candidateResult) {
     var mainInput = document.getElementById(mainId);
-    if (!mainInput) return Promise.resolve(null);
+    if (!mainInput) return null;
     var detailInput = document.getElementById(detailIdFor(mainId));
     var slot = (kind === 'waypoint') ? mainId.replace('_address', '') : (kind === 'origin' ? 'origin' : 'destination');
     var query = mainInput.value;
     var genericSuffix = extractGenericSuffix(mainInput.value);
-    return applyResult(candidateResult, mainInput, detailInput, slot, kind, document.getElementById(slot + 'Preview')).then(function () {
-      var detailHint = extractDetailHintFromResolved(query, candidateResult);
-      if (genericSuffix) appendDetailToken(detailInput, genericSuffix);
-      if (detailHint) appendDetailToken(detailInput, detailHint);
-      return buildResolvedText(resultLabel(candidateResult), detailInput ? detailInput.value : '');
-    });
+    applyResult(candidateResult, mainInput, detailInput, slot, kind, document.getElementById(slot + 'Preview'));
+    var detailHint = extractDetailHintFromResolved(query, candidateResult);
+    if (genericSuffix) appendDetailToken(detailInput, genericSuffix);
+    if (detailHint) appendDetailToken(detailInput, detailHint);
+    return buildResolvedText(resultLabel(candidateResult), detailInput ? detailInput.value : '');
   };
 
   // AI 챗봇이 전화번호 응답을 형식 검사 + 하이픈 포맷팅해서 확인 메시지를 만들 때 사용.
