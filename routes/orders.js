@@ -913,41 +913,11 @@ router.post('/', asyncHandler(async (req, res) => {
     VALUES (?, ?, NULL, '오더등록', '최초 등록')
   `, [newId, u.id]);
 
-  // 콜마너 오더접수 연동 — 지사가 콜마너를 사용 설정한 경우에만, fire-and-forget으로 등록한다.
-  // 좌표/행정구역이 없거나 API가 실패해도 로컬 오더 생성 자체는 이미 끝난 뒤라 실패는
-  // callmaner_last_error에 남기고 넘어간다(재시도는 하지 않음 — 다음 폴링 주기가 상태를
-  // 채워주지 않으니 필요하면 관리자가 직접 콜마너에 재등록해야 한다).
-  (async () => {
-    try {
-      const branchRow = await db.get('SELECT * FROM branches WHERE id = ?', [finalBranch]);
-      if (!branchRow || !branchRow.callmaner_enabled) return;
-      const paymentMethodRow = payment_method_id
-        ? await db.get('SELECT name FROM payment_methods WHERE id = ?', [payment_method_id])
-        : null;
-      const orderForCallmaner = {
-        origin_lat: originLat, origin_lon: originLon,
-        origin_sido, origin_sigugun, origin_dong,
-        origin_address: finalOriginAddress, origin_address_detail: origin_detail_address || null,
-        destination_lat: destinationLat, destination_lon: destinationLon,
-        destination_sido, destination_sigugun, destination_dong,
-        destination_address: finalDestinationAddress, destination_address_detail: destination_detail_address || null,
-        fare_amount: Number(fare_amount) || 0,
-        memo_customer: memo_customer || '',
-        order_type: finalOrderType,
-        reserved_date: effectiveReservedDate, reserved_time: effectiveReservedTime,
-      };
-      const result = await callmaner.orderReceipt(orderForCallmaner, branchRow, paymentMethodRow && paymentMethodRow.name);
-      await db.run(
-        `UPDATE orders SET callmaner_conf_slip = ?, callmaner_status = '접수', callmaner_status_code = '01',
-         callmaner_synced_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS'), callmaner_last_error = NULL
-         WHERE id = ?`,
-        [result.confSlip || null, newId]
-      );
-    } catch (e) {
-      console.error('콜마너 오더접수 실패:', e.message);
-      await db.run('UPDATE orders SET callmaner_last_error = ? WHERE id = ?', [String(e.message || '').slice(0, 500), newId]).catch(() => {});
-    }
-  })();
+  // 콜마너 오더접수는 더 이상 오더 "생성" 시점에 바로 나가지 않는다 — 로컬 상태가 '접수'로
+  // 바뀔 때(POST /:id/status의 registerOrderWithCallmaner 호출)만 나간다. 오더등록/대기 등
+  // 아직 검토 중인 단계에서 미리 콜마너에 등록해버리면(지사캐시 부족 등으로 실패해도 재시도가
+  // 없어) 담당자가 확인하기도 전에 실패로 굳어버리는 문제가 있었다 — 담당자가 실제로 접수
+  // 처리하는 시점에 맞춰 등록하도록 트리거를 옮겼다(사용자 확정 사항).
 
   // §7-2 자동 승격 판정 — premium 오더 접수 후 실제 소요시간이 8시간 이상이면 daily_driver로 전환
   // fire-and-forget: 경로탐색 실패/지연은 오더 등록 자체를 막지 않는다.
@@ -1590,6 +1560,45 @@ router.post('/:id/order-type', requireRole('admin'), asyncHandler(async (req, re
   res.redirect('/orders/' + req.params.id);
 }));
 
+// 콜마너 오더접수 — 오더 상태가 '접수'로 바뀌는 시점에만 fire-and-forget으로 호출한다(오더
+// 생성 시점엔 더 이상 호출하지 않음 — 위 POST '/' 주석 참고). 오더 row를 DB에서 다시 읽어서
+// 쓰므로 호출 시점(생성 직후든, 한참 뒤 상태변경이든)과 무관하게 항상 최신 값을 보낸다.
+// 이미 conf_slip이 있으면(중복 등록 방지) 조용히 넘어가고, 실패해도 재시도는 하지 않는다
+// (지사캐시 부족 등으로 실패한 뒤 상태를 다시 접수로 바꾸면 그때 재시도되는 정도로 충분).
+async function registerOrderWithCallmaner(orderId, branchId) {
+  try {
+    const branchRow = await db.get('SELECT * FROM branches WHERE id = ?', [branchId]);
+    if (!branchRow || !branchRow.callmaner_enabled) return;
+    const order = await db.get('SELECT * FROM orders WHERE id = ?', [orderId]);
+    if (!order || order.callmaner_conf_slip) return;
+    const paymentMethodRow = order.payment_method_id
+      ? await db.get('SELECT name FROM payment_methods WHERE id = ?', [order.payment_method_id])
+      : null;
+    const orderForCallmaner = {
+      origin_lat: order.origin_lat, origin_lon: order.origin_lon,
+      origin_sido: order.origin_sido, origin_sigugun: order.origin_sigugun, origin_dong: order.origin_dong,
+      origin_address: order.origin_address, origin_address_detail: order.origin_address_detail,
+      destination_lat: order.destination_lat, destination_lon: order.destination_lon,
+      destination_sido: order.destination_sido, destination_sigugun: order.destination_sigugun, destination_dong: order.destination_dong,
+      destination_address: order.destination_address, destination_address_detail: order.destination_address_detail,
+      fare_amount: order.fare_amount || 0,
+      memo_customer: order.memo_customer || '',
+      order_type: order.order_type,
+      reserved_date: order.reserved_date, reserved_time: order.reserved_time,
+    };
+    const result = await callmaner.orderReceipt(orderForCallmaner, branchRow, paymentMethodRow && paymentMethodRow.name);
+    await db.run(
+      `UPDATE orders SET callmaner_conf_slip = ?, callmaner_status = '접수', callmaner_status_code = '01',
+       callmaner_synced_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS'), callmaner_last_error = NULL
+       WHERE id = ?`,
+      [result.confSlip || null, orderId]
+    );
+  } catch (e) {
+    console.error('콜마너 오더접수 실패:', e.message);
+    await db.run('UPDATE orders SET callmaner_last_error = ? WHERE id = ?', [String(e.message || '').slice(0, 500), orderId]).catch(() => {});
+  }
+}
+
 router.post('/:id/status', asyncHandler(async (req, res) => {
   const order = await loadOrderInScope(req, res);
   if (!order) return;
@@ -1604,6 +1613,8 @@ router.post('/:id/status', asyncHandler(async (req, res) => {
     INSERT INTO order_status_history (order_id, actor_user_id, old_status, new_status, note)
     VALUES (?, ?, ?, ?, ?)
   `, [req.params.id, u.id, order.status, status, note || null]);
+
+  if (status === '접수') registerOrderWithCallmaner(order.id, order.branch_id);
 
   try {
     await notify({
