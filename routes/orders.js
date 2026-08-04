@@ -1594,6 +1594,11 @@ async function registerOrderWithCallmaner(orderId, branchId) {
     const paymentMethodRow = order.payment_method_id
       ? await db.get('SELECT name FROM payment_methods WHERE id = ?', [order.payment_method_id])
       : null;
+    // 경유지는 콜마너 viaList로 함께 보낸다(정의서 오더접수 via/viaList/via_count).
+    const waypointRows = await db.all(
+      'SELECT address, address_detail, lat, lon FROM order_waypoints WHERE order_id = ? ORDER BY seq',
+      [orderId]
+    ).catch(() => []);
     const orderForCallmaner = {
       origin_lat: order.origin_lat, origin_lon: order.origin_lon,
       origin_sido: order.origin_sido, origin_sigugun: order.origin_sigugun, origin_dong: order.origin_dong,
@@ -1605,8 +1610,11 @@ async function registerOrderWithCallmaner(orderId, branchId) {
       memo_customer: order.memo_customer || '',
       order_type: order.order_type,
       reserved_date: order.reserved_date, reserved_time: order.reserved_time,
+      // 콜마너 접수상태(0접수/5대기/4문의)로 매핑해서 보낸다 — 로컬에서 '대기'인 오더가
+      // 콜마너에서도 대기로 들어가 곧바로 배차 대상이 되지 않는다.
+      status: order.status,
     };
-    const result = await callmaner.orderReceipt(orderForCallmaner, branchRow, paymentMethodRow && paymentMethodRow.name);
+    const result = await callmaner.orderReceipt(orderForCallmaner, branchRow, paymentMethodRow && paymentMethodRow.name, waypointRows);
     await db.run(
       `UPDATE orders SET callmaner_conf_slip = ?, callmaner_status = '접수', callmaner_status_code = '01',
        callmaner_synced_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS'), callmaner_last_error = NULL

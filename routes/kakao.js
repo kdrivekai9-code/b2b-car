@@ -4,6 +4,7 @@ const express = require('express');
 const { requireAuth } = require('../middleware/auth');
 const asyncHandler = require('../middleware/asyncHandler');
 const { generateJson } = require('../lib/vertexAi');
+const { abbreviateSido, formatSigugun } = require('../lib/kakaoRegion');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -42,30 +43,12 @@ async function fetchMergedDocuments(query) {
   return [...addressResults, ...placeResults];
 }
 
-// 콜마너 오더접수 API가 요구하는 시도(약어)/시구군/동 분리값을 얻기 위한 역지오코딩.
-// 카카오 주소검색(address.json)/키워드검색(keyword.json)은 검색 방식에 따라 region depth
-// 필드 유무가 달라 일관되지 않으므로, 주소 선택 시 이미 알고 있는 위경도로 좌표->행정구역
-// API를 한 번 더 호출해 항상 같은 방식으로 얻는다("콜마너 외부연동 인터페이스 정의서"
+// 콜마너 오더접수 API가 요구하는 시도(약어)/시구군/동 분리값은 lib/kakaoRegion.js에
+// 모아뒀다 — 서버에서 경유지 viaList를 만들 때(lib/callmaner.js)도 같은 규칙이 필요해서
+// 공용 모듈로 분리했다. 카카오 주소검색/키워드검색은 검색 방식에 따라 region depth 필드
+// 유무가 달라 일관되지 않으므로, 주소 선택 시 이미 알고 있는 위경도로 좌표->행정구역 API를
+// 한 번 더 호출해 항상 같은 방식으로 얻는다("콜마너 외부연동 인터페이스 정의서"
 // "바. 공통주의사항" 2/3 참조).
-const SIDO_ABBREVIATIONS = {
-  서울특별시: '서울', 부산광역시: '부산', 대구광역시: '대구', 인천광역시: '인천',
-  광주광역시: '광주', 대전광역시: '대전', 울산광역시: '울산', 경기도: '경기',
-  강원도: '강원', 강원특별자치도: '강원', 충청북도: '충북', 충청남도: '충남',
-  전라북도: '전북', 전북특별자치도: '전북', 전라남도: '전남',
-  경상북도: '경북', 경상남도: '경남', 제주특별자치도: '제주', 세종특별자치시: '세종',
-};
-
-function abbreviateSido(name) {
-  const s = String(name || '').trim();
-  if (!s) return '';
-  if (SIDO_ABBREVIATIONS[s]) return SIDO_ABBREVIATIONS[s];
-  return s.slice(0, 2);
-}
-
-// "성남시 분당구" -> "성남시분당구" (공통주의사항 3 - 시구는 한 필드로, 공백 없이 합쳐서 사용)
-function formatSigugun(name) {
-  return String(name || '').trim().replace(/\s+/g, '');
-}
 
 function firstNonEmptyString() {
   for (let i = 0; i < arguments.length; i += 1) {
