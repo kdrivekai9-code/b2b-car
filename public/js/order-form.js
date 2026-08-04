@@ -1646,4 +1646,19 @@
     var formatted = formatPhoneDigits(digits);
     return { formatted: formatted, valid: !!formatted && isValidPhone(formatted) };
   };
+
+  // 좌표/행정구역 조회가 아직 끝나지 않은 채 폼이 제출되는 마지막 구멍을 막는다.
+  // 챗봇 흐름(confirmAndSubmit)은 __aiIntakeWaitPendingRegions를 직접 호출하지만, AI 접수화면
+  // 우측의 수동 "오더 등록" 버튼(views/orders/ai_intake.ejs)과 일반 오더 등록 폼의 제출 버튼은
+  // 그 경로를 타지 않고 브라우저 기본 submit으로 바로 나가버려서, 진행 중인 조회가 있으면
+  // origin_lat 등이 빈 채로 등록될 수 있었다(콜마너 연동 실패 원인).
+  // form.submit()은 submit 이벤트를 다시 발생시키지 않으므로 무한 루프가 되지 않는다.
+  var orderFormEl = document.getElementById('orderForm');
+  if (orderFormEl) {
+    orderFormEl.addEventListener('submit', function (e) {
+      if (!pendingRegionResolutions.length) return;
+      e.preventDefault();
+      window.__aiIntakeWaitPendingRegions().then(function () { orderFormEl.submit(); });
+    });
+  }
 })();
