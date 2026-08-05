@@ -69,20 +69,9 @@
   </div>
 
   <div>
-    <% if (currentUser.role !== 'client') { %>
-    <div class="card">
-      <h2>담당자</h2>
-      <% if (order.status === '오더등록') { %>
-        <form method="POST" action="/orders/<%= order.id %>/assign-self">
-          <button class="btn" type="submit">내가 담당하기</button>
-        </form>
-      <% } else { %>
-        <div class="kv"><span class="k">담당자</span><span><%= order.assigned_agent_name || '미지정' %></span></div>
-      <% } %>
-    </div>
-
     <div class="card">
       <h2>VOC 접수</h2>
+      <p class="page-sub" style="margin:0 0 10px;">사고 · 과태료 · 클레임을 접수하면 담당자가 확인합니다. 해당 항목을 선택한 뒤 내용을 입력해주세요.</p>
       <form method="POST" action="/orders/<%= order.id %>/voc" id="vocForm">
         <div class="row"><div class="field full">
           <label><input type="checkbox" name="voc_accident" id="vocAccidentCheck" <%= order.voc_accident_note != null ? 'checked' : '' %>> 사고 접수</label>
@@ -111,6 +100,19 @@
         })();
       </script>
     </div>
+
+    <% if (currentUser.role !== 'client') { %>
+    <div class="card">
+      <h2>담당자</h2>
+      <% if (order.status === '오더등록') { %>
+        <form method="POST" action="/orders/<%= order.id %>/assign-self">
+          <button class="btn" type="submit">내가 담당하기</button>
+        </form>
+      <% } else { %>
+        <div class="kv"><span class="k">담당자</span><span><%= order.assigned_agent_name || '미지정' %></span></div>
+      <% } %>
+    </div>
+
 
     <div class="card">
       <h2>🧑‍✈️ 기사 배정</h2>

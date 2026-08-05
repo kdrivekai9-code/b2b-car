@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import AppShell from '../../_components/AppShell';
 import OrderForm from '../new/OrderForm';
 import OrderDetailAdminPanels from './OrderDetailAdminPanels';
+import OrderVocPanel from './OrderVocPanel';
 
 // 오더 상세페이지를 기존 접수폼(OrderForm.js, /orders/new)의 edit 모드로 재사용 —
 // views/orders/detail.ejs는 수정이 아예 불가능한 읽기전용 화면이었다. 모든 역할(admin/
@@ -88,6 +89,13 @@ export default async function OrderDetailPage({ params }) {
           )}
         </div>
       )}
+
+      {/* VOC 접수는 역할 무관 공통 — 실제로 사고/과태료/클레임을 겪는 쪽은 고객사라
+          고객사도 자기 오더에 직접 접수할 수 있어야 한다(서버 권한은 loadOrderForVoc가
+          scopeFilter로 자기 지사·법인 오더인지 확인). 관리자는 여기서 접수 내용을 그대로 본다. */}
+      <div style={{ marginTop: 18 }}>
+        <OrderVocPanel data={data} orderId={id} />
+      </div>
 
       {isAdminOrBranchManager && (
         <div style={{ marginTop: 18 }}>

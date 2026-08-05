@@ -1412,7 +1412,7 @@ router.post('/:id/assign-self', asyncHandler(async (req, res) => {
 // VOC(사고/과태료/클레임) 접수 — 체크 해제하고 저장하면 해당 note가 다시 비워지므로
 // "체크 여부"를 따로 저장할 필요 없이 note 존재 자체가 체크 상태를 의미한다.
 router.post('/:id/voc', asyncHandler(async (req, res) => {
-  const order = await loadOrderInScope(req, res);
+  const order = await loadOrderForVoc(req, res);
   if (!order) return;
   const { voc_accident, voc_accident_note, voc_fine, voc_fine_note, voc_claim, voc_claim_note } = req.body;
   await db.run(
@@ -1510,6 +1510,26 @@ async function loadOrderInScope(req, res) {
   const u = req.session.user;
   if (u.role === 'client') { res.status(403).render('403', { title: '접근 권한 없음' }); return null; }
   if (u.role === 'branch_manager' && order.branch_id !== u.branch_id) {
+    res.status(403).render('403', { title: '접근 권한 없음' });
+    return null;
+  }
+  return order;
+}
+
+// VOC(사고/과태료/클레임) 접수는 고객사(client)도 자기 오더에 대해 직접 할 수 있어야 한다
+// (사용자 확정 사항 — 실제로 사고를 겪는 쪽이 고객사라 관리자를 거치지 않고 바로 남기는 게
+// 자연스럽다). loadOrderInScope는 client를 전부 403으로 막으므로 쓸 수 없고, 대신
+// scopeFilter로 "자기 지사/법인 오더인지"만 확인한다 — 다른 법인 오더 id를 URL에 넣어도
+// group_id가 달라 403이 된다(IDOR 방지). 관리자/지사장은 기존과 동일하게 전체/자기 지사.
+async function loadOrderForVoc(req, res) {
+  const order = await db.get('SELECT * FROM orders WHERE id = ?', [req.params.id]);
+  if (!order) { res.status(404).send('오더를 찾을 수 없습니다.'); return null; }
+  const scope = scopeFilter(req);
+  if (scope.branch_id && order.branch_id !== scope.branch_id) {
+    res.status(403).render('403', { title: '접근 권한 없음' });
+    return null;
+  }
+  if (scope.group_id && order.requester_group_id !== scope.group_id) {
     res.status(403).render('403', { title: '접근 권한 없음' });
     return null;
   }
