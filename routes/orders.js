@@ -1163,6 +1163,9 @@ router.get('/:id/data.json', asyncHandler(async (req, res) => {
         detail: w.address_detail || '',
         contact: w.contact_phone || '',
         vehicleNumber: w.vehicle_number || '',
+        // 저장된 경유지 좌표를 그대로 내려준다 — 폼이 "✓ 좌표" 배지와 경로 계산에 쓰고,
+        // 저장 시 다시 보내므로 다시 확정하지 않아도 좌표가 유지된다.
+        lat: w.lat, lon: w.lon,
       })),
     },
     rawWaypoints: waypoints,
@@ -1321,13 +1324,25 @@ router.post('/:id', asyncHandler(async (req, res) => {
     UPDATE orders SET branch_id = ?, requester_group_id = ?, origin_address = ?, origin_address_detail = ?, origin_contact = ?,
       destination_address = ?, destination_address_detail = ?, destination_contact = ?, vehicle_number = ?,
       vehicle_type = ?, reserved_date = ?, reserved_time = ?, payment_method_id = ?, fare_amount = ?, ferry_fare_amount = ?,
-      memo_customer = ?, memo_billing = ?, updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS')
+      memo_customer = ?, memo_billing = ?,
+      -- 콜마너 오더접수에 필요한 좌표/행정구역도 함께 저장한다. 그동안 이 UPDATE에서 빠져 있어서
+      -- 오더 상세에서 주소를 다시 확정해도 좌표가 DB에 반영되지 않았다(폼은 보내고 있었는데
+      -- 서버가 버렸음). COALESCE로 감싸 값이 안 온 경우 기존 값을 지우지 않는다.
+      origin_lat = COALESCE(?, origin_lat), origin_lon = COALESCE(?, origin_lon),
+      origin_sido = COALESCE(?, origin_sido), origin_sigugun = COALESCE(?, origin_sigugun), origin_dong = COALESCE(?, origin_dong),
+      destination_lat = COALESCE(?, destination_lat), destination_lon = COALESCE(?, destination_lon),
+      destination_sido = COALESCE(?, destination_sido), destination_sigugun = COALESCE(?, destination_sigugun), destination_dong = COALESCE(?, destination_dong),
+      updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS')
     WHERE id = ?
   `, [
     finalBranch, finalGroup, finalOriginAddress, origin_detail_address || null, origin_contact || null,
     finalDestinationAddress, destination_detail_address || null, destination_contact || null, splitVehicle.vehicleNumber,
     splitVehicle.vehicleType, effectiveReservedDate, effectiveReservedTime, payment_method_id || null,
     Number(fare_amount) || 0, Number(ferry_fare_amount) || 0, memo_customer || null, memo_billing || null,
+    toNumOrNullShared(req.body.origin_lat), toNumOrNullShared(req.body.origin_lon),
+    req.body.origin_sido || null, req.body.origin_sigugun || null, req.body.origin_dong || null,
+    toNumOrNullShared(req.body.destination_lat), toNumOrNullShared(req.body.destination_lon),
+    req.body.destination_sido || null, req.body.destination_sigugun || null, req.body.destination_dong || null,
     req.params.id,
   ]);
 

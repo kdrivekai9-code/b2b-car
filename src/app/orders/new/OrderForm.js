@@ -47,6 +47,14 @@ function deriveMemoWithReservationLine(currentMemo, isDeliveryBasis, deliveryDat
   return keptLines.join('\n').replace(/^\n+|\n+$/g, '');
 }
 
+// PostgreSQL numeric 컬럼은 pg 드라이버가 문자열로 돌려준다("37.5") — 지도/경로 계산과
+// `!= null` 판정이 숫자를 기대하므로 여기서 한 번 변환한다.
+function toCoordNumber(v) {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 function initialFieldState(order, defaultBranch, mode) {
   const reservedDate = order.reserved_date || '';
   const now = new Date();
@@ -67,14 +75,19 @@ function initialFieldState(order, defaultBranch, mode) {
       // index로 만들면 항상 결정적이다.
       id: 'prefill-' + i,
       address: w.address || '', detail: w.detail || '', contact: w.contact || '', vehicleNumber: w.vehicleNumber || '',
-      lat: null, lon: null,
+      lat: toCoordNumber(w.lat), lon: toCoordNumber(w.lon),
     }))
     : [];
   return {
     origin_address: order.origin_address || '', origin_detail_address: order.origin_detail_address || '', origin_contact: order.origin_contact || '',
-    origin_lat: null, origin_lon: null, origin_sido: '', origin_sigugun: '', origin_dong: '',
+    // 저장된 좌표/행정구역을 그대로 불러온다 — 예전엔 항상 빈 값으로 시작해서, 오더 상세를 열면
+    // DB에 행정구역이 있어도 "✓ 행정구역" 배지가 꺼진 채로 보였다(좌표만 아래 edit 효과가
+    // 지오코딩으로 다시 채워줘서 좌표 배지만 켜지는 상태). 배지는 실제 저장값을 보여줘야 한다.
+    origin_lat: toCoordNumber(order.origin_lat), origin_lon: toCoordNumber(order.origin_lon),
+    origin_sido: order.origin_sido || '', origin_sigugun: order.origin_sigugun || '', origin_dong: order.origin_dong || '',
     destination_address: order.destination_address || '', destination_detail_address: order.destination_detail_address || '', destination_contact: order.destination_contact || '',
-    destination_lat: null, destination_lon: null, destination_sido: '', destination_sigugun: '', destination_dong: '',
+    destination_lat: toCoordNumber(order.destination_lat), destination_lon: toCoordNumber(order.destination_lon),
+    destination_sido: order.destination_sido || '', destination_sigugun: order.destination_sigugun || '', destination_dong: order.destination_dong || '',
     waypoints: prefillWaypoints,
     reservation_basis: order.reservation_basis === 'delivery' ? 'delivery' : 'pickup',
     // 아직 실제 역산 계산이 안 붙어 있어(경로/지도 레이어 이후 추가 예정) 항상 빈 값으로
@@ -204,24 +217,46 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
   useEffect(() => {
     if (mode !== 'edit') return;
     let cancelled = false;
-    const targets = [
-      { kind: 'origin', address: order.origin_address },
-      { kind: 'destination', address: order.destination_address },
-      ...(Array.isArray(order.waypoints) ? order.waypoints.map((w, i) => ({ kind: 'waypoint', id: 'prefill-' + i, address: w.address })) : []),
-    ];
-    Promise.all(targets.map(async (t) => ({ ...t, coords: await geocodeAddressForEdit(t.address) }))).then((resolved) => {
+    // 저장된 값이 이미 있으면 다시 조회하지 않는다(initialFieldState가 그대로 불러온다) —
+    // 콜마너 연동 전에 만들어진 예전 오더만 빈 값을 채운다. 좌표는 있는데 행정구역만 없는
+    // 경우도 있어서(좌표 저장이 먼저 들어갔다) 둘을 따로 판단한다.
+    const endpointTargets = ['origin', 'destination'].map((kind) => ({
+      kind,
+      address: order[`${kind}_address`],
+      lat: toCoordNumber(order[`${kind}_lat`]),
+      lon: toCoordNumber(order[`${kind}_lon`]),
+      hasRegion: !!(order[`${kind}_sido`] && order[`${kind}_sigugun`] && order[`${kind}_dong`]),
+    }));
+    // 경유지는 콜마너 viaList에 행정구역이 필수가 아니라 좌표만 채운다.
+    const waypointTargets = (Array.isArray(order.waypoints) ? order.waypoints : []).map((w, i) => ({
+      kind: 'waypoint', id: 'prefill-' + i, address: w.address,
+      lat: toCoordNumber(w.lat), lon: toCoordNumber(w.lon), hasRegion: true,
+    }));
+
+    Promise.all([...endpointTargets, ...waypointTargets].map(async (t) => {
+      let { lat, lon } = t;
+      if (lat == null || lon == null) {
+        const coords = await geocodeAddressForEdit(t.address);
+        if (!coords) return null;
+        lat = coords.lat;
+        lon = coords.lon;
+      }
+      const region = t.hasRegion ? null : await resolveRegion(lat, lon);
+      return { ...t, lat, lon, region };
+    })).then((resolved) => {
       if (cancelled) return;
-      resolved.forEach((t) => {
-        if (!t.coords) return;
-        if (t.kind === 'origin') {
-          dispatch({ type: 'SET_FIELD', name: 'origin_lat', value: t.coords.lat });
-          dispatch({ type: 'SET_FIELD', name: 'origin_lon', value: t.coords.lon });
-        } else if (t.kind === 'destination') {
-          dispatch({ type: 'SET_FIELD', name: 'destination_lat', value: t.coords.lat });
-          dispatch({ type: 'SET_FIELD', name: 'destination_lon', value: t.coords.lon });
-        } else {
-          dispatch({ type: 'SET_WAYPOINT_FIELD', id: t.id, field: 'lat', value: t.coords.lat });
-          dispatch({ type: 'SET_WAYPOINT_FIELD', id: t.id, field: 'lon', value: t.coords.lon });
+      resolved.filter(Boolean).forEach((t) => {
+        if (t.kind === 'waypoint') {
+          dispatch({ type: 'SET_WAYPOINT_FIELD', id: t.id, field: 'lat', value: t.lat });
+          dispatch({ type: 'SET_WAYPOINT_FIELD', id: t.id, field: 'lon', value: t.lon });
+          return;
+        }
+        dispatch({ type: 'SET_FIELD', name: `${t.kind}_lat`, value: t.lat });
+        dispatch({ type: 'SET_FIELD', name: `${t.kind}_lon`, value: t.lon });
+        if (t.region) {
+          dispatch({ type: 'SET_FIELD', name: `${t.kind}_sido`, value: t.region.sido || '' });
+          dispatch({ type: 'SET_FIELD', name: `${t.kind}_sigugun`, value: t.region.sigugun || '' });
+          dispatch({ type: 'SET_FIELD', name: `${t.kind}_dong`, value: t.region.dong || '' });
         }
       });
     });
