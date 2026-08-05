@@ -27,6 +27,7 @@
     "connect-pg-simple": "^10.0.0",
     "dayjs": "^1.11.10",
     "dotenv": "^16.4.5",
+    "egoroof-blowfish": "^4.0.3",
     "ejs": "^3.1.10",
     "express": "^4.19.2",
     "express-rate-limit": "^8.6.0",
