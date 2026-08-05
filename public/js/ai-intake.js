@@ -65,6 +65,13 @@
 
   // 차량번호 질문에서 "출발지 도착 후 알려주겠다"는 취지의 답변은 차량번호 없이 넘어간다.
   var VEHICLE_NUMBER_SKIP_RE = /^(다음|없어요?|없습니다|없음|모르겠어요?|모름|몰라요?|아직\s*몰라요?|출발지에서\s*(확인|알려\S*|말씀\S*)|현장에서\s*(확인|알려\S*)|나중에\s*(확인|알려\S*)|미정|스킵|skip|패스|pass)[.!~\s]*$/i;
+
+  // 출발지/도착지 연락처 질문에서 "동일해" 같은 참조 표현 — updateQuickReplies()가 버튼으로
+  // 제안하는 것과 같은 값(도착지는 출발지 연락처, 출발지는 요청자 본인 연락처)을 텍스트로도
+  // 인식한다. VEHICLE_NUMBER_SKIP_RE와 같은 이유: 채울 값 자체가 없는 참조 표현이라 Gemini에
+  // 보내면 오더접수 답변이 아니라 "다른 요청"(unsupported)으로 오분류돼 상담원 연결로 새는
+  // 문제가 있었다 — 아예 Gemini를 거치지 않고 로컬에서 먼저 처리한다.
+  var SAME_AS_REFERENCE_RE = /^(동일해요?|같아요?|같습니다|위와\s*같아요?|(출발지|본인|요청자)\s*(연락처)?\s*(이?랑|하고|과|와)?\s*동일해?요?)[.!~\s]*$/;
   // 차량번호 형식이 이 횟수만큼 연속으로 틀리면 포기하고 다음 질문으로 넘어간다.
   var VEHICLE_NUMBER_MAX_ATTEMPTS = 2;
   var vehicleNumberFailCount = 0;
@@ -962,6 +969,32 @@
           isResume: true,
         }).then(function () { return null; });
       });
+    });
+    return true;
+  }
+
+  // origin_contact/destination_contact 질문 중 "동일해" 류 응답을 Gemini 없이 바로 채운다.
+  // 참조할 값이 없으면(예: 출발지 연락처를 아직 안 받은 상태에서 도착지 질문에 "동일해") 이
+  // 함수가 false를 돌려줘서 일반 흐름(Gemini)으로 넘어가게 한다 — 그쪽이 "무엇과 동일한지
+  // 알 수 없다"는 취지로 처리하는 게 더 낫다.
+  function handleSamePhonePendingReply(text) {
+    if (phase !== 'collecting') return false;
+    if (!SAME_AS_REFERENCE_RE.test(String(text || '').trim())) return false;
+
+    var sourceValue = null;
+    if (pendingField === 'destination_contact') {
+      sourceValue = val('origin_contact');
+    } else if (pendingField === 'origin_contact') {
+      var orderForm = document.getElementById('orderForm');
+      sourceValue = orderForm ? orderForm.dataset.myPhone : '';
+    }
+    if (!sourceValue) return false;
+
+    var meta = fieldMetaFor(pendingField);
+    document.getElementById(pendingField).value = sourceValue;
+    validatePhoneField(pendingField, meta ? meta.label : pendingField).then(function () {
+      var doneText = proceedAfterCollecting();
+      logBotMessage({ logText: doneText, needsAgent: false, requestedFeature: null });
     });
     return true;
   }
@@ -2329,7 +2362,24 @@
 
   // 상담원 접속 여부에 따라 문구가 달라지므로(온라인/오프라인), 서버가 최종 문구를 정해서
   // /bot-message 응답으로 돌려주면 그때 말풍선을 붙인다 — 여기서는 미리 addBubble하지 않는다.
-  function handleUnsupportedIntent(data) {
+  //
+  // skipGate=true는 명시적 "상담원 연결해주세요" 빠른 경로(Gemini를 거치지 않고 직접 호출하는
+  // 자리) 전용이다 — 그 요청만큼은 pendingField 중이라도 곧바로 연결해야 한다.
+  //
+  // 그 외(Gemini가 실제로 'unsupported'로 분류한 경우)는, 질문에 대한 답을 기다리는 중
+  // (phase==='collecting' && pendingField)이면 곧바로 상담원으로 보내지 않는다 — 그 질문에
+  // 대한 답을 못 알아들은 경우가 섞여 있기 때문이다(예: "동일해"처럼 채울 값 자체가 없는
+  // 참조 표현. handleSamePhonePendingReply로 대부분 걸러지지만, 그 패턴에 없는 표현은 여전히
+  // Gemini로 넘어가 unsupported로 오분류될 수 있다). 다른 검증 실패들과 같은 2회 누적 규칙
+  // (noteTrouble)을 따른다 — 1회차는 다시 묻고, 2회 연속이면 noteTrouble이 상담원 연결
+  // 제안까지 알아서 처리한다(사용자 확정 사항).
+  function handleUnsupportedIntent(data, skipGate) {
+    if (!skipGate && phase === 'collecting' && pendingField) {
+      if (noteTrouble()) return { logText: null, needsAgent: false, requestedFeature: null };
+      var meta = fieldMetaFor(pendingField);
+      sayBot('죄송합니다, 답변을 이해하지 못했습니다. ' + (meta ? meta.question : '다시 한번 말씀해주세요.'));
+      return { logText: null, needsAgent: false, requestedFeature: null };
+    }
     return { logText: null, needsAgent: true, requestedFeature: data.requestedFeature || null };
   }
 
@@ -3244,12 +3294,14 @@
         // 만들어두고 어디서도 호출하지 않아(죽은 코드) 차종 답변도 같이 새고 있었다.
         if (handleFareVehicleTypePendingReply(text)) return null;
         if (handleFareWaypointPendingReply(text)) return null;
+        // 연락처 질문 중 "동일해" 류 응답도 같은 이유로 Gemini보다 먼저 소비한다.
+        if (handleSamePhonePendingReply(text)) return null;
         // 명시적인 "상담원 연결" 요청은 Gemini 분류를 거치지 않고 바로 처리한다 — 이 요청만큼은
         // 콜드스타트/응답지연으로 고객이 기다리다 이탈해서 에스컬레이션 자체가 무산되는 일이 없어야 한다.
         // 단, 전화번호나 출/도/경 라벨 같은 오더접수 신호가 함께 있으면(예: 메모에 "상담원"이 우연히
         // 섞인 진짜 오더접수 메시지) 빠른 경로를 타지 않고 정상적으로 Gemini 분류로 넘긴다.
         if (isAgentRequest(text) && !looksLikeOrderIntake(text)) {
-          return logBotMessage(handleUnsupportedIntent({ requestedFeature: '상담원 연결' })).then(function (finalText) {
+          return logBotMessage(handleUnsupportedIntent({ requestedFeature: '상담원 연결' }, true)).then(function (finalText) {
             if (finalText) addBubble(finalText, 'bot');
           });
         }
