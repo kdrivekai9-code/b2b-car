@@ -4,13 +4,27 @@
   // 오더 상세페이지는 서버 렌더 시점의 order.callmaner_last_error로 이 배지를 이미 그려두지만
   // (새로고침하면 항상 보임), 폴링 도중 새로고침 없이 막 실패를 감지한 경우에도 같은 배지가
   // 바로 나타나도록 만들어 둔다(className으로 중복 삽입 방지).
+  // 화면에 이미 뜬 실패와 방금 감지한 실패가 같은 것인지 비교하기 위한 지문 — 상태를 다시
+  // '접수'로 바꿔 재시도했을 때(routes/orders.js registerOrderWithCallmaner의 재시도 경로)
+  // 코드/메시지가 달라지면 "새 실패"로 취급해야 한다.
+  function errorSignature(message, code) {
+    return (code || '') + '|' + (message || '');
+  }
+
   // code는 콜마너가 실제로 응답한 에러코드(정의서 rc, 예: E0 / HTTP 500) — 우리 쪽 사전검증
   // 실패(좌표 누락 등)는 요청이 나가지 않아 코드가 없으므로 그 줄을 아예 그리지 않는다.
+  // 이미 배지가 있으면 새로 만들지 않고 내용만 갈아끼운다 — 재시도로 에러가 바뀐 경우 예전
+  // 코드가 화면에 그대로 남아 있으면 안 된다(예전에는 배지가 있으면 그냥 return했다).
   function showBadge(message, code) {
-    if (document.querySelector('.callmaner-error-badge')) return;
-    var badge = document.createElement('div');
-    badge.className = 'callmaner-error-badge';
-    badge.setAttribute('role', 'alert');
+    var badge = document.querySelector('.callmaner-error-badge');
+    if (!badge) {
+      badge = document.createElement('div');
+      badge.className = 'callmaner-error-badge';
+      badge.setAttribute('role', 'alert');
+      document.body.appendChild(badge);
+    }
+    badge.textContent = '';
+    badge.setAttribute('data-error-signature', errorSignature(message, code));
     var strong = document.createElement('strong');
     strong.textContent = '⚠️ 콜마너 연동 실패';
     badge.appendChild(strong);
@@ -23,7 +37,6 @@
     var body = document.createElement('div');
     body.textContent = message;
     badge.appendChild(body);
-    document.body.appendChild(badge);
   }
 
   function showPopup(message, code, onClose) {
@@ -78,13 +91,26 @@
     var intervalMs = (options && options.intervalMs) || 1500;
     var attempts = 0;
 
+    // 폴링 시작 시점에 화면이 이미 보여주고 있던 실패의 지문 — 오더 상세는 서버 렌더 시점의
+    // callmaner_last_error로 배지를 미리 그려두므로, 실패한 오더를 열 때마다 폴링이 같은 실패를
+    // 다시 발견한다. 그때 팝업까지 띄우면 열 때마다 팝업을 닫아야 해서, 이미 보여주던 것과
+    // 같은 실패면 상시 표시되는 배지만 남긴다. 반대로 지문이 다르면(상태를 '접수'로 바꿔
+    // 재시도한 뒤의 새 실패) 또는 배지가 아예 없었으면 "방금 생긴 소식"이라 팝업으로 알린다.
+    var initialBadge = document.querySelector('.callmaner-error-badge');
+    var shownSignature = initialBadge ? initialBadge.getAttribute('data-error-signature') : null;
+
     function tick() {
       fetch('/orders/' + orderId + '/callmaner-status.json')
         .then(function (res) { return res.ok ? res.json() : null; })
         .then(function (data) {
           if (!data || !data.enabled) { onDone(); return; } // 콜마너 미사용 지사 - 아무 것도 하지 않음
-          // 팝업의 "확인"을 눌러야 onDone(페이지 이동 등) 진행
-          if (data.error) { showBadge(data.error, data.errorCode); showPopup(data.error, data.errorCode, onDone); return; }
+          if (data.error) {
+            var isAlreadyShown = shownSignature === errorSignature(data.error, data.errorCode);
+            showBadge(data.error, data.errorCode);
+            if (isAlreadyShown) { onDone(); return; }
+            showPopup(data.error, data.errorCode, onDone); // 팝업의 "확인"을 눌러야 onDone(페이지 이동 등) 진행
+            return;
+          }
           if (data.confSlip) { onDone(); return; } // 정상 등록 - 팝업 없음(요청 범위 밖)
           attempts += 1;
           if (attempts < maxAttempts) setTimeout(tick, intervalMs);

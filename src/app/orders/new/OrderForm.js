@@ -878,7 +878,13 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
         )}
       </div>
       {isEdit && order.callmaner_last_error && (
-        <div className="callmaner-error-badge" role="alert">
+        // data-error-signature는 callmaner-alert.js의 errorSignature()와 형식이 같아야 한다 —
+        // 폴링이 "이미 화면에 보여주고 있는 실패"인지 판단해 팝업 중복을 피하는 데 쓴다.
+        <div
+          className="callmaner-error-badge"
+          role="alert"
+          data-error-signature={`${order.callmaner_last_error_code || ''}|${order.callmaner_last_error}`}
+        >
           <strong>⚠️ 콜마너 연동 실패</strong>
           {/* 콜마너가 응답한 에러코드(rc). 좌표 누락 같은 우리 쪽 사전검증 실패는 요청이
               나가지 않아 코드가 없으므로 그 줄을 그리지 않는다. */}

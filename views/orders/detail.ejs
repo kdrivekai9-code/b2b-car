@@ -207,7 +207,9 @@
   </div>
 </div>
 <% if (order.callmaner_last_error) { %>
-<div class="callmaner-error-badge" role="alert">
+<%# data-error-signature 형식은 callmaner-alert.js의 errorSignature()와 맞춰야 한다 — 폴링이
+    "이미 화면에 보여주고 있는 실패"인지 판단해 팝업 중복을 피하는 데 쓴다. %>
+<div class="callmaner-error-badge" role="alert" data-error-signature="<%= (order.callmaner_last_error_code || '') + '|' + order.callmaner_last_error %>">
   <strong>⚠️ 콜마너 연동 실패</strong>
   <% if (order.callmaner_last_error_code) { %>
   <div class="callmaner-error-code">에러코드 <%= order.callmaner_last_error_code %></div>
