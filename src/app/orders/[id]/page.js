@@ -77,6 +77,11 @@ export default async function OrderDetailPage({ params }) {
           </p>
         </div>
         <div className="page-head-actions">
+          {/* 이 페이지는 서버 컴포넌트라 OrderForm.js의 submitting state(저장 중 비활성화)를
+              여기서 반영할 수 없다 — 순수 HTML form 속성으로 그 폼(id="order-edit-form")을
+              가리키기만 하고, 실제 중복제출 방지는 OrderForm.js의 submittingRef가 담당한다
+              (사용자 요청: 하단 취소 버튼 삭제 + 저장 버튼을 "오더수정"으로 바꿔 상단으로 이동). */}
+          <button type="submit" form="order-edit-form" className="btn">오더수정</button>
           <a className="btn secondary" href="/orders">&larr; 오더 리스트로</a>
         </div>
       </div>

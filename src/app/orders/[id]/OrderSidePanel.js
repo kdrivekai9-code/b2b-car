@@ -11,9 +11,73 @@ function historyLabel(h) {
   return `${h.old_status} → ${h.new_status}`;
 }
 
-export default function OrderSidePanel({ data, orderId }) {
-  const { order, legs, drivers, history, baseUrl, currentUserRole, ORDER_STATUSES } = data;
+// 귀속정보(지사/요청법인)와 오더타입(order_type/trip_type)은 OrderForm.js의 useReducer
+// state에 속한 값이라 그 컴포넌트가 state/setField를 그대로 넘겨준다. 이 필드들은
+// OrderForm의 <form id="order-edit-form">이 아니라 여기(03번 패널) 안의 별도
+// <form>(제출 없음, onSubmit을 막아둠)에 있는데, 두 가지 이유가 있다:
+//   1) .row/.field CSS는 `form .row`/`form .field`처럼 form 조상이 있어야만 레이아웃이
+//      적용되므로(public/css/style.css) 아무 form도 없이 두면 스타일이 깨진다.
+//   2) 지사 선택의 required 검증이 실제 저장(오더수정) 제출을 막아야 하는데, 그 제출은
+//      상단 헤더의 버튼이 order-edit-form을 가리키며 일어난다 — 그래서 각 select에
+//      form="order-edit-form"을 직접 지정해 실제로 검증될 폼을 명시한다(DOM상 어느
+//      <form>에 들어있는지와는 무관하게 이 속성이 우선한다).
+function AttributionAndOrderTypeFields({ state, setField, branches, groups, isAdmin, isClient }) {
+  return (
+    <form onSubmit={(e) => e.preventDefault()}>
+      <div className="section-title small">귀속 정보</div>
+      <div className="row">
+        {isAdmin ? (
+          <div className="field">
+            <label>지사 선택 <span className="required-mark" aria-hidden="true">*</span></label>
+            <select required form="order-edit-form" value={state.branch_id} onChange={(e) => setField('branch_id', e.target.value)}>
+              <option value="">선택하세요</option>
+              {branches.map((b) => (
+                <option key={b.id} value={b.id}>{b.name}</option>
+              ))}
+            </select>
+          </div>
+        ) : null}
+        {!isClient ? (
+          <div className="field">
+            <label>요청 법인(고객사)</label>
+            <select form="order-edit-form" value={state.requester_group_id} onChange={(e) => setField('requester_group_id', e.target.value)}>
+              <option value="">선택 안 함</option>
+              {groups.map((g) => (
+                <option key={g.id} value={g.id}>{g.name}</option>
+              ))}
+            </select>
+          </div>
+        ) : null}
+      </div>
+
+      <div className="section-title small">오더 타입</div>
+      <div className="row">
+        <div className="field">
+          <label>오더 타입</label>
+          <select form="order-edit-form" value={state.order_type || 'dispatch'} onChange={(e) => setField('order_type', e.target.value)}>
+            <option value="dispatch">탁송</option>
+            <option value="premium">프리미엄</option>
+            <option value="daily_driver">일일기사</option>
+          </select>
+        </div>
+        <div className="field">
+          <label>이용 형태 (일일기사)</label>
+          <select form="order-edit-form" value={state.trip_type || ''} onChange={(e) => setField('trip_type', e.target.value)}>
+            <option value="">해당 없음</option>
+            <option value="round_trip">왕복</option>
+            <option value="one_way">편도</option>
+          </select>
+        </div>
+      </div>
+    </form>
+  );
+}
+
+export default function OrderSidePanel({ data, orderId, state, setField }) {
+  const { order, legs, drivers, history, baseUrl, currentUserRole, ORDER_STATUSES, branches, groups } = data;
   const canManageDriver = currentUserRole === 'admin' || currentUserRole === 'branch_manager';
+  const isAdmin = currentUserRole === 'admin';
+  const isClient = currentUserRole === 'client';
 
   return (
     <section className="card order-panel order-map-panel">
@@ -21,6 +85,11 @@ export default function OrderSidePanel({ data, orderId }) {
         <div className="panel-icon">03</div>
         <div><h2>기사배정 · 수정이력</h2><p>배정된 기사와 이 오더의 수정 내역을 확인합니다.</p></div>
       </div>
+
+      <AttributionAndOrderTypeFields
+        state={state} setField={setField} branches={branches} groups={groups}
+        isAdmin={isAdmin} isClient={isClient}
+      />
 
       <div className="section-title small">🧑‍✈️ 기사배정 정보</div>
       {canManageDriver ? (

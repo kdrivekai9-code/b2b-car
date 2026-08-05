@@ -175,6 +175,12 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
   const isEdit = mode === 'edit';
   const [state, dispatch] = useReducer(reducer, initialFieldState(order, defaultBranch, mode));
   const [submitting, setSubmitting] = useState(false);
+  // edit 모드의 저장 버튼은 이제 페이지 상단(page.js)의 일반 <button type="submit"
+  // form="order-edit-form">이라 이 컴포넌트의 submitting state로 disabled 처리를 못 한다
+  // (서버 컴포넌트라 리렌더로 반영이 안 됨) — 그래서 handleSubmit 자체에서 재진입을
+  // 막는다. ref를 쓰는 이유는 state 갱신은 다음 렌더까지 반영이 늦어 아주 빠른 연속
+  // 클릭(같은 렌더에서 두 번 호출되는 경우)은 state 체크로 못 막기 때문이다.
+  const submittingRef = useRef(false);
   const [error, setError] = useState(null);
   const [routeInfo, setRouteInfo] = useState({ km: null, durationSec: null, toll: null, hasFerryLeg: false, isFinal: false });
   const [fareHint, setFareHint] = useState('');
@@ -477,6 +483,7 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
 
   async function handleSubmit(e) {
     e.preventDefault();
+    if (submittingRef.current) return;
     setError(null);
 
     if (!checkAssignedDriverGate()) return;
@@ -580,6 +587,7 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
       return;
     }
 
+    submittingRef.current = true;
     setSubmitting(true);
     try {
       const res = await fetch(mode === 'edit' ? `/orders/${orderId}` : '/orders', {
@@ -590,11 +598,13 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
       if (res.status === 400) {
         const data = await res.json().catch(() => ({ error: '입력값을 확인해주세요.' }));
         setError(data.error || '입력값을 확인해주세요.');
+        submittingRef.current = false;
         setSubmitting(false);
         return;
       }
       if (!res.ok) {
         setError('저장에 실패했습니다. 다시 시도해주세요.');
+        submittingRef.current = false;
         setSubmitting(false);
         return;
       }
@@ -610,6 +620,7 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
       window.location.assign(chatSessionId ? '/orders' : '/orders/' + data.orderId);
     } catch {
       setError('저장에 실패했습니다. 다시 시도해주세요.');
+      submittingRef.current = false;
       setSubmitting(false);
     }
   }
@@ -626,7 +637,12 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
             — HTML은 <form> 중첩을 허용하지 않는다(중첩되면 브라우저가 파서 레벨에서 구조를
             바꿔버려 실제로 hydration mismatch가 났다). 그래서 이 <form>은 grid의 01/02
             섹션만 감싸고, display:contents로 grid 레이아웃 자체에는 관여하지 않게 한다. */}
-        <form className="order-form-fields" onSubmit={handleSubmit} style={{ display: 'contents' }}>
+        {/* id는 OrderSidePanel(03번 자리)로 옮겨간 귀속정보/오더타입 필드와 상단 헤더의
+            "오더수정" 버튼이 form 속성으로 이 폼을 가리키기 위해 필요하다 — 실제 제출은
+            handleSubmit이 state를 읽어 만드는 것이라 DOM상 폼 밖에 있어도 값 자체는
+            문제없이 반영되지만, required 검증(예: 지사 선택)이 실제로 이 폼 제출을
+            막도록 하려면 form="order-edit-form"으로 명시적 연결이 필요하다. */}
+        <form id="order-edit-form" className="order-form-fields" onSubmit={handleSubmit} style={{ display: 'contents' }}>
         <section className="card order-panel route-panel">
           <div className="panel-title">
             <div className="panel-icon">01</div>
@@ -696,13 +712,21 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
                 setField('destination_lat', lat); setField('destination_lon', lon);
                 if (region) { setField('destination_sido', region.sido); setField('destination_sigugun', region.sigugun); setField('destination_dong', region.dong); }
               }} />
-            <div className="field">
-              <label>도착지 연락처 <span className="required-mark" aria-hidden="true">*</span></label>
-              <input type="text" className="phone-input" required placeholder="010-0000-0000"
-                value={state.destination_contact} onChange={(e) => { setField('sameAsOriginContact', false); setField('destination_contact', e.target.value); }} />
-              <label className="checkline">
-                <input type="checkbox" checked={state.sameAsOriginContact} onChange={(e) => handleSameAsOriginContact(e.target.checked)} /> 출발지 연락처와 동일
-              </label>
+            <div className="row">
+              <div className="field">
+                <label>도착지 연락처 <span className="required-mark" aria-hidden="true">*</span></label>
+                <input type="text" className="phone-input" required placeholder="010-0000-0000"
+                  value={state.destination_contact} onChange={(e) => { setField('sameAsOriginContact', false); setField('destination_contact', e.target.value); }} />
+                <label className="checkline">
+                  <input type="checkbox" checked={state.sameAsOriginContact} onChange={(e) => handleSameAsOriginContact(e.target.checked)} /> 출발지 연락처와 동일
+                </label>
+              </div>
+              <div className="field">
+                <label>도착지 대기시간(분)</label>
+                <input type="number" min={0} step={5} placeholder="없으면 비워두세요"
+                  value={state.destination_wait_minutes || ''}
+                  onChange={(e) => setField('destination_wait_minutes', e.target.value)} />
+              </div>
             </div>
           </div>
         </section>
@@ -819,55 +843,58 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
           </div>
           </div>
 
-          <div className="section-title small">귀속 정보</div>
-          {isAdmin ? (
-            <div className="field">
-              <label>지사 선택 <span className="required-mark" aria-hidden="true">*</span></label>
-              <select required value={state.branch_id} onChange={(e) => setField('branch_id', e.target.value)}>
-                <option value="">선택하세요</option>
-                {branches.map((b) => (
-                  <option key={b.id} value={b.id}>{b.name}</option>
-                ))}
-              </select>
-            </div>
-          ) : null}
-          {!isClient ? (
-            <div className="field">
-              <label>요청 법인(고객사)</label>
-              <select value={state.requester_group_id} onChange={(e) => setField('requester_group_id', e.target.value)}>
-                <option value="">선택 안 함</option>
-                {groups.map((g) => (
-                  <option key={g.id} value={g.id}>{g.name}</option>
-                ))}
-              </select>
-            </div>
-          ) : null}
+          {/* edit 모드에서는 귀속정보/오더타입을 우측 03번 패널(OrderSidePanel, 기사배정
+              정보 위쪽)로 옮겼다(사용자 요청) — create 모드는 그 패널 자체가 없으므로
+              (RouteMap이 그 자리를 대신함) 원래 위치를 그대로 유지한다. */}
+          {!isEdit && (
+            <>
+              <div className="section-title small">귀속 정보</div>
+              <div className="row">
+                {isAdmin ? (
+                  <div className="field">
+                    <label>지사 선택 <span className="required-mark" aria-hidden="true">*</span></label>
+                    <select required value={state.branch_id} onChange={(e) => setField('branch_id', e.target.value)}>
+                      <option value="">선택하세요</option>
+                      {branches.map((b) => (
+                        <option key={b.id} value={b.id}>{b.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                ) : null}
+                {!isClient ? (
+                  <div className="field">
+                    <label>요청 법인(고객사)</label>
+                    <select value={state.requester_group_id} onChange={(e) => setField('requester_group_id', e.target.value)}>
+                      <option value="">선택 안 함</option>
+                      {groups.map((g) => (
+                        <option key={g.id} value={g.id}>{g.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                ) : null}
+              </div>
 
-          <div className="section-title small">오더 타입</div>
-          <div className="row">
-            <div className="field">
-              <label>오더 타입</label>
-              <select value={state.order_type || 'dispatch'} onChange={(e) => setField('order_type', e.target.value)}>
-                <option value="dispatch">탁송</option>
-                <option value="premium">프리미엄</option>
-                <option value="daily_driver">일일기사</option>
-              </select>
-            </div>
-            <div className="field">
-              <label>이용 형태 (일일기사)</label>
-              <select value={state.trip_type || ''} onChange={(e) => setField('trip_type', e.target.value)}>
-                <option value="">해당 없음</option>
-                <option value="round_trip">왕복</option>
-                <option value="one_way">편도</option>
-              </select>
-            </div>
-            <div className="field">
-              <label>도착지 대기시간(분)</label>
-              <input type="number" min={0} step={5} placeholder="없으면 비워두세요"
-                value={state.destination_wait_minutes || ''}
-                onChange={(e) => setField('destination_wait_minutes', e.target.value)} />
-            </div>
-          </div>
+              <div className="section-title small">오더 타입</div>
+              <div className="row">
+                <div className="field">
+                  <label>오더 타입</label>
+                  <select value={state.order_type || 'dispatch'} onChange={(e) => setField('order_type', e.target.value)}>
+                    <option value="dispatch">탁송</option>
+                    <option value="premium">프리미엄</option>
+                    <option value="daily_driver">일일기사</option>
+                  </select>
+                </div>
+                <div className="field">
+                  <label>이용 형태 (일일기사)</label>
+                  <select value={state.trip_type || ''} onChange={(e) => setField('trip_type', e.target.value)}>
+                    <option value="">해당 없음</option>
+                    <option value="round_trip">왕복</option>
+                    <option value="one_way">편도</option>
+                  </select>
+                </div>
+              </div>
+            </>
+          )}
           {state.trip_type === 'round_trip' && (
             <>
               <div className="section-title small">최종 목적지 (왕복 일일기사)</div>
@@ -883,16 +910,22 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
             </>
           )}
 
-          <div className="section-title small">요청 메모</div>
+          <div className="route-stop order-memo-stop">
+          <div className="route-stop-title"><span className="route-marker">요청 메모</span></div>
           <div className="field full">
             <label>메모(기사전달사항)</label>
-            <textarea placeholder="예) 사고 이력 안내&#10;예) 스크래치 등 차량 관련 내용"
+            {/* 실제 입력된 내용이 없으면 여러 줄짜리 큰 textarea 대신 한 줄 높이로 표시한다
+                (사용자 요청) — 값이 생기면(입력 중이든 이미 저장돼 있든) 원래 높이로 돌아온다. */}
+            <textarea className={state.memo_customer ? '' : 'single-line-textarea'}
+              placeholder="예) 사고 이력 안내&#10;예) 스크래치 등 차량 관련 내용"
               value={state.memo_customer} onChange={(e) => setField('memo_customer', e.target.value)} />
           </div>
           <div className="field full">
             <label>업체 전달사항</label>
-            <textarea placeholder="예) 계산서/내역서 비고란에 'OOO'로 기재 요청"
+            <textarea className={state.memo_billing ? '' : 'single-line-textarea'}
+              placeholder="예) 계산서/내역서 비고란에 'OOO'로 기재 요청"
               value={state.memo_billing} onChange={(e) => setField('memo_billing', e.target.value)} />
+          </div>
           </div>
 
           {chatSessionId && (
@@ -907,12 +940,18 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
 
           {error && <div className="error-msg">{error}</div>}
 
-          <div className="order-form-actions">
-            <a className="btn secondary" href={mode === 'edit' ? `/orders/${orderId}` : '/orders'}>취소</a>
-            <button className="btn" type="submit" disabled={submitting}>
-              {submitting ? (mode === 'edit' ? '저장 중...' : '등록 중...') : (mode === 'edit' ? '오더 정보 저장' : '오더 등록')}
-            </button>
-          </div>
+          {/* edit 모드는 저장 버튼을 페이지 상단(오더 리스트로 버튼 앞)으로 옮기고 취소
+              버튼은 없앴다(사용자 요청) — 그 버튼은 이 <form id="order-edit-form">을
+              form 속성으로 가리키는 별도 버튼(src/app/orders/[id]/page.js)이라 여기엔
+              아무것도 남기지 않는다. create 모드는 기존과 동일하게 하단에 유지한다. */}
+          {mode !== 'edit' && (
+            <div className="order-form-actions">
+              <a className="btn secondary" href="/orders">취소</a>
+              <button className="btn" type="submit" disabled={submitting}>
+                {submitting ? '등록 중...' : '오더 등록'}
+              </button>
+            </div>
+          )}
         </section>
         </form>
 
@@ -926,7 +965,7 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
               destinationAddress={state.destination_address}
               onRouteUpdate={setRouteInfo}
             />
-            <OrderSidePanel data={initialData} orderId={orderId} />
+            <OrderSidePanel data={initialData} orderId={orderId} state={state} setField={setField} />
           </>
         ) : (
           <RouteMap

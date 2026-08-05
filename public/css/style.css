@@ -319,6 +319,13 @@ form .field.full{flex-basis:100%;}
 .order-schedule-stop .route-marker{background:#dcf0e1;color:#1f6b3f;}
 .order-payment-stop{margin-top:16px;border-color:#f0ddb0;background:#fdf6ea;}
 .order-payment-stop .route-marker{background:#fbeecb;color:#8a5a00;}
+.order-memo-stop{margin-top:16px;border-color:#dcd8f0;background:#f5f3fb;}
+.order-memo-stop .route-marker{background:#e8e4f7;color:#4c3d99;}
+/* 실제 입력된 내용이 없는 textarea는 여러 줄짜리 큰 칸 대신 한 줄 높이로 표시한다(사용자
+   요청, 오더 상세의 요청 메모). .ai-intake-grid 안에서만 쓰던 걸 어디서나 쓸 수 있게
+   조상 클래스 없이도 매칭되는 일반 규칙을 추가한다 — 기존 .ai-intake-grid 스코프 규칙과
+   값이 같아서 그쪽엔 영향 없다. */
+textarea.single-line-textarea{min-height:36px;height:36px;padding:8px 10px;resize:vertical;}
 .add-waypoint-btn{width:100%;border-style:dashed;color:#53667f;}
 .schedule-stop{position:relative;padding:13px 13px 2px;border:1px solid #d3ecd9;border-radius:var(--radius-sm);background:#eef9f1;margin-bottom:14px;}
 .schedule-stop .field{margin-bottom:10px;}
