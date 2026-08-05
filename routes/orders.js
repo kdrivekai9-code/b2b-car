@@ -98,6 +98,10 @@ function sseHeaders(res) {
 
 const ORDERS_PAGE_SIZE = 50;
 
+// 이 상태로 바뀔 때만 콜마너 오더접수를 보낸다 — POST /:id/status(전송 트리거)와
+// GET /:id/callmaner-status.json(진행중 판정)이 같은 기준을 써야 한다.
+const CALLMANER_TRIGGER_STATUSES = ['접수', '대기'];
+
 // EJS 렌더 라우트와 Next.js 프리뷰(GET /orders/data.json)가 완전히 동일한 쿼리/스코핑/필터
 // 로직을 공유하도록 분리했다 — dashboard.js의 buildDashboardData와 같은 패턴.
 async function buildOrdersListData(scope, query) {
@@ -1512,7 +1516,13 @@ router.get('/:id/callmaner-status.json', asyncHandler(async (req, res) => {
 
   res.json({
     enabled: !!order.callmaner_enabled,
-    pending: order.callmaner_enabled && !order.callmaner_conf_slip && !order.callmaner_last_error,
+    // "결과를 기다리는 중"은 콜마너 전송 대상 상태(접수/대기)일 때만 참이다 — 오더 생성 직후
+    // (status='오더등록')에는 전송 자체를 하지 않으므로, 이 조건이 없으면 화면에 "콜마너 등록
+    // 확인 중"이 영원히 떠 있게 된다(결과가 올 리 없다).
+    pending: !!order.callmaner_enabled
+      && CALLMANER_TRIGGER_STATUSES.includes(order.status)
+      && !order.callmaner_conf_slip
+      && !order.callmaner_last_error,
     error: order.callmaner_last_error || null,
     errorCode: order.callmaner_last_error_code || null,
     confSlip: order.callmaner_conf_slip || null,
@@ -1711,7 +1721,16 @@ router.post('/:id/status', asyncHandler(async (req, res) => {
   // '대기'도 '접수'와 마찬가지로 콜마너 등록을 트리거한다(사용자 확정 사항) — 로컬 status
   // 컬럼은 그대로 '대기'/'접수'로 남고, registerOrderWithCallmaner는 콜마너 쪽 상태만
   // (callmaner_status='접수', 콜마너 자체 라벨) 기록하므로 서로 안 섞인다.
-  if (status === '접수' || status === '대기') registerOrderWithCallmaner(order.id, order.branch_id);
+  //
+  // await로 기다린다. 예전에는 fire-and-forget이라 리다이렉트된 상세페이지가 결과보다 먼저
+  // 그려져서 실패 배너가 몇 초 뒤에야 떴다. 콜마너 OrderReceipt는 실측 약 1초라(타임아웃
+  // 10초는 상한일 뿐) 기다려도 체감 지연이 거의 없고, 무엇보다 Vercel 서버리스는 응답을
+  // 보낸 뒤 인스턴스를 얼려서 기다리지 않은 백그라운드 작업이 완료되지 않을 수 있다 —
+  // 기다리는 편이 정확성 면에서도 안전하다. 실패는 함수 안에서 잡아 DB에 기록하므로 여기서
+  // throw되지 않는다(상태변경 자체는 콜마너와 무관하게 항상 성공한다).
+  if (CALLMANER_TRIGGER_STATUSES.includes(status)) {
+    await registerOrderWithCallmaner(order.id, order.branch_id);
+  }
 
   try {
     await notify({
