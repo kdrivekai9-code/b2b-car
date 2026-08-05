@@ -104,14 +104,32 @@ async function requireAuth(req, res, next) {
       return destroyWithReason(req, res, problem.reason, problem.reason === 'absolute' ? 'SESSION_EXPIRED_ABSOLUTE' : 'SESSION_EXPIRED_IDLE', problem.message);
     }
 
-    const now = Date.now();
-    if (now - Number(req.session.lastSeenAt || 0) > LAST_SEEN_UPDATE_INTERVAL_MS) {
-      req.session.lastSeenAt = now;
-    }
+    touchLastSeen(req);
     next();
   } catch (error) {
     next(error);
   }
+}
+
+function touchLastSeen(req) {
+  const now = Date.now();
+  const stale = now - Number(req.session.lastSeenAt || 0) > LAST_SEEN_UPDATE_INTERVAL_MS;
+  if (stale) req.session.lastSeenAt = now;
+  return stale;
+}
+
+// SSE(EventSource) 연결처럼 res.end 없이 오래 열려있는 요청은, express-session이 세션을
+// 응답이 끝나는 시점에만 저장소에 반영하기 때문에 requireAuth가 연결 시작 시점에 한 번
+// 갱신한 lastSeenAt이 연결이 끊길 때까지 DB에 저장되지 않는다 — 그동안 화면을 계속 보고
+// 있어도(오더리스트/상담카드/채팅의 실시간 갱신 화면) 서버 입장에선 "그 이후 아무 활동도
+// 없었다"로 보여 idle 타임아웃으로 로그아웃되는 문제가 있었다. SSE 라우트의 keepAlive
+// 핑(20초 간격)에서 이 함수를 호출해, 1분 이상 지났으면 명시적으로 save()해 DB에 반영한다.
+function keepSessionAlive(req) {
+  if (!req.session) return;
+  if (!touchLastSeen(req)) return;
+  req.session.save((err) => {
+    if (err) console.error('SSE 세션 유지 저장 실패:', err.message);
+  });
 }
 
 function requireRole(...roles) {
@@ -132,4 +150,4 @@ function scopeFilter(req) {
   return {};
 }
 
-module.exports = { hashSessionToken, requireAuth, requireRole, scopeFilter, getSessionProblem, isAiIntakeRequest };
+module.exports = { hashSessionToken, requireAuth, requireRole, scopeFilter, getSessionProblem, isAiIntakeRequest, keepSessionAlive };

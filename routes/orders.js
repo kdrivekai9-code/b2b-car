@@ -1,6 +1,6 @@
 const express = require('express');
 const db = require('../db');
-const { requireAuth, requireRole, scopeFilter, getSessionProblem } = require('../middleware/auth');
+const { requireAuth, requireRole, scopeFilter, getSessionProblem, keepSessionAlive } = require('../middleware/auth');
 const asyncHandler = require('../middleware/asyncHandler');
 const { ORDER_STATUSES } = require('../config');
 const { getEffectivePaymentMethods, getEffectiveStatuses, checkOperatingHours, calculateFareWithFerry, calculatePremiumFare } = require('../lib/branchPolicy');
@@ -228,6 +228,7 @@ router.get('/stream', asyncHandler(async (req, res) => {
 
   keepAlive = setInterval(() => {
     if (res.writableEnded || res.destroyed || !res.writable) return cleanup();
+    keepSessionAlive(req);
     try { res.write(':\n\n'); } catch (e) { cleanup(); }
   }, 20000);
 

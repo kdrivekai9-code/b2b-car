@@ -5,7 +5,7 @@
 // 브라우저에는 SSE로 중계한다 — Supabase 키가 브라우저에 노출되지 않는다.
 const express = require('express');
 const db = require('../db');
-const { requireAuth, requireRole } = require('../middleware/auth');
+const { requireAuth, requireRole, keepSessionAlive } = require('../middleware/auth');
 const asyncHandler = require('../middleware/asyncHandler');
 const { notify } = require('../lib/push');
 const { kstNow } = require('../lib/period');
@@ -219,6 +219,7 @@ router.get('/agent-presence/stream', requireRole('admin'), asyncHandler(async (r
 
   keepAlive = setInterval(() => {
     if (res.writableEnded || res.destroyed || !res.writable) return cleanup();
+    keepSessionAlive(req);
     try { res.write(':\n\n'); } catch (e) { cleanup(); }
   }, 20000);
 
@@ -353,7 +354,7 @@ router.get('/:sessionId/stream', asyncHandler(async (req, res) => {
     if (payload && payload.sender === 'agent' && payload.id) markSingleMessageReadByUserAsync(payload.id, session.id);
     res.write(`data: ${JSON.stringify(payload)}\n\n`);
   });
-  const keepAlive = setInterval(() => res.write(':\n\n'), 20000);
+  const keepAlive = setInterval(() => { keepSessionAlive(req); res.write(':\n\n'); }, 20000);
   req.on('close', () => { clearInterval(keepAlive); closeChannel(streamHandle); });
 }));
 
@@ -876,7 +877,7 @@ router.get('/sessions/:id/stream', requireRole('admin'), asyncHandler(async (req
     // 말풍선의 배지를 클라이언트가 즉시 갱신할 수 있도록 그대로 중계한다.
     res.write(`data: ${JSON.stringify({ type: 'read_receipt', reader: receipt && receipt.reader })}\n\n`);
   });
-  const keepAlive = setInterval(() => res.write(':\n\n'), 20000);
+  const keepAlive = setInterval(() => { keepSessionAlive(req); res.write(':\n\n'); }, 20000);
   req.on('close', () => { clearInterval(keepAlive); closeChannel(streamHandle); });
 }));
 
