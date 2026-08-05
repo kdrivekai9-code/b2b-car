@@ -62,7 +62,12 @@ export default async function OrderDetailPage({ params }) {
     <AppShell currentUser={data.currentUser} activePath="/orders">
       <div className="page-head-row">
         <div>
-          <h1 className="page-title">오더 상세 · {order.oid}</h1>
+          <h1 className="page-title">
+            오더 상세 · {order.oid}
+            {order.callmaner_conf_slip && (
+              <span className="callmaner-conf-slip">콜마너접수번호 : {order.callmaner_conf_slip}</span>
+            )}
+          </h1>
           <p className="page-sub">
             <span className={`badge ${STATUS_COLORS[order.status] || 'gray'}`}>{order.status}</span>
             &nbsp; {order.branch_name} · {order.group_name || '-'} · 등록일시 {order.created_at}

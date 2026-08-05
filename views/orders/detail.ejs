@@ -1,7 +1,12 @@
 <%- include('../partials/header') %>
 <div class="page-head-row">
   <div>
-    <h1 class="page-title">오더 상세 · <%= order.oid %></h1>
+    <h1 class="page-title">
+      오더 상세 · <%= order.oid %>
+      <% if (order.callmaner_conf_slip) { %>
+      <span class="callmaner-conf-slip">콜마너접수번호 : <%= order.callmaner_conf_slip %></span>
+      <% } %>
+    </h1>
     <p class="page-sub">
       <span class="badge <%= statusColor(order.status) %>"><%= order.status %></span>
       &nbsp; <%= order.branch_name %> · <%= order.group_name || '-' %> · 등록일시 <%= order.created_at %>
