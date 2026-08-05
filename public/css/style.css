@@ -311,6 +311,14 @@ form .field.full{flex-basis:100%;}
 .route-marker{display:inline-flex;align-items:center;justify-content:center;min-width:42px;padding:5px 10px;border-radius:999px;background:#e7f0fb;color:#2e5c8a;font-size:13px;font-weight:800;}
 .destination-stop .route-marker{background:#fde8e8;color:#b91c1c;}
 .route-stop .field{margin-bottom:10px;}
+/* 운행일정/결제 및 요금도 출발·도착 섹션과 같은 형식(배경색 박스 + 알약형 타이틀)으로
+   맞춘다 — 출발(파란색)/도착(빨간색)과 구분되는 색만 다르게 써서 서로 다른 종류의
+   구간임을 헷갈리지 않게 한다. .schedule-stop은 이미 legacy views/orders/form.ejs가
+   전혀 다른 스타일로 쓰고 있어서(그쪽을 건드리면 안 됨) order- 접두어로 이름을 분리한다. */
+.order-schedule-stop{margin-top:20px;border-color:#cfe6d4;background:#eef8f0;}
+.order-schedule-stop .route-marker{background:#dcf0e1;color:#1f6b3f;}
+.order-payment-stop{margin-top:16px;border-color:#f0ddb0;background:#fdf6ea;}
+.order-payment-stop .route-marker{background:#fbeecb;color:#8a5a00;}
 .add-waypoint-btn{width:100%;border-style:dashed;color:#53667f;}
 .schedule-stop{position:relative;padding:13px 13px 2px;border:1px solid #d3ecd9;border-radius:var(--radius-sm);background:#eef9f1;margin-bottom:14px;}
 .schedule-stop .field{margin-bottom:10px;}

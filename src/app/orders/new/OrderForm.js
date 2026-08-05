@@ -713,7 +713,8 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
             <div><h2>운행 및 요청 정보</h2><p>예약 일정, 귀속 정보, 요금 및 요청 메모를 확인하세요.</p></div>
           </div>
 
-          <div className="section-title small">운행 일정</div>
+          <div className="route-stop order-schedule-stop">
+          <div className="route-stop-title"><span className="route-marker">운행일정</span></div>
           <div className="field full">
             <label>예약일시 <span className="required-mark" aria-hidden="true">*</span></label>
             <div className="inline-duo" style={{ marginBottom: 8, alignItems: 'center' }}>
@@ -792,9 +793,11 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
                 value={state.vehicle_number} onChange={(e) => setField('vehicle_number', e.target.value)} />
             </div>
           </div>
+          </div>
 
-          <div className="section-title small" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span>결제 및 요금</span>
+          <div className="route-stop order-payment-stop">
+          <div className="route-stop-title" style={{ justifyContent: 'space-between' }}>
+            <span className="route-marker">결제 및 요금</span>
             {routeInfo.km != null && <span style={{ fontWeight: 400 }}>거리 : {routeInfo.km.toFixed(1)} km</span>}
           </div>
           <div className="field full">
@@ -813,6 +816,7 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
             {routeInfo.hasFerryLeg && routeInfo.km != null && (
               <p className="fare-calc-hint">도선요금: {Number(state.ferry_fare_amount || 0).toLocaleString('ko-KR')}원 (구간요금에 포함)</p>
             )}
+          </div>
           </div>
 
           <div className="section-title small">귀속 정보</div>
