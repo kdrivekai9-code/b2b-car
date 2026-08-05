@@ -115,6 +115,9 @@
   // 도선료 계산에 차종이 필요해 요금문의 흐름이 멈춘 경우, 다음 메시지를 그 답으로 보고 이어가기
   // 위한 대기 상태 — { origin, destination }.
   var pendingFareVehicleTypeRoute = null;
+  // 요금문의 경유지 질문("경유지가 있으신가요?")의 답을 기다리는 상태 — 값이 있으면 다음
+  // 메시지를 handleFareWaypointPendingReply가 먼저 처리한다.
+  var pendingFareWaypointRoute = null;
   // 한 번의 사용자 메시지에 여러 봇 말풍선이 연달아 나올 때(요금문의 등), 시간 표시는 그 턴의
   // 마지막 말풍선 아래에만 남긴다 — 새 봇 말풍선이 추가될 때마다 직전 것의 시간을 지운다.
   // 새 사용자 메시지 처리를 시작할 때(resetTurnBotRow) null로 되돌려 이전 턴의 마지막
@@ -743,6 +746,12 @@
   function detectFareInquiryType(text) {
     var t = String(text || '');
     if (hasCallIntakeSignalText(t)) return null;
+    // 연락처나 "출:/도:/경:" 라벨이 있으면 요금문의가 아니라 오더접수다 — 요금만 물어보는 사람이
+    // 출발지·도착지 연락처까지 주지는 않는다. hasCallIntakeSignalText는 키워드 목록('예약',
+    // '접수' 등)만 보기 때문에 "탁송요청"처럼 목록에 없는 표현('요청')이 오면 아래 /탁송/ 규칙에
+    // 걸려 요금문의로 새고, 그러면 연락처를 아예 받지 않은 채 요금 안내만 하고 끝나버렸다
+    // (실제 리포트: "탁송요청 + 출/도 연락처" 메시지가 요금문의로 처리됨).
+    if (looksLikeOrderIntake(t)) return null;
     if (/(일일\s*대리\s*기사|일일\s*대리|하루\s*대리|데일리\s*대리)/.test(t)) return 'daily_proxy';
     if (/(대리\s*요금|대리운전|대리\s*기사)/.test(t)) return 'proxy';
     if (/(탁송\s*요금|탁송)/.test(t)) return 'dispatch';
@@ -879,6 +888,81 @@
       adminAreaOnly: route.adminAreaOnly,
       isResume: true,
     }).then(function () { return null; });
+    return true;
+  }
+
+  // "경유지가 있으신가요?"에 대한 답을 처리한다. 없다고 하면 요금문의를 깔끔히 마무리하고,
+  // 주소를 말하면 경유지 행을 추가해 경로패널이 경유지 포함 거리를 다시 계산하도록 하고
+  // (waitForFinalRouteDistance가 그 값을 읽는다) 요금을 다시 안내한다.
+  function handleFareWaypointPendingReply(text) {
+    if (!pendingFareWaypointRoute) return false;
+    var route = pendingFareWaypointRoute;
+    var t = String(text || '').trim();
+
+    if (isAgentRequest(t)) {
+      pendingFareWaypointRoute = null;
+      syncStatePatch({ pendingFareWaypointRoute: null });
+      escalateToAgent('상담원 연결');
+      return true;
+    }
+
+    // 경유지 없음 — 여기서 요금문의는 끝이다. 다음에 무엇을 할 수 있는지 함께 안내한다.
+    if (ADDITIONAL_REQUEST_NONE_RE.test(t)) {
+      pendingFareWaypointRoute = null;
+      syncStatePatch({ pendingFareWaypointRoute: null });
+      var doneText = '경유지 없이 안내드린 요금으로 확인해주세요. 이 조건으로 접수를 원하시면 예약일시와 차량번호, 출발지·도착지 연락처를 알려주시면 오더로 접수해드리겠습니다.';
+      addBubble(doneText, 'bot');
+      logBotMessage({ logText: doneText, needsAgent: false, requestedFeature: null });
+      return true;
+    }
+
+    // 그 외에는 경유지 주소로 보고 처리한다 — 주소 검색이 실패하면 validateAddressField가
+    // 재입력 안내를 띄우므로, 그때는 대기 상태를 유지해서 다시 답할 수 있게 한다.
+    pendingFareWaypointRoute = null;
+    syncStatePatch({ pendingFareWaypointRoute: null });
+    if (!addWaypointBtn) return false;
+    addWaypointBtn.click();
+    var rows = document.querySelectorAll('#waypointsWrap .waypoint-row');
+    var row = rows[rows.length - 1];
+    if (!row) return false;
+    var waypointFieldId = row.dataset.slot + '_address';
+    document.getElementById(waypointFieldId).value = t;
+    updateFareProgressLine(3, '경유지 포함 경로를 다시 계산 중입니다...');
+
+    validateAddressField(waypointFieldId, '경유지 주소').then(function (r) {
+      if (r && r.ambiguous) {
+        clearFareProgressLine();
+        pendingFareWaypointRoute = route;
+        logBotMessage(startDisambiguation([r]));
+        return null;
+      }
+      if (!r || !r.success) {
+        clearFareProgressLine();
+        pendingFareWaypointRoute = route; // 같은 질문에 다시 답할 수 있도록 대기 상태 복원
+        return null;
+      }
+      return waitForFinalRouteDistance(20000).then(function (km) {
+        if (!Number.isFinite(km) || km <= 0) {
+          clearFareProgressLine();
+          var failText = '경유지 포함 거리 계산을 완료하지 못했습니다. 경유지 주소를 조금 더 상세히 알려주시면 다시 계산해드리겠습니다.';
+          addBubble(failText, 'bot');
+          logBotMessage({ logText: failText, needsAgent: false, requestedFeature: null });
+          pendingFareWaypointRoute = route;
+          return null;
+        }
+        var kmText = '경유지를 포함한 예상 거리는 ' + km.toFixed(1) + 'km 입니다.';
+        addBubble(kmText, 'bot');
+        logBotMessage({ logText: kmText, needsAgent: false, requestedFeature: null });
+        return announceFareAndContinue({
+          origin: route.origin,
+          destination: route.destination,
+          vehicleType: route.vehicleType,
+          inquiryId: route.inquiryId,
+          adminAreaOnly: route.adminAreaOnly,
+          isResume: true,
+        }).then(function () { return null; });
+      });
+    });
     return true;
   }
 
@@ -1385,6 +1469,17 @@
         // 선박 이동이 필수인 구간(hasFerryLeg)은 경유지가 있어도 항로 자체가 바뀌지 않으므로
         // 질문을 생략한다 — 그 외(일반 육로 구간)에는 기존대로 경유지를 물어본다.
         if (!(routeMeta && routeMeta.hasFerryLeg)) {
+          // 질문만 던지고 대기 상태를 남기지 않아서, "없어" 같은 답이 Gemini 분류로 흘러가
+          // FAQ 미검색("관련된 답변을 찾지 못했습니다")으로 끝나버렸다 — 차종 질문이
+          // pendingFareVehicleTypeRoute를 남기는 것과 같은 방식으로 재개 정보를 남긴다.
+          pendingFareWaypointRoute = {
+            origin: ctx.origin,
+            destination: ctx.destination,
+            vehicleType: ctx.vehicleType || '',
+            inquiryId: ctx.inquiryId,
+            adminAreaOnly: ctx.adminAreaOnly,
+          };
+          syncStatePatch({ pendingFareWaypointRoute: pendingFareWaypointRoute });
           stageBotMessage('경유지가 있으신가요? 있으면 경유지 주소를 알려주시면 다시 경유지 포함 요금을 안내해 드릴께요', true);
         }
         return { halted: false, fareText: fareResult.text };
@@ -3143,6 +3238,12 @@
         // ---- /프리미엄 로컬 파싱 인터셉트 끝 ----
 
         if (handleFareInquiryPendingReply(text)) return null;
+        // 요금문의 도중 되물은 질문(차종 / 경유지)의 답은 Gemini 분류로 보내지 않고 여기서
+        // 먼저 소비한다 — 안 그러면 "없어"처럼 짧은 답이 FAQ 검색으로 새서
+        // "관련된 답변을 찾지 못했습니다"로 끝난다. handleFareVehicleTypePendingReply는
+        // 만들어두고 어디서도 호출하지 않아(죽은 코드) 차종 답변도 같이 새고 있었다.
+        if (handleFareVehicleTypePendingReply(text)) return null;
+        if (handleFareWaypointPendingReply(text)) return null;
         // 명시적인 "상담원 연결" 요청은 Gemini 분류를 거치지 않고 바로 처리한다 — 이 요청만큼은
         // 콜드스타트/응답지연으로 고객이 기다리다 이탈해서 에스컬레이션 자체가 무산되는 일이 없어야 한다.
         // 단, 전화번호나 출/도/경 라벨 같은 오더접수 신호가 함께 있으면(예: 메모에 "상담원"이 우연히
