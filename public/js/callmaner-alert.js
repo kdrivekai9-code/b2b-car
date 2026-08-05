@@ -4,21 +4,29 @@
   // 오더 상세페이지는 서버 렌더 시점의 order.callmaner_last_error로 이 배지를 이미 그려두지만
   // (새로고침하면 항상 보임), 폴링 도중 새로고침 없이 막 실패를 감지한 경우에도 같은 배지가
   // 바로 나타나도록 만들어 둔다(className으로 중복 삽입 방지).
-  function showBadge(message) {
+  // code는 콜마너가 실제로 응답한 에러코드(정의서 rc, 예: E0 / HTTP 500) — 우리 쪽 사전검증
+  // 실패(좌표 누락 등)는 요청이 나가지 않아 코드가 없으므로 그 줄을 아예 그리지 않는다.
+  function showBadge(message, code) {
     if (document.querySelector('.callmaner-error-badge')) return;
     var badge = document.createElement('div');
     badge.className = 'callmaner-error-badge';
     badge.setAttribute('role', 'alert');
     var strong = document.createElement('strong');
     strong.textContent = '⚠️ 콜마너 연동 실패';
+    badge.appendChild(strong);
+    if (code) {
+      var codeEl = document.createElement('div');
+      codeEl.className = 'callmaner-error-code';
+      codeEl.textContent = '에러코드 ' + code;
+      badge.appendChild(codeEl);
+    }
     var body = document.createElement('div');
     body.textContent = message;
-    badge.appendChild(strong);
     badge.appendChild(body);
     document.body.appendChild(badge);
   }
 
-  function showPopup(message, onClose) {
+  function showPopup(message, code, onClose) {
     var overlay = document.createElement('div');
     overlay.className = 'callmaner-alert-overlay';
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;';
@@ -29,6 +37,13 @@
     var title = document.createElement('div');
     title.textContent = '⚠️ 콜마너 연동 실패';
     title.style.cssText = 'font-weight:700;font-size:16px;margin-bottom:8px;color:#c0392b;';
+
+    var codeEl = null;
+    if (code) {
+      codeEl = document.createElement('div');
+      codeEl.textContent = '에러코드 ' + code;
+      codeEl.style.cssText = 'display:inline-block;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;font-weight:700;color:#922b21;background:#fdecea;border:1px solid #f1948a;border-radius:4px;padding:2px 8px;margin-bottom:10px;';
+    }
 
     var body = document.createElement('div');
     body.textContent = message;
@@ -45,6 +60,7 @@
     btn.onclick = function () { overlay.remove(); if (onClose) onClose(); };
 
     box.appendChild(title);
+    if (codeEl) box.appendChild(codeEl);
     box.appendChild(body);
     box.appendChild(hint);
     box.appendChild(btn);
@@ -67,7 +83,8 @@
         .then(function (res) { return res.ok ? res.json() : null; })
         .then(function (data) {
           if (!data || !data.enabled) { onDone(); return; } // 콜마너 미사용 지사 - 아무 것도 하지 않음
-          if (data.error) { showBadge(data.error); showPopup(data.error, onDone); return; } // 팝업의 "확인"을 눌러야 onDone(페이지 이동 등) 진행
+          // 팝업의 "확인"을 눌러야 onDone(페이지 이동 등) 진행
+          if (data.error) { showBadge(data.error, data.errorCode); showPopup(data.error, data.errorCode, onDone); return; }
           if (data.confSlip) { onDone(); return; } // 정상 등록 - 팝업 없음(요청 범위 밖)
           attempts += 1;
           if (attempts < maxAttempts) setTimeout(tick, intervalMs);

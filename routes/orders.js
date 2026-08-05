@@ -1482,8 +1482,10 @@ router.get('/:id', asyncHandler(async (req, res) => {
 // 실패 시 팝업으로 알려주기 위한 상태 조회 — 등록 자체는 fire-and-forget이라 등록 응답
 // 시점에는 아직 콜마너 API 호출이 끝나지 않았을 수 있다(public/js/callmaner-alert.js 참고).
 router.get('/:id/callmaner-status.json', asyncHandler(async (req, res) => {
+  // o.*로 받는다 — callmaner_last_error_code처럼 나중에 추가되는 컬럼을 열거하면 마이그레이션
+  // 미적용 DB에서 이 조회 자체가 깨져 폴링(callmaner-alert.js)이 통째로 실패한다.
   const order = await db.get(`
-    SELECT o.id, o.branch_id, o.requester_group_id, o.callmaner_conf_slip, o.callmaner_last_error, b.callmaner_enabled
+    SELECT o.*, b.callmaner_enabled
     FROM orders o JOIN branches b ON b.id = o.branch_id
     WHERE o.id = ?
   `, [req.params.id]);
@@ -1497,6 +1499,7 @@ router.get('/:id/callmaner-status.json', asyncHandler(async (req, res) => {
     enabled: !!order.callmaner_enabled,
     pending: order.callmaner_enabled && !order.callmaner_conf_slip && !order.callmaner_last_error,
     error: order.callmaner_last_error || null,
+    errorCode: order.callmaner_last_error_code || null,
     confSlip: order.callmaner_conf_slip || null,
   });
 }));
@@ -1639,15 +1642,39 @@ async function registerOrderWithCallmaner(orderId, branchId) {
       status: order.status,
     };
     const result = await callmaner.orderReceipt(orderForCallmaner, branchRow, paymentMethodRow && paymentMethodRow.name, waypointRows);
-    await db.run(
+    await tryUpdateWithErrorCodeColumn(
       `UPDATE orders SET callmaner_conf_slip = ?, callmaner_status = '접수', callmaner_status_code = '01',
-       callmaner_synced_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS'), callmaner_last_error = NULL
-       WHERE id = ?`,
+       callmaner_synced_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS'),
+       callmaner_last_error = NULL, callmaner_last_error_code = NULL WHERE id = ?`,
+      [result.confSlip || null, orderId],
+      `UPDATE orders SET callmaner_conf_slip = ?, callmaner_status = '접수', callmaner_status_code = '01',
+       callmaner_synced_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS'),
+       callmaner_last_error = NULL WHERE id = ?`,
       [result.confSlip || null, orderId]
     );
   } catch (e) {
-    console.error('콜마너 오더접수 실패:', e.message);
-    await db.run('UPDATE orders SET callmaner_last_error = ? WHERE id = ?', [String(e.message || '').slice(0, 500), orderId]).catch(() => {});
+    console.error('콜마너 오더접수 실패:', e.message, e.rc ? `(rc=${e.rc})` : '');
+    // 콜마너가 응답한 에러코드(rc)는 별도 컬럼에 담아, 화면에서 코드만 따로 보여줄 수 있게 한다.
+    // 좌표 누락 같은 우리 쪽 사전검증 실패는 요청이 나가지 않아 rc가 없다(NULL로 남는다).
+    const msg = String(e.message || '').slice(0, 500);
+    await tryUpdateWithErrorCodeColumn(
+      'UPDATE orders SET callmaner_last_error = ?, callmaner_last_error_code = ? WHERE id = ?',
+      [msg, e.rc ? String(e.rc).slice(0, 40) : null, orderId],
+      'UPDATE orders SET callmaner_last_error = ? WHERE id = ?',
+      [msg, orderId]
+    );
+  }
+}
+
+// callmaner_last_error_code 컬럼은 20260805000000 마이그레이션에서 추가된다 — 아직 적용하지
+// 않은 DB에서도(구버전 DB 호환, order_legs 처리와 같은 방어) 접수번호/에러 메시지 저장은
+// 그대로 되어야 하므로, 코드 컬럼을 쓰는 쿼리가 실패하면 그 컬럼 없는 쿼리로 한 번 더 시도한다.
+// 둘 다 실패하면 조용히 넘어간다 — 이 경로는 전부 fire-and-forget이라 오더 처리를 막으면 안 된다.
+async function tryUpdateWithErrorCodeColumn(sqlWithCode, paramsWithCode, sqlWithoutCode, paramsWithoutCode) {
+  try {
+    await db.run(sqlWithCode, paramsWithCode);
+  } catch (e) {
+    await db.run(sqlWithoutCode, paramsWithoutCode).catch(() => {});
   }
 }
 

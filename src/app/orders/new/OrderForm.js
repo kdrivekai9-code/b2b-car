@@ -232,9 +232,19 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
   // 오더 상세(edit 모드) 진입 시 콜마너 오더접수 결과를 짧게 폴링 — 등록 자체가
   // fire-and-forget이라 오더 리스트에서 방금 만든 오더를 클릭해 들어온 경우 아직 결과가
   // 안 나와 있을 수 있다. 실패했을 때만 팝업으로 알려준다(public/js/callmaner-alert.js).
+  //
+  // 상태를 '접수'로 바꾸는 순간이 실제 콜마너 등록 시점이고(routes/orders.js의
+  // registerOrderWithCallmaner) 그 상태변경은 일반 form POST → 리다이렉트라, 되돌아온 이 화면이
+  // 뜨는 시점엔 아직 호출이 진행 중이다. 그런데 콜마너 클라이언트 타임아웃은 10초(lib/callmaner.js
+  // DEFAULT_TIMEOUT_MS)인데 폴링 기본 창은 6회×1.5초≈7.5초라, 타임아웃으로 실패하는 최악의
+  // 경우엔 에러가 기록되기 직전에 폴링이 끝나버려 아무 안내도 못 봤다 — 그 10초를 넘기도록
+  // 창을 넓힌다(10회×1.5초≈13.5초). 기본값을 바꾸지 않는 이유는 화면이동을 onDone으로 막는
+  // 호출부(public/js/ai-intake.js)가 있어 그쪽 대기시간까지 같이 늘어나기 때문이다.
   useEffect(() => {
     if (mode !== 'edit' || !orderId) return;
-    if (typeof window !== 'undefined' && window.__callmanerAlert) window.__callmanerAlert.poll(orderId);
+    if (typeof window !== 'undefined' && window.__callmanerAlert) {
+      window.__callmanerAlert.poll(orderId, { maxAttempts: 10 });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -870,6 +880,11 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
       {isEdit && order.callmaner_last_error && (
         <div className="callmaner-error-badge" role="alert">
           <strong>⚠️ 콜마너 연동 실패</strong>
+          {/* 콜마너가 응답한 에러코드(rc). 좌표 누락 같은 우리 쪽 사전검증 실패는 요청이
+              나가지 않아 코드가 없으므로 그 줄을 그리지 않는다. */}
+          {order.callmaner_last_error_code && (
+            <div className="callmaner-error-code">에러코드 {order.callmaner_last_error_code}</div>
+          )}
           <div>{order.callmaner_last_error}</div>
         </div>
       )}

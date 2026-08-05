@@ -147,6 +147,9 @@ tbody tr[data-clickable="1"]{cursor:pointer;}
    화면을 벗어나지 않아도 항상 보이도록, 팝업과 달리 닫기 버튼 없이 페이지 체류 중 유지). */
 .callmaner-error-badge{position:fixed;right:16px;bottom:16px;max-width:320px;background:#fdecea;border:1px solid #f1948a;color:#922b21;padding:12px 14px;border-radius:8px;font-size:13px;line-height:1.5;box-shadow:0 6px 20px rgba(0,0,0,.18);z-index:900;}
 .callmaner-error-badge strong{display:block;margin-bottom:4px;}
+/* 콜마너가 응답한 에러코드(rc) — 문의 시 그대로 읽어주는 값이라 메시지 본문과 구분되게
+   등폭 글꼴로 강조한다. 배지 배경과 같은 색계열이라 테두리로만 구분한다. */
+.callmaner-error-code{display:inline-block;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;font-weight:700;border:1px solid #f1948a;border-radius:4px;padding:1px 6px;margin-bottom:6px;}
 @media (max-width:600px){
   .callmaner-error-badge{left:16px;right:16px;max-width:none;bottom:16px;}
 }
