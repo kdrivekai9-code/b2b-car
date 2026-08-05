@@ -152,6 +152,14 @@
         .catch(function () { return { handled: false, reason: 'network' }; });
     },
 
+    // 배차 지연 확인 — 기사 미배정으로 5분 이상 지난 주문이 있으면 요금 인상 질문을 돌려준다.
+    checkDispatchDelay: function (sessionId) {
+      return postJson('/chat/' + sessionId + '/dispatch-delay-check', {}, { headers: { 'Content-Type': 'application/json' } })
+        .then(function (res) { return jsonOrEmpty(res); })
+        .then(function (data) { return data || { offer: false }; })
+        .catch(function () { return { offer: false }; });
+    },
+
     fetchChatMessages: function (sessionId, sinceId) {
       return fetch('/chat/' + sessionId + '/messages?since=' + sinceId)
         .then(function (res) { return res.json(); });

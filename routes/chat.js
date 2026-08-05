@@ -10,7 +10,7 @@ const asyncHandler = require('../middleware/asyncHandler');
 const { notify } = require('../lib/push');
 const { kstNow } = require('../lib/period');
 const { getEffectivePaymentMethods } = require('../lib/branchPolicy');
-const { runDispatchAgent } = require('../lib/mcpDispatchAgent');
+const { runDispatchAgent, checkDispatchDelay } = require('../lib/mcpDispatchAgent');
 const {
   broadcastMessage, broadcastReadReceipt, broadcastSessionListChanged, openSessionStream, openSessionListStream, closeChannel,
   startAgentPresence, isAnyAgentOnline, listOnlineAgentNames,
@@ -297,6 +297,23 @@ router.post('/:sessionId/dispatch-agent', asyncHandler(async (req, res) => {
   } catch (e) {
     console.error('배차 주문 도우미 처리 실패:', e.message);
     return res.json({ handled: false, reason: 'error', error: e.message });
+  }
+}));
+
+// ---------------- 고객측: 배차 지연 감지(요금 인상 선제 제안) ----------------
+// 챗봇 화면이 열려 있는 동안 주기적으로 호출된다. 기사 미배정 상태로 접수 후 5분이 지난 주문이
+// 있으면 요금 인상 확인 질문을 돌려준다(실행은 고객이 "네"라고 답할 때 /dispatch-agent가 처리).
+router.post('/:sessionId/dispatch-delay-check', asyncHandler(async (req, res) => {
+  const session = await loadOwnedSession(req, res);
+  if (!session) return;
+  if (session.status !== 'bot') return res.json({ offer: false, reason: 'not_bot_session' });
+
+  try {
+    const result = await checkDispatchDelay({ user: req.session.user, sessionId: session.id });
+    return res.json(result);
+  } catch (e) {
+    console.error('배차 지연 확인 실패:', e.message);
+    return res.json({ offer: false, reason: 'error' });
   }
 }));
 

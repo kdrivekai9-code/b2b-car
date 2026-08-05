@@ -141,6 +141,10 @@
   // 보내기 전에 도우미에게 먼저 넘긴다("네"/"1번" 같은 짧은 답이 FAQ로 새는 것을 막기 위함).
   // 도우미가 처리하지 못하면(handled:false) 그 자리에서 해제되고 기존 경로로 되돌아간다.
   var dispatchAgentActive = false;
+  // 이 세션에서 배차 주문 도우미를 한 번이라도 쓴 적이 있는지 — 배차 지연 확인 폴링을 이때만
+  // 돌린다(모든 FAQ 세션이 주기적으로 MCP를 찔러보지 않게 하기 위함).
+  var dispatchAgentEverUsed = false;
+  var DISPATCH_DELAY_POLL_INTERVAL_MS = 60000;
   var lastAnnouncedMemoText = '';
   var lastAnnouncedBillingMemoText = '';
   var lastAiActivityPingAt = 0;
@@ -170,6 +174,7 @@
     lastAnnouncedBillingMemoText: lastAnnouncedBillingMemoText,
     lastAiActivityPingAt: lastAiActivityPingAt,
     dispatchAgentActive: dispatchAgentActive,
+    dispatchAgentEverUsed: dispatchAgentEverUsed,
   });
 
   function syncStatePatch(patch) {
@@ -1688,6 +1693,7 @@
       orderCategory: orderCategory,
       tripType: tripType,
       dispatchAgentActive: dispatchAgentActive,
+      dispatchAgentEverUsed: dispatchAgentEverUsed,
     });
     var fields = {};
     DRAFT_FIELD_IDS.forEach(function (id) { fields[id] = val(id); });
@@ -1721,6 +1727,7 @@
       // 받아야 한다 — 확인 대기 자체는 서버(chat_sessions.mcp_pending_json)에 있고, 이 플래그는
       // 클라이언트가 그 답을 어디로 보낼지 판단하는 용도다.
       dispatchAgentActive: dispatchAgentActive,
+      dispatchAgentEverUsed: dispatchAgentEverUsed,
     };
   }
   function restoreDraftState(draft) {
@@ -1748,6 +1755,7 @@
     orderCategory = draft.orderCategory || 'dispatch';
     tripType = draft.tripType || null;
     dispatchAgentActive = !!draft.dispatchAgentActive;
+    dispatchAgentEverUsed = !!draft.dispatchAgentEverUsed;
     updateOrderTypeBadge(confirmedOrderType);
     // choose_address_candidate(후보 목록을 저장하지 않음)와 offer_agent(제안 직전 상태를 저장하지
     // 않음)는 복원할 수 없다 — 어중간하게 그 단계로 복원하면 다음 답변을 처리하다 오류가 나므로
@@ -1780,6 +1788,7 @@
       orderCategory: orderCategory,
       tripType: tripType,
       dispatchAgentActive: dispatchAgentActive,
+      dispatchAgentEverUsed: dispatchAgentEverUsed,
     });
     updateQuickReplies();
   }
@@ -2627,10 +2636,32 @@
       }
       // 도우미가 확인/추가정보를 되물었으면 다음 메시지도 도우미가 먼저 받도록 표시해둔다.
       dispatchAgentActive = !!result.awaitingConfirmation || !!result.expectsReply;
-      syncStatePatch({ dispatchAgentActive: dispatchAgentActive });
+      dispatchAgentEverUsed = true;
+      syncStatePatch({ dispatchAgentActive: dispatchAgentActive, dispatchAgentEverUsed: true });
       addBubble(result.message, 'bot', null, /\?\s*$/.test(String(result.message).trim()));
       logBotMessage({ logText: result.message, needsAgent: false, requestedFeature: null });
       return true;
+    });
+  }
+
+  // 배차 지연 확인 — 기사 배정이 안 된 채로 접수 후 5분이 지난 주문이 있으면, 서버가 요금 인상
+  // 확인 질문을 만들어 보내준다(확인 대기 상태도 서버에 저장된다). 고객이 "네"라고 답하면
+  // dispatchAgentActive 경로로 도우미에게 전달되어 실제 요금 인상이 실행된다.
+  function pollDispatchDelay() {
+    if (!sessionId || !dispatchAgentEverUsed) return;
+    if (sessionStatus !== 'bot') return;
+    // 다른 질문/확인을 기다리는 중이거나 처리 중이면 끼어들지 않는다.
+    if (phase !== 'collecting' || pendingField || dispatchAgentActive) return;
+    if (sendBtn.dataset.processing === '1') return;
+
+    api.checkDispatchDelay(sessionId).then(function (result) {
+      if (!result || !result.offer || !result.message) return;
+      if (dispatchAgentActive) return; // 응답을 기다리는 동안 상태가 바뀌었으면 버린다
+      dispatchAgentActive = true;
+      syncStatePatch({ dispatchAgentActive: true });
+      resetTurnBotRow();
+      addBubble(result.message, 'bot', null, true);
+      logBotMessage({ logText: result.message, needsAgent: false, requestedFeature: null });
     });
   }
 
@@ -3768,6 +3799,7 @@
   updateSendButton();
   checkAiConnectionHealth();
   setInterval(checkAiConnectionHealth, AI_HEALTH_POLL_INTERVAL_MS);
+  setInterval(pollDispatchDelay, DISPATCH_DELAY_POLL_INTERVAL_MS);
 
   // ---------- 햄버거 메뉴(새 채팅 / 검색 / 최근 항목) ----------
   (function wireChatHistoryMenu() {
