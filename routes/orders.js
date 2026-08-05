@@ -1267,13 +1267,13 @@ router.post('/:id', asyncHandler(async (req, res) => {
   const finalOriginAddress = combineAddress(origin_address, origin_detail_address);
   const finalDestinationAddress = combineAddress(destination_address, destination_detail_address);
 
-  // 기사배정 후에는 고객/상담원(branch_manager)의 실시간 수정을 막는다(사용자 확정 사항) —
-  // 이미 기사에게 전달된 정보를 당사자 모르게 바꿔버리면 안 되기 때문이다. 관리자는 여전히
-  // 수정할 수 있되, 클라이언트(OrderForm.js)가 저장 전에 "기사님께 꼭 전달해주세요" 확인
-  // 팝업을 띄운다 — 서버는 그 팝업을 강제하지 않는다(관리자는 신뢰된 역할이라 순수 UX 안내).
-  // 클라이언트 쪽 확인을 우회해서 요청을 보내도(devtools 등) 여기서 다시 막히므로 실제
-  // 권한 경계는 여기다.
-  if (!isAdmin) {
+  // 기사배정 후에는 고객(client)의 실시간 수정만 막는다(사용자 확정 사항) — 이미 기사에게
+  // 전달된 정보를 당사자 모르게 바꿔버리면 안 되기 때문이다. 관리자와 상담원(branch_manager)
+  // 은 여전히 수정할 수 있되, 클라이언트(OrderForm.js)가 저장 전에 "기사님께 꼭 전달해주세요"
+  // 확인 팝업을 띄운다 — 서버는 그 팝업을 강제하지 않는다(둘 다 신뢰된 역할이라 순수 UX
+  // 안내). 클라이언트 쪽 확인을 우회해서 요청을 보내도(devtools 등) 여기서 다시 막히므로
+  // 실제 권한 경계는 여기다.
+  if (isClient) {
     const currentLegs = await buildOrderLegs(req.params.id, order, await db.all('SELECT * FROM order_waypoints WHERE order_id = ? ORDER BY seq ASC', [req.params.id]));
     if (hasAssignedDriver(order, currentLegs)) {
       return res.status(403).json({

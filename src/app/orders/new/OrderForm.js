@@ -462,13 +462,13 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
   }
 
   // 기사배정 후 수정 제한(사용자 확정 사항) — 이미 기사에게 전달된 정보를 당사자 모르게
-  // 바꿔버리면 안 된다. 고객(client)/상담원(branch_manager)은 저장 자체를 막고 안내만
-  // 보여주고, 관리자(admin)는 수정은 허용하되 "기사님께 꼭 전달해달라"는 확인 팝업을 거친다.
+  // 바꿔버리면 안 된다. 고객(client)은 저장 자체를 막고 안내만 보여주고, 관리자(admin)와
+  // 상담원(branch_manager)은 수정은 허용하되 "기사님께 꼭 전달해달라"는 확인 팝업을 거친다.
   // 서버(POST /:id)도 같은 기준(hasAssignedDriver)으로 다시 막으므로, 여기서는 사용자
   // 경험(왕복 없이 즉시 안내)을 위한 것이고 실제 권한 경계는 서버에 있다.
   function checkAssignedDriverGate() {
     if (!isEdit || !order.hasAssignedDriver) return true;
-    if (currentUserRole !== 'admin') {
+    if (currentUserRole === 'client') {
       setError('해당 오더가 기사님께 배정된 상태입니다. 수정사항은 상담원 대화 요청이나, 고객센터로 직접 요청해 주세요.');
       return false;
     }
@@ -616,7 +616,7 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
 
   return (
     <div className="order-form">
-      {isEdit && order.hasAssignedDriver && currentUserRole !== 'admin' && (
+      {isEdit && order.hasAssignedDriver && currentUserRole === 'client' && (
         <div className="error-msg" style={{ marginBottom: 14 }}>
           해당 오더가 기사님께 배정된 상태입니다. 수정사항은 상담원 대화 요청이나, 고객센터로 직접 요청해 주세요.
         </div>

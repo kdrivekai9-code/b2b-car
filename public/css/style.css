@@ -144,8 +144,9 @@ tbody tr[data-clickable="1"]{cursor:pointer;}
 .toast.toast-top{bottom:auto;top:28px;}
 
 /* 오더 상세 제목(OID) 옆에 붙는 콜마너 접수번호(reg_cslip) — 등록 성공 시에만 표시.
-   h1과 같은 줄에 이어 붙되 제목 폰트 크기를 그대로 물려받으면 너무 커 보여서 줄인다. */
-.callmaner-conf-slip{display:inline-block;margin-left:12px;font-size:13px;font-weight:600;color:#1f6b3f;background:#e9f7ef;border:1px solid #a3d9b5;border-radius:6px;padding:3px 10px;vertical-align:middle;}
+   OID와의 간격은 마크업의 nbsp 2칸으로 이미 만들어지므로 여기서 margin은 더하지 않는다.
+   h1 폰트 크기(28px)를 그대로 물려받으면 너무 커 보여서 확실히 작게 줄인다. */
+.callmaner-conf-slip{display:inline-block;font-size:11px;font-weight:600;color:#1f6b3f;background:#e9f7ef;border:1px solid #a3d9b5;border-radius:6px;padding:2px 8px;vertical-align:middle;}
 @media (max-width:600px){
   .callmaner-conf-slip{display:block;margin:6px 0 0;}
 }

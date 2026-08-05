@@ -4,7 +4,8 @@
     <h1 class="page-title">
       오더 상세 · <%= order.oid %>
       <% if (order.callmaner_conf_slip) { %>
-      <span class="callmaner-conf-slip">콜마너접수번호 : <%= order.callmaner_conf_slip %></span>
+      <%# 일반 공백은 브라우저가 한 칸으로 접어버리므로(white-space:normal 기본값) &nbsp;로 2칸 확보 %>
+      &nbsp;&nbsp;<span class="callmaner-conf-slip">콜마너접수번호 : <%= order.callmaner_conf_slip %></span>
       <% } %>
     </h1>
     <p class="page-sub">

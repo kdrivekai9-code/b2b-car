@@ -65,7 +65,10 @@ export default async function OrderDetailPage({ params }) {
           <h1 className="page-title">
             오더 상세 · {order.oid}
             {order.callmaner_conf_slip && (
-              <span className="callmaner-conf-slip">콜마너접수번호 : {order.callmaner_conf_slip}</span>
+              <>
+                {'  '}
+                <span className="callmaner-conf-slip">콜마너접수번호 : {order.callmaner_conf_slip}</span>
+              </>
             )}
           </h1>
           <p className="page-sub">
