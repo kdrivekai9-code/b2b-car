@@ -139,6 +139,19 @@
       });
     },
 
+    // 배차 주문 도우미(콜마너 MCP 도구 호출) — 봇이 처리 못하던 요청(주문 조회/변경/취소 등)을
+    // 상담원 연결로 넘기기 전에 먼저 시도한다. 실패/처리불가면 { handled: false }가 돌아온다.
+    dispatchAgent: function (sessionId, text) {
+      return postJson('/chat/' + sessionId + '/dispatch-agent', { text: text }, { headers: { 'Content-Type': 'application/json' } })
+        .then(function (res) {
+          return jsonOrEmpty(res).then(function (data) {
+            if (!res.ok) return { handled: false, reason: 'http_' + res.status };
+            return data || { handled: false };
+          });
+        })
+        .catch(function () { return { handled: false, reason: 'network' }; });
+    },
+
     fetchChatMessages: function (sessionId, sinceId) {
       return fetch('/chat/' + sessionId + '/messages?since=' + sinceId)
         .then(function (res) { return res.json(); });

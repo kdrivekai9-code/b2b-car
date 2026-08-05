@@ -137,6 +137,10 @@
   function resetTurnBotRow() {
     lastBotRowInTurn = null;
   }
+  // 배차 주문 도우미(콜마너 MCP)가 되물어본 상태 — true면 다음 메시지를 Gemini 의도분류로
+  // 보내기 전에 도우미에게 먼저 넘긴다("네"/"1번" 같은 짧은 답이 FAQ로 새는 것을 막기 위함).
+  // 도우미가 처리하지 못하면(handled:false) 그 자리에서 해제되고 기존 경로로 되돌아간다.
+  var dispatchAgentActive = false;
   var lastAnnouncedMemoText = '';
   var lastAnnouncedBillingMemoText = '';
   var lastAiActivityPingAt = 0;
@@ -165,6 +169,7 @@
     lastAnnouncedMemoText: lastAnnouncedMemoText,
     lastAnnouncedBillingMemoText: lastAnnouncedBillingMemoText,
     lastAiActivityPingAt: lastAiActivityPingAt,
+    dispatchAgentActive: dispatchAgentActive,
   });
 
   function syncStatePatch(patch) {
@@ -1682,6 +1687,7 @@
       confirmedOrderType: confirmedOrderType,
       orderCategory: orderCategory,
       tripType: tripType,
+      dispatchAgentActive: dispatchAgentActive,
     });
     var fields = {};
     DRAFT_FIELD_IDS.forEach(function (id) { fields[id] = val(id); });
@@ -1711,6 +1717,10 @@
       // DRAFT_FIELD_IDS와 별개로 저장한다 — 이게 없으면 상담관리 카드뷰에서 이 세션을 열었을 때
       // 도착지 인도시간 기준으로 판별했던 결과가 이어지지 않고 기본값(픽업 기준)으로 되돌아간다.
       reservationBasis: isDeliveryReservationBasis() ? 'delivery' : 'pickup',
+      // 배차 주문 도우미가 확인을 기다리는 중이면 새로고침/재진입 후에도 그 답("네")을 도우미가
+      // 받아야 한다 — 확인 대기 자체는 서버(chat_sessions.mcp_pending_json)에 있고, 이 플래그는
+      // 클라이언트가 그 답을 어디로 보낼지 판단하는 용도다.
+      dispatchAgentActive: dispatchAgentActive,
     };
   }
   function restoreDraftState(draft) {
@@ -1737,6 +1747,7 @@
     confirmedOrderType = draft.confirmedOrderType || null;
     orderCategory = draft.orderCategory || 'dispatch';
     tripType = draft.tripType || null;
+    dispatchAgentActive = !!draft.dispatchAgentActive;
     updateOrderTypeBadge(confirmedOrderType);
     // choose_address_candidate(후보 목록을 저장하지 않음)와 offer_agent(제안 직전 상태를 저장하지
     // 않음)는 복원할 수 없다 — 어중간하게 그 단계로 복원하면 다음 답변을 처리하다 오류가 나므로
@@ -1768,6 +1779,7 @@
       confirmedOrderType: confirmedOrderType,
       orderCategory: orderCategory,
       tripType: tripType,
+      dispatchAgentActive: dispatchAgentActive,
     });
     updateQuickReplies();
   }
@@ -2563,6 +2575,27 @@
     return { logText: null, needsAgent: true, requestedFeature: data.requestedFeature || null };
   }
 
+  // 배차 주문 도우미(콜마너 MCP 도구)에게 이번 메시지를 넘긴다. 처리했으면 말풍선을 붙이고
+  // 대화 로그에도 남긴 뒤 true, 처리하지 못했으면 false를 돌려준다(호출부가 기존 경로로 폴백).
+  function tryDispatchAgent(text) {
+    if (!sessionId) return Promise.resolve(false);
+    return api.dispatchAgent(sessionId, text).then(function (result) {
+      if (!result || !result.handled || !result.message) {
+        if (dispatchAgentActive) {
+          dispatchAgentActive = false;
+          syncStatePatch({ dispatchAgentActive: false });
+        }
+        return false;
+      }
+      // 도우미가 확인/추가정보를 되물었으면 다음 메시지도 도우미가 먼저 받도록 표시해둔다.
+      dispatchAgentActive = !!result.awaitingConfirmation || !!result.expectsReply;
+      syncStatePatch({ dispatchAgentActive: dispatchAgentActive });
+      addBubble(result.message, 'bot', null, /\?\s*$/.test(String(result.message).trim()));
+      logBotMessage({ logText: result.message, needsAgent: false, requestedFeature: null });
+      return true;
+    });
+  }
+
   // ---------------- 최종 확인("등록해 드릴까요?") 응답 처리 ----------------
   // "어"/"네" 같은 한 글자짜리 긍정어는 단독 답변일 때만(예: "됐어요"의 일부처럼 오탐하지 않도록) 인정한다.
   function isAffirmative(t) {
@@ -3284,6 +3317,7 @@
         var phaseDispatch = flowApi.dispatchPhase({
           phase: phase,
           pendingField: pendingField,
+          orderCategory: orderCategory,
           text: text,
           onOfferAgent: function (value) {
             handleOfferAgentPhase(value);
@@ -3544,6 +3578,20 @@
           return handleFareInquiryFlowFromText(fareParsed).then(function () { return null; });
         }
 
+        // 배차 주문 도우미가 방금 되물어본 상태면(확인 질문/후보 선택 등) 이번 답은 Gemini 의도분류로
+        // 보내지 않고 도우미에게 먼저 넘긴다 — "네", "1번" 같은 짧은 답은 분류기에 넣어봐야 FAQ로
+        // 새기 때문이다. 새 오더접수처럼 보이는 메시지는 도우미를 건너뛰고 원래 흐름을 태운다.
+        if (dispatchAgentActive && phase === 'collecting' && !pendingField && !looksLikeOrderIntake(text)) {
+          showThinkingBubble();
+          return tryDispatchAgent(text).then(function (handledByAgent) {
+            hideThinkingBubble();
+            if (handledByAgent) return null;
+            showThinkingBubble();
+            var fallbackHint = pendingField || (getNextMissingField() || {}).id || null;
+            return api.parseText(text, fallbackHint);
+          });
+        }
+
         showThinkingBubble();
         // pendingField가 아직 없으면(대화 첫 메시지, 또는 앞서 faq/unsupported로 잘못 새서 한 번도
         // 못 정해진 경우) 힌트 없이 보내는 대신, 지금 실제로 비어있는 다음 필수 항목을 힌트로 대신
@@ -3588,6 +3636,23 @@
         if (data.intent === 'unsupported') {
           // 이미 상담원 연결로 넘어가는 경로라(needsAgent:true) 화남 감지로 또 물어볼 필요가 없다.
           pendingFrustrationOffer = false;
+          // 상담원 연결 전에 배차 주문 도우미(콜마너 MCP)에게 한 번 넘겨본다 — 주문 조회/변경/취소는
+          // 실제 도구로 처리할 수 있다. 도우미가 처리하지 못하면(handled:false) 기존 경로 그대로
+          // 상담원 연결로 이어진다. 명시적인 "상담원 연결" 요청은 도우미를 거치지 않는다.
+          // 오더접수 질문에 답하는 중(pendingField)이면 도우미로 새지 않게 한다 — 이 경우의
+          // unsupported는 대개 "그 질문의 답을 못 알아들은 것"이라 handleUnsupportedIntent의
+          // 되묻기(noteTrouble) 규칙을 그대로 따라야 한다.
+          if (!isAgentRequest(text) && !(phase === 'collecting' && pendingField)) {
+            showThinkingBubble();
+            tryDispatchAgent(text).then(function (agentHandled) {
+              hideThinkingBubble();
+              if (agentHandled) return;
+              logBotMessage(handleUnsupportedIntent(data)).then(function (finalText) {
+                if (finalText) addBubble(finalText, 'bot');
+              });
+            });
+            return;
+          }
           // 상담원 접속 여부에 따른 최종 문구를 서버가 정하므로, 응답을 받은 뒤에 말풍선을 붙인다.
           logBotMessage(handleUnsupportedIntent(data)).then(function (finalText) {
             if (finalText) addBubble(finalText, 'bot');

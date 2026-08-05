@@ -10,6 +10,7 @@ const asyncHandler = require('../middleware/asyncHandler');
 const { notify } = require('../lib/push');
 const { kstNow } = require('../lib/period');
 const { getEffectivePaymentMethods } = require('../lib/branchPolicy');
+const { runDispatchAgent } = require('../lib/mcpDispatchAgent');
 const {
   broadcastMessage, broadcastReadReceipt, broadcastSessionListChanged, openSessionStream, openSessionListStream, closeChannel,
   startAgentPresence, isAnyAgentOnline, listOnlineAgentNames,
@@ -263,6 +264,40 @@ router.post('/:sessionId/user-message', asyncHandler(async (req, res) => {
   await db.run(`UPDATE chat_sessions SET updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') WHERE id = ?`, [session.id]);
   broadcastMessageAsync(session.id, inserted);
   res.json({ status: session.status });
+}));
+
+// ---------------- 고객측: 배차 주문 도우미(콜마너 MCP 도구 호출) ----------------
+// 지금까지 intent:'unsupported'(주문 조회/변경/취소 등)로 분류되면 곧바로 상담원 연결로 넘어갔다.
+// 그 앞단에 이 라우트를 두고, MCP 도구로 실제 처리가 가능한 요청이면 봇이 직접 답한다.
+// handled:false로 돌아오면 클라이언트는 기존 상담원 연결 경로를 그대로 탄다(기능 회귀 없음).
+router.post('/:sessionId/dispatch-agent', asyncHandler(async (req, res) => {
+  const session = await loadOwnedSession(req, res);
+  if (!session) return;
+  const text = (req.body.text || '').trim();
+  if (!text) return res.status(400).json({ handled: false, reason: 'empty_text' });
+
+  // 상담원이 이미 붙은 세션은 봇이 끼어들지 않는다(기존 봇 호출 규칙과 동일).
+  if (session.status === 'agent_active') return res.json({ handled: false, reason: 'agent_active' });
+
+  const history = await db.all(
+    `SELECT sender, message FROM chat_messages
+     WHERE session_id = ? AND sender IN ('user', 'bot') AND message IS NOT NULL
+     ORDER BY id DESC LIMIT 12`,
+    [session.id]
+  );
+  history.reverse();
+  // 방금 저장된 이번 메시지는 runDispatchAgent가 별도로 받으므로 히스토리 끝에서 제거한다.
+  if (history.length && history[history.length - 1].sender === 'user' && history[history.length - 1].message === text) {
+    history.pop();
+  }
+
+  try {
+    const result = await runDispatchAgent({ user: req.session.user, sessionId: session.id, text, history });
+    return res.json(result);
+  } catch (e) {
+    console.error('배차 주문 도우미 처리 실패:', e.message);
+    return res.json({ handled: false, reason: 'error', error: e.message });
+  }
 }));
 
 // ---------------- 고객측: 봇 응답 저장 (+ 상담원 호출 처리) ----------------
