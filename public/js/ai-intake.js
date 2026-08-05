@@ -113,6 +113,10 @@
   // proceedAfterCollecting()으로 돌아가지만, 프리미엄은 항목마다 다음 질문이 다르다
   // (출발지 모호 → 연락처 질문, 도착지 모호 → 경유지 질문 등).
   var premiumDisambiguationResume = null;
+  // premiumDisambiguationResume과 같은 이유로 필요 — 일일기사 흐름 중 출발지/도착지 주소가
+  // 모호해 후보를 고르게 했을 때, 고른 뒤 daily_driver 항목 순서(findNextDailyDriverField)로
+  // 돌아가야 한다(그냥 두면 applyDisambiguationChoice가 탁송 전용 proceedAfterCollecting으로 감).
+  var dailyDriverDisambiguationResume = null;
   var botMessageWriteChain = Promise.resolve();
   var isComposing = false;
   var submitAfterCompositionEnd = false;
@@ -734,6 +738,39 @@
       if (!el || !el.value.trim()) return f;
     }
     return null;
+  }
+
+  // getNextMissingField의 일일기사 버전 — REQUIRED_FIELDS(탁송 전용) 대신 ddFields(왕복/편도에
+  // 따라 달라지는 일일기사 전용 순서)를 기준으로, startIndex부터 훑어서 처음 비어있는 항목을
+  // 찾는다. 트리거 메시지 한 줄에 출발지/연락처/차량번호 등이 이미 와 있어도(예: "서초역에서
+  // 골드CC까지... 010-3333-4444") 예전에는 다시 물어봤다 — 이미 채워진 항목은 건너뛰되,
+  // 주소/연락처/차량번호는 이 시점에 좌표·형식 검증을 백그라운드로 걸어준다(콜마너 연동에
+  // 필요한 좌표/행정구역이 채워지지 않은 채 넘어가지 않도록). waypoints/destination_wait/
+  // final_destination_address/memo_customer는 한 줄 트리거에 흔히 오지 않는 항목이라 항상
+  // 물어본다(범위를 좁혀 안전하게 유지).
+  function findNextDailyDriverField(ddFields, startIndex) {
+    for (var i = startIndex; i < ddFields.length; i++) {
+      var f = ddFields[i];
+      if (f.id === 'waypoints' || f.id === 'destination_wait' || f.id === 'final_destination_address' || f.id === 'memo_customer') {
+        return f;
+      }
+      var el = document.getElementById(f.id);
+      var filled = el && el.value.trim();
+      if (!filled) return f;
+      if (f.type === 'address') validateAddressField(f.id, f.label);
+      else if (f.type === 'phone') validatePhoneField(f.id, f.label);
+      else if (f.type === 'vehicle') { validateVehicleNumberField(f.id, f.label).then(function (ok) { if (ok) vehicleNumberResolved = true; }); }
+    }
+    return null;
+  }
+
+  // getDailyDriverFields()가 선언하는 id('waypoints')와 실제로 그 답을 처리하는 인터셉트가
+  // 기다리는 pendingField('waypoint_add_more')가 서로 다르다 — 두 이름이 각자 다른 목적으로
+  // 먼저 만들어져서 안 맞게 됐다. findNextDailyDriverField가 'waypoints' 항목을 돌려줄 때
+  // 그 id를 그대로 setPendingField에 넘기면 아무 인터셉트도 못 받는 채로 멈춰버리므로, 여기서
+  // 항상 변환해서 쓴다.
+  function dailyDriverPendingId(field) {
+    return field.id === 'waypoints' ? 'waypoint_add_more' : field.id;
   }
 
   function val(id) {
@@ -2026,13 +2063,21 @@
         : '안녕하세요. 프리미엄 서비스 예약을 도와드리겠습니다.';
       sayBot(greetMsg);
       if (orderCategory === 'daily_driver') {
-        // 트리거 메시지에 이미 예약일시가 함께 왔으면(예: "내일오후 ... 일일기사 예약해줘 /
-        // 출발시간은 오전 9시고") 여기서 저장해둔다 — 예전에는 이 분기가 곧바로 return해버려서
-        // 함께 온 예약일시가 그대로 버려졌고, 그 결과 trip_type 확인 후 이미 답한 예약시간을
-        // 다시 물어보는 중복 질문으로 이어졌다(trip_type 처리부에서 이 값의 존재로 판단해
-        // 다시 묻지 않고 건너뛴다).
+        // 트리거 메시지 한 줄에 예약일시뿐 아니라 출발지/연락처/도착지/차량번호까지 함께 오는
+        // 경우가 흔한데(예: "서초역에서 골드CC까지 일일기사 예약해줘 / 출발시간은 오전 9시고
+        // / 010-3333-4444"), 예전에는 이 분기가 trip_type 질문만 던지고 곧바로 return해버려서
+        // 나머지 값을 전부 버렸다 — 그래서 이미 말한 출발지 주소를 나중에 또 물어보는 문제가
+        // 있었다. 여기서 우선 저장해두면, trip_type 확인 직후 findNextDailyDriverField가
+        // "이미 채워진 항목"으로 인식해 건너뛴다(주소/연락처/차량번호는 그때 백그라운드로
+        // 검증·지오코딩된다 — 지금 당장은 trip_type 질문에 집중해야 하므로 여기서 기다리지 않음).
         if (data.reserved_date) setField('reserved_date', data.reserved_date);
         if (data.reserved_time) setField('reserved_time', roundToTenMinutes(data.reserved_time));
+        if (data.origin_address) setField('origin_address', data.origin_address);
+        if (data.origin_contact) setField('origin_contact', data.origin_contact);
+        if (data.destination_address) setField('destination_address', data.destination_address);
+        if (data.destination_contact) setField('destination_contact', data.destination_contact);
+        if (data.vehicle_number || data.origin_vehicle_number) setField('vehicle_number', data.vehicle_number || data.origin_vehicle_number);
+        if (data.vehicle_type) setField('vehicle_type', data.vehicle_type);
         pendingField = 'trip_type';
         return { logText: greetMsg, needsAgent: false, requestedFeature: null };
       }
@@ -2075,11 +2120,100 @@
       reservedDateTimeConfirmed = true;
       var ddDtMsg = formatReservedDateTime(val('reserved_date'), val('reserved_time'));
       var ddFieldsAfterDate = flowApi.getDailyDriverFields(tripType);
-      var ddOriginField = ddFieldsAfterDate[2]; // index 0=trip_type, 1=reserved_date, 2=출발지 주소
-      setPendingField(ddOriginField.id);
-      var ddDtConfirmMsg = (ddDtMsg ? (ddDtMsg + '으로 예약을 확인했습니다.\n') : '') + ddOriginField.question;
+      // 트리거 메시지에 출발지/연락처 등이 이미 함께 왔을 수 있으니(findNextDailyDriverField
+      // 주석 참고) 무조건 출발지 주소(index 2)로 가지 않고, 이미 채워진 항목은 건너뛴다.
+      var ddNextAfterDate = findNextDailyDriverField(ddFieldsAfterDate, 2) || ddFieldsAfterDate[ddFieldsAfterDate.length - 1];
+      setPendingField(dailyDriverPendingId(ddNextAfterDate));
+      var ddDtConfirmMsg = (ddDtMsg ? (ddDtMsg + '으로 예약을 확인했습니다.\n') : '') + ddNextAfterDate.question;
       sayBot(ddDtConfirmMsg);
       return { logText: ddDtConfirmMsg, needsAgent: false, requestedFeature: null };
+    }
+
+    // reserved_date와 같은 이유로 빠져 있던 나머지 일일기사 전용 답변 처리(출발지 주소/연락처/
+    // 차량번호) — 전용 분기가 없어서 무슨 답을 하든 범용 proceedAfterCollecting()(탁송 기준)로
+    // 새고 있었다. 각 단계 모두 findNextDailyDriverField로 다음 항목을 정해서, 트리거 메시지에
+    // 이미 와 있던 나머지 값(예: 도착지 "골드CC")도 순서가 되면 건너뛴다.
+    if (orderCategory === 'daily_driver' && pendingField === 'origin_address') {
+      var ddOriginAddr = data.origin_address || (data.waypoints && data.waypoints[0] && data.waypoints[0].address) || null;
+      if (!ddOriginAddr) {
+        var ddOriginRetryQ = '출발지 주소를 다시 알려주세요?';
+        sayBot(ddOriginRetryQ);
+        return { logText: ddOriginRetryQ, needsAgent: false, requestedFeature: null };
+      }
+      document.getElementById('origin_address').value = ddOriginAddr;
+      var ddResumeOrigin = function () {
+        var ddFieldsAfterOrigin = flowApi.getDailyDriverFields(tripType);
+        var ddNext = findNextDailyDriverField(ddFieldsAfterOrigin, 3) || ddFieldsAfterOrigin[ddFieldsAfterOrigin.length - 1];
+        setPendingField(dailyDriverPendingId(ddNext));
+        sayBot(ddNext.question);
+        return { logText: ddNext.question, needsAgent: false, requestedFeature: null };
+      };
+      return validateAddressField('origin_address', '출발지 주소').then(function (r) {
+        if (r && r.ambiguous) {
+          dailyDriverDisambiguationResume = ddResumeOrigin;
+          return startDisambiguation([r]);
+        }
+        if (!r || !r.success) return { logText: null, needsAgent: false, requestedFeature: null };
+        return ddResumeOrigin();
+      });
+    }
+
+    if (orderCategory === 'daily_driver' && pendingField === 'origin_contact') {
+      var ddOriginContact = data.origin_contact || data.destination_contact || null;
+      if (!ddOriginContact) {
+        var ddContactRetryQ = '연락처를 다시 말씀해주세요? (예: 010-1234-5678)';
+        sayBot(ddContactRetryQ);
+        return { logText: ddContactRetryQ, needsAgent: false, requestedFeature: null };
+      }
+      document.getElementById('origin_contact').value = ddOriginContact;
+      return validatePhoneField('origin_contact', '출발지 연락처').then(function (ok) {
+        if (!ok) return { logText: null, needsAgent: false, requestedFeature: null };
+        var ddFieldsAfterContact = flowApi.getDailyDriverFields(tripType);
+        var ddNext = findNextDailyDriverField(ddFieldsAfterContact, 4) || ddFieldsAfterContact[ddFieldsAfterContact.length - 1];
+        setPendingField(dailyDriverPendingId(ddNext));
+        sayBot(ddNext.question);
+        return { logText: ddNext.question, needsAgent: false, requestedFeature: null };
+      });
+    }
+
+    if (orderCategory === 'daily_driver' && pendingField === 'vehicle_number') {
+      var ddVehicleNo = data.vehicle_number || data.origin_vehicle_number || null;
+      if (ddVehicleNo) document.getElementById('vehicle_number').value = ddVehicleNo;
+      return validateVehicleNumberField('vehicle_number', '차량번호').then(function () {
+        // 차량번호는 선택 항목이라 형식이 틀려도(validateVehicleNumberField가 이미 안내함) 다음으로 진행한다.
+        vehicleNumberResolved = true;
+        var ddFieldsAfterVehicle = flowApi.getDailyDriverFields(tripType);
+        var ddNext = findNextDailyDriverField(ddFieldsAfterVehicle, 5) || ddFieldsAfterVehicle[ddFieldsAfterVehicle.length - 1];
+        setPendingField(dailyDriverPendingId(ddNext));
+        sayBot(ddNext.question);
+        return { logText: ddNext.question, needsAgent: false, requestedFeature: null };
+      });
+    }
+
+    if (orderCategory === 'daily_driver' && pendingField === 'destination_address') {
+      var ddDestAddr = data.destination_address || null;
+      if (!ddDestAddr) {
+        var ddDestRetryQ = '도착지 주소를 다시 알려주세요?';
+        sayBot(ddDestRetryQ);
+        return { logText: ddDestRetryQ, needsAgent: false, requestedFeature: null };
+      }
+      document.getElementById('destination_address').value = ddDestAddr;
+      if (window.__updateVehicleTypeRequirement) window.__updateVehicleTypeRequirement();
+      var ddResumeDest = function () {
+        var ddFieldsAfterDest = flowApi.getDailyDriverFields(tripType);
+        var ddNext = findNextDailyDriverField(ddFieldsAfterDest, 7) || ddFieldsAfterDest[ddFieldsAfterDest.length - 1];
+        setPendingField(dailyDriverPendingId(ddNext));
+        sayBot(ddNext.question);
+        return { logText: ddNext.question, needsAgent: false, requestedFeature: null };
+      };
+      return validateAddressField('destination_address', '도착지 주소').then(function (r) {
+        if (r && r.ambiguous) {
+          dailyDriverDisambiguationResume = ddResumeDest;
+          return startDisambiguation([r]);
+        }
+        if (!r || !r.success) return { logText: null, needsAgent: false, requestedFeature: null };
+        return ddResumeDest();
+      });
     }
 
     // 경유지 주소 답변: Gemini가 파싱한 주소를 DOM 폼에 추가하고 대기시간 질문으로 전환
@@ -2900,6 +3034,12 @@
       Promise.resolve(resume()).then(function (result) { if (result) logBotMessage(result); });
       return;
     }
+    if (dailyDriverDisambiguationResume) {
+      var ddResume = dailyDriverDisambiguationResume;
+      dailyDriverDisambiguationResume = null;
+      Promise.resolve(ddResume()).then(function (result) { if (result) logBotMessage(result); });
+      return;
+    }
     var doneText = proceedAfterCollecting();
     logBotMessage({ logText: doneText, needsAgent: false, requestedFeature: null });
   }
@@ -3162,8 +3302,11 @@
             // 이걸 안 하면 사용자가 이미 답한 예약시간을 trip_type 확인 직후 또 물어보게 된다.
             if (val('reserved_date') && val('reserved_time')) {
               reservedDateTimeConfirmed = true;
-              var ddOriginFieldNow = ddFields[2]; // index 2 = 출발지 주소
-              setPendingField(ddOriginFieldNow.id);
+              // 예약일시뿐 아니라 출발지 주소/연락처 등도 트리거 메시지에 이미 왔을 수 있으니
+              // (findNextDailyDriverField 주석 참고) 무조건 출발지 주소로 가지 않고, 이미
+              // 채워진 항목은 건너뛴다.
+              var ddOriginFieldNow = findNextDailyDriverField(ddFields, 2) || ddFields[ddFields.length - 1];
+              setPendingField(dailyDriverPendingId(ddOriginFieldNow));
               var ddDtMsgNow = formatReservedDateTime(val('reserved_date'), val('reserved_time'));
               var skipConfirmMsg = tripLabel + '으로 확인했습니다. '
                 + (ddDtMsgNow ? ('예약시간은 ' + ddDtMsgNow + '으로 이어받아 진행하겠습니다.\n') : '')
@@ -3192,11 +3335,14 @@
             addBubble(wpQ, 'bot', null, true);
             return logBotMessage({ logText: wpQ, needsAgent: false, requestedFeature: null });
           }
-          // 추가 없음 → 도착지로 이동
-          setPendingField('destination_address');
-          var destQ = '도착지 주소를 알려주세요?';
-          addBubble(destQ, 'bot', null, true);
-          return logBotMessage({ logText: destQ, needsAgent: false, requestedFeature: null });
+          // 추가 없음 → 도착지로 이동. 단, 트리거 메시지에 도착지 주소가 이미 왔을 수
+          // 있으므로(예: "골드CC") 무조건 destination_address로 가지 않고
+          // findNextDailyDriverField로 실제 다음 빈 항목을 찾는다.
+          var ddFieldsAfterWaypoints = flowApi.getDailyDriverFields(tripType);
+          var ddNextAfterWaypoints = findNextDailyDriverField(ddFieldsAfterWaypoints, 6) || ddFieldsAfterWaypoints[ddFieldsAfterWaypoints.length - 1];
+          setPendingField(dailyDriverPendingId(ddNextAfterWaypoints));
+          addBubble(ddNextAfterWaypoints.question, 'bot', null, true);
+          return logBotMessage({ logText: ddNextAfterWaypoints.question, needsAgent: false, requestedFeature: null });
         }
 
         // ---- 일일기사 경유지 대기시간 Y/N ----
