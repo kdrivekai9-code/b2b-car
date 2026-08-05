@@ -2946,8 +2946,8 @@
 
   // 로컬 키워드로 판단이 애매할 때 쓰는 폴백 — 확인/수정/후보선택 단계 각각에서 방금 무엇을 물었는지와
   // 사용자의 답변을 Gemini에게 보내 분류받는다. 실패하면 'unclear'로 처리해 기존 안내 문구로 대체한다.
-  function classifyPhaseReplyFallback(text, phaseName, candidateLabels) {
-    return api.classifyReply(text, phaseName, candidateLabels);
+  function classifyPhaseReplyFallback(text, phaseName, candidateLabels, fieldChoices) {
+    return api.classifyReply(text, phaseName, candidateLabels, fieldChoices);
   }
 
   function startModifyFlow() {
@@ -3028,7 +3028,7 @@
   // 최종목적지)은 목록에서 빠진다 — orderCategory에 따라 다른 목록을 보여준다.
   function chooseFieldClarifyText() {
     if (orderCategory === 'daily_driver') {
-      return '이용 형태 / 예약일시 / 출발지 주소 / 출발지 연락처 / 차량번호 / 경유지 / 도착지 주소 / 기사 전달사항 중 어느 항목을 수정할지 말씀해주세요?';
+      return '이용 형태 / 예약일시 / 출발지 주소 / 출발지 연락처 / 차량번호 / 도착지 주소 / 기사 전달사항 중 어느 항목을 수정할지 말씀해주세요?';
     }
     return CHOOSE_FIELD_CLARIFY;
   }
@@ -3089,13 +3089,28 @@
     return null;
   }
 
+  // Gemini의 choose_field 분류는 서버가 넘겨받은 candidates로 필드 enum/설명을 동적으로 만든다
+  // (routes/orders.js classify-reply, lib/hybridChat.js) — candidates를 안 보내면 서버가 탁송
+  // 6항목으로 기본 폴백하므로, 일일기사는 반드시 자기 필드 목록을 넘겨야 "전달사항 수정해줘"
+  // 같은 daily_driver 전용 필드도 인식된다.
+  function currentFieldChoicesForClassify() {
+    if (orderCategory === 'daily_driver') {
+      return flowApi.getDailyDriverFields(tripType)
+        .filter(function (f) { return f.id !== 'waypoints'; })
+        .map(function (f) { return { id: f.id, label: f.label }; });
+    }
+    return null; // 그 외(탁송)는 서버 기본값(REQUIRED_FIELDS 6항목)을 그대로 쓴다.
+  }
+
   function handleChooseFieldPhase(text) {
     return flowApi.runChooseFieldPhase({
       text: text,
       isAgentRequest: isAgentRequest,
       looksFrustrated: looksFrustrated,
       matchFieldKeyword: matchFieldKeyword,
-      classifyFallback: classifyPhaseReplyFallback,
+      classifyFallback: function (t, phaseName) {
+        return classifyPhaseReplyFallback(t, phaseName, null, currentFieldChoicesForClassify());
+      },
       onAgent: function () {
         escalateToAgent('상담원 연결');
         return null;

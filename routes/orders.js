@@ -640,10 +640,20 @@ router.post('/ai-intake/classify-reply', asyncHandler(async (req, res) => {
   const text = (req.body.text || '').trim();
   const phase = req.body.phase || '';
   const candidates = Array.isArray(req.body.candidates) ? req.body.candidates : [];
+  // choose_field 단계에서 클라이언트가 지금 실제로 쓰는 필드 목록(탁송 6항목 vs 일일기사
+  // 전용 목록)을 넘겨주면, Gemini의 field enum/설명을 그 목록으로 만든다(lib/hybridChat.js) —
+  // 안 그러면 일일기사에 없는 필드를 요구하거나, 일일기사 전용 필드(전달사항 등)를 아예
+  // 고를 수 없다. 클라이언트가 안 만든 값이 섞여 들어올 수 있으니 형태/개수를 방어적으로 검증한다.
+  const fieldChoices = Array.isArray(req.body.fieldChoices)
+    ? req.body.fieldChoices
+      .filter((f) => f && typeof f.id === 'string' && typeof f.label === 'string')
+      .slice(0, 20)
+      .map((f) => ({ id: f.id.slice(0, 64), label: f.label.slice(0, 64) }))
+    : [];
   if (!text || !phase) return res.status(400).json({ action: 'unclear' });
 
   try {
-    const result = await classifyPhaseReply(text, phase, { candidates });
+    const result = await classifyPhaseReply(text, phase, { candidates, fieldChoices });
     res.json(result);
   } catch (e) {
     console.error('단계 응답 분류 실패:', e.message);

@@ -94,11 +94,12 @@
       });
     },
 
-    classifyReply: function (text, phaseName, candidateLabels) {
+    classifyReply: function (text, phaseName, candidateLabels, fieldChoices) {
       return postJson('/orders/ai-intake/classify-reply', {
         text: text,
         phase: phaseName,
         candidates: candidateLabels || [],
+        fieldChoices: fieldChoices || [],
       }, { headers: { 'Content-Type': 'application/json' } })
         .then(function (res) { return res.json(); })
         .catch(function () { return { action: 'unclear' }; });
