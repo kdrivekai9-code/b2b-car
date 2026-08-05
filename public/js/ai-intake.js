@@ -1456,7 +1456,14 @@
         });
       }
 
-      // 선박 이동이 필수인 구간이라 경유지 여부를 다시 물을 필요가 없어 질문을 생략한다.
+      // 선박 이동이 필수인 구간이라 경유지 여부는 다시 묻지 않지만(항로 자체가 안 바뀜),
+      // 다음에 뭘 해야 하는지 안내가 없으면 대화가 그대로 멈춰버린다(사용자 보고) — 일반
+      // 육로 구간(announceFareAndContinue의 !hasFerryLeg 분기, ADDITIONAL_REQUEST_NONE_RE
+      // 처리)과 같은 마무리 안내를 붙인다.
+      var doneText = '이 조건으로 접수를 원하시면 예약일시와 차량번호, 출발지·도착지 연락처를 알려주시면 오더로 접수해드리겠습니다.';
+      addBubble(doneText, 'bot');
+      logBotMessage({ logText: doneText, needsAgent: false, requestedFeature: null });
+
       return { halted: false, fareText: msg };
     });
   }
