@@ -1,7 +1,8 @@
 'use client';
 
 import Script from 'next/script';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 // Kakao Maps 렌더링 + 실제 경로(directions) 조회. order-form.js의 refreshMapView/
 // fetchRealDirections/fetchSplitSamcheonpoDirections를 React로 이식했다.
@@ -39,6 +40,40 @@ export default function RouteMap({ points, originAddress, destinationAddress, on
   const requestIdRef = useRef(0);
   const [summary, setSummary] = useState({ km: null, durationSec: null, toll: null, hasFerryLeg: false, isFinal: false });
 
+  // 지도 확대보기: #orderMap DOM 노드(및 그 안의 kakao map 인스턴스)를 다시 만들지 않고,
+  // createPortal의 대상 컨테이너만 도킹 위치 ↔ 모달 위치로 바꿔서 같은 노드를 옮긴다.
+  // (일반 order-form.js의 vanilla 버전은 appendChild로 직접 옮기지만, React가 관리하는
+  // 트리에서 같은 걸 하면 다음 렌더에서 리컨실리에이션이 깨질 수 있어 portal을 쓴다.)
+  const [zoomOpen, setZoomOpen] = useState(false);
+  const dockSlotRef = useRef(null);
+  const modalSlotRef = useRef(null);
+  const [portalTarget, setPortalTarget] = useState(null);
+
+  useEffect(() => {
+    setPortalTarget(dockSlotRef.current);
+  }, []);
+
+  // zoomOpen이 true가 되는 렌더에서 모달 껍데기(모달 슬롯 포함)가 함께 커밋되므로,
+  // 커밋 직후(paint 전) 실행되는 useLayoutEffect에서 바로 modalSlotRef.current를 읽을 수 있다.
+  useLayoutEffect(() => {
+    if (zoomOpen) setPortalTarget(modalSlotRef.current);
+  }, [zoomOpen]);
+
+  // 도킹→모달, 모달→도킹으로 컨테이너 크기가 바뀔 때마다 relayout하지 않으면
+  // 카카오맵이 이전 크기 기준으로 타일을 그려 지도가 잘려 보인다.
+  useEffect(() => {
+    if (!mapRef.current || !portalTarget) return;
+    const id = requestAnimationFrame(() => mapRef.current.relayout());
+    return () => cancelAnimationFrame(id);
+  }, [portalTarget]);
+
+  function closeZoom() {
+    // dockSlotRef는 항상 마운트되어 있으므로 모달 껍데기가 사라지기 전에(같은 렌더에서)
+    // portalTarget을 먼저 도킹 위치로 되돌려, 지도가 잠깐 갈 곳을 잃지 않게 한다.
+    setPortalTarget(dockSlotRef.current);
+    setZoomOpen(false);
+  }
+
   useEffect(() => {
     if (!sdkReady || !mapDivRef.current || mapRef.current) return;
     if (typeof window.kakao === 'undefined' || !window.kakao.maps) return;
@@ -46,7 +81,9 @@ export default function RouteMap({ points, originAddress, destinationAddress, on
       center: new window.kakao.maps.LatLng(36.5, 127.9),
       level: 12,
     });
-  }, [sdkReady]);
+    // portalTarget 의존성: #orderMap이 도킹 슬롯으로 처음 포탈되는 커밋 이후에야
+    // mapDivRef.current가 채워지므로, 이 효과가 그 시점에 한 번 더 재시도되어야 한다.
+  }, [sdkReady, portalTarget]);
 
   useEffect(() => {
     if (!sdkReady || !mapRef.current) return;
@@ -172,8 +209,10 @@ export default function RouteMap({ points, originAddress, destinationAddress, on
         applyFinal(data.totalDistance / 1000, data.totalDuration, data.tollFare, !!data.hasFerryLeg, path, data.ferrySegments || null);
       })
       .catch(() => {});
+    // portalTarget: #orderMap이 도킹 슬롯으로 포탈된 직후 map 인스턴스가 막 생겼을 수 있으니
+    // (위 map-생성 effect 주석 참고) 이 effect도 그 시점에 한 번 더 재시도되어야 한다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sdkReady, JSON.stringify(points), originAddress, destinationAddress]);
+  }, [sdkReady, portalTarget, JSON.stringify(points), originAddress, destinationAddress]);
 
   return (
     <aside className="card map-card order-map-panel">
@@ -194,7 +233,27 @@ export default function RouteMap({ points, originAddress, destinationAddress, on
           </div>
         </div>
       )}
-      <div id="orderMap" ref={mapDivRef} className="order-map" />
+      <div className="map-wrap">
+        <div ref={dockSlotRef} />
+        {!zoomOpen && (
+          <button type="button" className="map-zoom-btn" title="크게 보기" aria-label="지도 크게 보기" onClick={() => setZoomOpen(true)}>🔍</button>
+        )}
+      </div>
+      {portalTarget && createPortal(
+        <div id="orderMap" ref={mapDivRef} className="order-map" />,
+        portalTarget
+      )}
+      {zoomOpen && (
+        <div className="map-modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) closeZoom(); }}>
+          <div className="map-modal-box">
+            <div className="map-modal-header">
+              <h3>경로 미리보기</h3>
+              <button type="button" className="modal-close" onClick={closeZoom}>✕</button>
+            </div>
+            <div className="map-modal-body" ref={modalSlotRef} />
+          </div>
+        </div>
+      )}
       <Script
         src={`//dapi.kakao.com/v2/maps/sdk.js?appkey=${process.env.NEXT_PUBLIC_KAKAO_JS_KEY}&autoload=false`}
         strategy="afterInteractive"

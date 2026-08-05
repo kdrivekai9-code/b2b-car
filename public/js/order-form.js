@@ -590,6 +590,66 @@
     level: 12,
   });
 
+  // 지도 확대보기: 새 지도 인스턴스를 또 만들지 않고, 이미 마커/경로가 그려진 같은
+  // #orderMap DOM 노드를 모달로 옮겼다가(reparent) 닫으면 원래 자리로 되돌린다.
+  // kakao.maps.Map은 컨테이너 크기가 바뀌면 relayout()을 호출해줘야 타일이 다시 그려진다.
+  (function setupMapZoom() {
+    var mapEl = document.getElementById('orderMap');
+    if (!mapEl) return;
+    var originalParent = mapEl.parentNode;
+    var originalNextSibling = mapEl.nextSibling;
+
+    // 버튼을 지도 div 안(kakao가 내부 레이어를 그려넣는 곳)이 아니라 별도 래퍼의 형제로
+    // 둬야 카카오맵 내부 레이어에 가려지거나 지워지지 않는다.
+    var wrap = document.createElement('div');
+    wrap.className = 'map-wrap';
+    originalParent.insertBefore(wrap, mapEl);
+    wrap.appendChild(mapEl);
+
+    var zoomBtn = document.createElement('button');
+    zoomBtn.type = 'button';
+    zoomBtn.className = 'map-zoom-btn';
+    zoomBtn.title = '크게 보기';
+    zoomBtn.setAttribute('aria-label', '지도 크게 보기');
+    zoomBtn.textContent = '🔍';
+    wrap.appendChild(zoomBtn);
+
+    var overlay = document.createElement('div');
+    overlay.className = 'map-modal-overlay';
+    overlay.style.display = 'none';
+    overlay.innerHTML =
+      '<div class="map-modal-box">' +
+        '<div class="map-modal-header">' +
+          '<h3>경로 미리보기</h3>' +
+          '<button type="button" class="modal-close" id="mapZoomCloseBtn">✕</button>' +
+        '</div>' +
+        '<div class="map-modal-body" id="mapZoomBody"></div>' +
+      '</div>';
+    document.body.appendChild(overlay);
+    var modalBody = overlay.querySelector('#mapZoomBody');
+    var closeBtn = overlay.querySelector('#mapZoomCloseBtn');
+
+    function openZoom() {
+      modalBody.appendChild(wrap);
+      overlay.style.display = 'flex';
+      // display:none이었던 동안 컨테이너 크기가 0이었으므로, 실제로 크기가 잡힌 다음
+      // relayout해야 타일이 정상적으로 채워진다.
+      setTimeout(function () { map.relayout(); refreshMapView(); }, 0);
+    }
+    function closeZoom() {
+      if (originalNextSibling && originalNextSibling.parentNode === originalParent) {
+        originalParent.insertBefore(wrap, originalNextSibling);
+      } else {
+        originalParent.appendChild(wrap);
+      }
+      overlay.style.display = 'none';
+      setTimeout(function () { map.relayout(); refreshMapView(); }, 0);
+    }
+    zoomBtn.addEventListener('click', openZoom);
+    closeBtn.addEventListener('click', closeZoom);
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) closeZoom(); });
+  })();
+
   var pinClassByKind = { origin: 'origin', destination: 'dest', waypoint: 'waypoint' };
   var markers = {}; // slot -> kakao.maps.CustomOverlay
   var routeLine = null;
