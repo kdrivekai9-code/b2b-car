@@ -161,10 +161,15 @@
     if (phase === 'confirming') return handled(ctx.onConfirming ? ctx.onConfirming(text) : null);
     if (phase === 'choose_field') return handled(ctx.onChooseField ? ctx.onChooseField(text) : null);
     if (phase === 'choose_address_candidate') return handled(ctx.onDisambiguation ? ctx.onDisambiguation(text) : null);
-    if (phase === 'collecting' && pendingField === 'memo_customer') {
+    // memo_customer/vehicle_number는 탁송(REQUIRED_FIELDS)과 일일기사(getDailyDriverFields)가
+    // 같은 필드 id를 공유하지만 완료 후 흐름이 서로 다르다(탁송은 proceedAfterCollecting으로,
+    // 일일기사는 findNextDailyDriverField/finishDailyDriverCollection으로 이어져야 함) — 여기서
+    // orderCategory==='daily_driver'까지 가로채버리면 ai-intake.js의 일일기사 전용 pendingField
+    // 처리(handleOrderIntent 안, orderCategory==='daily_driver' 분기)가 아예 호출되지 못한다.
+    if (phase === 'collecting' && pendingField === 'memo_customer' && ctx.orderCategory !== 'daily_driver') {
       return handled(ctx.onAdditionalRequest ? ctx.onAdditionalRequest(text) : null);
     }
-    if (phase === 'collecting' && pendingField === 'vehicle_number') {
+    if (phase === 'collecting' && pendingField === 'vehicle_number' && ctx.orderCategory !== 'daily_driver') {
       return handled(ctx.onVehicleNumber ? ctx.onVehicleNumber(text) : null);
     }
     return { handled: false, value: ctx.onDefault ? ctx.onDefault(text) : null };

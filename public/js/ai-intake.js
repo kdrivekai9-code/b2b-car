@@ -2062,6 +2062,21 @@
     });
   }
 
+  // finishPremiumCollection과 같은 이유로 필요 — 일일기사 전달사항(memo_customer) 답변 후
+  // 탁송 전용 proceedAfterCollecting()(REQUIRED_FIELDS에 없는 destination_contact 등을
+  // 요구해 엉뚱한 질문으로 샐 수 있음) 대신 곧바로 요약 + 등록확인으로 넘어간다.
+  function finishDailyDriverCollection() {
+    setPendingField(null);
+    phase = 'confirming';
+    var summary = buildSummaryText();
+    addBubble(summary, 'bot');
+    logBotMessage({ logText: summary, needsAgent: false, requestedFeature: null });
+    var confirmQ = '위 내용으로 등록해 드릴까요?';
+    addBubble(confirmQ, 'bot', null, true);
+    logBotMessage({ logText: confirmQ, needsAgent: false, requestedFeature: null });
+    return null;
+  }
+
   function handleOrderIntent(data, sourceText) {
     var dateTimeChanged = !!(data.reserved_date || data.reserved_time);
     // 오더유형(탁송/대리/일일기사)은 대화당 한 번만 판별해 알려준다 — 이미 확정된 뒤에는
@@ -2203,16 +2218,30 @@
     }
 
     if (orderCategory === 'daily_driver' && pendingField === 'vehicle_number') {
-      var ddVehicleNo = data.vehicle_number || data.origin_vehicle_number || null;
-      if (ddVehicleNo) document.getElementById('vehicle_number').value = ddVehicleNo;
-      return validateVehicleNumberField('vehicle_number', '차량번호').then(function () {
-        // 차량번호는 선택 항목이라 형식이 틀려도(validateVehicleNumberField가 이미 안내함) 다음으로 진행한다.
-        vehicleNumberResolved = true;
+      var ddGotoNextVehicleField = function () {
         var ddFieldsAfterVehicle = flowApi.getDailyDriverFields(tripType);
         var ddNext = findNextDailyDriverField(ddFieldsAfterVehicle, 5) || ddFieldsAfterVehicle[ddFieldsAfterVehicle.length - 1];
         setPendingField(dailyDriverPendingId(ddNext));
         sayBot(ddNext.question);
         return { logText: ddNext.question, needsAgent: false, requestedFeature: null };
+      };
+      // "없어"/"모름" 같은 스킵 응답은 dispatch 흐름의 handleVehicleNumberPendingReply와
+      // 같은 방식으로 처리한다 — 그대로 validateVehicleNumberField에 넘기면 빈 값이 형식
+      // 오류로 취급돼 "잘못된 차량번호입니다"가 잘못 뜬다.
+      if (VEHICLE_NUMBER_SKIP_RE.test(String(sourceText || '').trim())) {
+        vehicleNumberFailCount = 0;
+        vehicleNumberResolved = true;
+        document.getElementById('vehicle_number').value = '';
+        sayBot('차량번호는 출발지에서 다시 확인하겠습니다.');
+        noteProgress();
+        return ddGotoNextVehicleField();
+      }
+      var ddVehicleNo = data.vehicle_number || data.origin_vehicle_number || null;
+      if (ddVehicleNo) document.getElementById('vehicle_number').value = ddVehicleNo;
+      return validateVehicleNumberField('vehicle_number', '차량번호').then(function () {
+        // 차량번호는 선택 항목이라 형식이 틀려도(validateVehicleNumberField가 이미 안내함) 다음으로 진행한다.
+        vehicleNumberResolved = true;
+        return ddGotoNextVehicleField();
       });
     }
 
@@ -2288,6 +2317,22 @@
       var retryFdQ = '최종 목적지 주소를 다시 알려주세요.';
       sayBot(retryFdQ);
       return { logText: retryFdQ, needsAgent: false, requestedFeature: null };
+    }
+
+    // 기사 전달사항(memo_customer) 답변 — 일일기사 흐름의 마지막 질문. handleAdditionalRequestPendingReply와
+    // 같은 판단(없음 표현이면 비움)을 쓰되, 탁송 전용 proceedAfterCollecting() 대신
+    // finishDailyDriverCollection()으로 마무리한다.
+    if (orderCategory === 'daily_driver' && pendingField === 'memo_customer') {
+      var ddMemoText = String(sourceText || '').trim();
+      var ddMemoEl = document.getElementById('memo_customer');
+      if (ADDITIONAL_REQUEST_NONE_RE.test(ddMemoText)) {
+        if (ddMemoEl) ddMemoEl.value = '';
+      } else {
+        var ddMemoVal = data.memo_customer || ddMemoText;
+        if (ddMemoEl) ddMemoEl.value = ddMemoVal;
+        sayBot('전달사항을 \'' + ddMemoVal + '\'(으)로 확인했습니다.');
+      }
+      return finishDailyDriverCollection();
     }
     // ---- /일일기사 전용 처리 끝 ----
 
