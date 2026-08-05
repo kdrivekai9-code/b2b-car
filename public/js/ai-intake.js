@@ -2026,6 +2026,13 @@
         : '안녕하세요. 프리미엄 서비스 예약을 도와드리겠습니다.';
       sayBot(greetMsg);
       if (orderCategory === 'daily_driver') {
+        // 트리거 메시지에 이미 예약일시가 함께 왔으면(예: "내일오후 ... 일일기사 예약해줘 /
+        // 출발시간은 오전 9시고") 여기서 저장해둔다 — 예전에는 이 분기가 곧바로 return해버려서
+        // 함께 온 예약일시가 그대로 버려졌고, 그 결과 trip_type 확인 후 이미 답한 예약시간을
+        // 다시 물어보는 중복 질문으로 이어졌다(trip_type 처리부에서 이 값의 존재로 판단해
+        // 다시 묻지 않고 건너뛴다).
+        if (data.reserved_date) setField('reserved_date', data.reserved_date);
+        if (data.reserved_time) setField('reserved_time', roundToTenMinutes(data.reserved_time));
         pendingField = 'trip_type';
         return { logText: greetMsg, needsAgent: false, requestedFeature: null };
       }
@@ -2050,6 +2057,31 @@
     if (data.destination_detail_address) setField('destination_detail_address', data.destination_detail_address);
 
     // ---- 일일기사 전용 pendingField 처리 ----
+    // 예약일시 답변 — trip_type(왕복/편도) 확인 직후 이 질문을 물어보는데, 정작 그 답을
+    // 처리하는 전용 분기가 없어서 무슨 답을 하든(제대로 된 날짜 답변이라도) 아래 일일기사
+    // 전용 분기들에 하나도 안 걸리고 맨 끝의 범용 proceedAfterCollecting()까지 흘러갔다.
+    // 그 함수는 orderCategory가 'premium'이 아니면(즉 'daily_driver'도 포함해서) 탁송용
+    // REQUIRED_FIELDS 기준 getNextMissingField()를 쓰는데, reservedDateTimeConfirmed가
+    // 여기서 한 번도 true로 안 바뀌니 매번 "예약시간을 말씀해주세요?"(탁송용 문구)를 다시
+    // 물어봐서, 방금 ddFields 문구로 보여준 것과 사실상 같은 질문이 중복으로 나왔다.
+    // premium_reserved_datetime(프리미엄) 처리와 같은 패턴으로 여기서 직접 확정하고
+    // ddFields의 다음 항목(출발지 주소)으로 넘긴다.
+    if (orderCategory === 'daily_driver' && pendingField === 'reserved_date') {
+      if (!data.reserved_date && !data.reserved_time) {
+        var ddDtRetryQ = '예약시간을 다시 말씀해주세요? (예: 내일 오후 3시 출발)';
+        sayBot(ddDtRetryQ);
+        return { logText: ddDtRetryQ, needsAgent: false, requestedFeature: null };
+      }
+      reservedDateTimeConfirmed = true;
+      var ddDtMsg = formatReservedDateTime(val('reserved_date'), val('reserved_time'));
+      var ddFieldsAfterDate = flowApi.getDailyDriverFields(tripType);
+      var ddOriginField = ddFieldsAfterDate[2]; // index 0=trip_type, 1=reserved_date, 2=출발지 주소
+      setPendingField(ddOriginField.id);
+      var ddDtConfirmMsg = (ddDtMsg ? (ddDtMsg + '으로 예약을 확인했습니다.\n') : '') + ddOriginField.question;
+      sayBot(ddDtConfirmMsg);
+      return { logText: ddDtConfirmMsg, needsAgent: false, requestedFeature: null };
+    }
+
     // 경유지 주소 답변: Gemini가 파싱한 주소를 DOM 폼에 추가하고 대기시간 질문으로 전환
     if (orderCategory !== 'dispatch' && pendingField && /^waypoint_address_\d+$/.test(pendingField)) {
       var wpAddr = data.waypointAddress || data.originAddress || null;
@@ -3124,6 +3156,21 @@
             var tripLabel = parsed === 'round_trip' ? '왕복' : '편도';
             setPendingField(null);
             var ddFields = flowApi.getDailyDriverFields(tripType);
+            // 트리거 메시지에 예약일시가 이미 함께 왔다면(handleOrderIntent의 daily_driver
+            // 진입 분기가 저장해둠) 다시 묻지 않고 바로 출발지 주소로 넘어간다 — 프리미엄→
+            // 일일기사 전환 경로(아래 premium_trip_type 처리)가 이미 하던 것과 같은 처리다.
+            // 이걸 안 하면 사용자가 이미 답한 예약시간을 trip_type 확인 직후 또 물어보게 된다.
+            if (val('reserved_date') && val('reserved_time')) {
+              reservedDateTimeConfirmed = true;
+              var ddOriginFieldNow = ddFields[2]; // index 2 = 출발지 주소
+              setPendingField(ddOriginFieldNow.id);
+              var ddDtMsgNow = formatReservedDateTime(val('reserved_date'), val('reserved_time'));
+              var skipConfirmMsg = tripLabel + '으로 확인했습니다. '
+                + (ddDtMsgNow ? ('예약시간은 ' + ddDtMsgNow + '으로 이어받아 진행하겠습니다.\n') : '')
+                + ddOriginFieldNow.question;
+              addBubble(skipConfirmMsg, 'bot', null, true);
+              return logBotMessage({ logText: skipConfirmMsg, needsAgent: false, requestedFeature: null });
+            }
             // 예약일시 질문으로 이동
             var nextField = ddFields[1]; // index 1 = 예약일시
             setPendingField(nextField.id);
