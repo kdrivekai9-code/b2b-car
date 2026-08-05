@@ -1082,7 +1082,10 @@ async function buildOrderLegs(orderId, order, waypoints) {
   }
   if (!legRows.length) return [];
 
-  const stopLabels = [order.origin_address, ...waypoints.map((w) => w.address), order.destination_address];
+  // 전체 주소 대신 상세주소만 보여준다(사용자 요청) — 구간 목록에서는 "몇 번째 구간인지"만
+  // 구분하면 되고, 전체 주소는 위쪽 이동 경로 섹션에 이미 나와 있어 중복이었다. 상세주소가
+  // 없으면(선택 항목이라 비어있을 수 있음) 아래 `|| '-'`가 그대로 처리한다.
+  const stopLabels = [order.origin_address_detail, ...waypoints.map((w) => w.address_detail), order.destination_address_detail];
   return legRows.map((row) => ({
     seq: row.seq,
     fromLabel: stopLabels[row.seq - 1] || '-',
