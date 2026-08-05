@@ -461,9 +461,25 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
     if (checked) setField('destination_contact', state.origin_contact);
   }
 
+  // 기사배정 후 수정 제한(사용자 확정 사항) — 이미 기사에게 전달된 정보를 당사자 모르게
+  // 바꿔버리면 안 된다. 고객(client)/상담원(branch_manager)은 저장 자체를 막고 안내만
+  // 보여주고, 관리자(admin)는 수정은 허용하되 "기사님께 꼭 전달해달라"는 확인 팝업을 거친다.
+  // 서버(POST /:id)도 같은 기준(hasAssignedDriver)으로 다시 막으므로, 여기서는 사용자
+  // 경험(왕복 없이 즉시 안내)을 위한 것이고 실제 권한 경계는 서버에 있다.
+  function checkAssignedDriverGate() {
+    if (!isEdit || !order.hasAssignedDriver) return true;
+    if (currentUserRole !== 'admin') {
+      setError('해당 오더가 기사님께 배정된 상태입니다. 수정사항은 상담원 대화 요청이나, 고객센터로 직접 요청해 주세요.');
+      return false;
+    }
+    return window.confirm('기사님에 배정되어 있으니 수정사항을 기사님께 꼭 전달해 주세요.');
+  }
+
   async function handleSubmit(e) {
     e.preventDefault();
     setError(null);
+
+    if (!checkAssignedDriverGate()) return;
 
     if (state.reservation_basis === 'delivery' && (!state.pickup_reserved_date || !state.pickup_reserved_time)) {
       // 실제 역산 계산이 아직 안 붙어 있어(경로 확정 전에는 계산 불가), 배송기준을 골랐는데
@@ -600,6 +616,11 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
 
   return (
     <div className="order-form">
+      {isEdit && order.hasAssignedDriver && currentUserRole !== 'admin' && (
+        <div className="error-msg" style={{ marginBottom: 14 }}>
+          해당 오더가 기사님께 배정된 상태입니다. 수정사항은 상담원 대화 요청이나, 고객센터로 직접 요청해 주세요.
+        </div>
+      )}
       <div className="order-grid">
         {/* OrderSidePanel(03번 자리, edit 모드)이 기사배정용 <form>을 자체적으로 갖고 있어서
             — HTML은 <form> 중첩을 허용하지 않는다(중첩되면 브라우저가 파서 레벨에서 구조를

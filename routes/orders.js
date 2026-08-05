@@ -1093,6 +1093,14 @@ async function buildOrderLegs(orderId, order, waypoints) {
   }));
 }
 
+// 기사배정 여부 — 단일배정(레거시, assigned_driver_id)과 구간 릴레이(order_legs, 마이그레이션
+// 이후 오더) 두 방식이 공존해서 어느 한쪽만 보면 놓친다. 오더 수정 권한(고객/상담원은 배차 후
+// 수정 차단, 관리자는 경고 팝업 후 허용)의 판단 기준이라 GET data.json과 POST 수정 양쪽에서
+// 반드시 같은 기준을 써야 한다.
+function hasAssignedDriver(order, legs) {
+  return !!order.assigned_driver_id || (Array.isArray(legs) && legs.some((l) => l.driverId));
+}
+
 // origin_address/destination_address는 combineAddress(main, detail)로 이미 합쳐진 문자열이라
 // (L591-595), OrderForm.js의 별도 "주소"/"상세주소" 두 칸에 되돌려 채우려면 detail 접미사를
 // 역산해서 잘라내야 한다. combineAddress가 항상 `main + ' ' + detail` 형태로만 합치므로
@@ -1162,6 +1170,8 @@ router.get('/:id/data.json', asyncHandler(async (req, res) => {
     ...formInit,
     order: {
       ...order,
+      // 오더 수정 화면(OrderForm.js)이 역할별로 다른 수정 제한 문구/팝업을 보여주는 기준.
+      hasAssignedDriver: hasAssignedDriver(order, legs),
       origin_address: splitCombinedAddress(order.origin_address, order.origin_address_detail),
       origin_detail_address: order.origin_address_detail || '',
       destination_address: splitCombinedAddress(order.destination_address, order.destination_address_detail),
@@ -1256,6 +1266,21 @@ router.post('/:id', asyncHandler(async (req, res) => {
   const finalGroup = isClient ? order.requester_group_id : toPositiveIntOrNull(requester_group_id);
   const finalOriginAddress = combineAddress(origin_address, origin_detail_address);
   const finalDestinationAddress = combineAddress(destination_address, destination_detail_address);
+
+  // 기사배정 후에는 고객/상담원(branch_manager)의 실시간 수정을 막는다(사용자 확정 사항) —
+  // 이미 기사에게 전달된 정보를 당사자 모르게 바꿔버리면 안 되기 때문이다. 관리자는 여전히
+  // 수정할 수 있되, 클라이언트(OrderForm.js)가 저장 전에 "기사님께 꼭 전달해주세요" 확인
+  // 팝업을 띄운다 — 서버는 그 팝업을 강제하지 않는다(관리자는 신뢰된 역할이라 순수 UX 안내).
+  // 클라이언트 쪽 확인을 우회해서 요청을 보내도(devtools 등) 여기서 다시 막히므로 실제
+  // 권한 경계는 여기다.
+  if (!isAdmin) {
+    const currentLegs = await buildOrderLegs(req.params.id, order, await db.all('SELECT * FROM order_waypoints WHERE order_id = ? ORDER BY seq ASC', [req.params.id]));
+    if (hasAssignedDriver(order, currentLegs)) {
+      return res.status(403).json({
+        error: '해당 오더가 기사님께 배정된 상태입니다. 수정사항은 상담원 대화 요청이나, 고객센터로 직접 요청해 주세요.',
+      });
+    }
+  }
 
   // 이 라우트는 OrderForm.js(React edit 모드)만 fetch()로 호출하므로 항상 JSON으로 응답한다
   // — 생성 폼과 달리 legacy EJS 폴백 렌더링 대상이 아니다. 운영시간 체크는 일부러 생략한다
