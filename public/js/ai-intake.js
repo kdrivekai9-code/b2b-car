@@ -798,7 +798,14 @@
     if (looksLikeOrderIntake(t)) return null;
     if (/(일일\s*대리\s*기사|일일\s*대리|하루\s*대리|데일리\s*대리)/.test(t)) return 'daily_proxy';
     if (/(대리\s*요금|대리운전|대리\s*기사)/.test(t)) return 'proxy';
-    if (/(탁송\s*요금|탁송)/.test(t)) return 'dispatch';
+    // "탁송" 단어 하나만 있어도 요금문의로 보던 것을 "탁송 요금"처럼 실제로 요금을 묻는
+    // 형태로만 좁힌다 — 오더접수 메시지엔 거의 항상 "탁송"이 등장하는데(서비스명이라),
+    // 그 위의 신호(hasCallIntakeSignalText/looksLikeOrderIntake)가 못 잡는 오타·자연어
+    // 표현(예: "탁송에약"처럼 "예약"이 오타난 경우)까지 이 느슨한 규칙이 요금문의로
+    // 가로채버려서, 실제로는 출발지/도착지/날짜가 이미 다 온 오더접수 메시지가 요금문의
+    // 흐름(연결어 없는 지명은 인식 못 함, 예약일시도 전혀 안 봄)으로 새고 있었다
+    // (실제 리포트: "이번주 토요일 사당역 부산역 탁송에약"이 요금문의로 처리됨).
+    if (/탁송\s*요금/.test(t)) return 'dispatch';
     return isFareInquiryIntentText(t) ? 'dispatch' : null;
   }
 
