@@ -1651,7 +1651,14 @@ async function registerOrderWithCallmaner(orderId, branchId) {
       'SELECT address, address_detail, lat, lon FROM order_waypoints WHERE order_id = ? ORDER BY seq',
       [orderId]
     ).catch(() => []);
+    // 콜마너 userHp(요청단말번호)는 출발지 연락처를 우선 쓰고 없으면 요청자(오더를 등록한
+    // 사용자) 연락처를 쓴다 — lib/callmaner.js의 normalizeUserHp가 이 순서로 고른다.
+    const requesterRow = order.created_by
+      ? await db.get('SELECT phone FROM users WHERE id = ?', [order.created_by]).catch(() => null)
+      : null;
     const orderForCallmaner = {
+      origin_contact: order.origin_contact,
+      requester_phone: requesterRow && requesterRow.phone,
       origin_lat: order.origin_lat, origin_lon: order.origin_lon,
       origin_sido: order.origin_sido, origin_sigugun: order.origin_sigugun, origin_dong: order.origin_dong,
       origin_address: order.origin_address, origin_address_detail: order.origin_address_detail,
