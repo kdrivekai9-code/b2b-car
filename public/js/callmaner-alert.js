@@ -39,6 +39,30 @@
     badge.appendChild(body);
   }
 
+  // 콜마너 등록은 fire-and-forget이라 상태변경/오더등록 직후에는 결과가 아직 없다 —
+  // 그동안 화면에 아무 표시도 없어서 "배너가 늦게 뜬다"로 보였다. 진행 중임을 알려주고,
+  // 결과(성공/실패)가 확인되면 지운다. pending은 서버가 이미 내려주던 값인데 쓰이지 않고 있었다.
+  function showPending() {
+    if (document.querySelector('.callmaner-pending-badge')) return;
+    var el = document.createElement('div');
+    el.className = 'callmaner-pending-badge';
+    el.setAttribute('role', 'status');
+    el.textContent = '⏳ 콜마너 등록 확인 중…';
+    document.body.appendChild(el);
+  }
+
+  function clearPending() {
+    var el = document.querySelector('.callmaner-pending-badge');
+    if (el) el.remove();
+  }
+
+  // 폴링 창을 다 써도 결과가 안 나온 경우 — 조용히 사라지면 사용자는 등록이 됐는지 알 수 없다.
+  function showPendingTimedOut() {
+    var el = document.querySelector('.callmaner-pending-badge');
+    if (!el) { showPending(); el = document.querySelector('.callmaner-pending-badge'); }
+    if (el) el.textContent = '⏳ 콜마너 등록 결과를 아직 확인하지 못했습니다. 잠시 후 새로고침해주세요.';
+  }
+
   function showPopup(message, code, onClose) {
     var overlay = document.createElement('div');
     overlay.className = 'callmaner-alert-overlay';
@@ -87,7 +111,10 @@
   function poll(orderId, options) {
     var onDone = (options && options.onDone) || function () {};
     if (!orderId) { onDone(); return; }
-    var maxAttempts = (options && options.maxAttempts) || 6;
+    // lib/callmaner.js의 API 타임아웃이 10초라, 예전 기본값(6회 × 1.5초 = 마지막 폴링 7.5초)은
+    // 콜마너가 늦게 응답하거나 타임아웃으로 끝난 경우를 놓쳤다 — 그러면 DB에는 에러가 남았는데
+    // 화면에는 새로고침 전까지 아무것도 안 떴다. 타임아웃 + 여유를 덮도록 창을 늘린다(0~16.5초).
+    var maxAttempts = (options && options.maxAttempts) || 12;
     var intervalMs = (options && options.intervalMs) || 1500;
     var attempts = 0;
 
@@ -103,20 +130,23 @@
       fetch('/orders/' + orderId + '/callmaner-status.json')
         .then(function (res) { return res.ok ? res.json() : null; })
         .then(function (data) {
-          if (!data || !data.enabled) { onDone(); return; } // 콜마너 미사용 지사 - 아무 것도 하지 않음
+          if (!data || !data.enabled) { clearPending(); onDone(); return; } // 콜마너 미사용 지사 - 아무 것도 하지 않음
           if (data.error) {
+            clearPending();
             var isAlreadyShown = shownSignature === errorSignature(data.error, data.errorCode);
             showBadge(data.error, data.errorCode);
             if (isAlreadyShown) { onDone(); return; }
             showPopup(data.error, data.errorCode, onDone); // 팝업의 "확인"을 눌러야 onDone(페이지 이동 등) 진행
             return;
           }
-          if (data.confSlip) { onDone(); return; } // 정상 등록 - 팝업 없음(요청 범위 밖)
+          if (data.confSlip) { clearPending(); onDone(); return; } // 정상 등록 - 팝업 없음(요청 범위 밖)
+          // 아직 결과가 없다 — 등록 요청이 진행 중임을 화면에 알린다.
+          showPending();
           attempts += 1;
           if (attempts < maxAttempts) setTimeout(tick, intervalMs);
-          else onDone();
+          else { showPendingTimedOut(); onDone(); }
         })
-        .catch(function () { onDone(); });
+        .catch(function () { clearPending(); onDone(); });
     }
     tick();
   }
