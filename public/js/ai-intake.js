@@ -451,7 +451,7 @@
 
   function applyQuickReplyPhone(phoneValue) {
     if (sendBtn.dataset.processing === '1' || phase !== 'collecting' || !pendingField) return;
-    var field = fieldMetaFor(pendingField);
+    var field = currentFieldMetaFor(pendingField);
     if (!field) return;
     sendBtn.dataset.processing = '1';
     updateSendButton();
@@ -1039,7 +1039,7 @@
     }
     if (!sourceValue) return false;
 
-    var meta = fieldMetaFor(pendingField);
+    var meta = currentFieldMetaFor(pendingField);
     document.getElementById(pendingField).value = sourceValue;
     validatePhoneField(pendingField, meta ? meta.label : pendingField).then(function () {
       var doneText = proceedAfterCollecting();
@@ -1824,6 +1824,20 @@
     return logBotMessage({ logText: memoQ, needsAgent: false, requestedFeature: null });
   }
 
+  // REQUIRED_FIELDS(탁송)와 getDailyDriverFields(일일기사)가 origin_address/origin_contact/
+  // vehicle_number/destination_address/reserved_date/memo_customer 같은 필드 id를 공유하다
+  // 보니, "지금 이 필드의 라벨/질문 문구는 무엇인가"를 물을 때도 orderCategory를 봐야 한다 —
+  // 안 그러면 일일기사 흐름에서 탁송 문구("차량을 픽업할 출발지 주소를 알려주세요?" 등)가
+  // 잘못 나온다. fieldMetaFor(탁송 전용)를 직접 쓰던 자리들을 이걸로 교체한다.
+  function currentFieldMetaFor(id) {
+    if (orderCategory === 'daily_driver') {
+      var ddFieldsNow = flowApi.getDailyDriverFields(tripType);
+      for (var i = 0; i < ddFieldsNow.length; i++) if (ddFieldsNow[i].id === id) return ddFieldsNow[i];
+      return null;
+    }
+    return fieldMetaFor(id);
+  }
+
   // 이번 턴에 새로 채워진 필드들의 검증이 모두 끝난 뒤 호출된다.
   // 아직 빈 필수 항목이 있으면 다음 질문으로, 전부 채워졌으면 요약 + 등록 확인 질문으로 넘어간다.
   function proceedAfterCollecting() {
@@ -1833,11 +1847,26 @@
     // 이번 메시지에서 화남/답답함이 감지됐으면, 다음 필수 질문 대신 상담원 연결을 먼저 제안한다.
     if (maybeOfferForFrustration()) return null;
 
-    // 프리미엄(대리) 전용 FSM은 애초에 차량번호/추가요청사항을 질문 순서에 두지 않는다(사용자
-    // 지정 시나리오라 그 항목들이 없음) — 수정 모드에서 필드 하나를 고친 뒤(예: 도착지 수정)
-    // 이 함수로 돌아왔을 때도 탁송 전용 getNextMissingField(차량번호 등)/추가요청사항 질문을
-    // 또 요구하지 않고 곧바로 요약·등록 확인으로 넘어간다.
-    if (orderCategory !== 'premium') {
+    // 일일기사는 REQUIRED_FIELDS(탁송 전용 필드 목록/순서)가 아니라 getDailyDriverFields
+    // 순서를 따라야 한다 — 예전에는 이 구분이 없어서 vehicle_number/memo_customer 응답을
+    // 처리하는 여러 자리(빠른답장 칩, "동일해" 처리, 전화번호 형태 빠른경로 등)가 여기로
+    // 오면 탁송 기준으로 진행되며 일일기사에 없는 destination_contact 등을 요구하거나
+    // 엉뚱한 순서로 진행됐다. 필드 하나만 고친 뒤(modifyFieldMode) 돌아온 경우는 다음 항목
+    // 으로 넘어가지 않고 곧바로 아래 요약·확인으로 떨어져야 하므로 건너뛴다.
+    if (orderCategory === 'daily_driver') {
+      if (!modifyFieldMode) {
+        var ddFieldsNow = flowApi.getDailyDriverFields(tripType);
+        var ddCurIdx = -1;
+        for (var di = 0; di < ddFieldsNow.length; di++) { if (ddFieldsNow[di].id === pendingField) { ddCurIdx = di; break; } }
+        var ddNextField = findNextDailyDriverField(ddFieldsNow, ddCurIdx + 1);
+        if (ddNextField) {
+          setPendingField(dailyDriverPendingId(ddNextField));
+          addBubble(ddNextField.question, 'bot', null, true);
+          return ddNextField.question;
+        }
+        // ddCurIdx를 못 찾았거나(-1) 남은 항목이 없으면 아래 요약·등록확인으로 그대로 진행한다.
+      }
+    } else if (orderCategory !== 'premium') {
       var missing = getNextMissingField();
       if (missing) {
         setPendingField(missing.id);
@@ -1855,7 +1884,7 @@
 
     var prefix = '';
     if (modifyFieldMode) {
-      var meta = fieldMetaFor(lastModifiedFieldId);
+      var meta = currentFieldMetaFor(lastModifiedFieldId);
       // 예약일시는 날짜 입력칸 하나의 원시값("2026-07-28")만 그대로 보여주면 시간이 빠진 채
       // 어색하게 보이므로, 다른 필드처럼 저장된 값을 그대로 쓰지 않고 사람이 읽기 좋은 형식으로 합쳐 보여준다.
       var newVal = (meta && meta.type === 'datetime')
@@ -2062,21 +2091,6 @@
     });
   }
 
-  // finishPremiumCollection과 같은 이유로 필요 — 일일기사 전달사항(memo_customer) 답변 후
-  // 탁송 전용 proceedAfterCollecting()(REQUIRED_FIELDS에 없는 destination_contact 등을
-  // 요구해 엉뚱한 질문으로 샐 수 있음) 대신 곧바로 요약 + 등록확인으로 넘어간다.
-  function finishDailyDriverCollection() {
-    setPendingField(null);
-    phase = 'confirming';
-    var summary = buildSummaryText();
-    addBubble(summary, 'bot');
-    logBotMessage({ logText: summary, needsAgent: false, requestedFeature: null });
-    var confirmQ = '위 내용으로 등록해 드릴까요?';
-    addBubble(confirmQ, 'bot', null, true);
-    logBotMessage({ logText: confirmQ, needsAgent: false, requestedFeature: null });
-    return null;
-  }
-
   function handleOrderIntent(data, sourceText) {
     var dateTimeChanged = !!(data.reserved_date || data.reserved_time);
     // 오더유형(탁송/대리/일일기사)은 대화당 한 번만 판별해 알려준다 — 이미 확정된 뒤에는
@@ -2160,14 +2174,12 @@
       }
       reservedDateTimeConfirmed = true;
       var ddDtMsg = formatReservedDateTime(val('reserved_date'), val('reserved_time'));
-      var ddFieldsAfterDate = flowApi.getDailyDriverFields(tripType);
-      // 트리거 메시지에 출발지/연락처 등이 이미 함께 왔을 수 있으니(findNextDailyDriverField
-      // 주석 참고) 무조건 출발지 주소(index 2)로 가지 않고, 이미 채워진 항목은 건너뛴다.
-      var ddNextAfterDate = findNextDailyDriverField(ddFieldsAfterDate, 2) || ddFieldsAfterDate[ddFieldsAfterDate.length - 1];
-      setPendingField(dailyDriverPendingId(ddNextAfterDate));
-      var ddDtConfirmMsg = (ddDtMsg ? (ddDtMsg + '으로 예약을 확인했습니다.\n') : '') + ddNextAfterDate.question;
-      sayBot(ddDtConfirmMsg);
-      return { logText: ddDtConfirmMsg, needsAgent: false, requestedFeature: null };
+      if (ddDtMsg) sayBot(ddDtMsg + '으로 예약을 확인했습니다.');
+      // proceedAfterCollecting()이 orderCategory==='daily_driver'일 때 pendingField(현재
+      // 'reserved_date')를 기준으로 다음 빈 항목을 찾아 진행한다 — 트리거 메시지에 출발지/
+      // 연락처 등이 이미 함께 왔었다면(findNextDailyDriverField 주석 참고) 그 항목들은 건너뛴다.
+      var ddDtNextText = proceedAfterCollecting();
+      return { logText: ddDtNextText, needsAgent: false, requestedFeature: null };
     }
 
     // reserved_date와 같은 이유로 빠져 있던 나머지 일일기사 전용 답변 처리(출발지 주소/연락처/
@@ -2182,20 +2194,18 @@
         return { logText: ddOriginRetryQ, needsAgent: false, requestedFeature: null };
       }
       document.getElementById('origin_address').value = ddOriginAddr;
-      var ddResumeOrigin = function () {
-        var ddFieldsAfterOrigin = flowApi.getDailyDriverFields(tripType);
-        var ddNext = findNextDailyDriverField(ddFieldsAfterOrigin, 3) || ddFieldsAfterOrigin[ddFieldsAfterOrigin.length - 1];
-        setPendingField(dailyDriverPendingId(ddNext));
-        sayBot(ddNext.question);
-        return { logText: ddNext.question, needsAgent: false, requestedFeature: null };
-      };
+      // 모호주소 후보 선택 뒤에는(startDisambiguation) applyDisambiguationChoice가
+      // dailyDriverDisambiguationResume 콜백으로 돌아온다 — proceedAfterCollecting을 그대로
+      // 넘기면 pendingField가 여전히 'origin_address'라서 그 기준으로 다음 항목을 찾는다.
       return validateAddressField('origin_address', '출발지 주소').then(function (r) {
         if (r && r.ambiguous) {
-          dailyDriverDisambiguationResume = ddResumeOrigin;
+          dailyDriverDisambiguationResume = function () {
+            return { logText: proceedAfterCollecting(), needsAgent: false, requestedFeature: null };
+          };
           return startDisambiguation([r]);
         }
         if (!r || !r.success) return { logText: null, needsAgent: false, requestedFeature: null };
-        return ddResumeOrigin();
+        return { logText: proceedAfterCollecting(), needsAgent: false, requestedFeature: null };
       });
     }
 
@@ -2209,22 +2219,11 @@
       document.getElementById('origin_contact').value = ddOriginContact;
       return validatePhoneField('origin_contact', '출발지 연락처').then(function (ok) {
         if (!ok) return { logText: null, needsAgent: false, requestedFeature: null };
-        var ddFieldsAfterContact = flowApi.getDailyDriverFields(tripType);
-        var ddNext = findNextDailyDriverField(ddFieldsAfterContact, 4) || ddFieldsAfterContact[ddFieldsAfterContact.length - 1];
-        setPendingField(dailyDriverPendingId(ddNext));
-        sayBot(ddNext.question);
-        return { logText: ddNext.question, needsAgent: false, requestedFeature: null };
+        return { logText: proceedAfterCollecting(), needsAgent: false, requestedFeature: null };
       });
     }
 
     if (orderCategory === 'daily_driver' && pendingField === 'vehicle_number') {
-      var ddGotoNextVehicleField = function () {
-        var ddFieldsAfterVehicle = flowApi.getDailyDriverFields(tripType);
-        var ddNext = findNextDailyDriverField(ddFieldsAfterVehicle, 5) || ddFieldsAfterVehicle[ddFieldsAfterVehicle.length - 1];
-        setPendingField(dailyDriverPendingId(ddNext));
-        sayBot(ddNext.question);
-        return { logText: ddNext.question, needsAgent: false, requestedFeature: null };
-      };
       // "없어"/"모름" 같은 스킵 응답은 dispatch 흐름의 handleVehicleNumberPendingReply와
       // 같은 방식으로 처리한다 — 그대로 validateVehicleNumberField에 넘기면 빈 값이 형식
       // 오류로 취급돼 "잘못된 차량번호입니다"가 잘못 뜬다.
@@ -2234,14 +2233,14 @@
         document.getElementById('vehicle_number').value = '';
         sayBot('차량번호는 출발지에서 다시 확인하겠습니다.');
         noteProgress();
-        return ddGotoNextVehicleField();
+        return { logText: proceedAfterCollecting(), needsAgent: false, requestedFeature: null };
       }
       var ddVehicleNo = data.vehicle_number || data.origin_vehicle_number || null;
       if (ddVehicleNo) document.getElementById('vehicle_number').value = ddVehicleNo;
       return validateVehicleNumberField('vehicle_number', '차량번호').then(function () {
         // 차량번호는 선택 항목이라 형식이 틀려도(validateVehicleNumberField가 이미 안내함) 다음으로 진행한다.
         vehicleNumberResolved = true;
-        return ddGotoNextVehicleField();
+        return { logText: proceedAfterCollecting(), needsAgent: false, requestedFeature: null };
       });
     }
 
@@ -2254,20 +2253,15 @@
       }
       document.getElementById('destination_address').value = ddDestAddr;
       if (window.__updateVehicleTypeRequirement) window.__updateVehicleTypeRequirement();
-      var ddResumeDest = function () {
-        var ddFieldsAfterDest = flowApi.getDailyDriverFields(tripType);
-        var ddNext = findNextDailyDriverField(ddFieldsAfterDest, 7) || ddFieldsAfterDest[ddFieldsAfterDest.length - 1];
-        setPendingField(dailyDriverPendingId(ddNext));
-        sayBot(ddNext.question);
-        return { logText: ddNext.question, needsAgent: false, requestedFeature: null };
-      };
       return validateAddressField('destination_address', '도착지 주소').then(function (r) {
         if (r && r.ambiguous) {
-          dailyDriverDisambiguationResume = ddResumeDest;
+          dailyDriverDisambiguationResume = function () {
+            return { logText: proceedAfterCollecting(), needsAgent: false, requestedFeature: null };
+          };
           return startDisambiguation([r]);
         }
         if (!r || !r.success) return { logText: null, needsAgent: false, requestedFeature: null };
-        return ddResumeDest();
+        return { logText: proceedAfterCollecting(), needsAgent: false, requestedFeature: null };
       });
     }
 
@@ -2306,22 +2300,20 @@
     // 최종 목적지 답변(왕복 일일기사)
     if (orderCategory === 'daily_driver' && pendingField === 'final_destination_address') {
       var finalAddr = data.destinationAddress || data.waypointAddress || null;
-      if (finalAddr) {
-        var fdEl = document.getElementById('final_destination_address');
-        if (fdEl) fdEl.value = finalAddr;
-        setPendingField('memo_customer');
-        var fdMemoQ = '기사 전달사항이 있으시면 알려주세요? (없으면 "없어"라고 답해주세요)';
-        sayBot(finalAddr + '(으)로 최종 목적지가 확인되었습니다.\n' + fdMemoQ);
-        return { logText: fdMemoQ, needsAgent: false, requestedFeature: null };
+      if (!finalAddr) {
+        var retryFdQ = '최종 목적지 주소를 다시 알려주세요.';
+        sayBot(retryFdQ);
+        return { logText: retryFdQ, needsAgent: false, requestedFeature: null };
       }
-      var retryFdQ = '최종 목적지 주소를 다시 알려주세요.';
-      sayBot(retryFdQ);
-      return { logText: retryFdQ, needsAgent: false, requestedFeature: null };
+      var fdEl = document.getElementById('final_destination_address');
+      if (fdEl) fdEl.value = finalAddr;
+      sayBot(finalAddr + '(으)로 최종 목적지가 확인되었습니다.');
+      return { logText: proceedAfterCollecting(), needsAgent: false, requestedFeature: null };
     }
 
     // 기사 전달사항(memo_customer) 답변 — 일일기사 흐름의 마지막 질문. handleAdditionalRequestPendingReply와
-    // 같은 판단(없음 표현이면 비움)을 쓰되, 탁송 전용 proceedAfterCollecting() 대신
-    // finishDailyDriverCollection()으로 마무리한다.
+    // 같은 판단(없음 표현이면 비움)을 쓰되, proceedAfterCollecting()이 orderCategory로
+    // 분기하므로 탁송의 destination_contact 등을 요구하지 않고 곧바로 요약·확인으로 넘어간다.
     if (orderCategory === 'daily_driver' && pendingField === 'memo_customer') {
       var ddMemoText = String(sourceText || '').trim();
       var ddMemoEl = document.getElementById('memo_customer');
@@ -2332,7 +2324,8 @@
         if (ddMemoEl) ddMemoEl.value = ddMemoVal;
         sayBot('전달사항을 \'' + ddMemoVal + '\'(으)로 확인했습니다.');
       }
-      return finishDailyDriverCollection();
+      additionalRequestResolved = true;
+      return { logText: proceedAfterCollecting(), needsAgent: false, requestedFeature: null };
     }
     // ---- /일일기사 전용 처리 끝 ----
 
@@ -2574,7 +2567,7 @@
       // 대화 시작 직후처럼 pendingField가 아직 없으면(어떤 질문에도 아직 답한 적이 없으면) 지금
       // 실제로 비어있는 다음 필수 항목을 기준으로 판단한다 — 텍스트로 답할 때의 기본 힌트 처리와 동일한 이유.
       var effectiveField = pendingField || (getNextMissingField() || {}).id || null;
-      var meta = fieldMetaFor(effectiveField);
+      var meta = currentFieldMetaFor(effectiveField);
       if (phase === 'collecting' && meta && meta.type === 'address') {
         applyFavoriteAddress(effectiveField, meta.label, f);
         return;
@@ -2613,7 +2606,7 @@
   function handleUnsupportedIntent(data, skipGate) {
     if (!skipGate && phase === 'collecting' && pendingField) {
       if (noteTrouble()) return { logText: null, needsAgent: false, requestedFeature: null };
-      var meta = fieldMetaFor(pendingField);
+      var meta = currentFieldMetaFor(pendingField);
       sayBot('죄송합니다, 답변을 이해하지 못했습니다. ' + (meta ? meta.question : '다시 한번 말씀해주세요.'));
       return { logText: null, needsAgent: false, requestedFeature: null };
     }
@@ -2791,9 +2784,9 @@
         phase: phase,
         pendingField: pendingField,
         pendingDisambiguation: pendingDisambiguation,
-        chooseFieldClarify: CHOOSE_FIELD_CLARIFY,
+        chooseFieldClarify: chooseFieldClarifyText(),
         getFieldQuestion: function (fieldId) {
-          var meta = fieldMetaFor(fieldId);
+          var meta = currentFieldMetaFor(fieldId);
           return meta ? meta.question : null;
         },
         candidateListText: candidateListText,
@@ -2993,12 +2986,21 @@
   // ---------------- "어느 부분을 수정해드릴까요?" 응답 처리 ----------------
   function matchFieldKeyword(text) {
     for (var i = 0; i < FIELD_KEYWORDS.length; i++) {
-      if (FIELD_KEYWORDS[i].re.test(text)) return fieldMetaFor(FIELD_KEYWORDS[i].id);
+      if (FIELD_KEYWORDS[i].re.test(text)) return currentFieldMetaFor(FIELD_KEYWORDS[i].id);
     }
     return null;
   }
 
   var CHOOSE_FIELD_CLARIFY = flowApi.getChooseFieldClarifyText();
+  // CHOOSE_FIELD_CLARIFY(탁송 전용 6항목 목록, "도착지 연락처" 포함)를 그대로 쓰면 일일기사
+  // 사용자에게는 없는 항목(도착지 연락처)을 고르라고 하고, 있는 항목(이용형태/전달사항/
+  // 최종목적지)은 목록에서 빠진다 — orderCategory에 따라 다른 목록을 보여준다.
+  function chooseFieldClarifyText() {
+    if (orderCategory === 'daily_driver') {
+      return '이용 형태 / 예약일시 / 출발지 주소 / 출발지 연락처 / 차량번호 / 경유지 / 도착지 주소 / 기사 전달사항 중 어느 항목을 수정할지 말씀해주세요?';
+    }
+    return CHOOSE_FIELD_CLARIFY;
+  }
 
   function applyFieldChoice(field, text) {
     noteProgress();
@@ -3075,7 +3077,7 @@
         return applyFieldChoice(field, sourceText);
       },
       onClassifiedField: function (fieldId, sourceText) {
-        var meta = fieldMetaFor(fieldId);
+        var meta = currentFieldMetaFor(fieldId);
         if (meta) return applyFieldChoice(meta, sourceText);
         return null;
       },
@@ -3087,8 +3089,9 @@
       },
       onTrouble: noteTrouble,
       onClarify: function () {
-        addBubble(CHOOSE_FIELD_CLARIFY, 'bot', null, true);
-        logBotMessage({ logText: CHOOSE_FIELD_CLARIFY, needsAgent: false, requestedFeature: null });
+        var clarifyText = chooseFieldClarifyText();
+        addBubble(clarifyText, 'bot', null, true);
+        logBotMessage({ logText: clarifyText, needsAgent: false, requestedFeature: null });
         return null;
       },
     });
@@ -3661,7 +3664,7 @@
         // Gemini는 "형식이 안 맞는 연락처"를 그냥 필드를 비운 채로 돌려준다(값을 몰라서가 아니라 못 알아봐서).
         // 지금 막 연락처를 물어본 상태이고 답변이 숫자/기호로만 되어 있으면(=전화번호를 시도한 것으로 보이면)
         // Gemini의 판단과 무관하게 직접 형식을 검사해서 이유를 알려준다.
-        var pendingMeta = fieldMetaFor(pendingField);
+        var pendingMeta = currentFieldMetaFor(pendingField);
         var pendingWasFilled = pendingMeta && isOrderIntent(data.intent) && data[pendingField];
         if (pendingMeta && pendingMeta.type === 'phone' && !pendingWasFilled && /^[\d\-\s()]{2,}$/.test(text)) {
           document.getElementById(pendingField).value = text;
