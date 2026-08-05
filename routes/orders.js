@@ -934,11 +934,14 @@ router.post('/', asyncHandler(async (req, res) => {
     VALUES (?, ?, NULL, '오더등록', '최초 등록')
   `, [newId, u.id]);
 
-  // 콜마너 오더접수는 더 이상 오더 "생성" 시점에 바로 나가지 않는다 — 로컬 상태가 '접수'로
-  // 바뀔 때(POST /:id/status의 registerOrderWithCallmaner 호출)만 나간다. 오더등록/대기 등
-  // 아직 검토 중인 단계에서 미리 콜마너에 등록해버리면(지사캐시 부족 등으로 실패해도 재시도가
-  // 없어) 담당자가 확인하기도 전에 실패로 굳어버리는 문제가 있었다 — 담당자가 실제로 접수
-  // 처리하는 시점에 맞춰 등록하도록 트리거를 옮겼다(사용자 확정 사항).
+  // 콜마너 오더접수 — 오더 등록(생성) 시점에 바로 나간다(사용자 확정 사항). registerOrderWithCallmaner가
+  // 항상 대기(status='5')로 등록하므로(lib/callmaner.js), 담당자가 검토하기 전에 곧바로 배차
+  // 대상이 되지는 않는다. await로 기다리는 이유는 POST /:id/status와 동일하다 — 실측 약 1초라
+  // 체감 지연이 적고, Vercel 서버리스는 응답 후 인스턴스를 얼려 기다리지 않은 백그라운드 작업이
+  // 완료되지 않을 수 있다. 실패는 함수 안에서 잡아 DB에 기록하므로 오더 등록 자체는 항상
+  // 성공한다. 이후 상태를 접수/대기로 바꾸면(POST /:id/status) 실패했던 등록이 재시도된다
+  // (registerOrderWithCallmaner는 conf_slip이 이미 있으면 조용히 건너뛰어 중복 등록하지 않음).
+  await registerOrderWithCallmaner(newId, finalBranch);
 
   // §7-2 자동 승격 판정 — premium 오더 접수 후 실제 소요시간이 8시간 이상이면 daily_driver로 전환
   // fire-and-forget: 경로탐색 실패/지연은 오더 등록 자체를 막지 않는다.
@@ -1632,11 +1635,12 @@ router.post('/:id/order-type', requireRole('admin'), asyncHandler(async (req, re
   res.redirect('/orders/' + req.params.id);
 }));
 
-// 콜마너 오더접수 — 오더 상태가 '접수'로 바뀌는 시점에만 fire-and-forget으로 호출한다(오더
-// 생성 시점엔 더 이상 호출하지 않음 — 위 POST '/' 주석 참고). 오더 row를 DB에서 다시 읽어서
-// 쓰므로 호출 시점(생성 직후든, 한참 뒤 상태변경이든)과 무관하게 항상 최신 값을 보낸다.
-// 이미 conf_slip이 있으면(중복 등록 방지) 조용히 넘어가고, 실패해도 재시도는 하지 않는다
-// (지사캐시 부족 등으로 실패한 뒤 상태를 다시 접수로 바꾸면 그때 재시도되는 정도로 충분).
+// 콜마너 오더접수 — 오더 등록(생성) 시점에 호출하고(위 POST '/'), 상태를 접수/대기로 바꿀
+// 때(POST /:id/status, CALLMANER_TRIGGER_STATUSES)도 다시 호출한다. 오더 row를 DB에서 다시
+// 읽어서 쓰므로 호출 시점(생성 직후든, 한참 뒤 상태변경이든)과 무관하게 항상 최신 값을 보낸다.
+// 이미 conf_slip이 있으면(중복 등록 방지) 조용히 넘어가고 — 그래서 상태변경 때의 재호출은
+// 실제로는 "생성 시점에 실패했으면 재시도"로만 동작한다(지사캐시 부족 등). lib/callmaner.js가
+// 콜마너 쪽 접수상태를 항상 대기(5)로 고정하므로, 등록 즉시 배차 대상이 되지는 않는다.
 async function registerOrderWithCallmaner(orderId, branchId) {
   try {
     const branchRow = await db.get('SELECT * FROM branches WHERE id = ?', [branchId]);
@@ -1669,9 +1673,6 @@ async function registerOrderWithCallmaner(orderId, branchId) {
       memo_customer: order.memo_customer || '',
       order_type: order.order_type,
       reserved_date: order.reserved_date, reserved_time: order.reserved_time,
-      // 콜마너 접수상태(0접수/5대기/4문의)로 매핑해서 보낸다 — 로컬에서 '대기'인 오더가
-      // 콜마너에서도 대기로 들어가 곧바로 배차 대상이 되지 않는다.
-      status: order.status,
     };
     const result = await callmaner.orderReceipt(orderForCallmaner, branchRow, paymentMethodRow && paymentMethodRow.name, waypointRows);
     await tryUpdateWithErrorCodeColumn(
