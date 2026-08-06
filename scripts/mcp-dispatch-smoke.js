@@ -8,6 +8,10 @@
 //   node scripts/mcp-dispatch-smoke.js --cid 01012345678 [--repNo 12345]
 //                                      [--origin 사당역] [--destination 강남역]
 //                                      [--raise 5000] [--skip-create]
+//                                      [--scheduled "2027-07-27 16:50"] [--status 5]
+//
+// --status 5(대기) / 4(문의)로 등록하면 실제 기사에게 배차가 나가지 않는다. 실제 고객 번호로
+// 점검할 때는 --status 5 와 먼 미래 --scheduled 를 함께 써서 실기사 출동을 피한다.
 //
 // 사전 조건: .env의 MCP_DISPATCH_API_KEY, 그리고 cid가 콜마너에 고객으로 등록돼 있어야 한다
 // (미등록이면 call.create가 CUSTOMER_NOT_FOUND로 거부한다 — 이 스크립트로 확인 가능).
@@ -42,6 +46,8 @@ async function main() {
   const originKeyword = args.origin || '사당역';
   const destinationKeyword = args.destination || '강남역';
   const raiseFare = Number(args.raise || 5000);
+  const scheduledAt = typeof args.scheduled === 'string' ? args.scheduled : null;
+  const status = typeof args.status === 'string' ? args.status : null;
 
   if (!cid) return fail('--cid 로 테스트 고객 연락처를 지정해주세요 (예: --cid 01012345678).');
   if (!mcp.isConfigured()) return fail('MCP_DISPATCH_API_KEY 환경변수가 없습니다 (.env 확인).');
@@ -71,15 +77,21 @@ async function main() {
   }
 
   const createArgs = {
-    repNo, cid, serviceType: 'immediate',
+    repNo, cid, serviceType: scheduledAt ? 'scheduled' : 'immediate',
     departure: { name: departure.name, region: departure.region, xy: departure.xy, address: '' },
     arrival: { name: arrival.name, region: arrival.region, xy: arrival.xy, address: '' },
     notes: '연동 점검 테스트(등록 후 자동 취소)',
   };
   if (quote.ok && quote.data.recommendedFare) createArgs.fare = quote.data.recommendedFare;
+  if (scheduledAt) createArgs.scheduledAt = scheduledAt;   // KST 기준 "YYYY-MM-DD HH:mm"
+  if (status) createArgs.status = status;
 
   const created = await mcp.callTool('call.create', createArgs, { timeoutMs: 20000 });
-  log('4. 주문 등록(call.create)', created);
+  log('4. 주문 등록(call.create) — 요청', createArgs);
+  log('4-1. 주문 등록 — 응답', created);
+  if (created.ok && scheduledAt) {
+    console.log(`   scheduledAt 대조: 보낸값="${scheduledAt}" / 응답값="${created.data.scheduledAt || '(없음)'}"`);
+  }
   if (!created.ok) return fail('주문 등록 실패: ' + created.error);
   const rcptNo = created.data.rcptNo;
 
