@@ -1426,6 +1426,12 @@ router.post('/:id', asyncHandler(async (req, res) => {
     }
   }
 
+  // 이미 콜마너에 접수된 오더(callmaner_conf_slip 있음)라면 방금 저장한 내용을 OrderModify로
+  // 실시간 반영한다(registerOrderWithCallmaner와 같은 이유로 await한다 — 응답/리다이렉트가
+  // 실패 상태보다 먼저 그려지면 실패 배너가 뒤늦게 뜬다). 아직 접수 전이면 함수 안에서 바로
+  // 리턴하므로 여기서 분기할 필요 없다.
+  await updateOrderWithCallmaner(req.params.id, finalBranch);
+
   broadcastOrderListChangedAsync();
   if (wantsJson) return res.json({ orderId: Number(req.params.id), oid: order.oid, legsReset });
   res.redirect('/orders/' + req.params.id + (legsReset ? '?notice=legs_reset' : ''));
@@ -1728,6 +1734,61 @@ async function registerOrderWithCallmaner(orderId, branchId) {
     console.error('콜마너 오더접수 실패:', e.message, e.rc ? `(rc=${e.rc})` : '');
     // 콜마너가 응답한 에러코드(rc)는 별도 컬럼에 담아, 화면에서 코드만 따로 보여줄 수 있게 한다.
     // 좌표 누락 같은 우리 쪽 사전검증 실패는 요청이 나가지 않아 rc가 없다(NULL로 남는다).
+    const msg = String(e.message || '').slice(0, 500);
+    await tryUpdateWithErrorCodeColumn(
+      'UPDATE orders SET callmaner_last_error = ?, callmaner_last_error_code = ? WHERE id = ?',
+      [msg, e.rc ? String(e.rc).slice(0, 40) : null, orderId],
+      'UPDATE orders SET callmaner_last_error = ? WHERE id = ?',
+      [msg, orderId]
+    );
+  }
+}
+
+// 오더수정(POST /:id)이 이미 콜마너에 접수된(callmaner_conf_slip 있는) 오더의 내용을
+// 바꾸면 OrderModify로 실시간 반영한다 — registerOrderWithCallmaner(최초 접수)와 짝을 이루는
+// 함수다. 아직 접수 전(conf_slip 없음)이면 여기서 할 일이 없다(최초 접수는 registerOrder
+// WithCallmaner가 생성/상태변경 시점에 담당).
+async function updateOrderWithCallmaner(orderId, branchId) {
+  try {
+    const branchRow = await db.get('SELECT * FROM branches WHERE id = ?', [branchId]);
+    if (!branchRow || !branchRow.callmaner_enabled) return;
+    const order = await db.get('SELECT * FROM orders WHERE id = ?', [orderId]);
+    if (!order || !order.callmaner_conf_slip) return;
+    const paymentMethodRow = order.payment_method_id
+      ? await db.get('SELECT name FROM payment_methods WHERE id = ?', [order.payment_method_id])
+      : null;
+    const waypointRows = await db.all(
+      'SELECT address, address_detail, lat, lon FROM order_waypoints WHERE order_id = ? ORDER BY seq',
+      [orderId]
+    ).catch(() => []);
+    const requesterRow = order.created_by
+      ? await db.get('SELECT phone FROM users WHERE id = ?', [order.created_by]).catch(() => null)
+      : null;
+    const orderForCallmaner = {
+      origin_contact: order.origin_contact,
+      requester_phone: requesterRow && requesterRow.phone,
+      origin_lat: order.origin_lat, origin_lon: order.origin_lon,
+      origin_sido: order.origin_sido, origin_sigugun: order.origin_sigugun, origin_dong: order.origin_dong,
+      origin_address: order.origin_address, origin_address_detail: order.origin_address_detail,
+      destination_lat: order.destination_lat, destination_lon: order.destination_lon,
+      destination_sido: order.destination_sido, destination_sigugun: order.destination_sigugun, destination_dong: order.destination_dong,
+      destination_address: order.destination_address, destination_address_detail: order.destination_address_detail,
+      fare_amount: order.fare_amount || 0,
+      memo_customer: order.memo_customer || '',
+      order_type: order.order_type,
+      reserved_date: order.reserved_date, reserved_time: order.reserved_time,
+    };
+    await callmaner.orderModify(orderForCallmaner, branchRow, paymentMethodRow && paymentMethodRow.name, waypointRows, order.callmaner_conf_slip);
+    await tryUpdateWithErrorCodeColumn(
+      `UPDATE orders SET callmaner_synced_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS'),
+       callmaner_last_error = NULL, callmaner_last_error_code = NULL WHERE id = ?`,
+      [orderId],
+      `UPDATE orders SET callmaner_synced_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS'),
+       callmaner_last_error = NULL WHERE id = ?`,
+      [orderId]
+    );
+  } catch (e) {
+    console.error('콜마너 오더수정 실패:', e.message, e.rc ? `(rc=${e.rc})` : '');
     const msg = String(e.message || '').slice(0, 500);
     await tryUpdateWithErrorCodeColumn(
       'UPDATE orders SET callmaner_last_error = ?, callmaner_last_error_code = ? WHERE id = ?',
