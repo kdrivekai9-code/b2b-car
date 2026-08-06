@@ -1991,3 +1991,8 @@ router.post('/:id/fare', asyncHandler(async (req, res) => {
 }));
 
 module.exports = router;
+// MCP 배차 도우미(lib/mcpDispatchAgent.js)가 콜마너 MCP 도구로 주문을 변경한 뒤, 그 결과가
+// 우리 orders 테이블에도 반영되도록(그리고 OrderModify로 콜마너에 다시 한번 확실히 반영되도록)
+// 재사용한다 — Express 라우터 함수 자체에 속성을 붙이는 것이라 app.use(orderRoutes) 쪽에는
+// 영향이 없다.
+module.exports.updateOrderWithCallmaner = updateOrderWithCallmaner;

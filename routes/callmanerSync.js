@@ -65,6 +65,25 @@ async function syncDriverInfo(branch, order, item, statusCode) {
   );
 }
 
+// OrderAllStatus 응답에는 요금(charge)이 들어있어 안전하게 동기화할 수 있다 — 반면 주소
+// (dep_*/arr_*)는 콜마너가 축약된 지명만 주는 경우가 많아(우리 쪽 상세주소를 덮어써서 정보
+// 손실이 날 위험) 폴링으로는 동기화하지 않는다(주소/예약시간 변경은 MCP 챗봇 도구 실행 직후
+// 우리 쪽에서 직접 반영 — lib/mcpDispatchAgent.js 참고). 예약시간(reservation_time)은
+// 정의서상 OrderAllStatus/OrderInfo 응답 어디에도 없어 폴링으로는 애초에 알 수 없다.
+async function syncFare(order, item) {
+  const charge = Number(item.charge);
+  if (!Number.isFinite(charge) || charge <= 0) return;
+  if (charge === Number(order.fare_amount || 0)) return;
+  await db.run(
+    `UPDATE orders SET fare_amount = ?, updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') WHERE id = ?`,
+    [charge, order.id]
+  );
+  await db.run(
+    `INSERT INTO order_status_history (order_id, actor_user_id, old_status, new_status, note) VALUES (?, NULL, ?, ?, ?)`,
+    [order.id, order.status, order.status, `[콜마너] 요금 동기화: ${Number(order.fare_amount || 0).toLocaleString('ko-KR')}원 → ${charge.toLocaleString('ko-KR')}원`]
+  );
+}
+
 router.get('/sync', checkCronAuth, asyncHandler(async (req, res) => {
   const branches = await db.all('SELECT * FROM branches WHERE callmaner_enabled = true');
   const summary = [];
@@ -89,6 +108,7 @@ router.get('/sync', checkCronAuth, asyncHandler(async (req, res) => {
         // 기사(이름/사번/연락처) 정보는 상태 매핑 여부와 무관하게 항상 확인한다 — 03(타사배차)처럼
         // 로컬 status는 안 바꾸는 코드라도 기사 배정 정보 자체는 그대로 보여줘야 한다.
         await syncDriverInfo(branch, order, item, statusCode);
+        await syncFare(order, item).catch((e) => console.error(`요금 동기화 실패 (conf_slip=${item.conf_slip}):`, e.message));
 
         if (mappedStatus && mappedStatus !== order.status) {
           await db.run(
