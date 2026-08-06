@@ -268,6 +268,14 @@ async function buildAiIntakeInitData(scope, userId) {
   };
 }
 
+// 화면에 재진입할 때마다(대시보드 갔다 오는 정도가 아니라 며칠 전 대화까지) 항상 마지막
+// 대화를 그대로 이어서 보여주고 있었다 — 사용자 확정: 30분 넘게 아무 메시지도 없었으면
+// 자동으로는 이어주지 않고 새 대화로 시작한다(단, requestedSessionId로 특정 세션을 콕
+// 집어 여는 경우는 의도적인 이동이라 이 제한을 적용하지 않는다 — 예: 상담 이력에서 클릭).
+// chat_sessions.updated_at은 상태전환/숨김 때만 갱신돼 "마지막 활동 시각"으로 못 쓰므로,
+// 실제 마지막 메시지(chat_messages.created_at, 없으면 세션 생성시각)를 기준으로 판단한다.
+const SESSION_IDLE_TIMEOUT_MINUTES = 30;
+
 async function loadAiIntakeRestoreData(userId, requestedSessionId) {
   const existingSession = await (requestedSessionId
     ? db.get(
@@ -275,9 +283,32 @@ async function loadAiIntakeRestoreData(userId, requestedSessionId) {
         [requestedSessionId, userId]
       )
     : db.get(
-        `SELECT id, status, draft_json FROM chat_sessions WHERE user_id = ? AND status != 'closed' AND user_hidden_at IS NULL ORDER BY created_at DESC LIMIT 1`,
+        `SELECT id, status, draft_json FROM chat_sessions cs
+         WHERE cs.user_id = ? AND cs.status != 'closed' AND cs.user_hidden_at IS NULL
+           AND to_timestamp(
+             COALESCE((SELECT MAX(cm.created_at) FROM chat_messages cm WHERE cm.session_id = cs.id), cs.created_at),
+             'YYYY-MM-DD HH24:MI:SS'
+           ) > (now() at time zone 'Asia/Seoul') - interval '${SESSION_IDLE_TIMEOUT_MINUTES} minutes'
+         ORDER BY cs.created_at DESC LIMIT 1`,
         [userId]
       ));
+
+  // 30분 넘게 방치된 세션들은 새로 안 이어줄 뿐 아니라 닫아둔다 — 안 그러면 상담원 모니터링
+  // 화면에 끝난 지 오래된 대화가 'bot' 상태로 계속 활성 세션처럼 남는다. 위 조회와 시간 조건이
+  // 반대(초과 vs 이하)라 서로 겹치지 않으므로, 방금 찾은 existingSession을 따로 제외할 필요는
+  // 없다. requestedSessionId로 특정해서 들어온 경우는 사용자가 그 대화를 보려는 것이므로
+  // 건드리지 않는다.
+  if (!requestedSessionId) {
+    await db.run(
+      `UPDATE chat_sessions cs SET status = 'closed'
+       WHERE cs.user_id = ? AND cs.status != 'closed' AND cs.user_hidden_at IS NULL
+         AND to_timestamp(
+           COALESCE((SELECT MAX(cm.created_at) FROM chat_messages cm WHERE cm.session_id = cs.id), cs.created_at),
+           'YYYY-MM-DD HH24:MI:SS'
+         ) <= (now() at time zone 'Asia/Seoul') - interval '${SESSION_IDLE_TIMEOUT_MINUTES} minutes'`,
+      [userId]
+    ).catch((e) => console.error('유휴 챗봇 세션 정리 실패:', e.message));
+  }
 
   let existingMessages = [];
   let existingDraft = null;
