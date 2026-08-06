@@ -162,6 +162,20 @@ export default function OrderSidePanel({ data, orderId, state, setField }) {
         <div className="kv"><span className="k">배정 기사</span><span>{order.driver_name || '미배정'}</span></div>
       )}
 
+      {/* 콜마너 쪽에서 실제 배차한 기사 — 위 "배정 기사"(우리 자체 drivers 테이블 배정)와는
+          완전히 별개다. routes/callmanerSync.js가 1분 폴링(OrderAllStatus의 wk_name)과
+          상태가 배차로 바뀔 때 1회(WkContactSearch)로 채운다. */}
+      {(order.callmaner_driver_name || order.callmaner_driver_phone) && (
+        <div className="kv">
+          <span className="k">콜마너 배정 기사</span>
+          <span>
+            {order.callmaner_driver_name || '이름 미확인'}
+            {order.callmaner_driver_sabun ? ` (사번 ${order.callmaner_driver_sabun})` : ''}
+            {order.callmaner_driver_phone ? ` · ${order.callmaner_driver_phone}` : ''}
+          </span>
+        </div>
+      )}
+
       {canManageDriver && (
         <>
           <div className="section-title small">사진 업로드 링크(기사 전달용, 로그인 불필요)</div>

@@ -159,6 +159,14 @@
           <button class="btn" type="submit">배정 저장</button>
         </form>
       <% } %>
+      <% if (order.callmaner_driver_name || order.callmaner_driver_phone) { %>
+      <!-- 콜마너 쪽에서 실제 배차한 기사 — 위 배정(우리 자체 drivers 테이블)과는 완전히
+           별개다. routes/callmanerSync.js가 1분 폴링 + 상태가 배차로 바뀔 때 1회 채운다. -->
+      <div class="kv">
+        <span class="k">콜마너 배정 기사</span>
+        <span><%= order.callmaner_driver_name || '이름 미확인' %><% if (order.callmaner_driver_sabun) { %> (사번 <%= order.callmaner_driver_sabun %>)<% } %><% if (order.callmaner_driver_phone) { %> · <%= order.callmaner_driver_phone %><% } %></span>
+      </div>
+      <% } %>
       <div class="section-title small">사진 업로드 링크(기사 전달용, 로그인 불필요)</div>
       <input type="text" class="photo-link-input" readonly value="<%= baseUrl %>/upload/<%= order.photo_upload_token %>" onclick="this.select()">
     </div>

@@ -17,6 +17,54 @@ function checkCronAuth(req, res, next) {
   next();
 }
 
+// callmaner_driver_* 컬럼은 20260806000000 마이그레이션에서 추가된다 — 아직 적용하지 않은
+// DB에서도(구버전 호환, callmaner_last_error_code와 같은 이유) 상태 동기화 자체는 계속
+// 돌아야 하므로, 컬럼 있는 쿼리가 실패하면 그 컬럼 없는 쿼리로 한 번 더 시도한다.
+async function tryUpdateDriverColumns(sqlWithDriver, paramsWithDriver, sqlWithoutDriver, paramsWithoutDriver) {
+  try {
+    await db.run(sqlWithDriver, paramsWithDriver);
+  } catch (e) {
+    await db.run(sqlWithoutDriver, paramsWithoutDriver).catch(() => {});
+  }
+}
+
+// OrderAllStatus의 wk_name("사번*이름")을 분리해 우리쪽 배정 기사(drivers 테이블)와는 별개인
+// "콜마너 배정 기사" 이름/사번을 저장한다. 실제 연락처(가상번호)는 이 폴링 응답에 없으므로,
+// 상태가 배차(status_code=02)로 갓 바뀌었고 아직 연락처를 못 받은 경우에만 별도 API
+// (기사연락처조회/WkContactSearch)를 호출해 채운다 — 매 폴링(1분)마다 부르면 불필요한 호출이
+// 쌓이므로 "아직 없을 때"로만 제한한다.
+async function syncDriverInfo(branch, order, item, statusCode) {
+  const parsed = callmaner.parseDriverNameField(item.wk_name);
+  let name = parsed.name || null;
+  let sabun = parsed.sabun || null;
+  let phone = order.callmaner_driver_phone || null;
+
+  const needsContact = statusCode === '02' && !order.callmaner_driver_phone;
+  if (needsContact) {
+    try {
+      const contact = await callmaner.wkContactSearch(branch, item.conf_slip);
+      name = contact.name || name;
+      sabun = contact.sabun || sabun;
+      phone = contact.phone || phone;
+    } catch (e) {
+      console.error(`기사연락처조회 실패 (conf_slip=${item.conf_slip}):`, e.message);
+    }
+  }
+
+  const changed = name !== (order.callmaner_driver_name || null)
+    || sabun !== (order.callmaner_driver_sabun || null)
+    || phone !== (order.callmaner_driver_phone || null);
+  if (!changed) return;
+
+  await tryUpdateDriverColumns(
+    `UPDATE orders SET callmaner_driver_name = ?, callmaner_driver_sabun = ?, callmaner_driver_phone = ? WHERE id = ?`,
+    [name, sabun, phone, order.id],
+    // 마이그레이션 전 DB에서는 그냥 아무것도 안 함(할 수 있는 컬럼이 없음) — 두 번째 인자로 no-op 쿼리
+    `SELECT 1`,
+    []
+  );
+}
+
 router.get('/sync', checkCronAuth, asyncHandler(async (req, res) => {
   const branches = await db.all('SELECT * FROM branches WHERE callmaner_enabled = true');
   const summary = [];
@@ -37,6 +85,10 @@ router.get('/sync', checkCronAuth, asyncHandler(async (req, res) => {
         const statusCode = item.status_code;
         const mappedStatus = callmaner.STATUS_CODE_TO_LOCAL_STATUS[statusCode];
         const rawNote = `[콜마너] 상태동기화: ${item.status || ''}(${statusCode || ''})`;
+
+        // 기사(이름/사번/연락처) 정보는 상태 매핑 여부와 무관하게 항상 확인한다 — 03(타사배차)처럼
+        // 로컬 status는 안 바꾸는 코드라도 기사 배정 정보 자체는 그대로 보여줘야 한다.
+        await syncDriverInfo(branch, order, item, statusCode);
 
         if (mappedStatus && mappedStatus !== order.status) {
           await db.run(
