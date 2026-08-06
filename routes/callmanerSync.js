@@ -93,6 +93,7 @@ async function syncFare(order, item) {
 // OrderInfo는 conf_slip만으로 조회되고 userHp 스코프를 타지 않아 이 문제가 없다.
 const SYNC_BY_CONF_SLIP_LIMIT = Number(process.env.CALLMANER_SYNC_ORDER_LIMIT || 40);
 const SYNC_LOOKBACK_DAYS = Number(process.env.CALLMANER_SYNC_LOOKBACK_DAYS || 3);
+const SYNC_CONCURRENCY = Number(process.env.CALLMANER_SYNC_CONCURRENCY || 5);
 const TERMINAL_LOCAL_STATUSES = ['완료', '취소'];
 
 async function syncOrdersByConfSlip(branch) {
@@ -108,14 +109,31 @@ async function syncOrdersByConfSlip(branch) {
     [branch.id, ...TERMINAL_LOCAL_STATUSES, SYNC_BY_CONF_SLIP_LIMIT]
   );
 
+  // 오더 1건당 1회 호출이라 순차로 돌면 건수만큼 시간이 걸린다 — 작은 묶음으로 병렬 조회한다.
+  // (목록형 API가 있으면 1회로 끝나지만 콜마너에 그런 명령이 없다: OrderList/OrderAll/
+  //  OrderStatusList 등 전부 E4[1003]. 유일한 목록형인 OrderAllStatus는 우리 외부연동 접수건을
+  //  돌려주지 않고, 돌려주는 건들도 status_code가 비어 있어 상태 매핑이 불가능하다 — 실측.)
+  const infoByOrderId = new Map();
+  for (let i = 0; i < orders.length; i += SYNC_CONCURRENCY) {
+    const chunk = orders.slice(i, i + SYNC_CONCURRENCY);
+    await Promise.all(chunk.map(async (order) => {
+      try {
+        infoByOrderId.set(order.id, await callmaner.orderInfo(branch, order.callmaner_conf_slip, order.origin_contact));
+      } catch (e) {
+        console.error(`단건 상태조회 실패 (conf_slip=${order.callmaner_conf_slip}):`, e.message);
+      }
+    }));
+  }
+
   let updated = 0;
   for (const order of orders) {
-    let info;
-    try {
-      info = await callmaner.orderInfo(branch, order.callmaner_conf_slip, order.origin_contact);
-    } catch (e) {
-      console.error(`단건 상태조회 실패 (conf_slip=${order.callmaner_conf_slip}):`, e.message);
-      continue;
+    const info = infoByOrderId.get(order.id);
+    if (!info) continue;
+
+    // 같은 응답에 요금(price)도 들어 있어 함께 맞춘다 — 요금 동기화는 원래 OrderAllStatus
+    // 응답으로만 하고 있었는데 그 경로가 사실상 죽어 있어 한 번도 동작하지 않았다.
+    if (info.price != null) {
+      await syncFare(order, { charge: info.price }).catch((e) => console.error(`요금 동기화 실패 (conf_slip=${order.callmaner_conf_slip}):`, e.message));
     }
 
     const mappedStatus = callmaner.STATUS_TEXT_TO_LOCAL_STATUS[info.status];
