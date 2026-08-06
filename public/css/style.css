@@ -443,7 +443,7 @@ textarea.single-line-textarea{min-height:36px;height:36px;padding:8px 10px;resiz
 .ai-chat-bubble.ai-user{background:linear-gradient(135deg,var(--blue),var(--navy2));color:#fff;align-self:flex-end;border-bottom-right-radius:4px;box-shadow:0 2px 8px rgba(52,104,192,.3);}
 .ai-chat-bubble.ai-agent{background:linear-gradient(135deg,#16a34a,#0d7a3a);color:#fff;align-self:flex-start;border-bottom-left-radius:4px;box-shadow:0 2px 8px rgba(22,163,74,.3);}
 .ai-chat-bubble.ai-user{display:flex;align-items:flex-start;gap:7px;}
-.ai-chat-bubble.ai-thinking{opacity:.8;font-style:italic;}
+.ai-chat-bubble.ai-thinking{opacity:.8;font-style:italic;color:var(--navy);}
 .ai-thinking-dots{display:inline-block;}
 .ai-thinking-dots span{opacity:0;animation:aiThinkingDot 1.8s ease-in-out infinite;}
 .ai-thinking-dots span:nth-child(1){animation-delay:0s;}
