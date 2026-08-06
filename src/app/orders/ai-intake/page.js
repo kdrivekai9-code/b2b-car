@@ -2,6 +2,7 @@ import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import AppShell from '../../_components/AppShell';
 import AiIntakeWorkspace from './AiIntakeWorkspace';
+import { renderChatText } from './formatChatText';
 
 export const dynamic = 'force-dynamic';
 export const preferredRegion = 'icn1';
@@ -114,7 +115,7 @@ export default async function AiIntakePage({ searchParams }) {
               {messages.slice(-12).map((message) => (
                 <div key={message.id} className={`ai-chat-bubble ${message.sender === 'user' ? 'ai-user' : message.sender === 'agent' ? 'ai-agent' : 'ai-bot'}`} style={{ maxWidth: '100%' }}>
                   {message.sender === 'agent' && <span className="bubble-label">상담원</span>}
-                  <div>{message.message}</div>
+                  <div>{message.sender === 'user' ? message.message : renderChatText(message.message)}</div>
                 </div>
               ))}
             </div>

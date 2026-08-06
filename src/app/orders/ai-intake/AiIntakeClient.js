@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { renderChatText } from './formatChatText';
 
 const STATUS_LABEL = {
   bot: '봇 응대중',
@@ -1151,7 +1152,7 @@ export default function AiIntakeClient({
           return (
             <div key={message.id} className={bubbleClass} style={{ maxWidth: '100%' }}>
               {message.sender === 'agent' && <span className="bubble-label">상담원</span>}
-              <div>{message.text}</div>
+              <div>{message.sender === 'user' ? message.text : renderChatText(message.text)}</div>
             </div>
           );
         })}
