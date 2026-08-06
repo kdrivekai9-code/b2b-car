@@ -201,14 +201,25 @@
       </ul>
     </div>
 
+    <%
+      // 고객은 상담원/관리자와 완전히 같은 권한을 가질 수 없다(사용자 확정 사항, routes/orders.js
+      // CLIENT_ALLOWED_STATUS_TARGETS와 반드시 같아야 함) — 기사 배정 후에는 아예 막고,
+      // 배정 전이라도 대기/취소만 고를 수 있다.
+      const isClientRole = currentUser.role === 'client';
+      const clientAllowedStatuses = ['대기', '취소'];
+      const statusOptions = isClientRole ? clientAllowedStatuses : ORDER_STATUSES;
+    %>
     <div class="card">
       <h2>상태 변경</h2>
+      <% if (isClientRole && order.hasAssignedDriver) { %>
+        <p class="fare-calc-hint">기사님이 이미 배정된 상태입니다. 상태 변경은 상담원 챗봇이나 고객센터를 통해 요청해주세요.</p>
+      <% } else { %>
       <form method="POST" action="/orders/<%= order.id %>/status">
         <div class="row">
           <div class="field">
             <label>새 상태</label>
             <select name="status">
-              <% ORDER_STATUSES.forEach(function(s){ %>
+              <% statusOptions.forEach(function(s){ %>
                 <option value="<%= s %>" <%= order.status === s ? 'selected' : '' %>><%= s %></option>
               <% }) %>
             </select>
@@ -217,6 +228,7 @@
         </div>
         <button class="btn" type="submit">상태 변경 저장</button>
       </form>
+      <% } %>
     </div>
   </div>
 </div>

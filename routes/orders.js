@@ -1537,6 +1537,9 @@ router.get('/:id', asyncHandler(async (req, res) => {
     || (u.role === 'client' && !!photoSettings.client_can_view);
   const photos = canViewPhotos ? await db.all('SELECT * FROM order_photos WHERE order_id = ? ORDER BY id DESC', [req.params.id]) : [];
   const legs = await buildOrderLegs(req.params.id, order, waypoints);
+  // "상태 변경" 카드가 고객에게 대기/취소만 허용하도록 제한하려면(POST /:id/status와 같은
+  // 기준) 배차 여부를 뷰에도 넘겨줘야 한다 — data.json(Next.js)은 이미 이 값을 내려주고 있었다.
+  order.hasAssignedDriver = hasAssignedDriver(order, legs);
 
   res.render('orders/detail', {
     title: '오더 상세 - ' + order.oid, order, history, waypoints, drivers, photos, canViewPhotos, legs,
@@ -1799,6 +1802,48 @@ async function updateOrderWithCallmaner(orderId, branchId) {
   }
 }
 
+// 정의서에는 "아무 상태로나" 바꾸는 API가 없다 — 대기/접수 전환(OrderStanby/
+// OrderStanbyRelease)과 취소(OrderCancel)만 지원한다. 그래서 우리 로컬 상태 중 이 세 가지에
+// 대응되는 것만 실시간으로 콜마너에 반영하고(대기(확인중)/접수(배차중)도 같은 전환으로
+// 취급), 나머지(기사배정/완료/문의/사고/과태료/취소요청/예약/오더등록)는 대응 API가 없어
+// 그대로 둔다 — 그 상태들은 여전히 콜마너→우리 방향 폴링(OrderAllStatus)으로만 반영된다.
+async function pushStatusChangeToCallmaner(order, status, note) {
+  if (!order.callmaner_conf_slip) return; // 아직 콜마너에 접수 전이면 반영할 대상이 없다.
+  try {
+    const branchRow = await db.get('SELECT * FROM branches WHERE id = ?', [order.branch_id]);
+    if (!branchRow || !branchRow.callmaner_enabled) return;
+
+    const confSlip = order.callmaner_conf_slip;
+    if (status === '취소') {
+      await callmaner.orderCancel(branchRow, confSlip, note || null);
+    } else if (status === '대기' || status === '대기(확인중)') {
+      await callmaner.orderStanby(branchRow, confSlip, order.callmaner_status_code || '0');
+    } else if (status === '접수' || status === '접수(배차중)') {
+      await callmaner.orderStanbyRelease(branchRow, confSlip);
+    } else {
+      return; // 대응하는 콜마너 API가 없는 상태 — 로컬 상태만 바뀌고 콜마너 쪽은 그대로 둔다.
+    }
+
+    await tryUpdateWithErrorCodeColumn(
+      `UPDATE orders SET callmaner_synced_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS'),
+       callmaner_last_error = NULL, callmaner_last_error_code = NULL WHERE id = ?`,
+      [order.id],
+      `UPDATE orders SET callmaner_synced_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS'),
+       callmaner_last_error = NULL WHERE id = ?`,
+      [order.id]
+    );
+  } catch (e) {
+    console.error('콜마너 상태변경 반영 실패:', e.message, e.rc ? `(rc=${e.rc})` : '');
+    const msg = String(e.message || '').slice(0, 500);
+    await tryUpdateWithErrorCodeColumn(
+      'UPDATE orders SET callmaner_last_error = ?, callmaner_last_error_code = ? WHERE id = ?',
+      [msg, e.rc ? String(e.rc).slice(0, 40) : null, order.id],
+      'UPDATE orders SET callmaner_last_error = ? WHERE id = ?',
+      [msg, order.id]
+    );
+  }
+}
+
 // callmaner_last_error_code 컬럼은 20260805000000 마이그레이션에서 추가된다 — 아직 적용하지
 // 않은 DB에서도(구버전 DB 호환, order_legs 처리와 같은 방어) 접수번호/에러 메시지 저장은
 // 그대로 되어야 하므로, 코드 컬럼을 쓰는 쿼리가 실패하면 그 컬럼 없는 쿼리로 한 번 더 시도한다.
@@ -1811,11 +1856,32 @@ async function tryUpdateWithErrorCodeColumn(sqlWithCode, paramsWithCode, sqlWith
   }
 }
 
+// 고객(client)은 상태를 볼 수만 있고 원래 바꿀 수 없었는데, "기사배정 전 취소/보류"만은
+// 직접 할 수 있어야 한다는 사용자 요청으로 제한적으로 열었다 — 대상 상태는 '대기'/'취소'
+// 뿐이고, 이미 기사가 배정된 뒤에는(hasAssignedDriver) 아예 막고 상담원/고객센터로
+// 안내한다(같은 이유로 오더 내용 자체도 배차 후엔 client가 못 고치게 막혀 있다, isClient
+// 분기 참고). loadOrderInScope는 client를 통째로 403 시키므로 loadOrderForVoc(scopeFilter
+// 기반)를 쓴다. 프런트(OrderSidePanel.js)에서도 같은 규칙으로 폼 자체를 안 보여주거나
+// 선택지를 좁히지만, 여긴 우회 방지용 최종 검증이다.
+const CLIENT_ALLOWED_STATUS_TARGETS = ['대기', '취소'];
+
 router.post('/:id/status', asyncHandler(async (req, res) => {
-  const order = await loadOrderInScope(req, res);
-  if (!order) return;
   const u = req.session.user;
+  const isClient = u.role === 'client';
+  const order = isClient ? await loadOrderForVoc(req, res) : await loadOrderInScope(req, res);
+  if (!order) return;
   const { status, note } = req.body;
+
+  if (isClient) {
+    const waypoints = await db.all('SELECT * FROM order_waypoints WHERE order_id = ? ORDER BY seq ASC', [req.params.id]);
+    const legs = await buildOrderLegs(req.params.id, order, waypoints);
+    if (hasAssignedDriver(order, legs)) {
+      return res.status(403).send('기사님이 이미 배정된 상태입니다. 상태 변경은 상담원 챗봇이나 고객센터를 통해 요청해주세요.');
+    }
+    if (!CLIENT_ALLOWED_STATUS_TARGETS.includes(status)) {
+      return res.status(403).send('고객 계정은 대기 또는 취소로만 상태를 변경할 수 있습니다.');
+    }
+  }
 
   await db.run(
     `UPDATE orders SET status = ?, updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') WHERE id = ?`,
@@ -1839,6 +1905,10 @@ router.post('/:id/status', asyncHandler(async (req, res) => {
   if (CALLMANER_TRIGGER_STATUSES.includes(status)) {
     await registerOrderWithCallmaner(order.id, order.branch_id);
   }
+
+  // 이미 콜마너에 접수된 오더라면, 이번 상태변경도 실시간으로 반영한다(사용자 요청 —
+  // 상담원/관리자뿐 아니라 지금 이 라우트를 통과한 모든 변경, 즉 client의 대기/취소 포함).
+  await pushStatusChangeToCallmaner(order, status, note);
 
   try {
     await notify({

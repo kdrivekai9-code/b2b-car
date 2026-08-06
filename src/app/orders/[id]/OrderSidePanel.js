@@ -21,13 +21,36 @@ function historyLabel(h) {
 //      상단 헤더의 버튼이 order-edit-form을 가리키며 일어난다 — 그래서 각 select에
 //      form="order-edit-form"을 직접 지정해 실제로 검증될 폼을 명시한다(DOM상 어느
 //      <form>에 들어있는지와는 무관하게 이 속성이 우선한다).
+// 고객(client) 대상 제한 상태 목록 — routes/orders.js의 CLIENT_ALLOWED_STATUS_TARGETS와
+// 반드시 같아야 한다(여긴 UX용 선택지 제한, 서버는 우회 방지용 최종 검증).
+const CLIENT_ALLOWED_STATUS_TARGETS = ['대기', '취소'];
+
 // 상태변경은 원래 페이지 맨 아래(admin/branch_manager 전용)에 따로 있었는데, 고객도 자기
-// 오더 상태를 직접 바꿔야 하는 경우(예: 취소요청)가 있어 도입 — 상담원/관리자용과 내용이
-// 완전히 같아졌으므로(같은 라우트, 같은 상태 목록) 역할 구분 없이 여기 하나로 합쳐서
-// "오더 타입" 섹션 바로 아래에 둔다(사용자 요청 — 기사배정 정보를 보기 전에 상태부터
-// 바꾸는 흐름이 더 자연스러움). POST /:id/status 라우트 자체는 이미 역할 제한이 없다
-// (loadOrderInScope로 지사 스코프만 확인).
-function OrderStatusChangeFields({ orderId, order, ORDER_STATUSES }) {
+// 오더 상태를 직접 바꿔야 하는 경우가 있어 "오더 타입" 섹션 바로 아래로 옮기며 도입했다.
+// 다만 고객은 상담원/관리자와 완전히 같은 권한을 가질 수 없다(사용자 확정 사항):
+//   - 기사가 이미 배정됐으면(hasAssignedDriver) 아예 폼을 보여주지 않고, 상담원 챗봇/
+//     고객센터로 안내한다 — 이미 기사에게 전달된 오더를 당사자 모르게 바꾸면 안 되기 때문
+//     (OrderForm.js의 편집 차단과 같은 이유).
+//   - 배정 전이라도 고객이 고를 수 있는 상태는 '대기'(보류)/'취소' 둘뿐이다.
+// admin/branch_manager는 기존처럼 전체 ORDER_STATUSES를 그대로 쓴다.
+function OrderStatusChangeFields({ orderId, order, ORDER_STATUSES, isClient }) {
+  if (isClient && order.hasAssignedDriver) {
+    return (
+      <>
+        <div className="section-title small">오더 상태 변경</div>
+        <p className="fare-calc-hint">
+          기사님이 이미 배정된 상태입니다. 상태 변경은 상담원 챗봇이나 고객센터를 통해 요청해주세요.
+        </p>
+      </>
+    );
+  }
+
+  const statusOptions = isClient
+    ? CLIENT_ALLOWED_STATUS_TARGETS
+    : (ORDER_STATUSES || []);
+  // 고객 기본 선택값은 현재 상태가 목록에 없을 수 있으니(예: 접수) 목록의 첫 값으로 안전하게 잡는다.
+  const defaultStatus = statusOptions.includes(order.status) ? order.status : statusOptions[0];
+
   return (
     <>
       <div className="section-title small">오더 상태 변경</div>
@@ -35,8 +58,8 @@ function OrderStatusChangeFields({ orderId, order, ORDER_STATUSES }) {
         <div className="row">
           <div className="field">
             <label>새 상태</label>
-            <select name="status" defaultValue={order.status}>
-              {(ORDER_STATUSES || []).map((s) => <option key={s} value={s}>{s}</option>)}
+            <select name="status" defaultValue={defaultStatus}>
+              {statusOptions.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
           <div className="field">
@@ -120,7 +143,7 @@ export default function OrderSidePanel({ data, orderId, state, setField }) {
         isAdmin={isAdmin} isClient={isClient}
       />
 
-      <OrderStatusChangeFields orderId={orderId} order={order} ORDER_STATUSES={ORDER_STATUSES} />
+      <OrderStatusChangeFields orderId={orderId} order={order} ORDER_STATUSES={ORDER_STATUSES} isClient={isClient} />
 
       <div className="section-title small">🧑‍✈️ 기사배정 정보</div>
       {canManageDriver ? (
