@@ -84,13 +84,15 @@ async function syncFare(order, item) {
   );
 }
 
-// 우리가 접수한 오더의 현재 상태를 conf_slip으로 직접 확인한다(OrderInfo).
+// 우리가 접수한 오더의 현재 상태를 확인한다 — 연락처 단위 목록조회(OrderHistory) 후,
+// 목록에 없는 건만 단건조회(OrderInfo)로 보완한다.
 //
-// 왜 이 경로가 필요한가: 폴링용 OrderAllStatus는 요청단말번호(userHp)에 매인 결과만 돌려주는데,
-// 우리는 지사 대표번호(branches.main_phone)를 보내고 있었다. 서울지사의 경우 그 값이 "12345"라
-// 어떤 고객의 번호도 아니어서 조회 결과가 항상 0건이었고, 콜마너에서 대기→접수로 바꿔도
-// 우리 쪽 상태가 영영 바뀌지 않았다(실측: userHp=12345 → 0건, 실제 고객번호 → 조회됨).
-// OrderInfo는 conf_slip만으로 조회되고 userHp 스코프를 타지 않아 이 문제가 없다.
+// 왜 OrderAllStatus를 안 쓰는가: 그쪽은 요청단말번호(userHp)에 매인 결과만 돌려주는데 우리는
+// 지사 대표번호(branches.main_phone)를 보내고 있었다. 서울지사는 그 값이 "12345"라 어떤 고객의
+// 번호도 아니어서 결과가 항상 0건이었고, 콜마너에서 대기→접수로 바꿔도 우리 쪽 상태가 영영
+// 바뀌지 않았다. 게다가 올바른 번호로 보내도 OrderReceipt로 접수한 건은 목록에 나오지 않고,
+// 나오는 건들조차 status_code가 빈 문자열이라 매핑이 불가능하다(정의서상 필수 항목인데도).
+// OrderHistory는 같은 userHp로 우리 접수건이 정상 조회되고 상태도 한글로 채워져 온다(실측).
 const SYNC_BY_CONF_SLIP_LIMIT = Number(process.env.CALLMANER_SYNC_ORDER_LIMIT || 40);
 const SYNC_LOOKBACK_DAYS = Number(process.env.CALLMANER_SYNC_LOOKBACK_DAYS || 3);
 const SYNC_CONCURRENCY = Number(process.env.CALLMANER_SYNC_CONCURRENCY || 5);
@@ -109,13 +111,42 @@ async function syncOrdersByConfSlip(branch) {
     [branch.id, ...TERMINAL_LOCAL_STATUSES, SYNC_BY_CONF_SLIP_LIMIT]
   );
 
-  // 오더 1건당 1회 호출이라 순차로 돌면 건수만큼 시간이 걸린다 — 작은 묶음으로 병렬 조회한다.
-  // (목록형 API가 있으면 1회로 끝나지만 콜마너에 그런 명령이 없다: OrderList/OrderAll/
-  //  OrderStatusList 등 전부 E4[1003]. 유일한 목록형인 OrderAllStatus는 우리 외부연동 접수건을
-  //  돌려주지 않고, 돌려주는 건들도 status_code가 비어 있어 상태 매핑이 불가능하다 — 실측.)
+  // 연락처(userHp) 단위로 묶어 목록조회(OrderHistory) 한 번에 그 번호의 오더를 모두 받는다.
+  // 접수(OrderReceipt)에 쓴 것과 같은 방식으로 userHp를 만들어야 같은 묶음으로 조회된다.
+  // 목록에서 못 찾은 건만 단건조회(OrderInfo)로 보완한다 — 콜마너가 기록한 userHp가 우리가
+  // 보낸 값과 다른 경우가 있을 수 있어서(목록은 userHp 스코프, 단건은 conf_slip 스코프).
+  const byUserHp = new Map();
+  orders.forEach((order) => {
+    const hp = callmaner.normalizeUserHp([order.origin_contact, order.requester_phone, branch.main_phone]);
+    if (!hp) return;
+    if (!byUserHp.has(hp)) byUserHp.set(hp, []);
+    byUserHp.get(hp).push(order);
+  });
+
+  const infoBySlip = new Map();
+  const userHps = Array.from(byUserHp.keys());
+  for (let i = 0; i < userHps.length; i += SYNC_CONCURRENCY) {
+    const chunk = userHps.slice(i, i + SYNC_CONCURRENCY);
+    await Promise.all(chunk.map(async (hp) => {
+      try {
+        const { orders: list } = await callmaner.orderHistory(branch, hp, { page: 1, pageSize: 50 });
+        list.forEach((o) => { if (o.confSlip) infoBySlip.set(o.confSlip, o); });
+      } catch (e) {
+        console.error(`목록 상태조회 실패 (userHp=${hp}):`, e.message);
+      }
+    }));
+  }
+
   const infoByOrderId = new Map();
-  for (let i = 0; i < orders.length; i += SYNC_CONCURRENCY) {
-    const chunk = orders.slice(i, i + SYNC_CONCURRENCY);
+  const missing = [];
+  orders.forEach((order) => {
+    const found = infoBySlip.get(String(order.callmaner_conf_slip));
+    if (found) infoByOrderId.set(order.id, found);
+    else missing.push(order);
+  });
+
+  for (let i = 0; i < missing.length; i += SYNC_CONCURRENCY) {
+    const chunk = missing.slice(i, i + SYNC_CONCURRENCY);
     await Promise.all(chunk.map(async (order) => {
       try {
         infoByOrderId.set(order.id, await callmaner.orderInfo(branch, order.callmaner_conf_slip, order.origin_contact));
