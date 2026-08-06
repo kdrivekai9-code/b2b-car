@@ -1,8 +1,11 @@
 # 콜마너 외부연동 API 메모
 
-「콜마너 외부연동 인터페이스 정의서」(구글시트, 시트 4개: 변경이력 / 인터페이스정의 및 목록 /
-인터페이스상세 / 오류코드)를 읽고 정리한 것과, 실제 호출로 확인한 차이점을 남긴다.
-정의서 파일 자체는 저장소에 없어서 `lib/callmaner.js`가 인용하는 절 번호를 대조하려면 원본이 필요하다.
+정의서 원본: **[callmaner-external-api-spec.xlsx](./callmaner-external-api-spec.xlsx)**
+(「콜마너 외부연동 인터페이스 정의서」, 시트 4개: 변경이력 / 인터페이스정의 및 목록 /
+인터페이스상세 / 오류코드). `lib/callmaner.js` 주석이 인용하는 "사. 인터페이스상세" 등의 절 번호는
+이 파일 기준이다.
+
+아래는 그 정의서를 읽고 정리한 것과, 실제 호출로 확인한 차이점이다.
 
 - 서비스 URL: `https://{host}/external_v1/{servlet}.do?t={JSON}` (수도권 `api.cd1.kr:8443`,
   지방권 `api.cd2.kr:8443`, 테스트 `alpha-api.cd1.kr:8443`)
@@ -59,6 +62,31 @@
 | 상태 | `{접수,배차,완료,취소,대기 등}` | 같음 — 한글 문자열. `status_code`는 없음 |
 
 그래서 상태 매핑은 코드가 아니라 한글 기준이다 → `lib/callmaner.js`의 `STATUS_TEXT_TO_LOCAL_STATUS`.
+
+## 정의서 다시 읽는 방법
+
+xlsx라 그대로 열기 어려우면 아래처럼 시트별로 덤프할 수 있다.
+
+```bash
+python3 - <<'EOF'
+import zipfile, re, html
+z = zipfile.ZipFile('docs/callmaner-external-api-spec.xlsx')
+ss = z.read('xl/sharedStrings.xml').decode('utf-8')
+shared = [html.unescape(re.sub(r'<[^>]+>', '', m)) for m in re.findall(r'<si>(.*?)</si>', ss, re.S)]
+xml = z.read('xl/worksheets/sheet3.xml').decode('utf-8')   # sheet3 = 인터페이스상세
+for rnum, row in re.findall(r'<row r="(\d+)"[^>]*>(.*?)</row>', xml, re.S):
+    cells = {}
+    for attrs, body in re.findall(r'<c ([^>]*?)/?>(?:(.*?)</c>)?', row, re.S):
+        col = re.search(r'r="([A-Z]+)\d+"', attrs).group(1)
+        t = re.search(r't="(\w+)"', attrs); v = re.search(r'<v>(.*?)</v>', body or '', re.S)
+        if v: cells[col] = shared[int(v.group(1))] if (t and t.group(1) == 's') else v.group(1)
+    if cells: print(rnum, ' | '.join(f"{k}={v}" for k, v in sorted(cells.items())))
+EOF
+```
+
+주의: 파라미터 이름이 들어 있는 셀이 공유문자열 인덱스(숫자)로만 남아 있는 행이 있다
+(예: 페이지 파라미터 행의 `433`/`436` = `page`/`page_size`). 이름이 안 보이면 그 숫자를
+공유문자열 인덱스로 되짚어야 한다.
 
 ## 콜마너에 확인이 필요한 것
 
