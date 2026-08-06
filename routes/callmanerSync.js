@@ -84,6 +84,76 @@ async function syncFare(order, item) {
   );
 }
 
+// 우리가 접수한 오더의 현재 상태를 conf_slip으로 직접 확인한다(OrderInfo).
+//
+// 왜 이 경로가 필요한가: 폴링용 OrderAllStatus는 요청단말번호(userHp)에 매인 결과만 돌려주는데,
+// 우리는 지사 대표번호(branches.main_phone)를 보내고 있었다. 서울지사의 경우 그 값이 "12345"라
+// 어떤 고객의 번호도 아니어서 조회 결과가 항상 0건이었고, 콜마너에서 대기→접수로 바꿔도
+// 우리 쪽 상태가 영영 바뀌지 않았다(실측: userHp=12345 → 0건, 실제 고객번호 → 조회됨).
+// OrderInfo는 conf_slip만으로 조회되고 userHp 스코프를 타지 않아 이 문제가 없다.
+const SYNC_BY_CONF_SLIP_LIMIT = Number(process.env.CALLMANER_SYNC_ORDER_LIMIT || 40);
+const SYNC_LOOKBACK_DAYS = Number(process.env.CALLMANER_SYNC_LOOKBACK_DAYS || 3);
+const TERMINAL_LOCAL_STATUSES = ['완료', '취소'];
+
+async function syncOrdersByConfSlip(branch) {
+  const placeholders = TERMINAL_LOCAL_STATUSES.map(() => '?').join(',');
+  // 1분마다 도는 폴링이라 대상 건수를 묶어둔다 — 종료 상태가 아니고 최근 접수된 오더만 본다
+  // (오래된 미완료 건까지 매분 조회하면 API 호출이 계속 쌓인다).
+  const orders = await db.all(
+    `SELECT * FROM orders
+     WHERE branch_id = ? AND callmaner_conf_slip IS NOT NULL
+       AND status NOT IN (${placeholders})
+       AND created_at >= to_char((now() at time zone 'Asia/Seoul') - interval '${SYNC_LOOKBACK_DAYS} days', 'YYYY-MM-DD HH24:MI:SS')
+     ORDER BY id DESC LIMIT ?`,
+    [branch.id, ...TERMINAL_LOCAL_STATUSES, SYNC_BY_CONF_SLIP_LIMIT]
+  );
+
+  let updated = 0;
+  for (const order of orders) {
+    let info;
+    try {
+      info = await callmaner.orderInfo(branch, order.callmaner_conf_slip, order.origin_contact);
+    } catch (e) {
+      console.error(`단건 상태조회 실패 (conf_slip=${order.callmaner_conf_slip}):`, e.message);
+      continue;
+    }
+
+    const mappedStatus = callmaner.STATUS_TEXT_TO_LOCAL_STATUS[info.status];
+    const note = `[콜마너] 상태동기화(단건조회): ${info.status || '-'}`;
+    if (info.status === order.callmaner_status && (!mappedStatus || mappedStatus === order.status)) continue;
+
+    if (mappedStatus && mappedStatus !== order.status) {
+      await db.run(
+        `UPDATE orders SET status = ?, callmaner_status = ?,
+         callmaner_synced_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS'), callmaner_last_error = NULL,
+         updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS')
+         WHERE id = ?`,
+        [mappedStatus, info.status || null, order.id]
+      );
+      await db.run(
+        `INSERT INTO order_status_history (order_id, actor_user_id, old_status, new_status, note) VALUES (?, NULL, ?, ?, ?)`,
+        [order.id, order.status, mappedStatus, note]
+      );
+      try {
+        await notify({
+          branchId: branch.id, eventType: 'order_events', excludeUserId: 0,
+          title: '오더 상태 변경(콜마너)', body: `${order.oid}: ${order.status} → ${mappedStatus}`, url: `/orders/${order.id}`,
+        });
+      } catch (e) { console.error('콜마너 동기화 알림 발송 실패:', e.message); }
+      updated += 1;
+    } else if (info.status !== order.callmaner_status) {
+      // 매핑 대상이 아닌 상태는 콜마너 쪽 표기만 갱신하고 로컬 status는 그대로 둔다.
+      await db.run(
+        `UPDATE orders SET callmaner_status = ?,
+         callmaner_synced_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS')
+         WHERE id = ?`,
+        [info.status || null, order.id]
+      );
+    }
+  }
+  return { checked: orders.length, updated };
+}
+
 router.get('/sync', checkCronAuth, asyncHandler(async (req, res) => {
   const branches = await db.all('SELECT * FROM branches WHERE callmaner_enabled = true');
   const summary = [];
@@ -144,6 +214,14 @@ router.get('/sync', checkCronAuth, asyncHandler(async (req, res) => {
           );
         }
       }
+
+      // OrderAllStatus가 우리 userHp로는 아무것도 돌려주지 않는 문제가 있어(위 주석 참고),
+      // 진행 중인 오더는 conf_slip 단건조회로 한 번 더 확인한다.
+      const bySlip = await syncOrdersByConfSlip(branch).catch((e) => {
+        console.error(`단건 상태동기화 실패 (branch ${branch.id}):`, e.message);
+        return { checked: 0, updated: 0 };
+      });
+      updated += bySlip.updated;
 
       if (updated > 0) broadcastOrderListChanged().catch((e) => console.error('콜마너 동기화 후 목록 갱신 신호 실패:', e.message));
 
