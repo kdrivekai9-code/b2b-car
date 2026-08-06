@@ -337,6 +337,11 @@ textarea.single-line-textarea{min-height:36px;height:36px;padding:8px 10px;resiz
 .reservation-date-row .date-select{flex:1;min-width:0;}
 .order-form-actions{margin-top:20px;padding-top:16px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;}
 .order-map-panel{position:sticky;top:20px;}
+/* 03번 패널(기사배정 정보)은 .order-grid의 세 번째 컬럼이라(minmax(300px,.9fr)) 다른
+   카드보다 좁다 — 기본 form .field(min-width:200px)로는 두 필드를 한 줄에 못 담아
+   "오더 타입 / 이용 형태", "새 상태 / 사유·메모"가 의도와 달리 다음 줄로 넘어갔다.
+   이 패널 안 폼에서만 최소 너비를 줄여 한 줄에 나란히 배치되게 한다. */
+.order-map-panel form .field{min-width:110px;}
 @media (max-width:1250px){ .order-grid{grid-template-columns:1fr 1fr;} .order-map-panel{grid-column:1 / -1;position:static;} }
 
 .ai-intake-grid{display:grid;grid-template-columns:0.85fr 1.3fr 1fr;gap:18px;align-items:start;}

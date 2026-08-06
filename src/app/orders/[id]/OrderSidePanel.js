@@ -21,11 +21,13 @@ function historyLabel(h) {
 //      상단 헤더의 버튼이 order-edit-form을 가리키며 일어난다 — 그래서 각 select에
 //      form="order-edit-form"을 직접 지정해 실제로 검증될 폼을 명시한다(DOM상 어느
 //      <form>에 들어있는지와는 무관하게 이 속성이 우선한다).
-// 상태변경은 원래 admin/branch_manager 패널 아래에만 있었는데, 고객도 자기 오더 상태를
-// 직접 바꿔야 하는 경우(예: 취소요청)가 있어 "오더 타입" 섹션 바로 아래에 별도로 노출한다.
-// POST /:id/status 라우트 자체는 이미 역할 제한이 없어(loadOrderInScope로 지사 스코프만
-// 확인) 안전하고, 선택 가능한 상태 목록은 관리자와 동일하게 둔다(사용자 확정 사항).
-function ClientOrderStatusFields({ orderId, order, ORDER_STATUSES }) {
+// 상태변경은 원래 페이지 맨 아래(admin/branch_manager 전용)에 따로 있었는데, 고객도 자기
+// 오더 상태를 직접 바꿔야 하는 경우(예: 취소요청)가 있어 도입 — 상담원/관리자용과 내용이
+// 완전히 같아졌으므로(같은 라우트, 같은 상태 목록) 역할 구분 없이 여기 하나로 합쳐서
+// "오더 타입" 섹션 바로 아래에 둔다(사용자 요청 — 기사배정 정보를 보기 전에 상태부터
+// 바꾸는 흐름이 더 자연스러움). POST /:id/status 라우트 자체는 이미 역할 제한이 없다
+// (loadOrderInScope로 지사 스코프만 확인).
+function OrderStatusChangeFields({ orderId, order, ORDER_STATUSES }) {
   return (
     <>
       <div className="section-title small">오더 상태 변경</div>
@@ -118,9 +120,7 @@ export default function OrderSidePanel({ data, orderId, state, setField }) {
         isAdmin={isAdmin} isClient={isClient}
       />
 
-      {isClient && (
-        <ClientOrderStatusFields orderId={orderId} order={order} ORDER_STATUSES={ORDER_STATUSES} />
-      )}
+      <OrderStatusChangeFields orderId={orderId} order={order} ORDER_STATUSES={ORDER_STATUSES} />
 
       <div className="section-title small">🧑‍✈️ 기사배정 정보</div>
       {canManageDriver ? (
@@ -180,30 +180,6 @@ export default function OrderSidePanel({ data, orderId, state, setField }) {
           </li>
         ))}
       </ul>
-
-      {/* 상태 변경은 페이지 맨 아래 관리자 패널에 따로 있었는데, 기사배정·수정이력을 보고
-          바로 상태를 바꾸는 흐름이 자연스러워서 이 패널 아래로 옮겼다(사용자 요청).
-          POST /:id/status는 콜마너 등록 트리거이기도 하다(routes/orders.js). */}
-      {canManageDriver && (
-        <>
-          <div className="section-title small">오더 상태 변경</div>
-          <form method="POST" action={`/orders/${orderId}/status`}>
-            <div className="row">
-              <div className="field">
-                <label>새 상태</label>
-                <select name="status" defaultValue={order.status}>
-                  {(ORDER_STATUSES || []).map((s) => <option key={s} value={s}>{s}</option>)}
-                </select>
-              </div>
-              <div className="field">
-                <label>사유/메모 (선택)</label>
-                <input type="text" name="note" placeholder="변경 사유" />
-              </div>
-            </div>
-            <button className="btn" type="submit">상태 변경 저장</button>
-          </form>
-        </>
-      )}
     </section>
   );
 }
