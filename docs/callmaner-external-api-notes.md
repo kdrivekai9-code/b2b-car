@@ -33,6 +33,21 @@
 
 16번 기사연락처조회는 목록에 영문명이 없지만 실제로는 `WkContactSearch`로 동작한다(`lib/callmaner.js`).
 
+### 목록 시트에 없고 상세 시트에만 있는 인터페이스
+
+"인터페이스정의 및 목록" 시트의 표에는 영문명이 비어 있거나 아예 빠져 있는데, "인터페이스상세"
+시트에는 `cmd`까지 정의된 것들이 있다. 목록만 보고 판단하면 놓친다.
+
+| 전문명 | cmd | 비고 |
+|---|---|---|
+| 오더요금수정 | `OrderCharge` | order.do |
+| 기사연락처조회 | `WkContactSearch` | order.do |
+| 완료오더조회 | `FinishOrderList` | order.do. userHp + page/page_size. **전일 기준**으로 내려주며 오전 9~10시는 피해달라는 주석 있음 |
+| 타사 배차/해제 | `OtherStatusChange` | order.do |
+| 탁송사진 이미지 | `ConsPicture` | **picture.do** |
+| 배차기사 현위치 조회 | `TrackingDriver` | order.do |
+| **기준시점 콜목록조회** | **`CallListSince`** | order.do. **userHp 없이 `providerId` + `sinceDt`만** — 지사 단위 조회 |
+
 ## 상태 폴링 — 왜 OrderAllStatus를 쓰지 않는가
 
 `OrderAllStatus` 요청 파라미터는 **`userHp`(요청단말번호, 필수) / `providerId` / `lastUpDate`** 뿐이다
@@ -48,6 +63,31 @@
 여기에 더해, 우리가 `userHp`로 지사 대표번호(`branches.main_phone`)를 보내고 있었던 문제도 있었다 —
 서울지사는 그 값이 `"12345"`라 어떤 고객의 번호도 아니어서 조회 결과가 **항상 0건**이었다.
 접수(`OrderReceipt`)는 출발지 연락처를 `userHp`로 보내는데 상태조회만 대표번호를 보내던 불일치였다.
+
+## 지사(providerId) 단위 조회 — CallListSince
+
+정의서에 지사 단위로 목록을 받는 인터페이스가 있다. `userHp`가 요청 파라미터에 아예 없다.
+
+```
+request : cmd="CallListSince", ver, ts, tn, providerId(●), sinceDt(● yyyymmddhh24miss)
+response: rc, rm  (목록은 rs.data)
+```
+
+그런데 **실제로는 `rc="00"`으로 정상 응답하면서 `rs.data`가 항상 빈 배열**이다. 아래를 다 시도했다.
+
+| 시도 | 결과 |
+|---|---|
+| `sinceDt=20260806000000` (오늘 0시) | 0건 |
+| `sinceDt=20260805000000` (어제 0시) | 0건 |
+| `sinceDt=0` | 0건 |
+| `providerId`에서 앱코드 제거(`B100-12345`) | 0건 |
+| `userHp`를 함께 전달 | 0건 |
+
+같은 시각에 `OrderHistory`(연락처 단위)로는 같은 오더들이 정상 조회된다. 즉 **지사 단위 목록
+API 두 개(`OrderAllStatus`, `CallListSince`)가 모두 우리 접수건을 빼놓는다** — 공통 원인이 있다고
+봐야 한다(콜마너 서버 설정에서 외부연동 접수건이 목록 대상에서 빠져 있을 가능성).
+
+첫 호출이 10초 타임아웃으로 실패하는 경우가 있어 이 API를 쓰게 되면 타임아웃을 넉넉히 잡아야 한다.
 
 ## 현재 동기화 방식 (routes/callmanerSync.js)
 
@@ -90,6 +130,14 @@ EOF
 
 ## 콜마너에 확인이 필요한 것
 
-1. `OrderAllStatus`에 `OrderReceipt` 접수건이 포함되지 않는 이유 (설정 문제인지 사양인지)
-2. `OrderAllStatus` 응답의 `status_code`가 비어 오는 이유 (정의서상 필수 항목)
-3. `providerId` 단위로 지사 전체 오더를 조회하는 방법이 있는지 (현재는 연락처 단위가 최선)
+지사 단위 목록 API 두 개가 모두 우리 접수건을 돌려주지 않는 것이 핵심이다. 이게 풀리면 폴링이
+연락처 개수와 무관하게 1분에 1회로 줄어든다.
+
+1. **`CallListSince`가 `rc="00"`인데 `rs.data`가 항상 비어 있습니다.** `providerId=B100-12345-AP12345`,
+   `sinceDt`를 오늘 0시/어제 0시/`0`으로 바꿔도, 앱코드를 떼도, `userHp`를 함께 넣어도 0건입니다.
+   같은 시각에 `OrderHistory`로는 같은 오더들이 조회됩니다. 지사 단위 조회를 쓰려면 어떤 설정이
+   필요한지요?
+2. **`OrderAllStatus`에 `OrderReceipt` 접수건이 포함되지 않습니다.** 같은 `userHp`(01081161240)로
+   조회할 때 콜마너 쪽에서 접수된 건은 나오는데 `OrderReceipt`로 접수한 179098847은 빠집니다.
+3. **`OrderAllStatus` 응답의 `status_code`가 빈 문자열로 옵니다.** 정의서상 필수(●) 항목이고
+   코드표까지 정의돼 있는데 실제로는 `status="취소", status_code=""`입니다.
