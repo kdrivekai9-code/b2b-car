@@ -73,6 +73,18 @@
       });
     },
 
+    appendAdditionalRequest: function (orderId, text) {
+      return postJson('/orders/' + orderId + '/additional-request', { text: text })
+        .then(function (res) {
+          if (!res.ok) {
+            return jsonOrEmpty(res).then(function (data) {
+              throw new Error(data.error || '요청사항 추가에 실패했습니다.');
+            });
+          }
+          return res.json();
+        });
+    },
+
     precheckSubmit: function (params) {
       return postForm('/orders/ai-intake/submit-precheck', params, { keepalive: true }).then(function (res) {
         if (res.status === 404) return { ok: true, skipped: true };

@@ -96,6 +96,14 @@
   var sessionStatus = 'bot';
   var lastWaitingStatusShown = null;
   var lastPolledId = 0;
+  // 오더 등록 직후, 같은 대화창에서 사용자가 후속 메시지(질문/요청사항)를 보내는 경우가 흔했다
+  // — 예전에는 이게 "새 오더접수"로 다시 분류돼 방금 등록한 것과 똑같은 오더가 중복
+  // 등록됐다(state가 리셋 안 되고 폼에 값도 그대로 남아있었음). submitOrderForm 성공 시
+  // {orderId, oid, at}로 채우고 resetOrderIntakeState()로 상태를 전부 지운다 — 이 시각으로부터
+  // POST_SUBMIT_APPEND_WINDOW_MS 안에 오더접수 의도가 아닌 메시지가 오면 새 오더로 취급하지
+  // 않고 방금 그 오더에 추가요청으로 붙인다(appendAdditionalRequestToLastOrder).
+  var lastSubmittedOrder = null;
+  var POST_SUBMIT_APPEND_WINDOW_MS = 30 * 60 * 1000;
 
   // ---- 일일기사/프리미엄 전용 FSM 상태 ----
   // orderCategory: 'dispatch' | 'premium' | 'daily_driver' — confirmedOrderType에서 파생
@@ -444,6 +452,42 @@
     chip.addEventListener('click', function () { applyQuickReplyPhone(suggestion.value); });
     quickRepliesEl.appendChild(chip);
     quickRepliesEl.style.display = '';
+  }
+
+  // 오더 등록(submitOrderForm) 성공 직후 호출한다 — 방금 오더의 필드 값/진행상태가 폼과
+  // 모듈 변수에 그대로 남아있으면, 바로 다음 메시지가 무엇이든 "이미 다 채워진 오더"로
+  // 오인되어 곧바로 재등록(중복 오더)으로 이어질 수 있었다. 새 오더를 시작하는 것과
+  // 동일한 빈 상태로 되돌린다.
+  function resetOrderIntakeState() {
+    pendingField = null;
+    modifyFieldMode = false;
+    lastModifiedFieldId = null;
+    reservedDateTimeConfirmed = false;
+    vehicleNumberResolved = false;
+    additionalRequestResolved = false;
+    confirmedOrderType = null;
+    troubleStreak = 0;
+    preOfferState = null;
+    pendingFrustrationOffer = false;
+    phase = 'collecting';
+    pendingDisambiguation = null;
+    disambiguationQueue = [];
+    orderCategory = 'dispatch';
+    tripType = null;
+    waypointsList = [];
+    currentWaypointAddrIdx = 0;
+    destinationWaitResolved = false;
+    premiumWaitYnAsked = false;
+    premiumPrefill = { originAddress: null, destinationAddress: null, contact: null };
+    premiumDisambiguationResume = null;
+    dailyDriverDisambiguationResume = null;
+    updateOrderTypeBadge(null);
+
+    var form = document.getElementById('orderForm');
+    if (form) {
+      form.reset();
+      document.querySelectorAll('#waypointsWrap .waypoint-row').forEach(function (row) { row.remove(); });
+    }
   }
 
   // pendingField를 바꾸는 모든 자리에서 이 함수를 통해서만 바꾼다 — 질문이 바뀔 때마다
@@ -2918,7 +2962,13 @@
         addBubble(okText, 'bot');
         // 이 세션은 완료된 것으로 닫는다 — 안 그러면 새로고침 후 세션 복원 기능이 방금 끝난
         // 오더의 phase/필드 값을 그대로 되살려서 새 오더 접수를 방해하게 된다.
-        logBotMessage({ logText: okText, needsAgent: false, requestedFeature: null, closeSession: true });
+        // closeSession 요청이 (아직 살아있는) 현재 sessionId로 나간 뒤에야 상태를 리셋한다 —
+        // 먼저 리셋해버리면 sessionId가 null이 되어 이 저장 요청 자체가 안 나간다.
+        logBotMessage({ logText: okText, needsAgent: false, requestedFeature: null, closeSession: true }).then(function () {
+          lastSubmittedOrder = { orderId: data.orderId, oid: data.oid, at: Date.now() };
+          resetOrderIntakeState();
+          sessionId = null;
+        });
         // 콜마너 오더접수는 fire-and-forget이라 이 시점엔 아직 결과가 안 나왔을 수 있다 —
         // 폴링이 끝나야(성공/실패/미사용 확인) 페이지를 이동한다. 실패 시 뜨는 팝업이 페이지
         // 전환 때문에 끊기지 않도록 이동을 그 뒤로 미룬다.
@@ -2935,6 +2985,16 @@
         logBotMessage({ logText: failText, needsAgent: false, requestedFeature: null });
         phase = 'confirming';
       });
+  }
+
+  // 오더 등록 직후 같은 대화창에 남긴 후속 메시지(질문/요청사항)를 그 오더에 추가한다 —
+  // 이미 resetOrderIntakeState()로 오더접수용 상태는 비워둔 뒤라, 이 메시지를 다시
+  // "새 오더접수"로 분류해 중복 등록하는 대신 여기서 소비한다.
+  function appendAdditionalRequestToLastOrder(text) {
+    var target = lastSubmittedOrder;
+    api.appendAdditionalRequest(target.orderId, text)
+      .then(function () { sayBot('요청하신 사항이 추가로 접수되었습니다.'); })
+      .catch(function () { sayBot('요청사항 추가에 실패했습니다. 다시 시도해주시거나 상담원에게 문의해주세요.'); });
   }
 
   function precheckOrderForm() {
@@ -3718,6 +3778,17 @@
             var doneText = proceedAfterCollecting();
             logBotMessage({ logText: doneText, needsAgent: false, requestedFeature: null });
           });
+          return;
+        }
+
+        // 방금 오더를 등록한 직후(30분 이내)라면, 새 오더접수 의도가 아닌 메시지는 그 오더에
+        // 대한 추가요청/질문으로 보고 붙인다 — isOrderIntent(다른 탁송을 새로 접수하려는
+        // 의도)는 제외해서, 연달아 진짜 새 오더를 요청하면 정상적으로 새로 접수되게 한다.
+        // greeting도 제외한다("안녕" 같은 인사말이 메모에 붙는 건 이상하다).
+        if (lastSubmittedOrder
+          && (Date.now() - lastSubmittedOrder.at) < POST_SUBMIT_APPEND_WINDOW_MS
+          && !isOrderIntent(data.intent) && data.intent !== 'greeting') {
+          appendAdditionalRequestToLastOrder(text);
           return;
         }
 

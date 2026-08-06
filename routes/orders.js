@@ -1527,6 +1527,38 @@ router.post('/:id/voc', asyncHandler(async (req, res) => {
   res.redirect('/orders/' + req.params.id);
 }));
 
+// AI 챗봇에서 오더를 방금 등록한 직후, 같은 대화창에 추가로 남긴 요청사항/질문을 그 오더에
+// 붙여준다(public/js/ai-intake.js의 appendAdditionalRequestToLastOrder) — 예전에는 이런
+// 후속 메시지가 "새 오더접수"로 다시 분류돼 똑같은 오더가 중복 등록되는 문제가 있었다.
+// 고객도 자기 오더에 직접 남길 수 있어야 하므로 VOC와 같은 scopeFilter 기반 접근을 쓴다.
+router.post('/:id/additional-request', asyncHandler(async (req, res) => {
+  const order = await loadOrderForVoc(req, res);
+  if (!order) return;
+  const text = String(req.body.text || '').trim();
+  if (!text) return res.status(400).json({ error: '추가할 내용이 없습니다.' });
+
+  const now = kstNow();
+  const stamp = `${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')} `
+    + `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  const entry = `[추가요청 ${stamp}] ${text}`;
+  const newMemo = order.memo_customer ? `${order.memo_customer}\n${entry}` : entry;
+
+  await db.run(
+    `UPDATE orders SET memo_customer = ?, updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') WHERE id = ?`,
+    [newMemo, req.params.id]
+  );
+  await db.run(
+    `INSERT INTO order_status_history (order_id, actor_user_id, old_status, new_status, note) VALUES (?, ?, ?, ?, ?)`,
+    [req.params.id, req.session.user.id, order.status, order.status, `AI 챗봇 추가요청: ${text}`]
+  );
+
+  // 이미 콜마너에 접수된 오더면 바뀐 메모(기사 전달사항)까지 OrderModify로 반영한다.
+  await updateOrderWithCallmaner(order.id, order.branch_id);
+
+  broadcastOrderListChangedAsync();
+  res.json({ ok: true });
+}));
+
 router.get('/:id', asyncHandler(async (req, res) => {
   const order = await db.get(`
     SELECT o.*, b.name AS branch_name, g.name AS group_name, pm.name AS payment_method_name, d.name AS driver_name,
