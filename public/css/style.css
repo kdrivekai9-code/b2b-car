@@ -749,3 +749,8 @@ textarea.single-line-textarea{min-height:36px;height:36px;padding:8px 10px;resiz
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{scroll-behavior:auto!important;transition-duration:.01ms!important;animation-duration:.01ms!important;animation-iteration-count:1!important;}
 }
+
+/* 배차지연 알림 설정(지사관리) — 콜 유형 다중선택 + "접수 후 N분 미배차" 인라인 입력 */
+.call-type-choices{display:flex;flex-wrap:wrap;gap:14px;padding:6px 0;}
+.delay-minutes-input{display:flex;align-items:center;gap:8px;}
+.delay-minutes-input input{width:90px;}

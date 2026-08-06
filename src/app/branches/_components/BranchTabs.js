@@ -14,6 +14,7 @@ const TAB_DEFS = [
   { key: 'photo', label: '사진 업로드 안내', path: 'photo-settings' },
   { key: 'extra', label: '추가기능', path: 'extra-settings' },
   { key: 'callmaner', label: '콜마너 연동', path: 'callmaner' },
+  { key: 'dispatch_delay', label: '배차지연 알림', path: 'dispatch-delay' },
 ];
 
 export default function BranchTabs({ active, branches = [], branch = null }) {

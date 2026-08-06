@@ -1,0 +1,112 @@
+<%- include('../partials/header') %>
+<div class="page-head-row">
+  <div>
+    <h1 class="page-title"><%= branch.name %> · 배차지연 알림</h1>
+    <p class="page-sub">배차가 지연될 때 챗봇이 고객에게 먼저 안내하고 요금 상향을 제안합니다. 여기에 등록된 고객사에만 안내가 나갑니다.</p>
+  </div>
+  <div class="page-head-actions">
+    <a class="btn secondary" href="/branches">지사 목록으로</a>
+    <button class="btn" type="submit" form="dispatchDelayForm">등록</button>
+  </div>
+</div>
+<%- include('../partials/branch_tabs', { branch: branch, active: 'dispatch_delay' }) %>
+
+<% if (error) { %><div class="error-msg"><%= error %></div><% } %>
+<% if (notice) { %><div class="success-msg"><%= notice %></div><% } %>
+
+<div class="card">
+  <form id="dispatchDelayForm" method="POST" action="/branches/<%= branch.id %>/dispatch-delay">
+    <div class="section-title">🔔 배차 지연시간 챗봇안내</div>
+
+    <div class="row">
+      <div class="field">
+        <label>선택고객 <span class="req">*</span></label>
+        <select name="group_id" required>
+          <option value="">고객사를 선택하세요</option>
+          <% groups.forEach(function (g) { %>
+            <option value="<%= g.id %>"><%= g.name %><%= g.main_phone ? ' (' + g.main_phone + ')' : '' %></option>
+          <% }) %>
+        </select>
+        <p class="page-sub">이 지사에 등록된 법인고객사만 선택할 수 있습니다. 이미 등록된 고객사를 다시 선택하면 기존 설정이 갱신됩니다.</p>
+      </div>
+      <div class="field">
+        <label>배차지연 판단 <span class="req">*</span></label>
+        <div class="delay-minutes-input">
+          <span>접수 후</span>
+          <input type="number" name="delay_minutes" value="5" min="1" max="120" step="1" required>
+          <span>분 미배차</span>
+        </div>
+        <p class="page-sub">접수 상태에서 이 시간이 지나도 기사가 배정되지 않으면 지연으로 봅니다(대기·예약 건은 제외).</p>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="field">
+        <label>선택대상 <span class="req">*</span></label>
+        <div class="call-type-choices">
+          <% callTypes.forEach(function (t) { %>
+            <label class="checkline">
+              <input type="checkbox" name="call_types" value="<%= t.key %>" <%= t.key === 'corporate_call' ? 'checked' : '' %>>
+              <%= t.label %>
+            </label>
+          <% }) %>
+        </div>
+        <p class="page-sub">선택한 콜 유형의 주문에만 적용됩니다(중복 선택 가능).</p>
+      </div>
+      <div class="field">
+        <label>요금 상향금액 <span class="req">*</span></label>
+        <select name="raise_amount" required>
+          <% for (var amount = 1000; amount <= 10000; amount += 1000) { %>
+            <option value="<%= amount %>" <%= amount === 5000 ? 'selected' : '' %>><%= amount.toLocaleString('ko-KR') %>원</option>
+          <% } %>
+        </select>
+        <p class="page-sub">챗봇이 제안할 인상 금액입니다(1,000원 단위, 최대 10,000원).</p>
+      </div>
+    </div>
+  </form>
+</div>
+
+<div class="card" style="margin-top:16px">
+  <div class="section-title">📋 업체별 등록 현황</div>
+  <% if (!settings.length) { %>
+    <p class="page-sub" style="margin:0">아직 등록된 고객사가 없습니다. 위에서 고객사를 선택해 등록해주세요.</p>
+  <% } else { %>
+    <table class="table">
+      <thead>
+        <tr>
+          <th>고객사</th>
+          <th>대표번호</th>
+          <th>선택대상</th>
+          <th>배차지연 판단</th>
+          <th>요금 상향금액</th>
+          <th>수정일시</th>
+          <th style="width:80px"></th>
+        </tr>
+      </thead>
+      <tbody>
+        <% settings.forEach(function (s) { %>
+          <%
+            var selectedKeys = String(s.call_types || '').split(',').filter(Boolean);
+            var selectedLabels = callTypes.filter(function (t) { return selectedKeys.indexOf(t.key) >= 0; })
+              .map(function (t) { return t.label; });
+          %>
+          <tr>
+            <td><%= s.group_name %></td>
+            <td><%= s.group_phone || '-' %></td>
+            <td><%= selectedLabels.join(', ') || '-' %></td>
+            <td>접수 후 <%= s.delay_minutes %>분 미배차</td>
+            <td><%= Number(s.raise_amount).toLocaleString('ko-KR') %>원</td>
+            <td><%= s.updated_at || s.created_at %></td>
+            <td>
+              <form method="POST" action="/branches/<%= branch.id %>/dispatch-delay/<%= s.id %>/delete"
+                    onsubmit="return confirm('<%= s.group_name %>의 배차지연 알림 설정을 삭제할까요?')">
+                <button class="btn small danger" type="submit">삭제</button>
+              </form>
+            </td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  <% } %>
+</div>
+<%- include('../partials/footer') %>

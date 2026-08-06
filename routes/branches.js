@@ -450,6 +450,100 @@ router.post('/:id/extra-settings', asyncHandler(async (req, res) => {
   res.redirect('/branches/' + req.params.id + '/extra-settings');
 }));
 
+// ---------------- 배차지연 알림 설정 ----------------
+// 챗봇이 "배차가 지연되고 있으니 요금을 올릴까요?"라고 먼저 제안할 대상을 고객사(법인) 단위로
+// 등록한다. 등록되지 않은 고객사에는 선제 안내가 나가지 않는다(옵트인).
+const DISPATCH_CALL_TYPES = [
+  { key: 'corporate_call', label: '법인콜', orderType: 'premium' },
+  { key: 'daily_driver', label: '일일기사', orderType: 'daily_driver' },
+  { key: 'dispatch', label: '탁송', orderType: 'dispatch' },
+];
+
+function parseCallTypes(raw) {
+  const values = Array.isArray(raw) ? raw : (raw ? [raw] : []);
+  const allowed = DISPATCH_CALL_TYPES.map((t) => t.key);
+  return values.map(String).filter((v) => allowed.indexOf(v) >= 0);
+}
+
+async function loadDispatchDelayPage(branchId) {
+  const [branch, branches, groups, settings] = await Promise.all([
+    db.get('SELECT * FROM branches WHERE id = ?', [branchId]),
+    db.all('SELECT id, name FROM branches ORDER BY id'),
+    db.all('SELECT id, name, main_phone FROM groups_tbl WHERE branch_id = ? ORDER BY name', [branchId]),
+    // 마이그레이션(20260806020000) 적용 전에도 화면이 뜨도록 — 테이블이 없으면 빈 목록으로 본다.
+    db.all(`
+      SELECT s.*, g.name AS group_name, g.main_phone AS group_phone
+      FROM dispatch_delay_settings s
+      JOIN groups_tbl g ON g.id = s.group_id
+      WHERE s.branch_id = ?
+      ORDER BY g.name
+    `, [branchId]).catch((e) => {
+      console.error('배차지연 알림 설정 조회 실패(빈 목록으로 표시):', e.message);
+      return [];
+    }),
+  ]);
+  return { branch, branches, groups, settings };
+}
+
+router.get('/:id/dispatch-delay', asyncHandler(async (req, res) => {
+  const { branch, branches, groups, settings } = await loadDispatchDelayPage(req.params.id);
+  if (!branch) return res.status(404).send('지사를 찾을 수 없습니다.');
+  res.render('branches/dispatch_delay', {
+    title: '배차지연 알림 - ' + branch.name,
+    branch,
+    branches,
+    groups,
+    settings,
+    callTypes: DISPATCH_CALL_TYPES,
+    error: req.query.error || null,
+    notice: req.query.notice || null,
+  });
+}));
+
+router.post('/:id/dispatch-delay', asyncHandler(async (req, res) => {
+  const base = '/branches/' + req.params.id + '/dispatch-delay';
+  const groupId = Number(req.body.group_id);
+  const callTypes = parseCallTypes(req.body.call_types);
+  const delayMinutes = Number(req.body.delay_minutes);
+  const raiseAmount = Number(req.body.raise_amount);
+
+  if (!Number.isInteger(groupId) || groupId <= 0) {
+    return res.redirect(base + '?error=' + encodeURIComponent('고객사를 선택해주세요.'));
+  }
+  if (!callTypes.length) {
+    return res.redirect(base + '?error=' + encodeURIComponent('적용할 콜 유형을 하나 이상 선택해주세요.'));
+  }
+  if (!Number.isInteger(delayMinutes) || delayMinutes < 1 || delayMinutes > 120) {
+    return res.redirect(base + '?error=' + encodeURIComponent('배차지연 판단 시간은 1~120분 사이로 입력해주세요.'));
+  }
+  if (!Number.isInteger(raiseAmount) || raiseAmount < 1000 || raiseAmount > 10000 || raiseAmount % 1000 !== 0) {
+    return res.redirect(base + '?error=' + encodeURIComponent('요금 상향금액은 1,000원 단위로 10,000원까지 선택해주세요.'));
+  }
+
+  // 이 지사에 속한 고객사만 등록할 수 있다(다른 지사 고객사가 폼 조작으로 들어오는 것 방지).
+  const group = await db.get('SELECT id FROM groups_tbl WHERE id = ? AND branch_id = ?', [groupId, req.params.id]);
+  if (!group) {
+    return res.redirect(base + '?error=' + encodeURIComponent('이 지사에 속한 고객사가 아닙니다.'));
+  }
+
+  await db.run(`
+    INSERT INTO dispatch_delay_settings (branch_id, group_id, call_types, delay_minutes, raise_amount)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT (branch_id, group_id) DO UPDATE SET
+      call_types = excluded.call_types,
+      delay_minutes = excluded.delay_minutes,
+      raise_amount = excluded.raise_amount,
+      updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS')
+  `, [req.params.id, groupId, callTypes.join(','), delayMinutes, raiseAmount]);
+
+  res.redirect(base + '?notice=' + encodeURIComponent('배차지연 알림 설정이 저장되었습니다.'));
+}));
+
+router.post('/:id/dispatch-delay/:settingId/delete', asyncHandler(async (req, res) => {
+  await db.run('DELETE FROM dispatch_delay_settings WHERE id = ? AND branch_id = ?', [req.params.settingId, req.params.id]);
+  res.redirect('/branches/' + req.params.id + '/dispatch-delay?notice=' + encodeURIComponent('설정이 삭제되었습니다.'));
+}));
+
 // ---------------- 프리미엄 요금표 ----------------
 router.get('/:id/premium-fare-rules', asyncHandler(async (req, res) => {
   const [branch, tiers, branches] = await Promise.all([
