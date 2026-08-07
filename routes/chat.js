@@ -130,6 +130,40 @@ async function markAgentMessagesReadByUser(sessionId) {
   if (rowCount > 0) broadcastReadReceiptAsync(sessionId, 'user');
 }
 
+// 카카오톡 고객 화면의 "1"(안읽음)을 지우는 방법은 메시지를 실제로 보내는 것뿐이다 —
+// 상담톡 명세서(v1.5.6)의 읽음 관련 API는 /receive/seen_info 하나이고 그것도 "고객이 우리
+// 메시지를 읽었다"는 반대 방향이다. 용어집에도 "상담원이 배정되었는지 여부는 카카오에서는 알 수
+// 없습니다"라고 못박혀 있다.
+//
+// 그래서 상담원이 실제로 읽은 순간에만 한 줄 보낸다. 판단 기준은 아래 UPDATE의 rowCount다 —
+// 0이면 이번에 새로 읽은 메시지가 없다는 뜻(재열람)이라 보내지 않는다. 상담원이 목록만 훑어본
+// 경우에도 이 함수 자체가 불리지 않으므로, "읽지도 않았는데 읽음으로 표시되는" 일이 없다.
+const AGENT_READ_NOTICE = '상담원이 확인했습니다. 곧 답변드리겠습니다.';
+
+async function notifyKakaoAgentRead(sessionId) {
+  const session = await db.get(
+    `SELECT id, channel, kakao_service_key, kakao_user_key, kakao_event_key
+     FROM chat_sessions WHERE id = ?`,
+    [sessionId]
+  );
+  if (!session || session.channel !== 'kakao') return;
+
+  const result = await kakaoConsult.sendMessage(session, AGENT_READ_NOTICE);
+  if (!result.ok) {
+    logIntegrationErrorAsync({
+      source: 'kakao', operation: 'send', refType: 'chat_session', refId: Number(sessionId),
+      message: result.error, context: { label: '상담원 읽음 알림' },
+    });
+    return;
+  }
+  // 발송된 것만 대화 이력에 남긴다 — 실패한 안내가 이력에만 남아 "보냈다"고 오해하지 않도록.
+  const inserted = await db.get(
+    `INSERT INTO chat_messages (session_id, sender, message) VALUES (?, 'system', ?) RETURNING *`,
+    [sessionId, AGENT_READ_NOTICE]
+  );
+  broadcastMessageAsync(sessionId, inserted);
+}
+
 async function markUserMessagesReadByAgent(sessionId) {
   const { rowCount } = await db.run(
     `UPDATE chat_messages
@@ -137,7 +171,11 @@ async function markUserMessagesReadByAgent(sessionId) {
      WHERE session_id = ? AND sender = 'user' AND read_by_agent_at IS NULL`,
     [sessionId]
   );
-  if (rowCount > 0) broadcastReadReceiptAsync(sessionId, 'agent');
+  if (rowCount > 0) {
+    broadcastReadReceiptAsync(sessionId, 'agent');
+    // 카카오 발신은 외부 호출이라 응답을 붙잡지 않는다(이 함수는 목록/스트림 응답 경로에서 await된다).
+    notifyKakaoAgentRead(sessionId).catch((e) => console.error('카카오 읽음 알림 실패:', e.message));
+  }
 }
 
 // 실시간 스트림으로 방금 도착한 메시지 한 건을 상대가 이미 화면을 보고 있는 상태에서 즉시 읽음
