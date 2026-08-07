@@ -222,6 +222,49 @@ async function tryAnswerFaq(session, text) {
 // b2b-car 계정이 없는 게 기본값이라(계획서 5.1) runDispatchAgent가 요구하는 users row가 없다.
 // 등록 고객 매칭(전화번호 기반)은 personal_info 필드 스펙이 아직 미확정이라(계획서 8.3) 이번
 // 1차 구현에는 넣지 않았다 — 지금은 전부 상담원 연결로 넘긴다.
+// 개인정보 제공 동의 게이트 (사용자 확정 규칙).
+//   · 요금문의·지식검색(FAQ) → 동의 없이도 응답한다. 개인을 특정할 필요가 없는 안내이기 때문.
+//   · 상담원 연결·주문접수    → 반드시 동의가 있어야 한다. 누구의 요청인지 모른 채 상담원을
+//     붙이거나 오더를 만들면 응대도 정산도 성립하지 않는다.
+// 동의 여부는 실제로 값을 받았는지로 판단한다(번호가 들어와 있으면 충족).
+function hasPersonalConsent(session) {
+  return !!(session && (session.external_phone || session.personal_info_at));
+}
+
+// 동의가 필요한 동작 직전에 부른다. 진행해도 되면 true, 동의를 기다려야 하면 false.
+// 동의 말풍선은 세션당 1회만 보낼 수 있어(명세서), 이미 보냈으면 다시 눌러달라고만 안내한다.
+// 다만 3일 유효기간이 지나 버튼이 만료됐는데 재발송도 못 하는 상태에서 계속 막으면 고객이
+// 아무 도움도 못 받고 갇힌다 — 그때는 예외적으로 상담원에게 넘긴다.
+async function ensurePersonalConsent(session, purpose, rawText) {
+  if (hasPersonalConsent(session)) return true;
+
+  if (!consentAlreadyRequested(session)) {
+    await savePendingConsentPurpose(session, purpose, rawText);
+    const asked = await requestPersonalInfo(session);
+    if (asked.ok) {
+      const notice = purpose === 'agent'
+        ? '상담원 연결을 위해 성함과 연락처가 필요합니다. 위 동의 버튼을 눌러주시면 바로 연결해드릴게요.'
+        : '접수를 위해 성함과 연락처가 필요합니다. 위 동의 버튼을 눌러주시면 바로 접수해드릴게요.';
+      await insertMessage(session.id, 'bot', notice);
+      await sendAndLog(session, notice, '개인정보 동의 요청 안내');
+      return false;
+    }
+    // 말풍선 발송 자체가 실패했으면 고객을 붙잡아둘 이유가 없다.
+    return true;
+  }
+
+  if (consentPending(session)) {
+    await savePendingConsentPurpose(session, purpose, rawText);
+    const notice = '앞서 보내드린 개인정보 제공 동의 버튼을 눌러주시면 이어서 도와드리겠습니다.';
+    await insertMessage(session.id, 'bot', notice);
+    await sendAndLog(session, notice, '개인정보 동의 재안내');
+    return false;
+  }
+
+  // 동의 절차가 만료됨(3일 초과) — 재발송이 불가하므로 막지 않고 진행시킨다.
+  return true;
+}
+
 async function handleUnsupported(session, text, requestedFeature) {
   const notice = '상담원을 연결해드릴게요. 잠시만 기다려주세요.';
   await insertMessage(session.id, 'bot', notice);
@@ -267,12 +310,23 @@ async function loadPendingIntake(session) {
   if (!session.intake_slots_json) return null;
   try {
     const saved = JSON.parse(session.intake_slots_json);
-    if (!saved || !saved.raw || !saved.savedAt) return null;
+    if (!saved || !saved.savedAt) return null;
+    if (!saved.raw && saved.purpose !== 'agent') return null;
     if (Date.now() - saved.savedAt > INTAKE_SLOT_TTL_MINUTES * 60000) return null;
     return saved;
   } catch (e) {
     return null;
   }
+}
+
+// 동의를 기다리는 동안 "무엇을 하려던 것인지"까지 함께 들고 있는다 — 동의가 도착하면
+// 접수는 접수대로, 상담원 연결은 상담원 연결대로 이어가야 한다.
+async function savePendingConsentPurpose(session, purpose, raw) {
+  await db.run(
+    `UPDATE chat_sessions SET intake_slots_json = ?,
+     intake_updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') WHERE id = ?`,
+    [JSON.stringify({ raw: raw || '', savedAt: Date.now(), purpose }), session.id]
+  ).catch((e) => console.error('동의 대기 상태 저장 실패:', e.message));
 }
 
 async function savePendingIntake(session, raw) {
@@ -310,21 +364,12 @@ async function tryHandleIntake(session, text) {
     return true;
   }
 
+  // 접수는 반드시 동의가 있어야 한다(사용자 확정 규칙) — 동의가 오면 저장해둔 내용으로 이어간다.
+  if (!await ensurePersonalConsent(session, 'intake', mergedRaw)) return true;
+
   // 번호(개인정보 동의로 받은 것) → 채널 매핑 순으로 접수 주체를 찾는다.
   const account = await resolveIntakeContext(session);
 
-  // 문맥을 못 찾았고 번호도 아직 없다면, 동의를 한 번 요청해보고 접수 내용은 들고 있는다 —
-  // 동의가 오면 /receive/personal_info에서 이 내용으로 접수를 이어간다(명세서상 세션당 1회).
-  if (!account && !session.external_phone && !consentAlreadyRequested(session)) {
-    await savePendingIntake(session, mergedRaw);
-    const asked = await requestPersonalInfo(session);
-    if (asked.ok) {
-      const notice = '접수를 위해 성함과 연락처가 필요합니다. 위 동의 버튼을 눌러주시면 바로 접수해드릴게요.';
-      await insertMessage(session.id, 'bot', notice);
-      await sendAndLog(session, notice, '개인정보 동의 요청 안내');
-      return true;
-    }
-  }
 
   if (!account || !account.auto_register) {
     // 매핑이 없거나 자동 등록을 켜지 않은 채널 — 파싱만 하고 상담원에게 넘긴다.
@@ -420,6 +465,7 @@ async function processBotTurn(session, text) {
   }
 
   if (ESCALATION_RE.test(text)) {
+    if (!await ensurePersonalConsent(session, 'agent', text)) return;
     return handleUnsupported(session, text, '사고·클레임 문의');
   }
 
@@ -443,14 +489,19 @@ async function processBotTurn(session, text) {
       return false;
     });
     if (handledByAgent) return;
+    if (!await ensurePersonalConsent(session, 'agent', text)) return;
     return handleUnsupported(session, text, classified.requestedFeature);
   }
   if (classified.intent === 'faq') {
+    // 요금문의·지식검색은 동의 없이 응답한다. 답을 못 찾아 상담원으로 넘길 때만 동의를 요구한다.
     const answered = await tryAnswerFaq(session, text);
-    if (!answered) await handleUnsupported(session, text, null);
+    if (answered) return;
+    if (!await ensurePersonalConsent(session, 'agent', text)) return;
+    await handleUnsupported(session, text, null);
     return;
   }
   // dispatch_order / proxy_order / daily_driver_order — 폼 파서가 못 잡은 자유 문장 접수다.
+  if (!await ensurePersonalConsent(session, 'intake', text)) return;
   return handleOrderIntake(session, text, classified.requestedFeature);
 }
 
@@ -496,10 +547,9 @@ router.post(['/receive', '/receive/message', '/receive/message-simple'], asyncHa
   if (session.status !== 'agent_active') {
     runAfterResponse(
       (async () => {
-        // 새 세션이면 첫 응답에 개인정보 제공동의를 함께 요청한다 — 동의를 받아야 이름/연락처가
-        // 들어오고, 그래야 익명 카카오 고객을 거래처 계정과 이을 수 있다(기획서 5.7).
-        // 실패해도 대화는 그대로 진행한다(동의는 부가 정보이지 응대 조건이 아니다).
-        if (session.isNew) await requestPersonalInfo(session);
+        // 동의 요청은 첫 메시지에 무조건 보내지 않는다 — 요금문의·지식검색만 하고 끝나는 고객에게는
+        // 불필요하다. 상담원 연결이나 접수처럼 실제로 신원이 필요한 시점에만 요청한다
+        // (ensurePersonalConsent, 사용자 확정 규칙).
         await processBotTurn(session, text);
       })().catch(async (e) => {
         console.error('카카오 상담톡 봇 처리 실패:', e.message);
@@ -609,7 +659,7 @@ router.post('/receive/personal_info', asyncHandler(async (req, res) => {
     session.external_name = name || session.external_name;
     const pending = await loadPendingIntake(session);
     if (pending) {
-      resumeAfterConsent = { session, raw: pending.raw };
+      resumeAfterConsent = { session, raw: pending.raw, purpose: pending.purpose || 'intake' };
     }
   }
 
@@ -627,15 +677,21 @@ router.post('/receive/personal_info', asyncHandler(async (req, res) => {
   res.json({ code: 200, message: 'SUCCESS' });
 
   if (resumeAfterConsent) {
-    runAfterResponse(
-      tryHandleIntake(resumeAfterConsent.session, resumeAfterConsent.raw)
-        .then((handled) => {
-          if (handled) return;
-          // 번호를 받았는데도 거래처를 못 찾은 경우 — 그대로 두면 고객이 답을 못 받는다.
-          return markNeedsAgent(resumeAfterConsent.session, resumeAfterConsent.raw, '신규 오더 접수(동의 후 거래처 확인 필요)');
-        }),
-      'resume_after_consent'
-    );
+    // 동의를 기다리느라 멈춰 있던 작업을 이어간다 — 고객이 같은 말을 다시 하지 않아도 되게.
+    const { session: resumeSession, raw, purpose } = resumeAfterConsent;
+    runAfterResponse((async () => {
+      await clearPendingIntake(resumeSession);
+      if (purpose === 'agent') {
+        const notice = '확인되었습니다. 상담원을 연결해드릴게요.';
+        await insertMessage(resumeSession.id, 'bot', notice);
+        await sendAndLog(resumeSession, notice, '동의 후 상담원 연결');
+        await markNeedsAgent(resumeSession, raw, '상담원 연결(동의 완료)');
+        return;
+      }
+      const handled = await tryHandleIntake(resumeSession, raw);
+      // 번호를 받았는데도 거래처를 못 찾은 경우 — 그대로 두면 고객이 답을 못 받는다.
+      if (!handled) await markNeedsAgent(resumeSession, raw, '신규 오더 접수(동의 후 거래처 확인 필요)');
+    })(), 'resume_after_consent');
   }
 }));
 
