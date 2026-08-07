@@ -19,6 +19,7 @@ const { getSmalltalkMessage } = require('../lib/smallTalk');
 const { runDispatchAgent } = require('../lib/mcpDispatchAgent');
 const { notify } = require('../lib/push');
 const { broadcastMessage, broadcastSessionListChanged } = require('../lib/realtimeChat');
+const { logIntegrationErrorAsync } = require('../lib/integrationLog');
 
 const router = express.Router();
 
@@ -152,7 +153,12 @@ async function markNeedsAgent(session, lastUserMessage, requestedFeature) {
 // 로그를 남겨야 운영 중 "봇이 답장을 안 한다"는 문의가 왔을 때 원인을 바로 알 수 있다.
 async function sendAndLog(session, text, label) {
   const result = await kakaoConsult.sendMessage(session, text);
-  if (!result.ok) console.error(`카카오 상담톡 발신 실패(${label}):`, result.error);
+  if (!result.ok) {
+    // 발신 실패는 고객 화면에만 안 보일 뿐 우리 대화창에는 봇 답변이 남아 정상처럼 보인다 —
+    // 반드시 기록해야 "봇이 답을 안 한다"는 문의가 왔을 때 원인을 바로 찾을 수 있다.
+    logIntegrationErrorAsync({ source: 'kakao', operation: 'send', refType: 'chat_session', refId: session.id,
+      message: result.error, context: { label, textHead: String(text || '').slice(0, 60) } });
+  }
   return result;
 }
 

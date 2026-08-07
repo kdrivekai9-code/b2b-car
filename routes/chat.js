@@ -12,6 +12,7 @@ const { kstNow } = require('../lib/period');
 const { getEffectivePaymentMethods } = require('../lib/branchPolicy');
 const { runDispatchAgent, checkDispatchDelay } = require('../lib/mcpDispatchAgent');
 const kakaoConsult = require('../lib/kakaoConsult');
+const { logIntegrationErrorAsync } = require('../lib/integrationLog');
 const {
   broadcastMessage, broadcastReadReceipt, broadcastSessionListChanged, openSessionStream, openSessionListStream, closeChannel,
   startAgentPresence, isAnyAgentOnline, listOnlineAgentNames,
@@ -837,7 +838,10 @@ router.post('/sessions/:id/reply', requireRole('admin'), asyncHandler(async (req
     // (계획서 5.5 — 지금까지는 웹 위젯에만 반영되고 끝났다).
     if (existing.channel === 'kakao') {
       const sendResult = await kakaoConsult.sendMessage(existing, text);
-      if (!sendResult.ok) console.error('카카오 상담톡 발신 실패(상담원 답장):', sendResult.error);
+      if (!sendResult.ok) {
+        logIntegrationErrorAsync({ source: 'kakao', operation: 'send', refType: 'chat_session', refId: Number(req.params.id),
+          message: sendResult.error, context: { label: '상담원 답장', textHead: String(text).slice(0, 60) } });
+      }
     }
   }
 

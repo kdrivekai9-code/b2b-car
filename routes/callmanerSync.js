@@ -7,6 +7,7 @@ const asyncHandler = require('../middleware/asyncHandler');
 const callmaner = require('../lib/callmaner');
 const { notify } = require('../lib/push');
 const { broadcastOrderListChanged } = require('../lib/realtimeChat');
+const { logIntegrationErrorAsync } = require('../lib/integrationLog');
 
 const router = express.Router();
 
@@ -132,7 +133,8 @@ async function syncOrdersByConfSlip(branch) {
         const { orders: list } = await callmaner.orderHistory(branch, hp, { page: 1, pageSize: 50 });
         list.forEach((o) => { if (o.confSlip) infoBySlip.set(o.confSlip, o); });
       } catch (e) {
-        console.error(`목록 상태조회 실패 (userHp=${hp}):`, e.message);
+        logIntegrationErrorAsync({ source: 'callmaner', operation: 'order_history', refType: 'branch', refId: branch.id,
+          message: e.message, context: { userHp: hp } });
       }
     }));
   }
@@ -151,7 +153,8 @@ async function syncOrdersByConfSlip(branch) {
       try {
         infoByOrderId.set(order.id, await callmaner.orderInfo(branch, order.callmaner_conf_slip, order.origin_contact));
       } catch (e) {
-        console.error(`단건 상태조회 실패 (conf_slip=${order.callmaner_conf_slip}):`, e.message);
+        logIntegrationErrorAsync({ source: 'callmaner', operation: 'order_info', refType: 'order', refId: order.id,
+          message: e.message, context: { confSlip: order.callmaner_conf_slip, oid: order.oid } });
       }
     }));
   }
@@ -282,7 +285,8 @@ router.get('/sync', checkCronAuth, asyncHandler(async (req, res) => {
       );
       summary.push({ branchId: branch.id, ok: true, count: orderList.length, updated });
     } catch (e) {
-      console.error(`콜마너 동기화 실패 (branch ${branch.id}):`, e.message);
+      logIntegrationErrorAsync({ source: 'callmaner', operation: 'sync', refType: 'branch', refId: branch.id,
+        message: e.message });
       summary.push({ branchId: branch.id, ok: false, error: e.message });
     }
   }
