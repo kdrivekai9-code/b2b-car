@@ -27,7 +27,11 @@ function isQuestionBubble(msg) {
 <div class="page-head-row">
   <div>
     <h1 class="page-title">상담 #<%= session.id %> <span class="badge <%= statusBadge[session.status] || 'gray' %>"><%= statusLabel[session.status] || session.status %></span></h1>
-    <p class="page-sub">고객: <%= session.user_name || '-' %> (<%= session.user_role || '-' %>)<%= session.user_phone ? ' · ' + session.user_phone : '' %></p>
+    <p class="page-sub">
+      고객: <%= session.user_name || '-' %> (<%= session.user_role || '-' %>)<%= session.user_phone ? ' · ' + session.user_phone : '' %>
+      <%# 여기서 보내는 답장이 카카오 상담톡으로 나간다는 걸 입력 전에 알 수 있어야 한다. %>
+      <% if (session.channel === 'kakao') { %><span class="badge amber">카카오 상담톡</span><% } %>
+    </p>
   </div>
   <div class="page-head-actions">
     <a class="btn secondary" href="/chat/sessions">← 목록으로</a>

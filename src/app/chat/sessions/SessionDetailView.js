@@ -66,7 +66,11 @@ export default function SessionDetailView({ initialSession, agents, currentUser 
           <h1 className="page-title">
             상담 #{session.id} <span className={`badge ${STATUS_BADGE[session.status] || 'gray'}`}>{STATUS_LABEL[session.status] || session.status}</span>
           </h1>
-          <p className="page-sub">고객: {session.user_name || '-'} ({session.user_role || '-'}){session.user_phone ? ` · ${session.user_phone}` : ''}</p>
+          <p className="page-sub">
+            고객: {session.user_name || '-'} ({session.user_role || '-'}){session.user_phone ? ` · ${session.user_phone}` : ''}
+            {/* 여기서 보내는 답장이 카카오 상담톡으로 나간다는 걸 입력 전에 알 수 있어야 한다. */}
+            {session.channel === 'kakao' && <span className="badge amber">카카오 상담톡</span>}
+          </p>
         </div>
         <div className="page-head-actions">
           <a className="btn secondary" href="/chat/sessions">← 목록으로</a>

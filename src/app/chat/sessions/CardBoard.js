@@ -181,7 +181,11 @@ export default function CardBoard({ initialSessions, initialOnlineAgents, curren
               >
                 <div className="session-card-head">
                   <strong>#{s.id} · {s.user_name || '-'}</strong>
-                  <span className={`badge ${STATUS_BADGE[s.status] || 'gray'}`}>{STATUS_LABEL[s.status] || s.status}</span>
+                  <span>
+                    {/* 답장이 카카오로 나가는 세션인지 상담원이 바로 알아야 한다(응대 톤·속도가 다르다). */}
+                    {s.channel === 'kakao' && <span className="badge amber">카카오</span>}
+                    <span className={`badge ${STATUS_BADGE[s.status] || 'gray'}`}>{STATUS_LABEL[s.status] || s.status}</span>
+                  </span>
                 </div>
                 <div className="session-card-sub">{s.user_role || '-'}{s.user_phone ? ` · ${s.user_phone}` : ''}</div>
                 <div className="session-card-msg" title={s.last_message || ''}>{s.last_message || '최근 메시지 없음'}</div>

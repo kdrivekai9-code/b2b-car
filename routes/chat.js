@@ -28,6 +28,17 @@ const SESSION_CREATE_LIMIT = process.env.NODE_ENV === 'test' && Number.isInteger
   : DEFAULT_SESSION_CREATE_LIMIT;
 const SESSION_CREATE_WINDOW_SQL = `to_char(now() at time zone 'Asia/Seoul' - interval '1 hour', 'YYYY-MM-DD HH24:MI:SS')`;
 
+// 카카오 상담톡 고객은 b2b-car 계정이 없어(chat_sessions.user_id가 NULL) users 조인 결과가
+// 전부 NULL이다. 목록·상세 화면이 하나같이 `user_name || '-'`로 그리기 때문에, 실제로 대화가
+// 오간 세션인데도 "#672 · -"처럼 빈 행으로 보여 상담원이 찾을 수가 없었다. 표시 지점이 여섯
+// 군데(EJS 목록/표/상세 + Next.js 카드/표/상세)라 화면마다 고치면 또 갈라지므로, 조회 시점에
+// 채널을 반영한 표시값을 만들어 내려보낸다. 연락처는 접수 폼에서 받은 external_phone으로 채운다.
+// 개인정보 제공동의를 받은 카카오 고객은 실제 이름이 external_name에 들어온다
+// (routes/kakaoConsult.js /receive/personal_info) — 있으면 그 이름을 먼저 쓴다.
+const CUSTOMER_NAME_SQL = `COALESCE(u.name, cs.external_name, CASE WHEN cs.channel = 'kakao' THEN '카카오 상담톡 고객' END)`;
+const CUSTOMER_ROLE_SQL = `COALESCE(u.role, CASE WHEN cs.channel = 'kakao' THEN '카카오' END)`;
+const CUSTOMER_PHONE_SQL = `COALESCE(u.phone, cs.external_phone)`;
+
 function defaultReservedDateTime() {
   const now = kstNow();
   const pad = (n) => String(n).padStart(2, '0');
@@ -435,8 +446,8 @@ router.get('/guide', requireRole('admin'), asyncHandler(async (req, res) => {
 // 반드시 아래 '/sessions/:id...' 와일드카드보다 먼저 등록해야 한다(이 파일의 다른 라우트들과 같은 이유).
 router.get('/sessions/needs-agent-summary', requireRole('admin'), asyncHandler(async (req, res) => {
   const rows = await db.all(`
-    SELECT cs.id, cs.updated_at,
-      COALESCE(g.name, u.name) AS customer_name,
+    SELECT cs.id, cs.updated_at, cs.channel,
+      COALESCE(g.name, ${CUSTOMER_NAME_SQL}) AS customer_name,
       (SELECT message FROM chat_messages WHERE session_id = cs.id AND sender = 'user' ORDER BY id DESC LIMIT 1) AS message
     FROM chat_sessions cs
     LEFT JOIN users u ON u.id = cs.user_id
@@ -453,7 +464,7 @@ router.get('/sessions/needs-agent-summary', requireRole('admin'), asyncHandler(a
 // branches 등 — 실시간 채팅/오더등록폼에서만 쓰임)는 필요 없다.
 async function buildSessionListSessions() {
   return db.all(`
-    SELECT cs.*, u.name AS user_name, u.role AS user_role, u.phone AS user_phone,
+    SELECT cs.*, ${CUSTOMER_NAME_SQL} AS user_name, ${CUSTOMER_ROLE_SQL} AS user_role, ${CUSTOMER_PHONE_SQL} AS user_phone,
       a.name AS assigned_agent_name,
       (SELECT message FROM chat_messages WHERE session_id = cs.id ORDER BY id DESC LIMIT 1) AS last_message,
       (SELECT COUNT(*) FROM chat_messages WHERE session_id = cs.id) AS message_count
@@ -622,7 +633,8 @@ router.get('/sessions/:id/intake-order', requireRole('admin'), asyncHandler(asyn
 // ---------------- 관리자: 세션 상세/모니터링/개입 ----------------
 router.get('/sessions/:id', requireRole('admin'), asyncHandler(async (req, res) => {
   const session = await db.get(`
-    SELECT cs.*, u.name AS user_name, u.role AS user_role, u.phone AS user_phone, u.login_id AS user_login_id,
+    SELECT cs.*, ${CUSTOMER_NAME_SQL} AS user_name, ${CUSTOMER_ROLE_SQL} AS user_role,
+      ${CUSTOMER_PHONE_SQL} AS user_phone, u.login_id AS user_login_id,
       a.name AS agent_name
     FROM chat_sessions cs
     LEFT JOIN users u ON u.id = cs.user_id
@@ -690,8 +702,8 @@ router.get('/sessions/:id', requireRole('admin'), asyncHandler(async (req, res) 
 // 슬라이스 범위 밖이라 branches/groups/paymentMethods/intakeOrder는 싣지 않는다).
 router.get('/sessions/:id/data.json', requireRole('admin'), asyncHandler(async (req, res) => {
   const session = await db.get(`
-    SELECT cs.id, cs.status, cs.assigned_agent_id, cs.requested_feature, cs.created_at, cs.updated_at,
-      u.name AS user_name, u.role AS user_role, u.phone AS user_phone,
+    SELECT cs.id, cs.status, cs.assigned_agent_id, cs.requested_feature, cs.created_at, cs.updated_at, cs.channel,
+      ${CUSTOMER_NAME_SQL} AS user_name, ${CUSTOMER_ROLE_SQL} AS user_role, ${CUSTOMER_PHONE_SQL} AS user_phone,
       a.name AS assigned_agent_name
     FROM chat_sessions cs
     LEFT JOIN users u ON u.id = cs.user_id

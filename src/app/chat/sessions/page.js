@@ -79,7 +79,10 @@ export default async function ChatSessionListPage({ searchParams }) {
               {sessions.map((s) => (
                 <tr key={s.id} className={s.status === 'needs_agent' ? 'session-row-needs-agent' : ''}>
                   <td>#{s.id}</td>
-                  <td>{s.user_name || '-'} <span style={{ color: 'var(--muted)' }}>({s.user_role || '-'})</span></td>
+                  <td>
+                    {s.user_name || '-'} <span style={{ color: 'var(--muted)' }}>({s.user_role || '-'})</span>
+                    {s.channel === 'kakao' && <span className="badge amber">카카오</span>}
+                  </td>
                   <td><span className={`badge ${STATUS_BADGE[s.status] || 'gray'}`}>{STATUS_LABEL[s.status] || s.status}</span></td>
                   <td>{s.assigned_agent_name || '미지정'}</td>
                   <td>{s.requested_feature || '-'}</td>
