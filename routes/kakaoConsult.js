@@ -13,9 +13,10 @@ const asyncHandler = require('../middleware/asyncHandler');
 const kakaoConsult = require('../lib/kakaoConsult');
 const { classifyAndExtract } = require('../lib/hybridChat');
 const { searchKnowledgeBase } = require('../lib/knowledgeSearch');
-const { parseKakaoIntake, buildMissingQuestion } = require('../lib/kakaoIntakeParser');
+const { parseKakaoIntake, buildMissingQuestion, normalizePhone, normalizePlate } = require('../lib/kakaoIntakeParser');
 const { findIntakeAccount, resolveIntakeContext, findAccountByPhone, linkUserKeyToAccount, createOrdersFromIntake } = require('../lib/kakaoIntakeService');
 const { getSmalltalkMessage } = require('../lib/smallTalk');
+const { buildSuggestion } = require('../lib/agentAssist');
 const { runDispatchAgent } = require('../lib/mcpDispatchAgent');
 const { notify } = require('../lib/push');
 const { broadcastMessage, broadcastSessionListChanged } = require('../lib/realtimeChat');
@@ -136,6 +137,35 @@ async function findOrCreateKakaoSession(keys) {
     session.kakao_event_key = keys.eventKey;
   }
   return session;
+}
+
+// 상담원 응대 중인 세션의 답변 초안 만들기 — 웹 위젯(routes/chat.js createSuggestionAsync)과
+// 같은 규칙이다. 초안이 없다고 상담이 막히면 안 되므로 실패는 로그만 남긴다.
+async function createAgentSuggestion(session, text) {
+  try {
+    const suggestion = await buildSuggestion(text);
+    if (!suggestion) return;
+
+    const lastUserMessage = await db.get(
+      `SELECT id FROM chat_messages WHERE session_id = ? AND sender = 'user' ORDER BY id DESC LIMIT 1`,
+      [session.id]
+    ).catch(() => null);
+
+    await db.run(
+      `UPDATE chat_suggestions SET status = 'dismissed',
+       decided_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS')
+       WHERE session_id = ? AND status = 'pending'`,
+      [session.id]
+    );
+    await db.run(
+      `INSERT INTO chat_suggestions (session_id, user_message_id, kind, suggested_text, intake_json)
+       VALUES (?, ?, ?, ?, ?)`,
+      [session.id, lastUserMessage ? lastUserMessage.id : null, suggestion.kind, suggestion.text,
+        suggestion.intake ? JSON.stringify(suggestion.intake) : null]
+    );
+  } catch (e) {
+    console.error('카카오 상담원 도우미 초안 생성 실패:', e.message);
+  }
 }
 
 async function insertMessage(sessionId, sender, message) {
@@ -291,6 +321,52 @@ async function handleUnsupported(session, text, requestedFeature) {
   await markNeedsAgent(session, text, requestedFeature);
 }
 
+// Gemini가 뽑은 필드를 블록 폼 파서(parseKakaoIntake)와 같은 모양으로 맞춘다 — 그래야
+// completeIntake가 두 경로를 구분하지 않고 처리한다.
+//
+// 날짜/시간은 여기서 계산하지 않는다. hybridChat이 이미 "오늘=YYYY-MM-DD" 기준을 프롬프트로
+// 받아 계산한 값(reservationDate/reservationTime)을 주므로 그대로 옮기고, 둘 다 없을 때만
+// resolveReservation의 즉시 처리에 맡긴다(when.immediate).
+function buildParsedFromClassified(classified, text) {
+  // 정규화는 폼 파서 것을 그대로 쓴다 — 같은 원문이 경로에 따라 다른 값으로 등록되면 안 된다.
+  const plates = [classified.originVehicleNumber, classified.waypointVehicleNumber]
+    .map((v) => normalizePlate(v)).filter(Boolean);
+  const vehicleType = String(classified.vehicleType || '').trim() || null;
+  // 차량 1대 = 오더 1건(파서와 동일). 차종은 첫 대에만 붙인다 — 두 번째 차량의 차종은 별도 필드가 없다.
+  const vehicles = plates.map((plate, i) => ({ plate, type: i === 0 ? vehicleType : null }));
+
+  const date = String(classified.reservationDate || '').trim() || null;
+  const time = String(classified.reservationTime || '').trim() || null;
+  // 날짜/시간은 여기서 계산하지 않는다. hybridChat이 "오늘=YYYY-MM-DD"를 프롬프트로 받아 이미
+  // 계산한 값을 주므로 그대로 옮기고, 둘 다 없으면 즉시 요청으로 둔다(resolveReservation이 처리).
+  const when = (date || time)
+    ? { immediate: false, date, time, dateRolled: false, raw: [date, time].filter(Boolean).join(' ') }
+    : { immediate: true, date: null, time: null, dateRolled: false, raw: null };
+
+  const join = (a, b) => [a, b].map((v) => String(v || '').trim()).filter(Boolean).join(' ') || null;
+  const originAddress = join(classified.originAddress, classified.originAddressDetail);
+  const destAddress = join(classified.destinationAddress, classified.destinationAddressDetail);
+
+  const missing = [];
+  if (!originAddress) missing.push('origin_address');
+  if (!destAddress) missing.push('destination_address');
+  if (!vehicles.length) missing.push('vehicle_number');
+
+  return {
+    matched: true,
+    complete: missing.length === 0,
+    missing,
+    // normalizePhone은 빈 값에 ''를 돌려주지만 폼 파서는 null을 넣는다 — 저장값을 맞춘다.
+    origin: { address: originAddress, contact: normalizePhone(classified.originContact) || null },
+    destination: { address: destAddress, contact: normalizePhone(classified.destinationContact) || null },
+    when,
+    vehicles,
+    options: {},
+    memo: String(classified.memo || '').trim() || null,
+    raw: text,
+  };
+}
+
 // 신규 오더 접수 — 상담톡 로그 2년치를 분석해보니 고객 메시지의 47%가 `[출발지]…[도착지]`
 // 형식의 정형 폼이고, 그 폼은 룰 파서만으로 98%가 필수 4종(출발지·도착지·차량번호·일시)까지
 // 추출된다("탁송 상담톡 챗봇 고도화 기획서" 2.1). 그래서 LLM 분류보다 **먼저** 폼 파서를 태운다 —
@@ -384,11 +460,17 @@ async function tryHandleIntake(session, text) {
   }
 
   // 접수는 반드시 동의가 있어야 한다(사용자 확정 규칙) — 동의가 오면 저장해둔 내용으로 이어간다.
-  if (!await ensurePersonalConsent(session, 'intake', mergedRaw)) return true;
+  return completeIntake(session, parsed, mergedRaw);
+}
+
+// 파싱이 끝난 접수를 실제로 등록한다 — 블록 폼(parseKakaoIntake)과 자유 문장(Gemini 추출)이
+// 같은 경로를 쓰도록 분리했다. 등록 여부·인계 사유 판단이 두 갈래로 갈리면 한쪽만 고쳐지는
+// 일이 생긴다.
+async function completeIntake(session, parsed, rawText) {
+  if (!await ensurePersonalConsent(session, 'intake', rawText)) return true;
 
   // 번호(개인정보 동의로 받은 것) → 채널 매핑 순으로 접수 주체를 찾는다.
   const account = await resolveIntakeContext(session);
-
 
   if (!account || !account.auto_register) {
     // 매핑이 없거나 자동 등록을 켜지 않은 채널 — 파싱만 하고 상담원에게 넘긴다.
@@ -396,7 +478,7 @@ async function tryHandleIntake(session, text) {
     const reason = !account
       ? (consentPending(session) ? '개인정보 동의 대기' : '거래처 확인 불가')
       : '자동 등록 꺼짐';
-    await handoffWithParsedSlots(session, parsed, mergedRaw, reason);
+    await handoffWithParsedSlots(session, parsed, rawText, reason);
     return true;
   }
 
@@ -420,7 +502,7 @@ async function tryHandleIntake(session, text) {
       no_account: '채널 매핑 없음',
       exception: '자동 접수 오류',
     };
-    await handoffWithParsedSlots(session, parsed, mergedRaw, labels[result.reason] || result.reason);
+    await handoffWithParsedSlots(session, parsed, rawText, labels[result.reason] || result.reason);
     return true;
   }
 
@@ -492,9 +574,16 @@ async function processBotTurn(session, text) {
   const handled = await tryHandleIntake(session, text);
   if (handled) return;
 
+  // 자유 문장 되묻기 중이면 앞선 원문에 이어붙여 분류한다 — 폼 파서는 블록 형식만 매칭하므로
+  // 보충 답변("지금요")만 넘기면 앞서 받은 출발지·도착지·차량이 사라져 처음부터 다시 묻게 된다.
+  const pendingIntake = await loadPendingIntake(session);
+  const intakeText = pendingIntake && pendingIntake.raw && pendingIntake.purpose !== 'agent'
+    ? pendingIntake.raw + '\n' + text
+    : text;
+
   let classified;
   try {
-    classified = await classifyAndExtract(text, null, null);
+    classified = await classifyAndExtract(intakeText, null, null);
   } catch (e) {
     console.error('카카오 상담톡 의도 분류 실패:', e.message);
     classified = { intent: 'unsupported' };
@@ -520,6 +609,29 @@ async function processBotTurn(session, text) {
     return;
   }
   // dispatch_order / proxy_order / daily_driver_order — 폼 파서가 못 잡은 자유 문장 접수다.
+  // Gemini가 뽑은 필드를 폼과 같은 모양으로 바꿔 같은 등록 경로를 태운다. 탁송(dispatch_order)만
+  // 대상이다 — 프리미엄/일일기사는 오더 컬럼과 요금 체계가 달라 이번 범위 밖이다.
+  // 경유지는 파서도 접수 서비스도 지원하지 않는다 — 자동 등록하면 경유지가 조용히 사라지므로
+  // 상담원에게 넘긴다.
+  const hasWaypoint = !!String(classified.waypointAddress || '').trim();
+  if (classified.intent === 'dispatch_order' && !hasWaypoint) {
+    const parsed = buildParsedFromClassified(classified, intakeText);
+    if (!parsed.complete) {
+      // 빠진 항목만 되묻는다 — 폼 경로와 같은 문구를 쓴다. 다음 메시지는 위 intakeText 병합으로
+      // 앞 원문에 이어붙여 다시 분류하므로, 고객이 전체를 다시 쓸 필요가 없다.
+      //
+      // 동의는 여기서 받지 않는다(폼 경로와 동일) — 동의 말풍선은 세션당 1회뿐이라, 아직 등록할지도
+      // 모르는 단계에서 써버리면 정작 등록 직전에 다시 띄울 수 없다. completeIntake가 요구한다.
+      await savePendingIntake(session, intakeText);
+      const question = buildMissingQuestion(parsed.missing);
+      await insertMessage(session.id, 'bot', question);
+      await sendAndLog(session, question, '접수 되묻기(자유문장)');
+      return;
+    }
+    await completeIntake(session, parsed, intakeText);
+    return;
+  }
+
   if (!await ensurePersonalConsent(session, 'intake', text)) return;
   return handleOrderIntake(session, text, classified.requestedFeature);
 }
@@ -576,6 +688,10 @@ router.post(['/receive', '/receive/message', '/receive/message-simple'], asyncHa
       }),
       'bot_turn'
     );
+  } else {
+    // 상담원 응대 중 — 봇은 고객에게 답하지 않지만(기존 규칙 유지) 답변 초안은 만들어 둔다.
+    // 상담원 화면에 "채택 대기"로 뜨고, 승인해야 고객에게 나간다(lib/agentAssist.js).
+    runAfterResponse(createAgentSuggestion(session, text), 'agent_suggestion');
   }
 }));
 
@@ -734,3 +850,5 @@ router.post('/receive/personal_info', asyncHandler(async (req, res) => {
 }));
 
 module.exports = router;
+// 자유 문장 필드 매핑은 폼 파서와 결과가 같아야 해서 따로 검증한다(scripts/kakao-freetext-intake-test.js).
+module.exports.buildParsedFromClassified = buildParsedFromClassified;
