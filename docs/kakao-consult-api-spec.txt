@@ -1,0 +1,2625 @@
+카카오톡 상담톡 API​
+  가이드 문서
+개정이력
+
+
+
+ 버전     작성일자        변경구분            변경내용           작성자   승인자
+
+ 1.0   2025.06.27    신규     최초 작성                  김형범   전형주
+
+ 1.1   2025.09.25    신규     V3 업데이트                김형범   전형주
+
+ 1.2   2025.10.20    변경     시스템 메시지 추가             김형범   전형주
+
+ 1.3   2025.12.31    변경     Receive API 최신화        김형범   전형주
+
+                            Upload API 추가 및 Send
+ 1.4    2026.4.8    신규/변경                          김형범   전형주
+                            API Response 변경
+용어집
+
+상담 세션 (Session)
+●​ 상담원이 고객에게 메시지를 전송하기 위한 필수 조건입니다.
+●​ 상담 세션이 생성된 상태에서 상담원은 메시지를 발송할 수 있습니다.
+●​ 생성된 세션은 카카오톡 사용자의 마지막 메시지 수신 시점으로부터 30일간
+  유지되며, 고객 메시지가 수신될 때 마다 연장됩니다.
+    ○​ 세션 종료 시각은 사용자의 마지막 메시지 수신 시각을 기준으로, 다음
+      정각으로부터 30일 후로 설정됩니다.
+    ○​ 예) 8월 20일 15:15에 마지막 메시지를 수신했다면, 세션은 30일 뒤인 9월
+      19일 16:00에 종료
+●​ 상담 세션 생성 조건은 아래와 같습니다.
+    ○​ 카카오톡 사용자가 상담 연결하기를 이용하여 상담을 요청
+    ○​ 카카오톡에서 직접 채널 채팅방에 메시지를 전송하여 상담 요청
+●​ 상담 세션 종료 조건은 아래와 같습니다.
+    ○​ 상담원이 상담 종료
+    ○​ 상담원이 카카오톡 사용자를 차단
+    ○​ 카카오톡 사용자가 카카오톡 채널 채팅방에 "!종료"메시지 입력
+    ○​ 카카오톡 사용자가 카카오톡 채널 채팅방 나가기
+    ○​ 카카오톡 사용자가 카카오톡 채널을 차단
+    ○​ 카카오톡 사용자의 마지막 메시지 수신 후 30일이 경과
+
+
+사용자 키 (UserKey)
+●​ 특정 카카오톡 사용자를 구분하기 위한 key로, 상담톡 메시지 수신시에 함께
+  전달됩니다.
+●​ 사용자 키는 카카오톡 채널 별로 유효합니다. 카카오톡 채널이 다르면, 사용자가
+  동일하더라도 다른 사용자 키를 사용합니다.
+●​ 사용자 키는 대소문자를 구분합니다.
+●​ 카카오톡 사용자가 카카오톡 채널을 차단 후 해지시했을 경우에는 사용자 키가
+  변경되지 않습니다.
+●​ 카카오톡 탈퇴 후 재가입시에는 다른 사용자 키로 변경됩니다.
+
+
+상담원
+●​ 상담원은 카카오에서 제공하는 상담톡 API를 이용하는 주체를 의미하며 반드시
+  사람을 지칭하는 것은 아닙니다.
+●​ 상담을 요청한 카카오톡 사용자에게 상담원이 배정 되었는지 여부는 카카오에서는
+  알 수 없습니다.
+●​ 상담 진행시 직접적인 상담이 아닌 항목 선택 등의 메시지 발신도 카카오에서는
+  상담원이 발송한 것(과금)으로 구분됩니다.
+●​ 시스템 메시지 발신은 과금에서 제외 됩니다.
+
+
+상담 메시지
+●​ 상담원이 카카오톡 사용자에게 보낸 대화 메시지, 카카오톡 사용자가 상담원한테
+  보낸 메시지 모두 상담 메시지로 합니다.
+●​ 상담 메시지는 상담톡 시스템에는 저장되지 않으며 카카오톡 메시지 시스템에
+  3일간만 저장됩니다.
+
+
+챗봇 대화 내역 전달
+●​ 챗봇 대화 내역 조회 혹은 사용자 메타 정보 수신 중 하나의 방법을 통해서 챗봇
+  대화내역을 전달 받을 수 있습니다
+●​ 상담시작이 된 상태에서 조회 시점 기준 이전 3일전 메시지까지 전달 받을 수
+  있습니다.
+●​ 챗봇 대화내역의 세부 스펙은 챗봇 고객센터로 문의 부탁드립니다.
+상담 연결하기
+상담톡은 상담톡API를 통한 상담 연결 외에도 웹사이트나 모바일 application 내의 특정 버튼을 통해
+
+카카오톡 상담원 연결이 가능합니다. 이 방식은                                                 ,                           등의 버튼 클릭을 통해
+이루어집니다.
+
+❖​ PC에서 상담 연결 버튼 버튼을 통해 메타정보 전달 시 요청 페이지는 새창 또는 팝업 형태 요청하여야
+   합니다.
+❖​ 팝업의 최소 권장 사이즈는 w: 1024 h: 800입니다.
+❖​ 봇과 상담톡을 동시에 이용하는 프로필일 경우, 봇(bot) 파라미터를 이용해 봇으로 상담을 연결할 수
+   있습니다.
+❖​ 상담 연결 버튼 클릭시 파트너사 페이지를 거쳐 카카오 로그인 페이지로 이동하는 경우에는 아래
+   코드를 파트너사 페이지 내에 포함시켜 권장사이즈로 팝업창이 노출되도록 해야합니다.
+
+                I/F Code    <script src="https://bizmessage.kakao.com/chat/includeScript"></script>
+
+            ​
+
+
+    버튼을 통한 상담 연결 - POST 방식
+○​ 메소드 : POST
+○​ URL : https://bizmessage.kakao.com/chat/open
+○​ 미디어 타입 : application/x-www-form-urlencoded
+○​ 송신 파라미터 :
+    ●​ extra의 최대 글자수를 초과하는 경우 허용 길이까지만 사용해서 호출됩니다.
+    ●​ extra에는 개인정보를 포함하지 않아야 합니다. 불가피하게 개인정보가 포함되어야 할 경우,
+            암호화를 적용해야 합니다.
+    ●​ app_open_type은 모바일 브라우저에서 커스텀 앱 스킴 실행 방식을 제어하기 위해 사용되는
+            값입니다.
+                  ○​ direct: 클라이언트 상관 없이 카카오톡 실행 시도
+                  ○​ modal: 클라이언트 상관 없이 모달 팝업을 띄워 유저 제스처 유도
+
+
+  I/F Code            IFK0001                               I/F Name                                       상담 연결 > POST 방식
+
+    URL                    https://bizmessage.kakao.com/chat/open               인증
+
+   Method              POST                              Content-Type                                 application/x-www-form-urlencoded
+
+                                                                 Request Message
+
+                                                                    반복여
+   HTTP                    항목                 필수여부                            TYPE(길이)                              설명
+                                                                     부
+
+  HEADER         Content-Type                     Y                  N                      요청 본문 타입 (application/x-www-form-urlencoded)
+ I/F Code            IFK0001                           I/F Name                                상담 연결 > POST 방식
+
+  URL                  https://bizmessage.kakao.com/chat/open             인증
+
+ Method              POST                            Content-Type                         application/x-www-form-urlencoded
+
+                                                             Request Message
+
+                                                                반복여
+  HTTP                항목                   필수여부                       TYPE(길이)                          설명
+                                                                 부
+
+  BODY       uuid                             Y                  N        text      카카오톡 채널 (@로 연결되는 아이디)
+
+             extra                            N                  N     text(1000)   상담시 전달하고 싶은 메타 정보
+
+                                                                                    "true"인 경우 봇으로 상담 연결
+                                                                                    bot:"false": 상담톡으로 연결(기본값)
+                                                                                    bot:"true": 봇으로 연결
+             bot                              N                  N        text
+                                                                                    bot:"auto": 봇으로 연결하되, 상담 세션이 있을 경우
+                                                                                    상담모드 유지
+                                                                                    (True 같이 대문자 불가)
+
+             event                            N                  N      text(100)   봇으로 상담 연결 시 같이 실행될 봇 말블럭 이벤트명
+
+             app_open_type                    N                  N        text      모바일 앱스킴 실행 방식
+
+
+
+
+   버튼을 통한 상담 연결 - GET 방식
+○​ 메소드 : GET
+○​ URL : https://bizmessage.kakao.com/chat/open/{uuid}
+○​ 송신 파라미터 :
+   ●​ extra는 영문 / 숫자 / 밑줄 문자를 허용합니다. 조건을 만족하지 않는 extra는 빈 문자열로
+          대체됩니다.
+   ●​ extra에는 개인정보를 포함하지 않아야 합니다. 불가피하게 개인정보가 포함되어야 할 경우,
+          암호화를 적용해야 합니다.
+   ●​ app_open_type은 모바일 브라우저에서 커스텀 앱 스킴 실행 방식을 제어하기 위해 사용되는
+          값입니다.
+              ○​ direct: 클라이언트 상관 없이 카카오톡 실행 시도
+              ○​ modal: 클라이언트 상관 없이 모달 팝업을 띄워 유저 제스처 유도
+  I/F Code           IFK0002                           I/F Name                                 상담 연결 > GET 방식
+
+   URL               https://bizmessage.kakao.com/chat/open/{uuid}        인증
+
+  Method               GET                           Content-Type
+
+                                                             Request Message
+
+                                                                반복여
+   HTTP                항목                  필수여부                       TYPE(길이)                          설명
+                                                                 부
+
+   PATH       uuid                            Y                  N        text      카카오톡 채널 (@로 연결되는 아이디)
+
+PARAMETER     extra                           N                  N      text(50)    상담시 전달하고 싶은 메타 정보
+
+                                                                                    "true"인 경우 봇으로 상담 연결
+                                                                                    bot:"false": 상담톡으로 연결(기본값)
+                                                                                    bot:"true": 봇으로 연결
+              bot                             N                  N        text
+                                                                                    bot:"auto": 봇으로 연결하되, 상담 세션이 있을 경우
+                                                                                    상담모드 유지
+                                                                                    (True 같이 대문자 불가)
+
+              event                           N                  N      text(100)   봇으로 상담 연결 시 같이 실행될 봇 말블럭 이벤트명
+
+              app_open_type                   N                  N        text      모바일 앱스킴 실행 방식
+Send Service API(ROOT URL : /api/v1/send)
+상담톡은 서비스의 상황에 맞게 메시지 내용을 구성할 수 있도록 다양한 메시지 타입을
+제공합니다. 상담톡 메시지 유형은 크게 Plain, Rich 두 가지로 나눌 수 있습니다.
+
+  ❖​ 메시지 전송 시 사용 가능한 말풍선 타입 및 주의사항을 확인할 수 있습니다.
+  ❖​ 이미지를 발송하기 위해서는 파일 업로드를 이용해 업로드를 해야합니다.​
+
+
+  메시지 버튼 타입
+   상담톡 메시지 버튼 타입별 사용 가능한 버튼 파라미터와 필수 파라미터는 아래와
+같습니다.
+
+                                                   사용 가능
+      Type                 설명                                     필수 파라미터
+                                                   파라미터
+                                               url_mobile       url_mobile
+             지정한 웹 링크로 이동 (http 또는 https만
+      WL                                       url_pc
+             입력 가능)
+                                               url_target
+                                                                다음 중 2가지
+                                               scheme_android
+                                                                이상
+                                               scheme_ios
+      AL     지정한 앱 스킴 또는 웹 링크로 이동                               scheme_android
+                                               url_mobile
+                                                                scheme_ios
+                                               url_pc
+                                                                url_mobile
+      BK     해당 버튼 텍스트 발송                      extra
+
+      MD     해당 버튼 텍스트 + 메시지 본문 발송             extra
+             상담톡에서 봇상담으로 전환 (상담톡 세션
+                                               extra
+      BT     종료)
+                                               chat_event
+             * 상담톡 세션 종료하고, 봇 이벤트 호출
+             버튼 클릭 시 카카오톡 채널 추가
+             강조형 버튼(노란색)으로 표기되며, 버튼이
+             여러개일 경우 지정된 위치에 사용해야함
+      AC     TEXT, IMAGE, ITEM_LIST - 첫번째 버튼
+             WIDE, WIDE_ITEM_LIST,
+             CAROUSEL_FEED - 마지막 버튼
+             name은 채널 추가로 고정
+      BF     카카오 비즈니스폼을 실행                   biz_form_key       biz_form_key
+             강조형 버튼(노란색)으로 표기되며, 버튼이
+             여러개일 경우 지정된 위치에 사용해야함
+             TEXT, IMAGE, ITEM_LIST - AC 버튼이
+             없으면 첫번째, AC 버튼이 있으면 두번째
+             버튼에 위치
+             WIDE, WIDE_ITEM_LIST,
+             CAROUSEL_FEED - 첫번째 버튼
+           name은 다음 중 사용 가능 - 톡에서
+           예약하기, 톡에서 설문하기, 톡에서
+           응모하기
+
+
+메시지 바로연결 타입
+  바로 연결 타입과 필수 파라미터는 아래와 같습니다.
+
+                                              사용 가능
+    type                설명                                   필수 파라미터
+                                              파라미터
+                                          url_mobile       url_mobile
+           지정한 웹 링크로 이동 (http 또는 https만
+     WL                                   url_pc
+           입력 가능)
+                                          url_target
+                                          scheme_android   다음 중 2가지
+                                          scheme_ios       이상 필수 입력
+     AL    지정한 앱 스킴 또는 웹 링크로 이동           url_mobile       scheme_android
+                                          url_pc           scheme_ios
+                                                           url_mobile
+     BK    해당 버튼 텍스트 발송                   extra
+
+           카카오 I 오픈빌더의 챗봇을 사용하는           extra
+     BT
+           카카오톡 채널만 이용가능                  chat_event
+           비즈니스폼 버튼 사용을 위한 비즈니스폼          biz_form_key     biz_form_key
+     BF    키를 비즈니스폼 업로드 API를 이용해
+           발급
+
+
+
+자동 답변 타입
+  비즈메세지 센터 시스템에 등록된 자동 답변 타입은 아래와 같습니다.
+
+                                              사용 가능
+    type                설명                                   필수 파라미터
+                                              파라미터
+     S1    상담불가
+     S2    상담부재
+     S3    무응답 상담종료
+     S4    상담대기
+     S5    금칙어 상담불가
+
+
+
+
+●​ 메시지 송신 API : /plain
+ ○​ 설명 : plain 메시지 송신
+ ○​ 미디어 타입 : APPLICATION/JSON
+ ○​ 송신 파라미터 목록
+           ■​ X-Platform-Type : Platform 타입을 설정합니다.(solution web / kakao_counsel_talk)
+               여기선 kakao_counsel_talk으로 사용하시면 됩니다.
+           ■​ X-Service-Key : BZM의 발신 프로필 키를 설정합니다.
+           ■​ X-User-Key : 사용자 카카오 계정 ID에 대한 고유한 키값입니다.
+           ■​ X-Event-Key : 해당 상담 대화에 대한 Event Key입니다.
+           ■​ RequestBody : 메시지 Payload 영역입니다. 실제 메시지가 해당 RequestBody에
+               입력하면 되며 ""으로 묶어서 전송합니다.​
+
+
+
+
+I/F Code        IF12005                                    I/F Name                      core API > plain 메시지 송신
+
+ URL                                 /api/v1/send/plain                          인증
+
+                                                                                                application/json;
+Method           POST                                     Content-Type
+                                                                                                charset=UTF-8
+
+                                                   Request Message
+
+                                                                                TYPE(길
+ HTTP                항목                 필수여부                             반복여부                         설명
+                                                                                 이)
+
+HEADER      accept                           N                            N              컨텐츠 타입
+
+                                                                                         플랫폼
+            X-Platform-Type                  Y                            N
+                                                                                         타입(kakao_counsel_talk)
+
+
+            X-Service-Key                    Y                            N              발신프로필 키
+
+
+
+            X-User-Key                       Y                            N              사용자 키
+
+
+            X-Event-Key                      Y                            N              이벤트 키 (session id)
+
+
+                                                                                         요청 본문 타입
+            Content-Type                     Y                            N
+                                                                                         (application/json)
+
+BODY                                         Y                            N              내용 → 아래 참고
+
+                                                  Response Message
+
+                                                                                TYPE(길
+ HTTP                           항목                                       반복여부                         설명
+                                                                                 이)
+
+ Body                code                                                 N                        결과 코드
+
+             success_count                                                N                        성공 건 수
+
+                fail_count                                                N                        실패 건 수
+
+                payload                                                   N
+
+                              message_info                                Y                   성공 혹은 실패 정보
+
+                                                          code            N                           코드
+
+                                                     message              N                       실패 메시지
+
+                                                    description           N                    실패 메시지 설명
+    I/F Code                IF12005                                       I/F Name                      core API > plain 메시지 송신
+
+     URL                                            /api/v1/send/plain                          인증
+
+                                                                                                             application/json;
+    Method                  POST                                         Content-Type
+                                                                                                             charset=UTF-8
+
+                                                                  Request Message
+
+                                                                                               TYPE(길
+     HTTP                       항목                     필수여부                             반복여부                       설명
+                                                                                                이)
+
+    HEADER            accept                               N                             N              컨텐츠 타입
+
+                                                                 serial_number           N                  메시지 고유 번호
+
+                                                                   created_at            N                      성공 시간
+
+                           message                                                       N                     오류 메시지
+
+                          description                                                    N                      오류 설명
+
+
+
+아래 예시 참조
+
+
+
+
+    ❖​ 성공 실패 별 response body 형태 ( 예시 )
+
+
+SUCCESS
+
+{
+    "code": "SUCCESS",
+    "payload": {
+         "message_info": [
+              {
+                   "code": 0,
+                   "created_at": "2026-03-16T13:57:52.360",
+                   "serial_number": "a321581206_65fbbde7"
+              }
+         ],
+         "success_count": 1,
+         "fail_count": 0
+    },
+    "now": "2026-03-16T13:57:52.390492727+09:00"
+}
+
+PARTIAL_SUCCESS
+
+{
+    "code": "PARTIAL_SUCCESS",
+    "payload": {
+         "message_info": [
+              {
+                   "code": 0,
+                   "created_at": "2026-03-16T10:50:40.358",
+                   "serial_number": "a321581206_45a05237"
+              },
+              {
+                  "code": -505,
+                  "message": "FailedToReadImageException",
+                  "description": "유효한 이미지 링크가 아님",
+                  "serial_number": "a321581206_5dfb3c7a"
+              }
+         ],
+         "success_count": 1,
+         "fail_count": 1
+    },
+    "now": "2026-03-16T10:50:40.507528202+09:00"
+}
+
+
+
+FAILED
+
+{
+    "code": "FAILED",
+    "payload": {
+         "message_info": [
+              {
+                  "code": -510,
+                  "message": "NoTextException(serialNumber: a321581206_573b0f30)",
+                  "description": "텍스트가 없음",
+                  "serial_number": "a321581206_573b0f30"
+              }
+         ],
+         "success_count": 0,
+         "fail_count": 1
+    },
+    "now": "2026-03-16T13:55:02.608126693+09:00"
+}
+
+ERROR
+
+{
+    "code": "NOT_ALLOWED_TYPE",
+    "message": "The message type is not permitted in this url.",
+    "description": "잘못된 타입 요청입니다."
+}
+
+
+
+
+                   ■​ Request Body 에 들어가야할 내용은 아래의 샘플을 따라주셔야 합니다.
+                    JSON                                                         Key description
+
+    아래 참고                            version : 버전
+
+                                     chapters[] (JSON Array) : 메시지 목록
+
+                                       - chapter 속성
+
+                                         - sections[] (JSON Array) : 말풍선 내 컨텐츠 컨테이너
+
+                                           - section 속성
+
+                                              - type (String) O : 섹션 타입 [text, file, video, audio]
+
+                                              - data (String) : 컨텐츠
+
+                                              - name (String) : 본문 이름
+                                                    - size (Integer) : 크기
+
+
+
+    ❖​ 메시지 타입별 request body 형태 ( 예시 )
+
+
+plain 메세지
+
+text                                                                        예시
+
+{
+    "version": 1,
+    "chapters": [
+         {
+             "sections": [
+                 {
+                     "type": "text",
+                     "data": "I said that I would get him the file, and I
+would get him what broken bits of food I could, and I would come
+to him at the Battery, early in the morning."
+                 }
+             ]
+         }
+    ],
+    "meta": {
+         "1": "test1",
+         "2": "test2"
+    }
+}
+
+file                                                                        예시
+
+{
+    "version": 1,
+    "chapters": [
+         {
+             "sections": [
+                 {
+                     "type": "file",
+                     "name": "file-example_PDF_1MB.pdf",
+                     "data":
+"http://mud-kage.kakao.com/dn/hweO6/pa2ISuCYXi/kfuWi8kcbg6
+5n8NKLGBj11/f_z48kvf.pdf",
+                     "size": 1042157
+                 }
+             ]
+         }
+    ],
+    "meta": {
+         "1": "test1",
+         "2": "test2"
+    }
+}
+
+vidoe                                                                       예시
+{
+    "version": 1,
+    "chapters": [
+         {
+             "sections": [
+                 {
+                     "type": "video",
+                     "name": "file_example_MP4_1280_10MG.mp4",
+                     "data":
+"http://mud-kage.kakao.com/dn/bA3JvZ/wzqgGndnwV/xTYCKDfl
+Z1ndLk0a1ghtz1/talkv_high.mp4",
+                     "size": 9840497
+                 }
+             ]
+         }
+    ],
+    "meta": {
+         "1": "test1",
+         "2": "test2"
+    }
+}
+
+audio                                                            예시
+
+{
+    "version": 1,
+    "chapters": [
+         {
+             "sections": [
+                 {
+                     "type": "audio",
+                     "name": "file_example_MP3_5MG.mp3",
+                     "data":
+"http://mud-kage.kakao.com/dn/ZuRFQ/hETnHim4lm/fbTsH5UNiz
+iKrt2UgZXr7k/h2bpzv-aac.m4a",
+                     "size": 5319693
+                 }
+             ]
+         }
+    ],
+    "meta": {
+         "1": "test1",
+         "2": "test2"
+    }
+}
+
+image                                                            예시
+{
+    "version": 1,
+    "chapters": [
+         {
+             "sections": [
+                 {
+                     "type": "image",
+                     "data":
+"http://dn-m.talk.kakao.com/talkm/o2UnmtiJBi/S8Kz4KQDWVsH
+mqWSw7mog1/i_y147es.jpg"
+                 }
+             ]
+         }
+    ],
+    "meta": {
+         "1": "test1",
+         "2": "test2"
+    }
+}
+
+type : TEXT, FILE, VIDEO, AUDIO, IMAGE
+
+
+
+
+         ●​ 메시지 송신 API : /rich
+             ○​       설명 : rich 메시지 송신
+             ○​       미디어 타입 : APPLICATION/JSON
+             ○​       버튼 타입 : 버튼 타입
+             ○​       퀵리플라이 타입 : 바로연결 타입
+             ○​       자동답변 타입 : 자동답변 타입
+             ○​       송신 파라미터 목록
+                     ■​ X-Platform-Type : Platform 타입을 설정합니다(solution web /
+                        kakao_counsel_talk). 여기선 kakao_counsel_talk으로 사용하시면 됩니다.
+                     ■​ X-Service-Key : BZM의 발신 프로필 키를 설정합니다.
+                     ■​ X-User-Key : 사용자 카카오 계정 ID에 대한 고유한 키값입니다.
+                     ■​ X-Event-Key : 해당 상담 대화에 대한 Event Key입니다.
+                     ■​ RequestBody : 메시지 Payload 영역입니다. 실제 메시지가 해당
+                        RequestBody에 입력하면 되며 ""으로 묶어서 전송합니다.
+                     ■​ send > 메시지 송신 (상담사 → API CORE SERVER → BZM → CLIENT)
+I/F Code       IF12006                                      I/F Name                        core API > plain 메시지 송신
+
+ URL                                   /api/v1/send/rich                           인증
+
+Method            POST                                     Content-Type                    application/json; charset=UTF-8
+
+                                                      Request Message
+
+                                                                                 TYPE(길이
+ HTTP             항목           필수여부                                       반복여부                          설명
+                                                                                    )
+
+HEADER     accept                 N                                        N               컨텐츠 타입
+
+                                                                                           플랫폼
+           X-Platform-Type        Y                                        N
+                                                                                           타입(kakao_counsel_talk)
+
+
+           X-Service-Key          Y                                        N               발신프로필 키
+
+
+
+           X-User-Key             Y                                        N               사용자 키
+
+
+           X-Event-Key            Y                                        N               이벤트 키 (session id)
+
+
+           Content-Type           Y                                        N               요청 본문 타입 (application/json)
+
+
+BODY                               Y                                       N               내용 → 아래 참고
+
+                                                     Response Message
+
+                                                                                 TYPE(길이
+ HTTP                                  항목                                 반복여부                          설명
+                                                                                    )
+
+ Body      code                                                            N                         결과 코드
+
+           success_count                                                   N                         성공 건 수
+
+           fail_count                                                      N                         실패 건 수
+
+           payload                                                         N
+
+                             message_info                                  Y                    성공 혹은 실패 정보
+
+                                              code                         N                            코드
+
+                                              message                      N                        실패 메시지
+
+                                              description                  N                      실패 메시지 설명
+
+                                              serial_number                N                      메시지 고유 번호
+
+                                              created_at                   N                         성공 시간
+
+           message                                                         N                        오류 메시지
+
+           description                                                     N                         오류 설명
+
+
+❖​ 성공 실패 별 response body 형태 ( 예시 ) 참조
+
+
+
+
+■​ Request Body 에 들어가야할 내용은 아래의 샘플을 따라주셔야 합니다.
+        JSON                                              Key description
+
+아래 참고          ​
+               version : 버전
+               chapters[] (JSON Array) : 메시지 목록
+                 - chapter 속성
+                   - sections[] (JSON Array) : 말풍선 내 컨텐츠 컨테이너
+                     - section 속성
+                       - type (String) O : 섹션 타입 [text, image, wide,wide_item_list, item_list, carousel_feed]
+                       - data (String) : 컨텐츠
+                       - attachment 속성
+                          - buttons[] (JSON Array) : 버튼
+                              - name (String) : 버튼 이름(28자까지 가능)
+                              - type (String) : 버튼 타입 [ WL, AL, BK, MD, BT, AC, BF ]
+                              - scheme_android(String): MOBILE Android 환경에서 클릭 시 실행​
+                              - scheme_ios (String): MOBILE iOS 환경에서 클릭 시 실행​
+                              - url_mobile (String): MOBILE 환경에서 클릭 시 이동할 URL​
+                              - url_pc (String): PC 환경에서 클릭 시 이동할 URL​
+                              - url_target (String): 외부브라우저로 열려면 'out' 입력​
+                              - extra(String): 상담톡<->카카오톡 챗봇 전환 시 혹은BK, MD 버튼 발송 시 전달할 정보​
+                              - chat_event(String): 카카오톡 챗봇 전환 시 연결할 카카오톡 챗봇 이벤트명​
+                              - start_type(String): 상담 시작 타입 ​
+                              - biz_form_key(String): 비즈니스폼 업로드를 통해 발급받은 bizFormKey
+                          - coupon 속성
+                              - title (String) : 버튼 이름
+                              - description (String) : 쿠폰 설명​
+                              - url_pc (String) : PC 환경에서 클릭 시 이동할 URL​
+                              - url_mobile (String) : MOBILE 환경에서 클릭 시 이동할 URL​
+                              - scheme_android (String) : MOBILE Android 환경에서 클릭 시 실행​
+                              - scheme_ios (String) : MOBILE iOS 환경에서 클릭 시 실행
+                          - image 속성
+                              - img_url (String) : 이미지
+                              - img_link (String) : 이미지 클릭 시 이동
+                          - item 속성
+                              - highlight 속성
+                                - title (String) : 제목
+                                - description (String) : 설명
+                                -img_url (String) : 이미지
+                              - list[] (JSON Array) : 아이템 리스트
+                                - title (String) : 제목
+                                - description (String) : 설명
+                              - summary 속성
+                                - title (String) : 제목
+                                - description (String) : 설명
+                          - quick_replies[] (JSON Array) : 바로가기
+                              - name (String) : 제목
+                              - type (String) : 바로연결 타입 [ WL, AL, BK, BT, BF ]
+                              - scheme_android(String): MOBILE Android 환경에서 클릭 시 실행​
+                              - scheme_ios (String): MOBILE iOS 환경에서 클릭 시 실행​
+                              - url_mobile (String): MOBILE 환경에서 클릭 시 이동할 URL​
+                              - url_pc (String): PC 환경에서 클릭 시 이동할 URL​
+                              - url_target (String): 외부브라우저로 열려면 'out' 입력​
+                              - extra(String): 상담톡<->카카오톡 챗봇 전환 시 혹은BK, MD 버튼 발송 시 전달할 정보​
+                              - chat_event(String): 카카오톡 챗봇 전환 시 연결할 카카오톡 챗봇 이벤트명​
+                              - start_type(String): 상담 시작 타입 ​
+                              - biz_form_key(String): 비즈니스폼 업로드를 통해 발급받은 bizFormKey
+                       - carousel 속성
+                                                              - list[] (JSON Array) : 캐로셀 리스트
+                                                                  - header (String) : 헤더
+                                                                  - message (String) : 메세지
+                                                                  - attachment : attachment 참조
+                                                           - auto_answer (String) : 시스템 메세지 [S1, S2, S3, S4, S5]
+                                                           - lock (boolean) : 보안 메세지 여부
+
+
+
+
+    ❖​ 메시지 타입별 request body 형태 ( 예시 )
+
+
+rich 메세지
+
+텍스트                                                                                    예시
+
+{
+    "version": 1,
+    "chapters": [
+         {
+             "sections": [
+                 {
+                     "type": "text",
+                     "data": "상담톡 텍스트 유형",
+                     "attachment": {
+                         "buttons": [
+                              {
+                                  "name": "버튼1",
+                                  "type": "WL",
+                                  "url_pc": "http://bizmessage.kakao.com/",
+                                  "url_mobile": "http://bizmessage.kakao.com/"
+                              }
+                         ],
+                         "coupon": {
+                              "title": "1000원 할인 쿠폰",
+                              "description": "소박한 할인쿠폰",
+                              "url_mobile": "https://daum.net",
+                              "url_pc": "https://kakao.com"
+                         },
+                         "quick_replies": [
+                              {
+                                  "name": "kakao",
+                                  "type": "WL",
+                                  "url_pc": "http://bizmessage.kakao.com/",
+                                  "url_mobile": "http://bizmessage.kakao.com/"
+                              }
+                         ]
+                     }
+                 }
+             ]
+         }
+    ],
+    "meta": {
+         "1": "test1",
+         "2": "test2"
+    }
+}
+
+이미지                                                                                    예시
+{
+    "version": 1,
+    "chapters": [
+         {
+             "sections": [
+                 {
+                     "type": "image",
+                     "data": "상담톡 이미지 유형",
+                     "attachment": {
+                         "image": {
+                              "img_url":
+"http://mud-kage.kakao.com/dn/fqTEl/dJMcahp9Hzj/V1whguTc5dL6by
+oYmGZN3K/img_l.jpg"
+                         },
+                         "buttons": [
+                              {
+                                  "name": "버튼1",
+                                  "type": "WL",
+                                  "url_pc": "http://bizmessage.kakao.com/",
+                                  "url_mobile": "http://bizmessage.kakao.com/"
+                              }
+                         ],
+                         "coupon": {
+                              "title": "1000원 할인 쿠폰",
+                              "description": "소박한 할인쿠폰",
+                              "url_mobile": "https://daum.net",
+                              "url_pc": "https://kakao.com"
+                         }
+                     }
+                 }
+             ]
+         }
+    ],
+    "meta": {
+         "1": "test1",
+         "2": "test2"
+    }
+}
+
+와이드 이미지                                                                          예시
+{
+    "version": 1,
+    "chapters": [
+         {
+             "sections": [
+                 {
+                     "type": "wide",
+                     "data": "상담톡 와이드 이미지 유형",
+                     "attachment": {
+                         "image": {
+                              "img_url":
+"http://mud-kage.kakao.com/dn/cfPel3/dJMb99MoU8k/oL2sweKvsivK
+M7e3kKMly0/img_l.jpg",
+                              "img_link": "http://bizmessage.kakao.com/"
+                         },
+                         "buttons": [
+                              {
+                                  "name": "버튼1",
+                                  "type": "WL",
+                                  "url_pc": "http://bizmessage.kakao.com/",
+                                  "url_mobile": "http://bizmessage.kakao.com/"
+                              }
+                         ],
+                         "coupon": {
+                              "title": "1000원 할인 쿠폰",
+                              "description": "소박한 할인쿠폰",
+                              "url_mobile": "https://daum.net",
+                              "url_pc": "https://kakao.com"
+                         }
+                     }
+                 }
+             ]
+         }
+    ],
+    "meta": {
+         "1": "test1",
+         "2": "test2"
+    }
+}
+
+와이드 리스트                                                                          예시
+{
+    "version": 1,
+    "chapters": [
+      {
+          "sections": [
+            {
+                "type": "wide_item_list",
+                "data": "와이드 리스트 header",
+                "attachment": {
+                    "buttons": [
+                         {
+                              "name": "버튼1",
+                              "type": "WL",
+                              "url_pc": "http://bizmessage.kakao.com/",
+                              "url_mobile": "http://bizmessage.kakao.com/"
+                         },
+                         {
+                              "name": "버튼2",
+                              "type": "WL",
+                              "url_pc": "http://bizmessage.kakao.com/",
+                              "url_mobile": "http://bizmessage.kakao.com/"
+                         }
+                    ],
+                    "item": {
+                         "list": [
+                              {
+                                   "title": "1번 아이템",
+                                   "img_url":
+"http://mud-kage.kakao.com/dn/tlg8a/dJMcagY4hpG/ruzzK5YTLFqOV
+WT5jM2Ot1/img_l.jpg",
+                                   "url_mobile": "http://bizmessage.kakao.com/"
+                              },
+                              {
+                                   "title": "2번 아이템",
+                                   "img_url":
+"http://mud-kage.kakao.com/dn/tlg8a/dJMcagY4hpG/ruzzK5YTLFqOV
+WT5jM2Ot1/img_l.jpg",
+                                   "url_mobile": "http://bizmessage.kakao.com/"
+                              },
+                              {
+                                   "title": "3번 아이템",
+                                   "img_url":
+"http://mud-kage.kakao.com/dn/tlg8a/dJMcagY4hpG/ruzzK5YTLFqOV
+WT5jM2Ot1/img_l.jpg",
+                                   "url_mobile": "http://bizmessage.kakao.com/"
+                              },
+                              {
+                                   "title": "4번 아이템",
+                                   "img_url":
+"http://mud-kage.kakao.com/dn/tlg8a/dJMcagY4hpG/ruzzK5YTLFqOV
+WT5jM2Ot1/img_l.jpg",
+                                   "url_mobile": "http://bizmessage.kakao.com/"
+                              }
+                         ]
+                    },
+                    "coupon": {
+                              "title": "10000원 할인 쿠폰",
+                              "description": "신년맞이 할인쿠폰",
+                              "url_mobile": "https://daum.net",
+                              "url_pc": "https://daum.net",
+                              "scheme_android": "",
+                              "scheme_ios": ""
+                         }
+                     }
+                 }
+             ]
+         }
+    ],
+    "meta": {
+         "1": "test1",
+         "2": "test2"
+    }
+}
+
+아이템 리스트                                                                           예시
+
+{
+    "version": 1,
+    "chapters": [
+         {
+             "sections": [
+                 {
+                     "type": "item_list",
+                     "data": "data",
+                     "attachment": {
+                         "buttons": [
+                              {
+                                   "name": "버튼1",
+                                   "type": "WL",
+                                   "url_pc": "http://bizmessage.kakao.com/",
+                                   "url_mobile": "http://bizmessage.kakao.com/"
+                              },
+                              {
+                                   "name": "버튼2",
+                                   "type": "WL",
+                                   "url_pc": "http://bizmessage.kakao.com/",
+                                   "url_mobile": "http://bizmessage.kakao.com/"
+                              }
+                         ],
+                         "item": {
+                              "highlight": {
+                                   "title": "1번 아이템",
+                                   "description": "first",
+                                   "img_url":
+"http://mud-kage.kakao.com/dn/tlg8a/dJMcagY4hpG/ruzzK5YTLFqOV
+WT5jM2Ot1/img_l.jpg"
+                              },
+                              "list": [
+                                   {
+                                        "title": "1번 아이템",
+                                        "description": "first item"
+                                   },
+                                   {
+                                         "title": "2번 아이템",
+                                         "description": "second item"
+                                    },
+                                    {
+                                         "title": "3번 아이템",
+                                         "description": "third item"
+                                    },
+                                    {
+                                         "title": "4번 아이템",
+                                         "description": "forth item"
+                                    }
+                              ],
+                              "summary": {
+                                    "title": "su-ttl",
+                                    "description": "su-description"
+                              }
+                         },
+                         "coupon": {
+                              "title": "10000원 할인 쿠폰",
+                              "description": "신년맞이 할인쿠폰",
+                              "url_mobile": "https://daum.net",
+                              "url_pc": "https://daum.net"
+                         },
+                         "quick_replies": [
+                              {
+                                    "name": "kakao",
+                                    "type": "WL",
+                                    "url_pc":
+"https://business.kakao.com/info/infotalk",
+                                    "url_mobile":
+"https://business.kakao.com/info/infotalk/"
+                              },{
+                                    "name": "business",
+                                    "type": "WL",
+                                    "url_pc":
+"https://business.kakao.com/info/infotalk/",
+                                    "url_mobile":
+"https://business.kakao.com/info/infotalk/"
+                              }
+                         ]
+                     }
+                 }
+             ]
+         }
+    ],
+    "meta": {
+         "1": "test1",
+         "2": "test2"
+    }
+}
+
+캐로셀 피드                                                                  예시
+
+{
+    "version": 1,
+    "chapters": [
+         {
+      "sections": [
+        {
+            "type": "carousel_feed",
+            "carousel": {
+              "list": [
+                 {
+                      "header": "1번 캐러셀 피드 헤더",
+                      "message": "1번 캐러셀 피드 메시지",
+                      "attachment": {
+                          "image": {
+                               "img_url":
+"http://mud-kage.kakao.com/dn/fqTEl/dJMcahp9Hzj/V1whguTc5dL6by
+oYmGZN3K/img_l.jpg",
+                               "img_link": "http://bizmessage.kakao.com/"
+                          },
+                          "buttons": [
+                               {
+                                    "name": "버튼1",
+                                    "type": "WL",
+                                    "url_pc": "https://m.daum.net",
+                                    "url_mobile": "https://m.daum.net",
+                                    "scheme_ios": "",
+                                    "scheme_android": ""
+                               },
+                               {
+                                    "name": "버튼2",
+                                    "type": "WL",
+                                    "url_pc": "https://m.daum.net",
+                                    "url_mobile": "https://m.daum.net",
+                                    "scheme_ios": "",
+                                    "scheme_android": ""
+                               }
+                          ],
+                          "coupon": {
+                               "title": "10000원 할인 쿠폰",
+                               "description": "신년맞이 할인쿠폰",
+                               "url_mobile": "https://daum.net",
+                               "url_pc": "https://daum.net"
+                          }
+                      }
+                 },
+                 {
+                      "header": "2번 캐러셀 피드 헤더",
+                      "message": "2번 캐러셀 피드 메시지",
+                      "attachment": {
+                          "image": {
+                               "img_url":
+"http://mud-kage.kakao.com/dn/fqTEl/dJMcahp9Hzj/V1whguTc5dL6by
+oYmGZN3K/img_l.jpg",
+                               "img_link": "http://bizmessage.kakao.com/"
+                          },
+                          "buttons": [
+                               {
+                                    "name": "버튼1",
+                                    "type": "WL",
+                                    "url_pc": "https://m.daum.net",
+                                  "url_mobile": "https://m.daum.net",
+                                  "scheme_ios": "",
+                                  "scheme_android": ""
+                             },
+                             {
+                                  "name": "버튼2",
+                                  "type": "WL",
+                                  "url_pc": "https://m.daum.net",
+                                  "url_mobile": "https://m.daum.net",
+                                  "scheme_ios": "",
+                                  "scheme_android": ""
+                             }
+                        ],
+                        "coupon": {
+                             "title": "777원 할인 쿠폰",
+                             "description": "신년맞이 할인쿠폰",
+                             "url_mobile": "https://daum.net",
+                             "url_pc": "https://daum.net"
+                        }
+                    }
+               },
+               {
+                    "header": "3번 캐러셀 피드 헤더",
+                    "message": "3번 캐러셀 피드 메시지",
+                    "attachment": {
+                        "image": {
+                             "img_url":
+"http://mud-kage.kakao.com/dn/fqTEl/dJMcahp9Hzj/V1whguTc5dL6by
+oYmGZN3K/img_l.jpg",
+                             "img_link": "http://bizmessage.kakao.com/"
+                        },
+                        "buttons": [
+                             {
+                                  "name": "버튼1",
+                                  "type": "WL",
+                                  "url_pc": "https://m.daum.net",
+                                  "url_mobile": "https://m.daum.net",
+                                  "scheme_ios": "",
+                                  "scheme_android": ""
+                             },
+                             {
+                                  "name": "버튼2",
+                                  "type": "WL",
+                                  "url_pc": "https://m.daum.net",
+                                  "url_mobile": "https://m.daum.net",
+                                  "scheme_ios": "",
+                                  "scheme_android": ""
+                             }
+                        ]
+                    }
+               },
+               {
+                    "header": "4번 캐러셀 피드 헤더",
+                    "message": "4번 캐러셀 피드 메시지",
+                    "attachment": {
+                        "image": {
+                             "img_url":
+"http://mud-kage.kakao.com/dn/fqTEl/dJMcahp9Hzj/V1whguTc5dL6by
+oYmGZN3K/img_l.jpg",
+                             "img_link": "http://bizmessage.kakao.com/"
+                        },
+                        "buttons": [
+                             {
+                                  "name": "버튼1",
+                                  "type": "WL",
+                                  "url_pc": "https://m.daum.net",
+                                  "url_mobile": "https://m.daum.net",
+                                  "scheme_ios": "",
+                                  "scheme_android": ""
+                             },
+                             {
+                                  "name": "버튼2",
+                                  "type": "WL",
+                                  "url_pc": "https://m.daum.net",
+                                  "url_mobile": "https://m.daum.net",
+                                  "scheme_ios": "",
+                                  "scheme_android": ""
+                             }
+                        ]
+                    }
+               },
+               {
+                    "header": "5번 캐러셀 피드 헤더",
+                    "message": "5번 캐러셀 피드 메시지",
+                    "attachment": {
+                        "image": {
+                             "img_url":
+"http://mud-kage.kakao.com/dn/fqTEl/dJMcahp9Hzj/V1whguTc5dL6by
+oYmGZN3K/img_l.jpg",
+                             "img_link": "http://bizmessage.kakao.com/"
+                        },
+                        "buttons": [
+                             {
+                                  "name": "버튼1",
+                                  "type": "WL",
+                                  "url_pc": "https://m.daum.net",
+                                  "url_mobile": "https://m.daum.net",
+                                  "scheme_ios": "",
+                                  "scheme_android": ""
+                             },
+                             {
+                                  "name": "버튼2",
+                                  "type": "WL",
+                                  "url_pc": "https://m.daum.net",
+                                  "url_mobile": "https://m.daum.net",
+                                  "scheme_ios": "",
+                                  "scheme_android": ""
+                             }
+                        ]
+                    }
+               },
+               {
+                                  "header": "6번 캐러셀 피드 헤더",
+                                  "message": "6번 캐러셀 피드 메시지",
+                                  "attachment": {
+                                      "image": {
+                                           "img_url":
+"http://mud-kage.kakao.com/dn/fqTEl/dJMcahp9Hzj/V1whguTc5dL6by
+oYmGZN3K/img_l.jpg",
+                                           "img_link": "http://bizmessage.kakao.com/"
+                                      },
+                                      "buttons": [
+                                           {
+                                               "name": "버튼1",
+                                               "type": "WL",
+                                               "url_pc": "https://m.daum.net",
+                                               "url_mobile": "https://m.daum.net",
+                                               "scheme_ios": "",
+                                               "scheme_android": ""
+                                           }
+                                      ]
+                                  }
+                              }
+                         ],
+                         "tail": {
+                              "url_pc": "https://m.daum.net",
+                              "url_mobile": "https://m.daum.net"
+                         }
+                     }
+                 }
+             ]
+         }
+    ],
+    "meta": {
+         "1": "test1",
+         "2": "test2"
+    }
+}
+
+시스템 메세지                                                                                 예시
+
+{
+    "version": 1,
+    "chapters": [
+         {
+             "sections": [
+                 {
+                     "type": "text",
+                     "data": "S1",
+                     "auto_answer": "S1"
+                 }
+             ]
+         }
+    ],
+    "meta": {
+         "1": "test1",
+         "2": "test2"
+    }
+}
+sections type: TEXT, IMAGE, WIDE, ITEM_LIST,
+WIDE_ITEM_LIST, CAROUSEL_FEED
+actions type: image, button, quick, coupon, item
+actions button params type: WL, AL, BK, MD, BT, BF, PA
+actions quick params type: WL, AL, BK, BT, BF
+
+
+
+
+    ●​ 메시지 송신 API : /end
+       ○​ 설명 : 고객과의 상담이 마무리 되었을 때, 종료 요청을 보내면 현재 열려있는
+          세션이 종료됩니다.
+       ○​ PLAIN / RICH 타입 헤더와 헤더에 맞는 메세지가 본문에 있는 경우 해당 메세지를
+          발송하고 종료 처리합니다.
+       ○​ 미디어 타입 : APPLICATION/JSON
+       ○​ 송신 파라미터 목록
+            ■​ X-Platform-Type : Platform 타입을 설정합니다(solution web / kakao_counsel_talk).
+                 여기선 kakao_counsel_talk으로 사용하시면 됩니다.
+            ■​ X-Service-Key : BZM의 발신 프로필 키를 설정합니다.
+            ■​ X-User-Key : 사용자 카카오 계정 ID에 대한 고유한 키값입니다.
+            ■​ X-Event-Key : 해당 상담 대화에 대한 Event Key입니다.
+
+
+                    I/F Code                IF12007                       I/F Name                      core API > 상담 종료
+
+                      URL                             /api/v1/send/end                    인증
+
+                    Method                     POST                      Content-Type              application/json; charset=UTF-8
+
+                                                                 Request Message
+
+                                                                                        TYPE(길이
+                     HTTP                      항목            필수여부          반복여부                                 설명
+                                                                                           )
+
+                   HEADER             accept                     N            N                   컨텐츠 타입
+
+
+                                      X-Platform-Type            Y            N                   플랫폼 타입(kakao_counsel_talk)
+
+
+
+                                      X-Service-Key              Y            N                   발신프로필 키
+
+
+
+                                      X-User-Key                 Y            N                   사용자 키
+
+
+                                      X-Event-Key                Y            N                   이벤트 키 (session id)
+
+
+                                      Content-Type               Y            N                   요청 본문 타입 (application/json)
+
+
+                                      X-Event-Type               N            N                   PLAIN / RICH 메세지 발송 타입
+
+
+                                                                                                  내용 (있을 경우 메시지 발송 후
+                REQUESTBODY                                      Y            N
+                                                                                                  종료)
+
+                                                                Response Message
+             I/F Code           IF12007                           I/F Name                   core API > 상담 종료
+
+               URL                         /api/v1/send/end                    인증
+
+             Method                 POST                      Content-Type              application/json; charset=UTF-8
+
+                                                      Request Message
+
+                                                                             TYPE(길이
+              HTTP                  항목             필수여부           반복여부                               설명
+                                                                                )
+
+             HEADER        accept                     N              N                 컨텐츠 타입
+
+                                                                             TYPE(길이
+              HTTP                         항목                     반복여부                               설명
+                                                                                )
+
+              Body                  code                             N                            결과 코드
+
+   {
+       "code": "SUCCESS"
+   }
+
+
+
+
+●​ 메시지 송신 API : /endWithBot
+ ○​ 설명 : 상담 종료 후 이벤트 말블럭 실행
+ ○​ 미디어 타입 : APPLICATION/JSON
+ ○​ 송신 파라미터 목록
+   ■​ X-Platform-Type : Platform 타입을 설정합니다(solution web / kakao_counsel_talk).
+           여기선 kakao_counsel_talk으로 사용하시면 됩니다.
+   ■​ X-Service-Key : BZM의 발신 프로필 키를 설정합니다.
+   ■​ X-User-Key : 사용자 카카오 계정 ID에 대한 고유한 키값입니다.
+   ■​ X-Event-Key : 해당 상담 대화에 대한 Event Key입니다.
+
+
+             I/F Code           IF12007                           I/F Name                   core API > 상담 종료
+
+               URL                      /api/v1/send/endWithBot                인증
+
+             Method                 POST                      Content-Type              application/json; charset=UTF-8
+
+                                                      Request Message
+
+                                                                             TYPE(길이
+              HTTP                  항목             필수여부           반복여부                               설명
+                                                                                )
+
+             HEADER        accept                     N              N                 컨텐츠 타입
+
+
+                           X-Platform-Type            Y              N                 플랫폼 타입(kakao_counsel_talk)
+
+
+
+                           X-Service-Key              Y              N                 발신프로필 키
+
+
+
+                           X-User-Key                 Y              N                 사용자 키
+
+
+                           X-Event-Key                Y              N                 이벤트 키 (session id)
+
+
+                           Content-Type               Y              N                 요청 본문 타입 (application/json)
+          I/F Code           IF12007                          I/F Name                   core API > 상담 종료
+
+            URL                     /api/v1/send/endWithBot                인증
+
+          Method                 POST                     Content-Type              application/json; charset=UTF-8
+
+                                                  Request Message
+
+                                                                         TYPE(길이
+           HTTP                  항목            필수여부           반복여부                               설명
+                                                                            )
+
+         HEADER         accept                    N              N                 컨텐츠 타입
+
+
+      REQUESTBODY                                 Y              N                 봇 이벤트 명 - [A-Za-z0-9_]{0,100}
+                                                                                   규칙
+
+“abcd1234ABCDetc”
+
+                                                 Response Message
+
+                                                                         TYPE(길이
+           HTTP                         항목                    반복여부                               설명
+                                                                            )
+
+           Body                  code                            N                            결과 코드
+
+{
+    "code": "SUCCESS"
+}
+Upload Service API(ROOT URL : /api/v1/upload)
+ ●​ 업로드 API : /image
+   ○​ 설명 : 이미지를 업로드 합니다.
+   ○​ 기한 : 이미지 파일의 보관 기간은 21일입니다.
+   ○​ 미디어 타입 : MULTIPART/FORM-DATA
+   ○​ rich 메시지 용으로 업로드하실 경우 이미지 명에 "rich" 를 붙이셔야 합니다.
+   ○​ 제한사항:​
+     - 용량 : 5MB 이하​
+     - 권장 : 가로 500px 이상​
+     - 가로:세로 비율 2:1 이상, 3:4이하만 업로드 가능​
+     - 허용 확장자 : "jpg", "jpeg", "gif", "png"
+   ○​ 송신 파라미터 목록
+     ■​ X-Service-Key : BZM의 발신 프로필 키를 설정합니다.
+       I/F Code            IF12501                            I/F Name                    core API > 이미지 업로드
+
+        URL                          /api/v1/upload/image                    인증
+
+       Method              POST                             Content-Type                    multipart/form-data
+
+                                                       Request Message
+
+                                                                           TYPE(길이
+        HTTP                항목                 필수여부             반복여부                               설명
+                                                                              )
+
+       HEADER     accept                           N               N                 컨텐츠 타입
+
+
+                  X-Platform-Type                  Y               N                 플랫폼 타입(kakao_counsel_talk)
+
+
+
+                  X-Service-Key                    Y               N                 발신프로필 키
+
+
+
+                  Content-Type                     Y               N                 요청 본문 타입 (multipart/form-data)
+
+
+       BODY       image                            Y               N                 이미지 파일
+
+                                                       Response Message
+
+                                                                           TYPE(길이
+        HTTP                         항목                         반복여부                               설명
+                                                                              )
+
+        Body                code                                   N                 결과 코드
+
+                           payload                                 N
+
+                            extra            IMAGE_NAME            N                 이미지 이름
+
+                                             IMAGE_SIZE            N                 이미지 크기
+
+                            now                                    N                 시간
+            I/F Code                IF12501                            I/F Name                   core API > 이미지 업로드
+
+              URL                             /api/v1/upload/image                    인증
+
+            Method                  POST                             Content-Type                    multipart/form-data
+
+                                                                 Request Message
+
+                                                                                    TYPE(길이
+             HTTP                    항목                  필수여부            반복여부                               설명
+                                                                                       )
+
+            HEADER         accept                            N              N                 컨텐츠 타입
+
+   {
+       "code": "SUCCESS",
+       "payload": "http://mud-kage.kakao.com/dn/b7Lbvl/btsQI6PiC2z/JrTKTo1rINHae87IPmGjgK/img_l.jpg",
+       "extra": {
+            "IMAGE_NAME": "kantocelebration_rich.jpg",
+            "IMAGE_SIZE": "421227"
+       },
+       "now": "2025-09-22T13:14:57.775777+09:00"
+   }
+
+
+
+
+●​ 업로드 API : /file
+ ○​ 설명 : 파일, 오디오, 동영상을 업로드 한다.(파일, 동영상 : 300mb 제한, 오디오 :
+       10mb 제한)
+ ○​ 기한 : 동영상파일의 보관 기간은 21일, 나머지 파일은 15일입니다.
+ ○​ 미디어 타입 : MULTIPART/FORM-DATA
+ ○​ 허용되지 않는 확장자 : ​
+       "php", "phtml", "jsp", "jspx", "asp", "aspx", "cer", "asa", "cdx", "cfm", "exe", "com",
+       "msi", "bat", "cmd", "sh", "pl", "py"
+ ○​ 송신 파라미터 목록
+   ■​ X-Service-Key : BZM의 발신 프로필 키를 설정합니다.
+             I/F Code               IF12502                            I/F Name                    core API >파일 업로드
+
+              URL                              /api/v1/upload/file                    인증
+
+             Method                 POST                             Content-Type                    multipart/form-data
+
+                                                                 Request Message
+
+                                                                                    TYPE(길이
+              HTTP                   항목                  필수여부            반복여부                               설명
+                                                                                       )
+
+            HEADER         accept                            N              N                 컨텐츠 타입
+
+
+                           X-Service-Key                     Y              N                 발신프로필 키
+
+
+
+                           Content-Type                      Y              N                 요청 본문 타입 (multipart/form-data)
+
+
+             BODY          file                              Y              N                 오디오, 동영상, 파일
+             I/F Code              IF12502                           I/F Name                    core API >파일 업로드
+
+              URL                            /api/v1/upload/file                    인증
+
+             Method                POST                            Content-Type                   multipart/form-data
+
+                                                               Request Message
+
+                                                                                  TYPE(길이
+              HTTP                  항목                 필수여부            반복여부                              설명
+                                                                                     )
+
+             HEADER       accept                           N              N                 컨텐츠 타입
+
+                          type                             Y              N                 파일 타입(AUDIO, VIDEO, FILE)
+
+                                                               Response Message
+
+                                                                                  TYPE(길이
+              HTTP                           항목                        반복여부                              설명
+                                                                                     )
+
+              Body                  code                                  N                 결과 코드
+
+                                   payload                                N
+
+                                    extra            FILE_NAME            N                 파일 이름
+
+                                                      FILE_SIZE           N                 파일 크기
+
+                                    now                                   N                 시간
+
+    {
+        "code": "SUCCESS",
+        "payload": "http://mud-kage.kakao.com/dn/Lsaz9/wyq2O6tdd0/PdOeUEuYbnVEkkO8K2Yg11/talkv_high.mp4",
+        "extra": {
+             "FILE_NAME": "video.mp4",
+             "FILE_SIZE": "51654381"
+        },
+        "now": "2025-09-22T12:57:57.713491+09:00"
+    }
+
+
+●​ 업로드 API : /status
+ ○​ 설명 : 동영상 업로드 상태를 확인합니다.
+ ○​ 기한 : 3일 이내에 업로드된 동영상만 확인이 가능합니다.
+ ○​ 송신 파라미터 목록
+   ■​ X-Service-Key : BZM의 발신 프로필 키를 설정합니다.
+   ■​ url : upload/file로 받은 url을 입력합니다.
+   ■​ type : 현재는 비동기 api인 VIDEO만 제공됩니다.
+     I/F Code               IF12503                            I/F Name                      core API >파일 업로드
+
+       URL                            /api/v1/upload/status                    인증
+
+      Method                 GET                              Content-Type
+
+                                                         Request Message
+
+                                                                             TYPE(길이
+      HTTP                   항목                  필수여부             반복여부                             설명
+                                                                                )
+
+     HEADER        accept                            N               N                 컨텐츠 타입
+
+
+                   X-Service-Key                     Y               N                 발신프로필 키
+
+
+    PARAMETER      url                               Y               N                 url
+
+                   type                              Y               N                 파일 타입( VIDEO )
+
+                                                         Response Message
+
+                                                                             TYPE(길이
+      HTTP                            항목                          반복여부                             설명
+                                                                                )
+
+       Body                  code                                    N                 결과 코드
+
+                                                                                       상태
+                                                                                       업로드 완료: COMPLETE
+                            payload                                  N
+                                                                                       업로드 진행중: IN_PROGRESS
+                                                                                       파일 조회 불가: NOT_FOUND
+
+                             now                                     N                 시간
+
+{
+    "code": "SUCCESS",
+    "payload": "COMPLETE",
+    "now": "2026-04-08T14:36:17.872372+09:00"
+}
+Receive Service API(ROOT URL : /api/v1/receive)
+  ●​ 사용자 메타 정보 수신 API : /reference
+   ○​ 설명 : 사용자가 상담 연결 요청 시점의 정보를 수신할 수 있습니다. 상담 진행
+      중에 또 다른 연결 요청이 있다면 진행 중인 상담은 그대로 유지되지만, 추가로
+      사용자의 상담 연결 요청 정보를 수신할 수 있습니다. 상담 연결 버튼에
+      메타(extra) 정보를 입력한 경우 함께 전달됩니다.
+   ○​ 미디어 타입 : APPLICATION/JSON
+   ○​ 송신 파라미터 목록
+     ■​ HttpHeaders : 비즈메시지 수신 헤더 입니다.
+     ■​ RequestParams : 비즈메시지 수신 파라미터들 입니다.
+     ■​ RequestBody : 비즈메시지 수신 메시지 Payload 데이터 입니다.
+   ○​ receive > 상담 요청 (CLIENT → BZM → API CORE SERVER → 상담사)
+      I/F Code   IF11001                                  I/F Name                     core API > 상담 요청
+
+       URL       /api/v1/receive/reference                                    인증
+
+                                                                                       application/json;
+      Method     POST                                    Content-Type
+                                                                                       charset=UTF-8
+
+                                                Request Message
+
+       HTTP                            항목                         반복여부      TYPE(길이)            설명
+
+
+      HEADER     Content-Type                                           N              요청 본문 타입
+                                                                                       (application/json)
+
+                                                                                       플랫폼 타입
+                 X-Platform-Type                                        N
+                                                                                       (kakao_counsel_talk)
+
+                 X-Service-Key                                          N              발신프로필 키
+
+
+                 X-User-Key                                             N              사용자 키
+
+
+                 X-Event-Key                                            N              이벤트 키 (session id)
+
+       Body      user_key                                               N              사용자 키
+
+                 session_id                                             N              session id
+
+                 sender_key                                             N              발신 프로필 키
+
+                 app_user_id                                            N              app user id
+
+                 time                                                   N              발송 시간
+
+                                                                                       버튼을 통해 전달된
+                 reference           extra
+                                                                                       메타 정보
+
+                                     text                                              버튼을 통해 전달된
+                                                                                       메타 정보 (삭제예정)
+
+                                     lastText
+
+                                     lastTextDate
+
+                                     appUserId
+                                                                                             버튼을 통해 전달된
+                                last_reference   extra
+                                                                                             메타 정보
+
+                                                                                             상담을 어떻게
+                                                 bot
+                                                                                             시작했는지 값
+
+                                                                                             봇으로 상담 시작 시,
+                                                 bot_event
+                                                                                             봇 블럭 이벤트 값
+
+                                                                                             마지막 메타 정보
+                                                 created_at
+                                                                                             생성일
+
+ {​
+      "user_key":"string",​
+      "session_id":"string",​
+      "sender_key":"string",​
+      "app_user_id":null,
+      "time":1738710631227,​
+      "reference":
+        {
+              "extra":"",
+              "text":"",
+              "lastText":"",
+              "lastTextDate":"",
+              "appUserId":null
+        },​
+      "last_reference":
+        {
+              "extra":"",
+              "bot":"",
+              "bot_event":"",
+              "created_at":""
+        }​
+ }
+
+
+
+
+●​ 고객 메시지 수신 API : /message
+ ○​ 설명 : 채널(상담톡 API)을 통하여 인입된 고객의 메시지를 수신하기 위한 API
+        입니다.
+ ○​ 미디어타입 : APPLICATION/JSON
+ ○​ 송신 파라미터 목록
+      ■​ HttpHeaders : 비즈메시지 수신 헤더 입니다.
+      ■​ RequestParams : 비즈메시지 수신 파라미터들 입니다.
+      ■​ RequestBody : 비즈메시지 수신 메시지 Payload 데이터 입니다.
+ ○​ receive > 메세지 전송 (CLIENT → BZM → API CORE SERVER → 상담사)
+ I/F Code         IF11002                                      I/F Name                  core API > 메세지 전송
+
+      URL         /api/v1/receive/message                                         인증
+
+                                                                                         application/json;
+  Method          POST                                        Content-Type
+                                                                                         charset=UTF-8
+
+                                                          Request Message
+
+     HTTP                                        항목                          반복   TYPE               설명
+                                                                              여부   (길이)
+
+          HEADER     Content-Type                                             N           요청 본문 타입
+                                                                                          (application/json)
+
+                                                                              N           플랫폼 타입
+                     X-Platform-Type
+                                                                                          (kakao_counsel_talk)
+
+                     X-Service-Key                                            N           발신프로필 키
+
+
+                     X-User-Key                                               N           사용자 키
+
+
+                     X-Event-Key                                              N           이벤트 키 (session id)
+
+
+            Body     chapters                                                 Y
+
+                                            sections                          Y
+
+                                                           type               N           메세지 타입
+
+                                                           data               N           메세지
+
+                                                           display            N           메세지 표현
+
+                                                           lock               N           보안메세지 여부
+
+                                                           attachment         N           장문 첨부
+
+                                                                        url   N           첨부 url
+
+                     meta                                                     N
+
+                                            serialNumber                      N           메세지 번호
+
+                                            created                           N           생성시간
+
+                                            sessionId                         N           세션 아이디
+
+
+          예시는 아래 참조
+
+
+
+
+짧은 문장 샘플
+
+{
+    "chapters" : [ {
+      "sections" : [ {
+        "type" : "text",
+        "data" : "네",
+        "lock" : false
+      }]
+    } ],
+    "meta" : {
+      "serialNumber" : "1234567891234567890",
+      "created" : "2025-10-22T06:40:49.973Z",
+      "sessionId" : "123456789"
+    }
+}
+
+
+긴 문장 샘플
+{
+  "chapters" : [ {
+    "sections" : [ {
+      "type" : "text",
+      "data" : "long data...",
+      "attachment" : {
+        "url" :
+"http://dn.talk.kakao.com/talkm/LcU6W3ueHE/d7nqooJLgU18VreFpkZ
+Pkk/t_7a5094d7fb73.txt"
+      },
+      "lock" : false
+    }]
+  } ],
+  "meta" : {
+    "serialNumber" : "1234567891234567890",
+    "created" : "2025-10-22T06:13:14.65Z",
+    "sessionId" : "123456789"
+  }
+}
+
+이미지 샘플
+
+
+{
+  "chapters" : [ {
+    "sections" : [ {
+      "type" : "file",
+      "data" :
+"https://talk.kakaocdn.net/dna/blU3e5/o2XYgC8I53/8yFUxl5S4lke5bR
+r9yCl2U/i_fb7586e7bc9d.jpeg?credential=zf3biCPbmWRjbqf40YGeP
+FLewdou7TIK&expires=1776649688&signature=vNr7X63iPfVJrd4ypH
+dqdQo6YK4%3D",
+      "display" : "image",
+      "lock" : false
+    }]
+  } ],
+  "meta" : {
+    "serialNumber" : "1234567891234567890",
+    "created" : "2025-10-22T03:55:44.316Z",
+    "sessionId" : "123456789"
+  }
+}
+
+
+영상 샘플
+
+{
+  "chapters" : [ {
+    "sections" : [ {
+      "type" : "file",
+      "data" :
+"https://talk.kakaocdn.net/dna/gVgqU/wzu3cIM2Rp/IBKqPXd8e8VQij
+NvJztRKB/talkv_high.mp4?credential=zf3biCPbmWRjbqf40YGePFLe
+wdou7TIK&expires=1776650478&signature=JJY%2FmRtABZICQCMl
+Ly%2FMbVzgLjc%3D",
+      "display" : "video",
+      "lock" : false
+    }]
+  } ],
+  "meta" : {
+    "serialNumber" : "1234567891234567890",
+    "created" : "2025-10-22T03:55:44.316Z",
+    "sessionId" : "123456789"
+  }
+}
+
+음성 샘플
+{
+  "chapters" : [ {
+    "sections" : [ {
+      "type" : "file",
+      "data" :
+"https://talk.kakaocdn.net/dna/ditjy3/wzveRYrjtg/uMdLQqpwxjCt5Ltfqd
+8YmX/f_07ffcba40c12.mp3?credential=zf3biCPbmWRjbqf40YGePFL
+ewdou7TIK&expires=1776650396&signature=AHu1s4oTQx%2BF%2
+BbMZJG3tiiu%2Fov4%3D",
+      "display" : "file",
+      "lock" : false
+    }]
+  } ],
+  "meta" : {
+    "serialNumber" : "1234567891234567890",
+    "created" : "2025-10-22T03:57:33.859Z",
+    "sessionId" : "123456789"
+  }
+}
+
+파일 샘플
+
+
+{
+  "chapters" : [ {
+    "sections" : [ {
+      "type" : "file",
+      "data" :
+"https://talk.kakaocdn.net/dna/PhPPW/wzu6NWpLdS/WkLq5XdmEeg
+4rTMT45851r/f_827d3e617427.pdf?credential=zf3biCPbmWRjbqf40Y
+GePFLewdou7TIK&expires=1776650265&signature=3z1z6oBZLbOsb
+BlojxynJuOII3A%3D",
+      "display" : "file",
+      "lock" : false
+    }]
+  } ],
+  "meta" : {
+    "serialNumber" : "1234567891234567890",
+    "created" : "2025-10-22T03:57:33.859Z",
+    "sessionId" : "123456789"
+  }
+}
+
+
+
+
+       ❖​ /message api 에서 고객의 메세지 중 일부는 파일을 받을 수 있는데, 사용자가 전송 가능한
+            파일 확장자와 파일 용량은 아래와 같습니다.
+
+
+              type                                                extention                                                  description
+
+
+             image        jpg, jpeg, gif, bmp, png, tiff                                                                In case “file”, not
+                                                                                                                        available on
+             video        mp4, m4v, avi, asf, wmv, mkv, ts, mpg, mpeg, mov, flv, ogv                                    Mobile_iOS yet.
+
+
+             audio        mp3, wav, flac, tta, tak, aac, wma, ogg, m4a
+
+
+              file        pdf, odp, ppt, pptx, key, show, doc, docx, hwp, txt, rtf, xml, wks, wps, xps, md, odf,
+                          odt, pages, ods, csv, tsv, xls, xlsx, numbers, cell, psd, ai, sketch, tif, tiff, tga, webp,
+                          zip, gz, bz2, rar, 7z, lzh, alz
+        type                                                   size                                         description
+
+
+        image          Mobile: 15MB                                                                  In case “video”, 5
+                       PC: 300MB                                                                     min limitation on
+                                                                                                     self recording.
+        video          300MB
+                                                                                                     In case “file”, not
+        audio          Mobile: 5분                                                                    available on
+                       PC: 300MB                                                                     Mobile_iOS yet.
+
+
+         file          300MB
+
+
+
+
+●​ 고객발 상담 종료 이벤트 수신 API : /expired_session
+ ○​ 설명 : 비즈메시지를 통하여 인입된 고객의 상담 종료 이벤트 메시지를 수신하기
+        위한 API 입니다.
+ ○​ 미디어타입 : APPLICATION/JSON
+ ○​ 송신 파라미터 목록
+    ■​ HttpHeaders : 비즈메시지 수신 헤더 입니다.
+    ■​ RequestParams : 비즈메시지 수신 파라미터들 입니다.
+    ■​ RequestBody : 비즈메시지 수신 메시지 Payload 데이터 입니다.
+ ○​ receive > 상담 종료 (CLIENT → BZM → API CORE SERVER → 상담사)
+           I/F Code          IF11003                                   I/F Name                core API > 상담종료
+
+                URL          /api/v1/receive/expired_session                           인증
+
+                                                                                               application/json;
+            Method           POST                                     Content-Type
+                                                                                               charset=UTF-8
+
+                                                        Request Message
+
+                                                                                     TYPE(길이
+                HTTP                           항목                       반복여부                             설명
+                                                                                        )
+
+
+           HEADER            Content-Type                                   N                  요청 본문 타입
+                                                                                               (application/json)
+
+                                                                                               플랫폼 타입
+                             X-Platform-Type                                N
+                                                                                               (kakao_counsel_talk)
+
+                             X-Service-Key                                  N                  발신프로필 키
+
+
+                             X-User-Key                                     N                  사용자 키
+
+
+                             X-Event-Key                                    N                  이벤트 키 (session id)
+
+                Body         user_key                                       N                  사용자 키
+
+                             session_id                                     N                  session id
+
+                             sender_key                                     N                  발신 프로필 키
+
+                             time                                           N                  발송 시간
+
+   {​
+   "user_key":"string",​
+   "session_id":"string",​
+   "sender_key":"string",​
+   "time":1738710631227​
+   }
+
+
+
+
+●​ 사용자 읽음 정보 수신 API : /seen_info
+ ○​ 설명 : 사용자의 읽음 정보를 수신합니다.
+ ○​ 미디어타입 : APPLICATION/JSON
+ ○​ 송신 파라미터 목록
+       ■​ HttpHeaders : 비즈메시지 수신 헤더 입니다.
+       ■​ RequestParams : 비즈메시지 수신 파라미터들 입니다.
+       ■​ RequestBody : 비즈메시지 수신 메시지 Payload 데이터 입니다.
+ ○​ receive > 상담 종료 (CLIENT → BZM → API CORE SERVER → 상담사)
+                                                                                             core API >
+         I/F Code            IF11004                                  I/F Name
+                                                                                             읽음정보수신
+
+           URL               /api/v1/receive/seen_info                               인증
+
+                                                                                             application/json;
+         Method              POST                                   Content-Type
+                                                                                             charset=UTF-8
+
+                                                         Request Message
+
+                                                                                   TYPE(길이
+          HTTP                                 항목                      반복여부                           설명
+                                                                                      )
+
+
+         HEADER              Content-Type                                  N                 요청 본문 타입
+                                                                                             (application/json)
+
+                                                                                             플랫폼 타입
+                             X-Platform-Type                               N
+                                                                                             (kakao_counsel_talk)
+
+                             X-Service-Key                                 N                 발신프로필 키
+
+
+                             X-User-Key                                    N                 사용자 키
+
+
+                             X-Event-Key                                   N                 이벤트 키 (session id)
+
+           Body              user_key                                      N                 사용자 키
+
+                             session_id                                    N                 session id
+
+                             sender_key                                    N                 발신 프로필 키
+
+                                                                                             사용자가 채팅방을
+                                                                                             읽은 시각 (전달되는
+                             time                                          N
+                                                                                             시각과는 다소 차이가
+                                                                                             있을수 있음)
+
+   {​
+   "user_key":"string",​
+   "session_id":"string",​
+   "sender_key":"string",​
+   "time":1738710631227​
+   }
+Session Service API(ROOT URL : /api/v1/session)
+ 세션 타입
+    세션 시작 타입
+         Type                             설명
+          UM                          채팅방 직접 진입
+          BP                          PC 상담하기 버튼
+          BM                        Mobile 상담하기 버튼
+          QR                          QR 상담하기 버튼
+          BA                      알림톡 내 상담톡 전환 버튼
+          SW                          챗봇 > 상담 전환
+
+
+    세션 종료 타입
+         Type                             설명
+          AE                      30일 경과 시스템 자동 종료
+          EC                           대화방 나가기
+          BF                             친구 차단
+          EU                       사용자 종료 처리 (!종료)
+          SB                        챗봇으로 전환하기 버튼
+          WB                         챗봇 상담하기 버튼
+          BU                         상담원 사용자 차단
+          EP                          상담원 상담 종료
+
+
+
+
+ ●​ 세션 API : -
+   ○​ 설명 : 유저 키로 가장 최근 세션 정보를 조회할 수 있습니다.
+   ○​ 미디어 타입 : APPLICATION/JSON
+   ○​ 세션 타입 : 세션 타입
+   ○​ 송신 파라미터 목록
+     ■​ X-Service-Key : BZM의 발신 프로필 키를 설정합니다.
+     ■​ X-User-Key : 사용자 카카오 계정 ID에 대한 고유한 키값입니다.
+        I/F Code                 IF12601                         I/F Name                     core API > 세션 조회
+
+          URL                              /api/v1/session                      인증
+
+        Method                    GET                          Content-Type                     application/json
+
+                                                           Request Message
+
+                                                                              TYPE(길이
+         HTTP                     항목               필수여부            반복여부                              설명
+                                                                                 )
+
+        HEADER          accept                         N              N                 컨텐츠 타입
+
+
+                        X-Service-Key                  Y              N                 발신프로필 키
+
+
+
+                        X-User-Key                     Y              N                 사용자 키
+
+
+
+                        Content-Type                   Y              N                 요청 본문 타입 (application/json)
+
+
+                                                        Response Message
+
+                                                                              TYPE(길이
+         HTTP                              항목                      반복여부                              설명
+                                                                                 )
+
+         Body                     code                                N                 결과 코드
+
+                                 payload                              N                 아래 json 이 string 으로 들어감
+
+                                  now                                 N                 시간
+
+{
+    "code": 0,
+    "session": {
+        "session_id": 301707456,
+        "sender_key": "4274c549c6c9d01d0e6ae57139500c76f0c82f8d",
+        "started_type": "SW",
+        "started_at": "2025-09-16T13:32:19.431",
+        "expired_type": "EP",
+        "expired_at": "2025-09-22T09:47:35.29"
+    }
+}
+Statistic Service API(ROOT URL : /api/v1/stat)
+     ●​ 채팅 조회 API : /chat
+     ○​ 설명 : 채팅방 통계를 조회할 수 있습니다.
+     ○​ 미디어 타입 : APPLICATION/JSON
+     ○​ 송신 파라미터 목록
+                   ■​ X-Service-Key : BZM의 발신 프로필 키를 설정합니다.
+                   ■​ date : 채팅방 통계 조회일
+             I/F Code                     IF12701                        I/F Name                   core API > 채팅방 통계 조회
+
+                 URL                                /api/v1/stat/chat                    인증
+
+              Method                       GET                          Content-Type                     application/json
+
+                                                               Request Message
+
+                                                                                       TYPE(길이
+                 HTTP                      항목                필수여부           반복여부                              설명
+                                                                                          )
+
+             HEADER              accept                          N               N               컨텐츠 타입
+
+
+                                 X-Service-Key                   Y               N               발신프로필 키
+
+
+
+                                 Content-Type                    Y               N               요청 본문 타입 (application/json)
+
+
+          PARAMETER              date                            Y               N               조회일(yyyyMMdd)
+
+
+                                                              Response Message
+
+                                                                                       TYPE(길이
+                 HTTP                               항목                      반복여부                              설명
+                                                                                          )
+
+                 Body                      code                                  N               결과 코드
+
+                                          payload                                N               아래 json 이 string 으로 들어감
+
+                                           now                                   N               시간
+
+ {
+     "code": "200",
+     "data": {
+         "date": "20250701",
+         "sender_key": {sender_key},
+         "total_count": 1,
+         "valid_count": 0,
+         "invalid_count": 1,
+         "invalid_no_answer_count": 0,
+         "invalid_no_request_count": 1,
+         "invalid_system_response_count": 0,
+         "charging_rate": 0,
+         "user_count": 0,
+         "connected_user_count": 1
+     }
+ }
+       I/F Code                    IF12701                           I/F Name                   core API > 채팅방 통계 조회
+
+         URL                                  /api/v1/stat/chat                      인증
+
+        Method                      GET                             Content-Type                     application/json
+
+                                                         Request Message
+
+                                                                                   TYPE(길이
+         HTTP                       항목                 필수여부             반복여부                              설명
+                                                                                      )
+
+       HEADER             accept                           N               N                 컨텐츠 타입
+
+- date : 조회일 (yyyyMMdd)
+- sender_key : 발신프로필 키
+- total_count : 총채팅방수
+- valid_count : 과금채팅
+- invalid_count : 비과금채팅
+- invalid_no_request_count : 휴면채팅
+- invalid_no_answer_count : 상담무응답
+- invalid_system_response_count : 시스템응답
+- charging_rate : 과금율
+- user_count : 상담고객수
+- connected_user_count : 연결중고객수
+
+
+
+
+  ●​ 세션 조회 API : /session
+  ○​ 설명 : 세션 통계를 조회할 수 있습니다.
+  ○​ 미디어 타입 : APPLICATION/JSON
+  ○​ 송신 파라미터 목록
+            ■​ X-Service-Key : BZM의 발신 프로필 키를 설정합니다.
+            ■​ date : 세션 통계 조회일
+       I/F Code                    IF12702                           I/F Name                    core API > 세션 통계 조회
+
+         URL                                 /api/v1/stat/session                    인증
+
+        Method                      GET                             Content-Type                     application/json
+
+                                                         Request Message
+
+                                                                                   TYPE(길이
+         HTTP                       항목                 필수여부             반복여부                              설명
+                                                                                      )
+
+       HEADER             accept                           N               N                 컨텐츠 타입
+
+
+                          X-Service-Key                    Y               N                 발신프로필 키
+
+
+
+                          Content-Type                     Y               N                 요청 본문 타입 (application/json)
+
+
+     PARAMETER            date                             Y               N                 조회일(yyyyMMdd)
+
+
+                                                        Response Message
+             I/F Code                        IF12702                           I/F Name                     core API > 세션 통계 조회
+
+                URL                                    /api/v1/stat/session                    인증
+
+              Method                          GET                             Content-Type                     application/json
+
+                                                                   Request Message
+
+                                                                                             TYPE(길이
+                HTTP                          항목                 필수여부             반복여부                              설명
+                                                                                                )
+
+             HEADER                 accept                           N               N                 컨텐츠 타입
+
+                                                                                             TYPE(길이
+                HTTP                                   항목                         반복여부                              설명
+                                                                                                )
+
+                Body                          code                                   N                 결과 코드
+
+                                             payload                                 N                 아래 json 이 string 으로 들어감
+
+                                              now                                    N                 시간
+
+{
+    "code": "200",
+    "data": {
+        "date": "20250701",
+        "sender_key": {sender_key},
+        "total_count": 2,
+        "friendship_count": 2,
+        "no_friendship_count": 0,
+        "start_with_user_message_count": 2,
+        "start_with_button_pc_count": 0,
+        "start_with_button_mo_count": 0,
+        "start_with_qr_count": 0,
+        "start_with_switch_count": 0,
+        "start_with_button_at_count": 0,
+        "expire_exit_chat_count": 0,
+        "expire_block_friend_count": 0,
+        "expire_by_user_count": 0,
+        "expire_by_switch_bot": 0,
+        "expire_by_start_with_bot": 0,
+        "expire_block_user_count": 0,
+        "expire_by_partner_count": 0,
+        "expire_auto_expired_count": 2,
+        "p_interval_data": {
+            "within_1month": 2
+        }
+    }
+}
+
+- date : 조회일 (yyyyMMdd)
+- sender_key : 발신프로필 키
+- total_count : 총 종료 세션
+- friendship_count : (지인 여부) 지인
+- no_friendship_count : (지인 여부) 비지인
+- start_with_user_message_count : (연결 방법) 채팅방 직접 진입 수
+- start_with_button_pc_count : (연결 방법) 상담하기 버튼(PC) 수
+- start_with_button_mo_count : (연결 방법) 상담하기 버튼(Mobile) 수
+- start_with_qr_count : (연결 방법) 상담하기 버튼(QR) 수
+- start_with_switch_count : (연결 방법) 챗봇 > 상담 전환 수
+          I/F Code                        IF12702                           I/F Name                  core API > 세션 통계 조회
+
+           URL                                      /api/v1/stat/session                    인증
+
+          Method                           GET                             Content-Type                  application/json
+
+                                                                Request Message
+
+                                                                                          TYPE(길이
+           HTTP                            항목                 필수여부             반복여부                           설명
+                                                                                               )
+
+        HEADER                   accept                           N               N                 컨텐츠 타입
+
+ - start_with_button_at_count : (연결 방법) 알림톡 내 상담톡 전환 버튼 수
+ - expire_exit_chat_count : (종료 방법) 사용자 대화방 나가기 수
+ - expire_block_friend_count : (종료 방법) 사용자 친구 차단 수
+ - expire_by_user_count : (종료 방법) 사용자 !종료 수
+ - expire_by_switch_bot : (종료 방법) 사용자 챗봇으로 전환 종료 수
+ - expire_by_start_with_bot : (종료 방법) 사용자 챗봇상담하기 버튼 종료 수
+ - expire_block_user_count : (종료 방법) 상담원 사용자 차단 수
+ - expire_by_partner_count : (종료 방법) 상담원 상담종료 수
+ - expire_auto_expired_count : (종료 방법) 30일 경과 자동 종료 건수
+ - p_interval_data : 세션 연결 시간(JSON)
+  - within_30min : ~30m
+  - within_1day : ~1d
+  - within_1week : ~7d
+  - within_1month : ~30d
+  - over_1month : ~30d+
+
+
+
+
+Center Service API(ROOT URL : /api/v1/system)
+카카오톡 채널이 상담톡을 이용하기 위해 필요한 기능을 관리하기 위한 API에 대해
+설명합니다.
+
+
+
+  ●​ 상담시간 조회 API : /consult/time
+     ○​ 설명 : 발신프로필 키로 상담 시간을 조회할 수 있습니다.
+     ○​ 미디어 타입 : APPLICATION/JSON
+     ○​ 송신 파라미터 목록
+           ■​ X-Service-Key : BZM의 발신 프로필 키를 설정합니다.
+                                                                                                         core API > 상담시간
+    I/F Code            IF1412              I/F Name
+                                                                                                         조회
+
+    URL                 /api/v1/system/consult/time                                       인증
+
+                                                                                                         application/json;
+    Method              GET                 Content-Type
+                                                                                                         charset=UTF-8
+
+    Request Message
+    HTTP                      항목               필수여부       반복여부   TYPE(길이)   설명
+
+    HEADER                    X-Service-Key    Y          N                 발신프로필 키
+
+    Response Message
+
+    HTTP                      항목                          반복여부   TYPE(길이)   설명
+
+    Body                      code                        N                 결과 코드
+
+                              message                     N                 오류 메시지
+
+                                                                            요일 별 상담 시간
+                              week_timetable              Y
+                                                                            목록
+
+                                                                            요일 (ex. mon, tue,
+                                               day        N
+                                                                            wed...)
+
+                                               start_at   N                 상담 시작 시간
+
+                                               end_at     N                 상담 종료 시간
+
+    {
+        "code": "200",
+        "week_timetable": [
+             {
+                  "day": "mon",
+                  "start_at": "0900",
+                  "end_at": "1800"
+             },
+             {
+                  "day": "wed",
+                  "start_at": "0900",
+                  "end_at": "1800"
+             },
+             {
+                  "day": "fri",
+                  "start_at": "0900",
+                  "end_at": "1800"
+             },
+             {
+                  "day": "sat",
+                  "start_at": "0800",
+                  "end_at": "1200"
+             }
+        ],
+        "message": "오류가 발생하면 노출 됩니다."
+    }
+
+
+
+​
+
+
+
+    ●​ 상담시간 저장 API : /consult/time
+        ○​ 설명 : 발신프로필 키로 상담 시간을 수정할 수 있습니다.
+        ○​ 미디어 타입 : APPLICATION/JSON
+        ○​ 송신 파라미터 목록
+                 ■​ X-Service-Key : BZM의 발신 프로필 키를 설정합니다.
+                                                                                  core API >
+    I/F Code    IF1413                               I/F Name
+                                                                                  상담시간 저장
+
+     URL        /api/v1/system/consult/time                              인증
+
+                                                                                  application/json;
+    Method      POST                                Content-Type
+                                                                                  charset=UTF-8
+
+                                              Request Message
+
+     HTTP                    항목               필수여부              반복여부   TYPE(길이)          설명
+
+    HEADER      X-Service-Key                   Y                  N              발신프로필 키
+
+                                                                                  업로드할
+     Body       week_timetable                  Y                  Y
+                                                                                  비즈니스폼 ID
+
+                                                                                  요일 (ex. mon,
+                             day                Y                  N
+                                                                                  tue, wed...)
+
+                             startAt            Y                  N              상담 시작 시간
+
+                             endAt              Y                  N              상담 종료 시간
+
+                                              Response Message
+
+     HTTP                               항목                      반복여부   TYPE(길이)          설명
+
+     Body       code                                               N              결과 코드
+
+                message                                            N              오류 메시지
+
+                time                                               N              등록일자
+
+{
+    "code": "200",
+    "time" : "2025-04-18T16:07:39.407275",
+    "message": "오류가 발생하면 노출 됩니다."
+}
+User Management API(ROOT URL : /api/v1/profile)
+ ●​ 사용자 수신 차단 API : /block
+      ○​ 설명 : 발신프로필 키와 유저키로 원치않는 사용자와의 상담을 차단할 수
+           있습니다.
+      ○​ 미디어 타입 : APPLICATION/JSON
+      ○​ 송신 파라미터 목록
+         ■​ X-Service-Key : BZM의 발신 프로필 키를 설정합니다.
+         ■​ X-User-Key : 사용자 카카오 계정 ID에 대한 고유한 키값입니다.
+                                                                                     profile API > 사용자
+      I/F Code     IF1414                                    I/F Name
+                                                                                     수신 차단
+
+        URL        /api/v1/profile/block                                    인증
+
+                                                                                     application/json;
+      Method       POST                                    Content-Type
+                                                                                     charset=UTF-8
+
+                                                    Request Message
+
+       HTTP               항목                 필수여부            반복여부         TYPE(길이)            설명
+
+      HEADER       X-Service-Key              Y                 N                    발신프로필 키
+
+                   X-User-Key                 Y                 N                    사용자 키
+
+                                                    Response Message
+
+       HTTP                            항목                    반복여부         TYPE(길이)            설명
+
+       Body        code                                         N                    결과 코드
+
+                   message                                      N                    오류 메시지
+
+  {
+      "code": "200",
+      "message": "오류가 발생하면 노출 됩니다."
+  }
+
+
+
+
+ ●​ 사용자 수신 차단 해제 API : /unblock
+      ○​ 설명 : 발신프로필 키와 유저키로 차단된 사용자를 해제할 수 있습니다.
+      ○​ 미디어 타입 : APPLICATION/JSON
+      ○​ 송신 파라미터 목록
+         ■​ X-Service-Key : BZM의 발신 프로필 키를 설정합니다.
+         ■​ X-User-Key : 사용자 카카오 계정 ID에 대한 고유한 키값입니다.
+                                                                                     profile API > 사용자
+      I/F Code     IF1415                                   I/F Name
+                                                                                     수신 차단 해제
+
+       URL         /api/v1/profile/unblock                                  인증
+
+      Method       POST                                    Content-Type              application/json;
+                                                                           charset=UTF-8
+
+                                             Request Message
+
+     HTTP               항목            필수여부            반복여부      TYPE(길이)          설명
+
+    HEADER       X-Service-Key         Y                 N                 발신프로필 키
+
+                 X-User-Key            Y                 N                 사용자 키
+
+                                             Response Message
+
+     HTTP                        항목                   반복여부      TYPE(길이)          설명
+
+     Body        code                                    N                 결과 코드
+
+                 message                                 N                 오류 메시지
+
+{
+    "code": "200",
+    "message": "오류가 발생하면 노출 됩니다."
+}
+

@@ -11,6 +11,7 @@ const { notify } = require('../lib/push');
 const { kstNow } = require('../lib/period');
 const { getEffectivePaymentMethods } = require('../lib/branchPolicy');
 const { runDispatchAgent, checkDispatchDelay } = require('../lib/mcpDispatchAgent');
+const kakaoConsult = require('../lib/kakaoConsult');
 const {
   broadcastMessage, broadcastReadReceipt, broadcastSessionListChanged, openSessionStream, openSessionListStream, closeChannel,
   startAgentPresence, isAnyAgentOnline, listOnlineAgentNames,
@@ -794,7 +795,11 @@ router.post('/sessions/:id/assign', requireRole('admin'), asyncHandler(async (re
 }));
 
 router.post('/sessions/:id/reply', requireRole('admin'), asyncHandler(async (req, res) => {
-  const existing = await db.get('SELECT id, assigned_agent_id FROM chat_sessions WHERE id = ?', [req.params.id]);
+  const existing = await db.get(
+    `SELECT id, assigned_agent_id, channel, kakao_service_key, kakao_user_key, kakao_event_key
+     FROM chat_sessions WHERE id = ?`,
+    [req.params.id]
+  );
   const wantsJson = wantsJsonResponse(req);
   if (!existing) {
     if (wantsJson) return res.status(404).json({ error: '세션을 찾을 수 없습니다.' });
@@ -827,6 +832,13 @@ router.post('/sessions/:id/reply', requireRole('admin'), asyncHandler(async (req
     );
     broadcastMessageAsync(req.params.id, inserted);
     broadcastSessionListChangedAsync();
+
+    // 카카오 출신 세션(routes/kakaoConsult.js)이면 상담원 답장을 중계서버로도 내보낸다
+    // (계획서 5.5 — 지금까지는 웹 위젯에만 반영되고 끝났다).
+    if (existing.channel === 'kakao') {
+      const sendResult = await kakaoConsult.sendMessage(existing, text);
+      if (!sendResult.ok) console.error('카카오 상담톡 발신 실패(상담원 답장):', sendResult.error);
+    }
   }
 
   if (wantsJson) {
@@ -836,7 +848,10 @@ router.post('/sessions/:id/reply', requireRole('admin'), asyncHandler(async (req
 }));
 
 router.post('/sessions/:id/close', requireRole('admin'), asyncHandler(async (req, res) => {
-  const existing = await db.get('SELECT id FROM chat_sessions WHERE id = ?', [req.params.id]);
+  const existing = await db.get(
+    `SELECT id, channel, kakao_service_key, kakao_user_key, kakao_event_key FROM chat_sessions WHERE id = ?`,
+    [req.params.id]
+  );
   const wantsJson = wantsJsonResponse(req);
   if (!existing) {
     if (wantsJson) return res.status(404).json({ error: '세션을 찾을 수 없습니다.' });
@@ -844,6 +859,13 @@ router.post('/sessions/:id/close', requireRole('admin'), asyncHandler(async (req
   }
   await db.run(`UPDATE chat_sessions SET status = 'closed' WHERE id = ?`, [req.params.id]);
   broadcastSessionListChangedAsync();
+
+  // 카카오 출신 세션은 종료 시 중계서버에도 상담 종료를 알린다(계획서 5.6).
+  if (existing.channel === 'kakao') {
+    const closeResult = await kakaoConsult.sendClose(existing, '상담이 종료되었습니다. 이용해주셔서 감사합니다.');
+    if (!closeResult.ok) console.error('카카오 상담톡 발신 실패(상담 종료):', closeResult.error);
+  }
+
   if (wantsJson) return res.json({ ok: true, status: 'closed' });
   res.redirect('/chat/sessions');
 }));

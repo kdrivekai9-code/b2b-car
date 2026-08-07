@@ -1,0 +1,881 @@
+<title>카카오 상담톡 연동 계획서</title>
+<style>
+  :root {
+    --paper: #faf8f3;
+    --paper-raised: #ffffff;
+    --ink: #1c1a17;
+    --ink-soft: #5c574c;
+    --ink-faint: #918c7d;
+    --line: #e6e0d2;
+    --line-strong: #d7cfba;
+    --accent: #c98f00;
+    --accent-bg: #f7e6b8;
+    --accent-ink: #4a3600;
+    --blue: #3a5fa0;
+    --blue-bg: #e2e9f5;
+    --purple: #8b7fa0;
+    --purple-bg: #ece8f2;
+    --green: #3f7d4f;
+    --green-bg: #e1ede3;
+    --red: #a13f3f;
+    --red-bg: #f3e2e2;
+    --shadow: 0 1px 2px rgba(28,26,23,.05), 0 6px 20px rgba(28,26,23,.06);
+    --radius: 10px;
+    --font-ui: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif;
+    --font-mono: ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
+  }
+  :root[data-theme="dark"] {
+    --paper: #17161a;
+    --paper-raised: #201f24;
+    --ink: #ece8e0;
+    --ink-soft: #b3ab9c;
+    --ink-faint: #7d7568;
+    --line: #322f2f;
+    --line-strong: #423e3c;
+    --accent: #e0ac2c;
+    --accent-bg: #3a2f0f;
+    --accent-ink: #f5d98a;
+    --blue: #7fa0d9;
+    --blue-bg: #23293a;
+    --purple: #b3a6cc;
+    --purple-bg: #2a2534;
+    --green: #7fbd8e;
+    --green-bg: #1e2d20;
+    --red: #d98a8a;
+    --red-bg: #322020;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.35);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #17161a;
+      --paper-raised: #201f24;
+      --ink: #ece8e0;
+      --ink-soft: #b3ab9c;
+      --ink-faint: #7d7568;
+      --line: #322f2f;
+      --line-strong: #423e3c;
+      --accent: #e0ac2c;
+      --accent-bg: #3a2f0f;
+      --accent-ink: #f5d98a;
+      --blue: #7fa0d9;
+      --blue-bg: #23293a;
+      --purple: #b3a6cc;
+      --purple-bg: #2a2534;
+      --green: #7fbd8e;
+      --green-bg: #1e2d20;
+      --red: #d98a8a;
+      --red-bg: #322020;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.35);
+    }
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-ui);
+    line-height: 1.7;
+    font-size: 15.5px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .shell {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 0 28px 120px;
+  }
+  a { color: var(--blue); }
+
+  /* ---- Header ---- */
+  header.doc-head {
+    padding: 56px 0 32px;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 8px;
+  }
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: .09em;
+    text-transform: uppercase;
+    color: var(--accent-ink);
+    background: var(--accent-bg);
+    padding: 5px 11px;
+    border-radius: 999px;
+    margin-bottom: 18px;
+  }
+  h1.title {
+    font-size: 34px;
+    font-weight: 800;
+    letter-spacing: -.01em;
+    margin: 0 0 12px;
+    text-wrap: balance;
+    color: var(--ink);
+  }
+  .doc-sub {
+    font-size: 16px;
+    color: var(--ink-soft);
+    max-width: 62ch;
+    margin: 0 0 22px;
+  }
+  .meta-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 22px;
+    font-size: 13px;
+    color: var(--ink-faint);
+  }
+  .meta-row b { color: var(--ink-soft); font-weight: 600; }
+
+  /* ---- Layout: content + TOC ---- */
+  .layout {
+    display: grid;
+    grid-template-columns: 200px minmax(0,1fr);
+    gap: 48px;
+    margin-top: 40px;
+  }
+  @media (max-width: 880px) {
+    .layout { grid-template-columns: 1fr; }
+    nav.toc { display: none; }
+  }
+  nav.toc {
+    position: sticky;
+    top: 28px;
+    align-self: start;
+    font-size: 12.5px;
+  }
+  nav.toc .toc-label {
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin-bottom: 10px;
+  }
+  nav.toc ol {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    border-left: 1px solid var(--line);
+  }
+  nav.toc a {
+    display: block;
+    padding: 5px 0 5px 14px;
+    color: var(--ink-soft);
+    text-decoration: none;
+    border-left: 1px solid transparent;
+    margin-left: -1px;
+  }
+  nav.toc a:hover { color: var(--ink); border-left-color: var(--ink-faint); }
+
+  main { min-width: 0; }
+  section { margin-bottom: 56px; scroll-margin-top: 24px; }
+  section > .sec-label {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--ink-faint);
+    letter-spacing: .02em;
+    margin-bottom: 6px;
+  }
+  h2 {
+    font-size: 22px;
+    font-weight: 800;
+    letter-spacing: -.005em;
+    margin: 0 0 16px;
+    text-wrap: balance;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--line);
+  }
+  h3 {
+    font-size: 16.5px;
+    font-weight: 700;
+    margin: 28px 0 10px;
+    color: var(--ink);
+  }
+  p { margin: 0 0 14px; max-width: 70ch; }
+  ul, ol { margin: 0 0 14px; padding-left: 22px; }
+  li { margin-bottom: 6px; max-width: 66ch; }
+  strong { font-weight: 700; }
+  code {
+    font-family: var(--font-mono);
+    font-size: .89em;
+    background: var(--paper-raised);
+    border: 1px solid var(--line);
+    padding: 1px 6px;
+    border-radius: 5px;
+    color: var(--ink);
+  }
+
+  /* ---- Chips / status labels ---- */
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11.5px;
+    font-weight: 700;
+    padding: 2px 9px;
+    border-radius: 999px;
+    letter-spacing: .01em;
+    white-space: nowrap;
+  }
+  .chip-new    { background: var(--blue-bg); color: var(--blue); }
+  .chip-legacy { background: var(--purple-bg); color: var(--purple); }
+  .chip-open   { background: var(--red-bg); color: var(--red); }
+  .chip-ok     { background: var(--green-bg); color: var(--green); }
+  .chip-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+  /* ---- Callouts ---- */
+  .callout {
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--ink-faint);
+    background: var(--paper-raised);
+    border-radius: 0 var(--radius) var(--radius) 0;
+    padding: 14px 18px;
+    margin: 18px 0;
+    box-shadow: var(--shadow);
+  }
+  .callout.open { border-left-color: var(--red); }
+  .callout.open .callout-title { color: var(--red); }
+  .callout.ok { border-left-color: var(--green); }
+  .callout.ok .callout-title { color: var(--green); }
+  .callout-title {
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: .01em;
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .callout p:last-child, .callout ul:last-child, .callout ol:last-child { margin-bottom: 0; }
+
+  /* ---- Tables ---- */
+  .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--paper-raised); box-shadow: var(--shadow); margin: 16px 0 22px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; min-width: 560px; }
+  th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  thead th {
+    font-size: 11.5px;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    font-weight: 700;
+    background: var(--paper);
+    border-bottom: 1px solid var(--line-strong);
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  td code, th code { white-space: nowrap; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  .method { font-family: var(--font-mono); font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 4px; }
+  .m-get  { background: var(--green-bg); color: var(--green); }
+  .m-post { background: var(--blue-bg); color: var(--blue); }
+
+  /* ---- Diagram ---- */
+  .diagram-card {
+    border: 1px solid var(--line);
+    background: var(--paper-raised);
+    border-radius: var(--radius);
+    padding: 20px;
+    box-shadow: var(--shadow);
+    margin: 16px 0 22px;
+    overflow-x: auto;
+  }
+  .diagram-card .cap {
+    font-size: 12px;
+    color: var(--ink-faint);
+    margin-top: 10px;
+    text-align: center;
+  }
+
+  /* ---- Phase timeline ---- */
+  .phases { display: flex; flex-direction: column; gap: 0; margin: 18px 0 22px; }
+  .phase {
+    display: grid;
+    grid-template-columns: 84px 1fr;
+    gap: 18px;
+    padding: 16px 0;
+    border-top: 1px solid var(--line);
+  }
+  .phase:first-child { border-top: none; }
+  .phase-tag {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--ink-faint);
+    padding-top: 2px;
+  }
+  .phase-body h4 { margin: 0 0 6px; font-size: 14.5px; font-weight: 700; }
+  .phase-body p { margin: 0; font-size: 13.5px; color: var(--ink-soft); }
+
+  footer.doc-foot {
+    margin-top: 64px;
+    padding-top: 20px;
+    border-top: 1px solid var(--line);
+    font-size: 12.5px;
+    color: var(--ink-faint);
+  }
+
+  ::selection { background: var(--accent-bg); color: var(--accent-ink); }
+</style>
+
+<div class="shell">
+
+  <header class="doc-head">
+    <span class="eyebrow">내부 기술 검토 · 계획서</span>
+    <h1 class="title">카카오 상담톡 연동 — Zammad → b2b-car 챗봇 전환</h1>
+    <p class="doc-sub">
+      ConsulTalk 중계서버(consultalk-alpha.callmaner.com)를 통해 들어오는 카카오 상담톡 대화를
+      현재는 Zammad가 처리하고 있다. 이 문서는 그 처리 주체를 b2b-car 자체 챗봇(하이브리드 분류기 +
+      배차 주문 도우미)으로 교체하기 위한 구조 분석과 실행 계획을 정리한다.
+    </p>
+    <div class="meta-row">
+      <span><b>대상 시스템</b> b2b-car (Express + Next.js)</span>
+      <span><b>중계서버</b> ConsulTalk (callmaner 운영)</span>
+      <span><b>현재 처리주체</b> Zammad</span>
+      <span><b>전환 대상</b> b2b-car 자체 챗봇</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc">
+      <div class="toc-label">목차</div>
+      <ol>
+        <li><a href="#overview">1. 개요</a></li>
+        <li><a href="#current">2. 현재 구조</a></li>
+        <li><a href="#api">3. 중계서버 API</a></li>
+        <li><a href="#dkt">4. 카카오 원본 스펙(DKT)</a></li>
+        <li><a href="#target">5. 목표 구조</a></li>
+        <li><a href="#design">6. 상세 설계</a></li>
+        <li><a href="#schema">7. DB 변경</a></li>
+        <li><a href="#open">8. 확인 필요 사항</a></li>
+        <li><a href="#phases">9. 실행 계획</a></li>
+        <li><a href="#risk">10. 리스크</a></li>
+      </ol>
+    </nav>
+
+    <main>
+
+      <section id="overview">
+        <div class="sec-label">01</div>
+        <h2>개요</h2>
+        <p>
+          지금 카카오톡 상담톡으로 들어오는 고객 문의는 <strong>ConsulTalk 중계서버</strong>가 받아서
+          <strong>Zammad</strong>(헬프데스크)로 전달하고, Zammad 상담원(또는 Zammad 쪽 봇)이 답장하면
+          다시 중계서버를 거쳐 고객에게 전달되는 구조로 되어 있다. 이 문서가 제안하는 변경은 딱 하나다 —
+          <strong>Zammad가 있던 자리를 b2b-car로 옮긴다.</strong> 중계서버와 카카오 쪽 프로토콜은 그대로 두고,
+          "누가 대화를 처리하는가"만 바꾸는 것이므로 카카오 API 자체를 직접 다룰 필요는 없다(중계서버가 그 부분을
+          이미 흡수하고 있음).
+        </p>
+        <p>
+          b2b-car는 이미 웹 챗위젯용으로 <code>lib/hybridChat.js</code>(의도분류·필드추출)와
+          <code>lib/mcpDispatchAgent.js</code>(주문조회·변경 도구 실행)를 갖고 있다. 이 문서의 핵심은
+          이 두 모듈을 그대로 재사용하면서, 지금까지 없던 <strong>"로그인하지 않은 카카오 고객"</strong>이라는
+          새로운 진입 경로를 어떻게 안전하게 열 것인가에 있다.
+        </p>
+      </section>
+
+      <section id="current">
+        <div class="sec-label">02</div>
+        <h2>현재 구조 (Zammad 기반)</h2>
+        <div class="diagram-card">
+<pre class="mermaid">
+sequenceDiagram
+    participant C as 고객(카카오톡)
+    participant K as 카카오 상담톡
+    participant R as ConsulTalk 중계서버
+    participant Z as Zammad
+
+    C->>K: 메시지 입력
+    K->>R: POST /receive/message
+    R->>Z: (중계서버 내부 연동, 문서에 없음)
+    Note over R,Z: 현재 다운스트림 연동 방식 미확인 — 8.1 참고
+    Z-->>R: POST /send/zammad_send_message
+    R->>R: 헤더 변환 후 내부적으로 /send/message 호출
+    R->>K: 카카오 발신 API
+    K->>C: 답장 전달
+
+    C->>K: "상담원 연결" 버튼
+    K->>R: POST /receive/reference
+    R->>K: POST /send/message ("연결중입니다")
+    R->>Z: POST /send/chatbot 형태로 최근 3일 대화이력 전달(추정)
+    Note over R,Z: 실제 티켓 생성 방식은 Zammad 쪽 설정 — 미확인
+</pre>
+          <div class="cap">현재: 중계서버가 수신 이벤트를 Zammad로 넘기고, Zammad의 응답을 다시 중계서버가 카카오로 전달</div>
+        </div>
+        <p>
+          ConsulTalk의 <code>zammad_send_message</code> / <code>zammad_upload_file</code> / <code>zammad_send_close</code>
+          세 엔드포인트는 전부 <strong>Zammad → 중계서버</strong> 방향(Zammad의 웹훅이 호출하는 자리)이다.
+          안에서 바디로 받은 <code>user_key</code>/<code>service_key</code>/<code>event_key</code>를 헤더
+          형식(<code>X-User-Key</code> 등)으로 바꿔 기존 <code>/send/*</code> 엔드포인트를 그대로 호출하는,
+          "Zammad 전용 얇은 래퍼"다. 반대로 <strong>고객 → Zammad</strong> 방향(수신 쪽)이 실제로 어떻게 Zammad에
+          꽂혀 있는지는 이 API 문서에 노출되어 있지 않다 — 중계서버 내부 설정이거나 별도 연동일 가능성이 높다.
+        </p>
+      </section>
+
+      <section id="api">
+        <div class="sec-label">03</div>
+        <h2>중계서버(ConsulTalk) API 정리</h2>
+        <p>
+          <code>consultalk-alpha.callmaner.com/openapi.json</code> 기준으로 확인한 전체 엔드포인트다.
+          <span class="chip chip-new"><span class="chip-dot"></span>b2b-car가 직접 쓸 것</span>과
+          <span class="chip chip-legacy"><span class="chip-dot"></span>Zammad 전용(교체 대상)</span>을 구분해뒀다.
+        </p>
+        <h3>발신 (b2b-car → 고객)</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>엔드포인트</th><th>용도</th><th>구분</th></tr></thead>
+            <tbody>
+              <tr><td><span class="method m-post">POST</span> <code>/send/message</code></td><td>상담사(=b2b-car 봇/상담원)가 고객에게 메시지 전송. 헤더로 인증(<code>X-Service-Key</code>/<code>X-User-Key</code>/<code>X-Event-Key</code>)</td><td><span class="chip chip-new">직접 사용</span></td></tr>
+              <tr><td><span class="method m-post">POST</span> <code>/send/plain</code></td><td>텍스트/파일/이미지 등 단순 메시지 전송</td><td><span class="chip chip-new">직접 사용</span></td></tr>
+              <tr><td><span class="method m-post">POST</span> <code>/send/upload</code></td><td>고객에게 보낼 파일 업로드(사진 등)</td><td><span class="chip chip-new">직접 사용</span></td></tr>
+              <tr><td><span class="method m-post">POST</span> <code>/send/close</code></td><td>상담 종료 메시지 + 세션 정리</td><td><span class="chip chip-new">직접 사용</span></td></tr>
+              <tr><td><span class="method m-post">POST</span> <code>/send/chatbot</code></td><td>최근 3일 챗봇 대화이력 조회(상담원 인계 시 참고용)</td><td><span class="chip chip-new">직접 사용</span></td></tr>
+              <tr><td><span class="method m-post">POST</span> <code>/send/zammad_send_message</code></td><td>Zammad 웹훅 전용 래퍼(바디로 키 전달 → 헤더로 변환 → <code>/send/message</code> 호출)</td><td><span class="chip chip-legacy">교체 대상</span></td></tr>
+              <tr><td><span class="method m-post">POST</span> <code>/send/zammad_upload_file</code></td><td>Zammad 전용 업로드 래퍼</td><td><span class="chip chip-legacy">교체 대상</span></td></tr>
+              <tr><td><span class="method m-post">POST</span> <code>/send/zammad_send_close</code></td><td>Zammad 전용 종료 래퍼</td><td><span class="chip chip-legacy">교체 대상</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <h3>수신 (카카오 → b2b-car)</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>엔드포인트</th><th>용도</th><th>비고</th></tr></thead>
+            <tbody>
+              <tr><td><span class="method m-post">POST</span> <code>/receive/message</code></td><td>고객 메시지 수신(구조화 형태, <code>chapters[].sections[]</code>)</td><td>메인 수신 경로</td></tr>
+              <tr><td><span class="method m-post">POST</span> <code>/receive/message-simple</code></td><td>고객 메시지 수신(구버전 단순 형태)</td><td>하위호환</td></tr>
+              <tr><td><span class="method m-post">POST</span> <code>/receive/reference</code></td><td>고객이 "상담원 연결" 버튼 클릭</td><td>상담원 전환 트리거</td></tr>
+              <tr><td><span class="method m-post">POST</span> <code>/receive/expired_session</code></td><td>상담 세션 만료</td><td>세션 정리 트리거</td></tr>
+              <tr><td><span class="method m-post">POST</span> <code>/receive/seen_info</code></td><td>고객이 메시지를 읽은 시각 — <code>{ user_key, session_id, sender_key, time }</code></td><td>명세서 필수 구현 항목 — 미구현 시 카카오가 404로 재시도 유발(문서 경고)</td></tr>
+              <tr><td><span class="method m-post">POST</span> <code>/receive/personal_info</code></td><td>개인정보 제공동의 정보(닉네임/전화번호 등, 필드 미확정)</td><td>ConsulTalk도 타입 검증 없이 원시 바디 수신 — 로그에 본문 남기지 않도록 문서에 명시</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="callout open">
+          <div class="callout-title">⚠ 확인 필요</div>
+          <p>
+            이 6개 수신 엔드포인트는 <strong>"카카오 → 중계서버"</strong> 방향이지 <strong>"중계서버 → b2b-car"</strong>
+            방향이 아니다. 즉 이 문서에 있는 API만으로는 중계서버가 받은 걸 우리 쪽으로 어떻게 다시 보내줄지 알 수
+            없다 — 지금 Zammad로 가는 경로가 중계서버 내부 하드코딩인지, service_key별 웹훅 URL 설정인지부터
+            확인해야 한다. <a href="#open">8절</a> 참고.
+          </p>
+        </div>
+      </section>
+
+      <section id="dkt">
+        <div class="sec-label">04</div>
+        <h2>카카오 상담톡 원본 스펙 — "상담톡 API (DKT) v1.2" 확인 사항</h2>
+        <p>
+          중계서버가 감싸고 있는 원본 규격 문서(<code>상담톡 API (DKT) v1.2, 25.03.25</code>)를 확인했다.
+          <span style="opacity:.75">(카카오 쪽에 v1.4(26.4.8, 51페이지) 최신본이 별도로 존재하지만, 지금
+          연동 대상인 ConsulTalk 중계서버 자체가 구버전 스펙 기준으로 만들어져 있어 이번 계획서는 의도적으로
+          v1.2를 기준으로 삼는다 — 중계서버가 v1.4에 맞춰 갱신되면 그때 이 섹션도 다시 검토한다.)</span>
+          엔드포인트 경로(<code>/api/v1/send/message</code>, <code>/api/v1/receive/reference</code> 등)와
+          헤더(<code>X-Platform-Type</code>/<code>X-Service-Key</code>/<code>X-User-Key</code>/
+          <code>X-Event-Key</code>)가 ConsulTalk 스펙과 완전히 동일하다 — 즉
+          <strong>ConsulTalk은 이 DKT 규격을 그대로 구현한 것</strong>이고, 3절의 <code>/send/*</code>·
+          <code>/receive/*</code> 엔드포인트는 이 문서가 정의하는 "BZM"(카카오 비즈메시지) 연동 규격 그 자체다.
+          아래는 3절에 없던, 실제 설계에 영향을 주는 세부 규칙이다.
+        </p>
+
+        <h3>4.1 상담 세션 라이프사이클</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>구분</th><th>조건</th></tr></thead>
+            <tbody>
+              <tr><td rowspan="2">생성</td><td>고객이 "상담 연결하기"로 상담 요청</td></tr>
+              <tr><td>고객이 카카오톡 채널 채팅방에 직접 메시지 전송</td></tr>
+              <tr><td>유지</td><td><strong>마지막 메시지 수신 후 30일간</strong> 유지 — 고객 메시지가 올 때마다 연장</td></tr>
+              <tr><td rowspan="5">종료</td><td>상담원이 상담 종료</td></tr>
+              <tr><td>상담원이 카카오톡 사용자를 차단</td></tr>
+              <tr><td>고객이 채팅방에 <code>"!종료"</code> 입력(플랫폼 예약 커맨드)</td></tr>
+              <tr><td>고객이 채팅방 나가기 / 채널 차단</td></tr>
+              <tr><td>마지막 메시지 수신 후 30일 경과(자동 만료 → <code>/receive/expired_session</code>)</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          <code>"!종료"</code>는 우리 쪽이 처리하는 게 아니라 <strong>플랫폼이 가로채는 예약어</strong>다 —
+          b2b-car 봇이 별도로 이 문구를 감지할 필요는 없고, 세션이 끝났다는 사실만
+          <code>/receive/expired_session</code>(또는 별도 종료 통지가 있다면 그쪽)으로 통지받는다.
+        </p>
+
+        <h3>4.2 UserKey의 특성 — DB 설계에 직접 영향</h3>
+        <ul>
+          <li>카카오톡 <strong>채널별로 다르다</strong> — 같은 사람이라도 채널(지사?)이 다르면 다른 UserKey.</li>
+          <li>대소문자를 구분한다.</li>
+          <li>채널을 차단했다가 해제해도 <strong>UserKey는 안 바뀐다.</strong></li>
+          <li><strong>카카오톡 탈퇴 후 재가입하면 UserKey가 바뀐다.</strong></li>
+        </ul>
+        <div class="callout open">
+          <div class="callout-title">⚠ 설계 반영</div>
+          <p>
+            마지막 항목 때문에 <code>external_user_key</code>만으로는 고객을 영구히 식별할 수 없다 —
+            "탈퇴 후 재가입"이 흔한 일은 아니지만, 등록 고객 매칭(5.1)은 UserKey가 아니라
+            <strong>전화번호(<code>personal_info</code> 동의로 수신)</strong>를 1차 식별자로 삼고,
+            UserKey는 "같은 세션 내에서 재진입을 빠르게 찾기 위한 보조키" 정도로만 쓰는 게 안전하다.
+          </p>
+        </div>
+
+        <h3>4.3 "상담원" = 반드시 사람이 아님, 과금 단위</h3>
+        <p>
+          문서가 명시적으로 정의한다: <strong>"상담원은 카카오에서 제공하는 상담톡 API를 이용하는 주체를
+          의미하며 반드시 사람을 지칭하는 것은 아니다."</strong> 카카오 쪽에서는 실제 사람이 배정됐는지
+          봇이 자동응답 중인지 구분하지 않는다. 그리고 <strong>항목 선택 등 자동 발신도 상담원 발송(과금
+          대상)으로 잡힌다</strong> — 오직 "시스템 메시지"(4.5의 <code>platform_answer</code>)만 과금에서
+          빠진다. b2b-car 봇이 자동으로 보내는 답장도 전부 과금 대상 메시지라는 뜻이므로, 예상 메시지량
+          기준 비용을 10절(리스크)에서 함께 짚는다.
+        </p>
+
+        <h3>4.4 메시지 보관 정책 — 우리 쪽 로그가 유일한 영구 기록</h3>
+        <p>
+          상담 메시지는 <strong>상담톡 시스템 자체에는 저장되지 않고, 카카오톡 메시지 시스템에 3일간만</strong>
+          보관된다. 챗봇 대화 이력 조회(<code>/send/chatbot</code>)도 "상담 시작 시점 기준 최근 3일"까지만
+          가능하다. 즉 <strong>b2b-car가 <code>chat_messages</code>에 저장하는 사본이 3일이 지나면 유일하게
+          남는 기록</strong>이 된다 — 7절의 <code>kakao_consult_events</code> 감사로그를 "있으면 좋은 것"이
+          아니라 "이것 없으면 3일 후 복구 불가"로 필수 취급해야 한다.
+        </p>
+
+        <h3>4.5 메시지 타입 카탈로그</h3>
+        <p>발신(<code>/send/message</code>, <code>/send/plain</code>)이 지원하는 <code>chapters[].sections[]</code> 구성이다.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>타입</th><th>구성</th><th>b2b-car 1차 범위</th></tr></thead>
+            <tbody>
+              <tr><td>SimpleText</td><td><code>title</code> + <code>text</code> 섹션</td><td><span class="chip chip-ok"><span class="chip-dot"></span>필수</span></td></tr>
+              <tr><td>SimpleImage</td><td><code>file</code> 섹션(<code>display:"image"</code>)</td><td><span class="chip chip-legacy"><span class="chip-dot"></span>2차</span></td></tr>
+              <tr><td>SimpleFile</td><td><code>file</code> 섹션(업로드 후 받은 URL 재전송)</td><td><span class="chip chip-legacy"><span class="chip-dot"></span>2차</span></td></tr>
+              <tr><td>TextCard / BasicCard</td><td><code>title</code> + <code>action</code>(버튼 배열)</td><td><span class="chip chip-legacy"><span class="chip-dot"></span>2차 — 오더상태 카드 등에 적합</span></td></tr>
+              <tr><td>Button (message/link)</td><td><code>action.actions[]</code>, WL(웹링크)/AL(앱링크) 지원</td><td><span class="chip chip-legacy"><span class="chip-dot"></span>2차</span></td></tr>
+              <tr><td>바로연결(quick_reply)</td><td><code>supplement.quick_reply[]</code> — WL/AL/BK(봇키워드)/BT(버튼트리거)</td><td><span class="chip chip-open"><span class="chip-dot"></span>미정 — 상담원 전환 버튼과 겹칠 수 있음</span></td></tr>
+              <tr><td>시스템 메시지(<code>platform_answer</code>)</td><td><code>data</code>: <code>off</code>(상담불가)/<code>no_operator</code>(상담부재)/<code>no_answer</code>(무응답)/<code>wait</code>(상담대기)</td><td><span class="chip chip-new"><span class="chip-dot"></span>운영시간 외 안내에 활용</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          b2b-car의 <code>chat_messages.message</code>는 순수 텍스트 컬럼이라, 1차 범위는
+          <strong>SimpleText만</strong>으로 좁히는 5.7의 결정을 유지한다. 다만 <code>platform_answer</code>
+          (시스템 메시지, 과금 제외)는 운영시간 외 자동안내에 유용해 1차 범위에 포함시킬 것을 제안한다.
+        </p>
+
+        <h3>4.6 <code>/receive/reference</code>(상담원 연결) 실제 필드</h3>
+        <p>
+          원본 스펙은 ConsulTalk이 노출한 것보다 훨씬 풍부하다 — <code>user_key</code>/<code>session_id</code>/
+          <code>sender_key</code>/<code>app_user_id</code>/<code>time</code> 외에
+          <code>reference.text</code>(상담원 연결 버튼을 누르기 직전 고객이 입력한 문구),
+          <code>reference.lastText</code>/<code>lastTextDate</code>(가장 최근 대화),
+          <code>last_reference.bot</code>/<code>bot_event</code>(직전에 어떤 봇 시나리오였는지)까지 온다.
+          6.5(상담원 전환) 설계에서 이 <code>reference.text</code>를 상담원 카드보드에 "고객이 방금 뭐라고
+          했는지" 요약으로 바로 보여주면 인계 품질이 좋아진다.
+        </p>
+
+        <h3>4.7 <code>/receive/message</code> 원본 필드 vs ConsulTalk 래핑</h3>
+        <p>
+          원본 스펙의 수신 바디는 <code>user_key</code>/<code>session_id</code>/<code>sender_key</code>/
+          <code>time</code>/<code>serial_number</code>/<code>content</code>/<code>contents</code>(배열)/
+          <code>type</code>로 비교적 단순하다. ConsulTalk이 이걸 <code>chapters[].sections[]</code> 구조로
+          한번 더 감싸서 노출하고 있다는 뜻이므로, b2b-car는 <strong>ConsulTalk 스펙(3절)만</strong> 상대하면
+          되고 이 원본 구조를 직접 파싱할 일은 없다 — 참고용으로만 남긴다.
+        </p>
+
+        <div class="callout ok">
+          <div class="callout-title">✓ seen_info / personal_info — DKT 원본에 없는 이유 확인</div>
+          <p>
+            원본 스펙(v1.2, 25.03.25, 총 23페이지)의 Receive Service API는 <code>/reference</code>,
+            <code>/message</code>, <code>/expired_session</code> 3개뿐이다 — <code>seen_info</code>,
+            <code>personal_info</code>는 이 문서 자체에 항목이 없다. ConsulTalk의 실제 배포 서버
+            (<code>/openapi.json</code>)를 직접 조회해 확인한 결과, 두 엔드포인트는 실재하며 코드
+            docstring에 "명세서 IF11004"처럼 <strong>더 상세한 카카오 부록/버전 문서(IF 번호 체계)</strong>를
+            근거로 인용하고 있다 — 즉 우리가 받은 23페이지 문서는 DKT 스펙의 축약본이고, 이 두 엔드포인트는
+            그 부록에만 있는 항목으로 보인다.
+          </p>
+          <p style="margin-top:.6em">
+            <strong>seen_info 요청 바디는 ConsulTalk 서버에서 실제로 확인됐다</strong>:
+            <code>{ user_key: string, session_id: string|number, sender_key: string, time: number }</code>
+            — 고객이 채팅방을 읽은 시각을 전달하는 용도이며, ConsulTalk 자체 문서에 "과거 미구현 시 카카오가
+            404로 재시도를 유발했다"는 경고가 남아있어 <strong>필수 구현 항목</strong>으로 확정한다.
+          </p>
+          <p style="margin-top:.6em">
+            <strong>personal_info는 여전히 필드 스펙이 없다</strong> — ConsulTalk 서버조차 이 엔드포인트를
+            타입 검증 없이 원시 바디로 받고 있어(Pydantic 스키마 미정의), "닉네임/전화번호 등" 설명 외의
+            정확한 필드명은 카카오 부록 문서나 callmaner 쪽 실제 수신 로그 샘플을 받아야 확정할 수 있다.
+          </p>
+        </div>
+      </section>
+
+      <section id="target">
+        <div class="sec-label">05</div>
+        <h2>목표 구조 (b2b-car 챗봇 기반)</h2>
+        <div class="diagram-card">
+<pre class="mermaid">
+sequenceDiagram
+    participant C as 고객(카카오톡)
+    participant K as 카카오 상담톡
+    participant R as ConsulTalk 중계서버
+    participant B as b2b-car (신규 웹훅)
+    participant G as Gemini (hybridChat.js)
+    participant M as MCP 배차 도우미
+
+    C->>K: 메시지 입력
+    K->>R: POST /receive/message
+    R->>B: POST /kakao-consult/receive (신규, 공유시크릿 검증)
+    B->>B: kakao_chat_sessions에서 세션 찾기/생성
+    B->>G: classifyAndExtract(text)
+    alt 주문 조회/변경 의도
+        B->>M: runDispatchAgent(ctx, text)
+        M-->>B: 처리 결과 텍스트
+    else FAQ/오더접수
+        G-->>B: 분류 결과
+    end
+    B->>R: POST /send/message (X-Service/User/Event-Key)
+    R->>K: 카카오 발신 API
+    K->>C: 답장 전달
+
+    C->>K: "상담원 연결" 버튼
+    K->>R: POST /receive/reference
+    R->>B: POST /kakao-consult/receive-reference
+    B->>B: chat_sessions.status = needs_agent (기존 인프라 재사용)
+    B->>R: POST /send/message ("상담사를 연결중입니다")
+</pre>
+          <div class="cap">목표: 중계서버의 다운스트림이 b2b-car를 향하고, 응답은 기존 hybridChat/MCP 도우미가 생성</div>
+        </div>
+      </section>
+
+      <section id="design">
+        <div class="sec-label">06</div>
+        <h2>상세 설계</h2>
+
+        <h3>5.1 고객 식별 모델 — 가장 중요한 결정</h3>
+        <p>
+          b2b-car의 <code>chat_sessions</code>는 <code>user_id → users(id)</code>가 필수라 로그인 계정이
+          없으면 세션 자체를 못 만든다. 카카오 상담톡 고객은 b2b-car 계정이 없는 게 기본값이므로, 다음 두
+          경로를 병행한다.
+        </p>
+        <ul>
+          <li><strong>등록된 고객</strong> — 카카오 발신 전화번호(<code>personal_info</code> 동의로 수신)가
+            기존 <code>orders.origin_contact</code>/<code>destination_contact</code>와 일치하면, 그 오더가 속한
+            지사/고객사로 조회 범위를 한정해 자기 오더만 조회·문의할 수 있게 한다(MCP 도우미의
+            <code>mcp_customer_links</code> 패턴과 동일한 사고방식).</li>
+          <li><strong>미등록/익명 고객</strong> — FAQ 답변과 신규 탁송 문의(요금 안내 등)까지만 처리하고,
+            주문 조회·변경류는 상담원 연결로 넘긴다.</li>
+        </ul>
+        <p>
+          이를 위해 <code>chat_sessions.user_id</code>를 <strong>nullable</strong>로 바꾸고
+          <code>channel</code>(<code>web</code>/<code>kakao</code>), <code>external_user_key</code>(카카오
+          <code>userKey</code>), <code>external_phone</code> 컬럼을 추가하는 안을 제안한다(7절).
+        </p>
+
+        <h3>5.2 수신 웹훅</h3>
+        <p>
+          <code>POST /kakao-consult/receive</code>(신규, 공개 라우트) 하나로 <code>/receive/message</code>와
+          <code>/receive/message-simple</code> 두 포맷을 모두 받는다. 인증은 세션 쿠키가 아니라
+          <strong>공유 시크릿</strong>(중계서버가 보내는 <code>X-Service-Key</code>를 화이트리스트와 대조, 또는
+          별도 웹훅 시크릿 헤더)으로 한다 — <code>middleware/auth.js</code>의 <code>requireAuth</code>는 이
+          라우트에 적용하지 않는다.
+        </p>
+        <p>
+          <code>chapters[].sections[]</code> 구조에서 <code>type: "text"</code> 섹션의 <code>data</code>를
+          이어붙여 평문으로 만든 뒤 <code>hybridChat.js</code>에 그대로 넘긴다(이 모듈은 이미 세션/DB에
+          의존하지 않는 순수 함수라 그대로 재사용 가능 — 별도 수정 불필요).
+        </p>
+
+        <h3>5.3 챗봇 처리 — 기존 모듈 재사용</h3>
+        <p>
+          <code>classifyAndExtract</code>/<code>classifyPhaseReply</code>는 이미 세션과 무관한 순수 함수라
+          그대로 쓴다. <code>runDispatchAgent</code>는 <code>users</code> 테이블 row(<code>id/name/phone/
+          branch_id</code>)를 요구하므로, 등록된 고객 케이스에서는 전화번호로 매칭되는 내부 계정을 찾아 그
+          row를 넘기고, 매칭되는 계정이 없으면 이 도우미는 건너뛰고 FAQ/일반 응답으로만 처리한다.
+        </p>
+
+        <h3>5.4 발신 연동</h3>
+        <p>
+          답장은 <code>/send/message</code>(또는 파일이면 <code>/send/upload</code> → <code>/send/plain</code>)를
+          직접 호출한다. 세션별 <code>X-Service-Key</code>/<code>X-User-Key</code>/<code>X-Event-Key</code>를
+          <code>kakao_chat_sessions</code>에 저장해두고 매 발신마다 재사용한다.
+        </p>
+
+        <h3>5.5 상담원 전환</h3>
+        <p>
+          <code>/receive/reference</code> 수신 시 기존 <code>chat_sessions.status = 'needs_agent'</code> +
+          <code>notify()</code>(<code>lib/push.js</code>) 흐름을 그대로 태운다. 카카오 쪽에 "상담사를
+          연결중입니다" 안내만 <code>/send/message</code>로 즉시 응답하면, 이후 흐름은 지금 상담원 카드보드
+          화면(<code>/chat/sessions</code>)과 완전히 동일하다 — <strong>새로 만들 UI가 없다.</strong>
+        </p>
+        <p>
+          단, 기존 <code>POST /chat/sessions/:id/reply</code>(상담원 답장)에 "이 세션이 카카오 출신이면
+          <code>/send/message</code>도 같이 호출" 분기를 추가해야 한다 — 지금은 웹 위젯에만 반영되고 끝난다.
+        </p>
+
+        <h3>5.6 세션 종료/만료</h3>
+        <p>
+          <code>/receive/expired_session</code> → <code>chat_sessions.status = 'closed'</code>. 상담원이
+          <code>/chat/sessions/:id/close</code>를 누르면 반대로 <code>/send/close</code>를 호출해 카카오 쪽에도
+          종료를 알린다.
+        </p>
+
+        <h3>5.7 메시지 포맷 변환</h3>
+        <p>
+          <code>chat_messages.message</code>는 현재 순수 텍스트 컬럼이다. 이미지/파일 첨부는 스키마에 없으므로,
+          1차 범위는 <strong>텍스트만</strong>으로 좁히고(사진 문의는 상담원 연결로 유도), 이후 필요하면
+          <code>attachment_url</code>/<code>attachment_type</code> 컬럼을 추가하는 2차 작업으로 분리한다.
+        </p>
+      </section>
+
+      <section id="schema">
+        <div class="sec-label">07</div>
+        <h2>DB 변경사항 (제안)</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>테이블</th><th>변경</th><th>이유</th></tr></thead>
+            <tbody>
+              <tr><td><code>chat_sessions</code></td><td><code>user_id</code>를 nullable로 변경</td><td>익명 카카오 고객은 <code>users</code> row가 없음</td></tr>
+              <tr><td><code>chat_sessions</code></td><td><code>channel</code> text, 기본값 <code>'web'</code> 추가</td><td>웹 위젯/카카오 상담톡 구분</td></tr>
+              <tr><td><code>chat_sessions</code></td><td><code>external_user_key</code> text 추가</td><td>카카오 <code>userKey</code> — 재진입 시 세션 매칭</td></tr>
+              <tr><td><code>chat_sessions</code></td><td><code>external_phone</code> text 추가</td><td>등록 고객 매칭(오더 조회 범위 결정)</td></tr>
+              <tr><td><code>chat_sessions</code></td><td><code>kakao_service_key</code>/<code>kakao_user_key</code>/<code>kakao_event_key</code> text 추가</td><td>발신 시 그대로 재사용할 인증 키 3종</td></tr>
+              <tr><td class="num">신규</td><td><code>kakao_consult_events</code> 감사로그 테이블(원본 payload, 처리결과)</td><td>수신 이벤트 재현/디버깅 — <code>mcp_tool_calls</code>와 같은 패턴</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="open">
+        <div class="sec-label">08</div>
+        <h2>확인 필요 사항</h2>
+        <p>ConsulTalk의 공개 API 스펙, 카카오 상담톡 원본 스펙(DKT v1.2), b2b-car 코드베이스까지 확인했다. 아래는 그럼에도 실제 착수 전 반드시 확인해야 하는 것들이다.</p>
+
+        <div class="callout open">
+          <div class="callout-title"><span class="chip chip-open"><span class="chip-dot"></span>8.1 중계서버 다운스트림 설정</span></div>
+          <p>
+            중계서버가 <code>/receive/*</code>로 받은 걸 Zammad로 넘기는 방식(고정 URL 하드코딩인지,
+            <code>service_key</code>별 웹훅 URL 설정인지)을 callmaner 쪽(ConsulTalk 운영 담당, 콜마너
+            연동문서의 정경석 등)에 확인해야 한다. 우리가 직접 못 바꾸는 설정이면 그쪽에 웹훅 URL 변경을
+            요청하는 절차가 별도로 필요하다.
+          </p>
+        </div>
+        <div class="callout open">
+          <div class="callout-title"><span class="chip chip-open"><span class="chip-dot"></span>8.2 서비스 키 발급/개수</span></div>
+          <p>
+            <code>X-Service-Key</code>/<code>X-User-Key</code>/<code>X-Event-Key</code>가 지사(branch)별인지
+            전사 공통 1개인지, 카카오 플러스친구 채널이 지사별로 분리되어 있는지 확인 필요 — b2b-car는
+            지사 단위로 운영되므로(콜마너 연동도 지사별 <code>callmaner_provider_id</code>) 구조가 다르면
+            <code>branches</code> 테이블에 관련 컬럼을 추가해야 한다.
+          </p>
+        </div>
+        <div class="callout">
+          <div class="callout-title"><span class="chip chip-ok"><span class="chip-dot"></span>8.3 seen_info — 해결됨 / personal_info — 필드 여전히 미확정</span></div>
+          <p>
+            <code>seen_info</code>는 ConsulTalk 서버(<code>/openapi.json</code>)를 직접 조회해 실제 바디를
+            확인했다: <code>{ user_key, session_id, sender_key, time }</code>. 이번에 읽은 카카오 원본
+            스펙(DKT v1.2, 25.03.25, 23페이지)의 Receive Service API에는 이 두 엔드포인트가 아예 없는데
+            (<a href="#dkt">4절</a> 참고), ConsulTalk 코드는 "명세서 IF11004"를 근거로 인용하고 있어 우리가
+            받은 문서가 축약본이고 별도 IF 번호 체계의 부록에 정의돼 있는 것으로 보인다.
+          </p>
+          <p style="margin-top:.6em">
+            <code>personal_info</code>는 ConsulTalk 서버 자체가 타입 검증 없이 원시 바디를 받고 있어(설명은
+            "닉네임/전화번호 등"뿐) 정확한 필드명은 여전히 미확정이다. Drive에 부록 문서가 더 있는지 확인하거나,
+            안 되면 callmaner 쪽에 실제 수신 로그 샘플 1건을 요청하는 편이 더 빠르다.
+          </p>
+        </div>
+        <div class="callout open">
+          <div class="callout-title"><span class="chip chip-open"><span class="chip-dot"></span>8.4 재시도 정책</span></div>
+          <p>
+            <code>seen_info</code> 설명에 "과거 미구현으로 404를 반환해 카카오 측 재시도를 유발했음"이라고
+            명시되어 있다 — 신규 웹훅은 <strong>어떤 이벤트든 우선 200을 즉시 반환</strong>하고, 무거운
+            처리(Gemini 호출 등)는 비동기로 넘기는 구조가 안전하다.
+          </p>
+        </div>
+      </section>
+
+      <section id="phases">
+        <div class="sec-label">09</div>
+        <h2>실행 계획</h2>
+        <div class="phases">
+          <div class="phase">
+            <div class="phase-tag">0단계</div>
+            <div class="phase-body">
+              <h4>확인 &amp; 접근 확보</h4>
+              <p>8절의 확인 필요 사항을 callmaner 쪽과 조율. seen_info/personal_info 실제 필드가 담긴
+                문서(있다면)를 Drive에서 추가 확보. 테스트용 서비스 키 발급.</p>
+            </div>
+          </div>
+          <div class="phase">
+            <div class="phase-tag">1단계</div>
+            <div class="phase-body">
+              <h4>스키마 &amp; 웹훅 뼈대</h4>
+              <p>7절 DB 변경 마이그레이션 작성. <code>POST /kakao-consult/receive</code> 라우트 신설(공유
+                시크릿 검증만, 즉시 200 응답 + 로그 적재).</p>
+            </div>
+          </div>
+          <div class="phase">
+            <div class="phase-tag">2단계</div>
+            <div class="phase-body">
+              <h4>수신 → 챗봇 연결</h4>
+              <p>텍스트 추출 → <code>classifyAndExtract</code> 연결. FAQ/탁송요금 문의 등 익명 고객도 가능한
+                범위부터 먼저 응답 흐름 완성 (<code>/send/message</code> 발신 포함).</p>
+            </div>
+          </div>
+          <div class="phase">
+            <div class="phase-tag">3단계</div>
+            <div class="phase-body">
+              <h4>등록 고객 &amp; MCP 도우미</h4>
+              <p>전화번호 매칭 로직, <code>runDispatchAgent</code> 연결. 주문 조회/변경까지 카카오에서 가능하게.</p>
+            </div>
+          </div>
+          <div class="phase">
+            <div class="phase-tag">4단계</div>
+            <div class="phase-body">
+              <h4>상담원 전환 &amp; 종료</h4>
+              <p><code>/receive/reference</code>·<code>/receive/expired_session</code> 연결, 기존 상담원
+                카드보드에서 카카오 세션도 답장 가능하도록 <code>/chat/sessions/:id/reply</code> 확장.</p>
+            </div>
+          </div>
+          <div class="phase">
+            <div class="phase-tag">5단계</div>
+            <div class="phase-body">
+              <h4>Zammad 병행 운영 → 전환</h4>
+              <p>일부 지사/채널만 먼저 b2b-car로 전환해 실사용 검증 후, 문제 없으면 중계서버 다운스트림을
+                전체 전환하고 Zammad 전용 엔드포인트 의존을 제거.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="risk">
+        <div class="sec-label">10</div>
+        <h2>리스크 &amp; 고려사항</h2>
+        <ul>
+          <li><strong>중계서버 제어권</strong> — 다운스트림 전환이 우리 권한 밖이면 전체 일정이 callmaner 쪽
+            대응 속도에 종속된다.</li>
+          <li><strong>익명 고객 오남용</strong> — 로그인 없는 채널이라 요금 문의 남용/스팸에 대한 레이트리밋이
+            웹 위젯보다 더 필요하다(<code>SESSION_CREATE_LIMIT</code> 패턴을 <code>external_user_key</code>
+            기준으로 적용).</li>
+          <li><strong>개인정보 처리</strong> — <code>personal_info</code> 수신 내용은 문서 자체가 "로그에
+            남기지 말 것"을 명시 — <code>kakao_consult_events</code> 감사로그 저장 시 이 필드는 마스킹/제외
+            해야 한다.</li>
+          <li><strong>이중 처리 방지</strong> — Zammad와 b2b-car가 같은 채널을 동시에 구독하면 고객에게
+            응답이 두 번 갈 수 있다 — 5단계 병행 운영 구간은 반드시 서비스 키 단위로 분리한다.</li>
+          <li><strong>메시지 발신 = 과금 단위</strong> — 4.3에서 확인했듯 봇 자동응답도 전부 "상담원 발신"으로
+            과금된다(<code>platform_answer</code> 시스템 메시지만 예외). Gemini 분류가 애매해서 여러 번
+            되묻는 대화가 늘어나면 비용도 같이 늘어난다 — 웹 위젯 대비 메시지당 비용이 실제로 드는 채널이라는
+            점을 트래픽 추정에 반영해야 한다.</li>
+          <li><strong>UserKey 비영속성</strong> — 4.2에서 확인했듯 고객이 카카오톡을 탈퇴 후 재가입하면
+            UserKey가 바뀐다. 등록 고객 식별을 UserKey에만 의존하면 안 되고 전화번호 매칭을 항상 병행해야
+            한다.</li>
+          <li><strong>3일 메시지 보관 한계</strong> — 4.4에서 확인했듯 카카오 쪽 원본은 3일이 지나면 사라진다.
+            <code>kakao_consult_events</code> 감사로그가 곧 유일한 영구 기록이므로, 이 로그 자체의 백업/보존
+            정책을 별도로 정해야 한다.</li>
+        </ul>
+      </section>
+
+    </main>
+  </div>
+
+  <footer class="doc-foot">
+    b2b-car 내부 검토 문서 · ConsulTalk OpenAPI 스펙(consultalk-alpha.callmaner.com), 카카오 상담톡 API
+    (DKT) v1.2(25.03.25) 원본 문서, b2b-car 코드베이스 분석 기반
+  </footer>
+
+</div>

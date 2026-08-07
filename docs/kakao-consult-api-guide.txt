@@ -1,0 +1,615 @@
+           상담톡 API (DKT) v 1.2
+           (25.03.25)
+           용어집
+           상담 세션 (Session)
+                 상담원이 고객에게 메시지를 전송하기 위한 필수 조건입니다.
+                 상담 세션이 생성된 상태에서 상담원은 메시지를 발송할 수 있습니다.
+                 생성된 세션은 카카오톡 사용자의 마지막 메시지 수신 후 30일간 유지되며, 고객 메시
+                 지가 수신될 때 마다 연장됩니다.
+                 상담 세션 생성 조건은 아래와 같습니다.
+                   카카오톡 사용자가 상담 연결하기를 이용하여 상담을 요청
+                   카카오톡에서 직접 채널 채팅방에 메시지를 전송하여 상담 요청
+                 상담 세션 종료 조건은 아래와 같습니다.
+                   상담원이 상담 종료
+                   상담원이 카카오톡 사용자를 차단
+                   카카오톡 사용자가 카카오톡 채널 채팅방에 "!종료"메시지 입력
+                   카카오톡 사용자가 카카오톡 채널 채팅방 나가기
+                   카카오톡 사용자가 카카오톡 채널을 차단
+                   카카오톡 사용자의 마지막 메시지 수신 후 30일이 경과
+           사용자 키 (UserKey)
+                 특정 카카오톡 사용자를 구분하기 위한 key로, 상담톡 메시지 수신시에 함께 전달됩니
+                 다.
+                 사용자 키는 카카오톡 채널 별로 유효합니다. 카카오톡 채널이 다르면, 사용자가 동일하
+                 더라도 다른 사용자 키를 사용합니다.
+                 사용자 키는 대소문자를 구분합니다.
+                 카카오톡 사용자가 카카오톡 채널을 차단 후 해지시했을 경우에는 사용자 키가 변경되
+                 지 않습니다.
+
+상담톡 API (DKT) v 1.2 (25.03.25)                                     1
+                 카카오톡 탈퇴 후 재가입시에는 다른 사용자 키로 변경됩니다.
+           상담원
+                 상담원은 카카오에서 제공하는 상담톡 API를 이용하는 주체를 의미하며 반드시 사람을
+                 지칭하는 것은 아닙니다.
+                 상담을 요청한 카카오톡 사용자에게 상담원이 배정 되었는지 여부는 카카오에서는 알
+                 수 없습니다.
+                 상담 진행시 직접적인 상담이 아닌 항목 선택 등의 메시지 발신도 카카오에서는 상담원
+                 이 발송한 것(과금)으로 구분됩니다.
+                 시스템 메시지 발신은 과금에서 제외 됩니다.
+           상담 메시지
+                 상담원이 카카오톡 사용자에게 보낸 대화 메시지, 카카오톡 사용자가 상담원한테 보낸
+                 메시지 모두 상담 메시지로 합니다.
+                 상담 메시지는 상담톡 시스템에는 저장되지 않으며 카카오톡 메시지 시스템에 3일간만
+                 저장됩니다.
+           챗봇 대화 내역 전달
+                 챗봇 대화 내역 조회 혹은 사용자 메타 정보 수신 중 하나의 방법을 통해서 챗봇 대화내
+                 역을 전달 받을 수 있습니다
+                 상담시작이 된 상태에서 조회 시점 기준 이전 3일전 메시지까지 전달 받을 수 있습니다.
+                 챗봇 대화내역의 세부 스펙은 챗봇 고객센터로 문의 부탁드립니다.
+
+
+           Send Service API(ROOT URL :
+           /api/v1/send)
+                 메시지 송신 API : /message
+                   설명 : 해당 API를 정상적으로 호출하면 Message를 해당 User-Key를 보유한 대
+                   상에게 송신할 수 있습니다.
+                   미디어 타입 : APPLICATION/JSON
+                   송신 파라미터 목록
+
+상담톡 API (DKT) v 1.2 (25.03.25)                                           2
+                            X-Platform-Type : Platform타입을 설정합니다      (solution web /
+                                            여기선
+                            kakao_counsel_talk).              으로 사용하시면 됩니다.
+                                                       kakao_counsel_talk
+
+                         X-Service-Key : BZM의 발신 프로필 키를 설정합니다.
+
+                         X-User-Key : 사용자 카카오 계정 ID에 대한 고유한 키값입니다.
+
+                         X-Event-Key : 해당 상담 대화에 대한 Event Key입니다.
+
+                         RequestBody : 메시지 Payload 영역입니다. 실제 메시지가 해당
+                         RequestBody에 입력하면 되며 ""으로 묶어서 전송합니다.
+
+                       예제
+
+
+
+
+상담톡 API (DKT) v 1.2 (25.03.25)                                                         3
+                            send >   메세지 송신 (상담사 → API CORE SERVER → BZM → CLIENT)
+
+
+
+
+                            Request Body   에 들어가야할 내용은 아래의 샘플을 따라주셔야 합니다.
+
+상담톡 API (DKT) v 1.2 (25.03.25)                                                       4
+             JSON                                   Key description
+
+                                                    version :버전
+                                                                           메시지 목록
+                                                    chapters[] (JSON Array) :
+                                                      - chapter속성
+                                                                                말풍선 내 컨텐츠 컨테이너
+                                                         - sections[] (JSON Array) :
+             {                                              - section 속성
+                 "version": 123,                                             섹션 타
+                                                                - type (String) O :
+                 "chapters": [                      입 [title, text, file, action, command, platform_answer]
+                    {                                                      컨텐트
+                                                                - data (String) :
+                       "sections": [                                         메시지 타
+                                                                - display (String) :
+                          {                         입 [text, photo, video, audio, file]
+                            "type": "text",                                    정보
+                                                                - extra (String) : extra
+                            "data": "test",                                  기타정보
+                                                                - params (JSON) :
+                            "display": "text"                               이름 파일 이름 등
+                                                                - name (String) :        (         )
+                          }                                                 크기 파일 크기 등
+                                                                - size (Number) :         (         )
+                       ]                                                          액션 목록 버튼
+                                                                - actions[] (JSON Array) :            ( )
+                    }                                                   속성
+                                                                   - action
+                 ],                                                             액션 버튼 타
+                                                                      - type (String) O :     (  )
+                 "meta": {                          입 [message, link, hotkey, submit]
+                    "1": "test1",                                                버튼명
+                                                                      - name (String) O :
+                    "2": "test2"                                                메시지 내용
+                                                                      - data (String) O :
+                 }                                                                 기기유
+                                                                      - deviceType (String) :
+             }                                      형 [all, web, pc, mobile, app, android, ios]
+                                                                               버튼 발송 시 전달할 정보
+                                                                      - extra (String) :                extra
+                                                                                 기타정보
+                                                                      - params (JSON) :
+                                                                                   트리거 데이터
+                                                                      - triggerData (String) :
+                                                    meta : 메타정보
+                 메시지 타입별 Request Body 형태
+             1. SimpleText
+
+
+                   {
+                       "version": 123,
+                       "chapters": [
+                         {
+                            "sections": [
+                              {
+                                 "type": "title",
+                                 "data": " 포켓몬 마스터"
+                              },
+                              {
+                                 "type": "text",
+                                 "data": " 포켓몬 마스터"
+
+상담톡 API (DKT) v 1.2 (25.03.25)                                                                                  5
+                                 }
+                             ]
+                         }
+                      ],
+                      "meta": {
+                         "1": "test1",
+                         "2": "test2"
+                      }
+                  }
+
+
+             2. SimpleImage
+
+
+                  {
+                      "version": 123,
+                      "chapters": [
+                        {
+                           "sections": [
+
+
+                                 {
+                                "type": "file",
+                                "display": "image",
+                                "data" : "http://dn-
+                  m.talk.kakao.com/talkm/o1v8qNsrfL/CAoqzOkR36BYPOZ0yc2BRK/i_5mcclh.png"
+                             }
+                          ]
+                       }
+                    ],
+                    "meta": {
+                       "1": "test1",
+                       "2": "test2"
+                    }
+                  }
+
+
+             3. SimpleFile
+
+
+                  {
+                      "version": 123,
+                      "chapters": [
+                        {
+                             "sections": [
+                               {
+                                     "type": "file",
+                                     "display": "pdf",
+
+
+
+상담톡 API (DKT) v 1.2 (25.03.25)                                                             6
+                                        "data": "${uploaded_url}",
+                                        "name": "     재직증명서
+                                                          .pdf",
+                                        "size": 45000
+                                   }
+                               ]
+                           }
+                      ],
+                      "meta": {
+                           "1": "test1",
+                           "2": "test2"
+                      }
+                  }
+
+
+             4. TextCard
+
+
+                  {
+                      "version": 123,
+                      "chapters": [
+                           {
+                               "sections": [
+                                   {
+                                        "type": "title",
+                                        "data": "   포켓몬 마스터"
+                                   },
+                                   {
+                                        "type": "action",
+                                        "actions": [
+                                          {
+                                                 "type": "message",
+                                                 "name": " 마스터 "
+                                            },
+                                            {
+                                                 "type": "link",
+                                                 "name": " 마스터   ",
+                                  "data": "http://dn-
+                  m.talk.kakao.com/talkm/o1v8qNsrfL/CAoqzOkR36BYPOZ0yc2BRK/i_5mcclh.png"
+                                            }
+                                        ]
+                                   }
+                               ]
+                           }
+                      ],
+                      "meta": {
+
+
+
+
+상담톡 API (DKT) v 1.2 (25.03.25)                                                             7
+                           "1": "test1",
+                           "2": "test2"
+                      }
+                  }
+
+
+             5. BasicCard
+
+
+                  {
+                      "version": 123,
+                      "chapters": [
+                           {
+                               "sections": [
+                                   {
+                                        "type": "title",
+                                        "data": "   포켓몬 마스터"
+                                   },
+                      {
+                                        "type": "file",
+                                        "display": "image",
+                                        "data" : "http://mud-
+                  kage.kakao.com/dn/bVaFL4/btsMtGU3Opn/9Tdsgdxv3rOZqctGZkluZK/img_l.jpg"
+                           },
+                                   {
+                                        "type": "action",
+                                        "actions": [
+                                          {
+                                                 "type": "message",
+                                                 "name": " 마스터 "
+                                            },
+                                            {
+                                                 "type": "link",
+                                                 "name": " 마스터   ",
+                                  "data": "http://dn-
+                  m.talk.kakao.com/talkm/o1v8qNsrfL/CAoqzOkR36BYPOZ0yc2BRK/i_5mcclh.png"
+                                            }
+                                        ]
+                                   }
+                               ]
+                           }
+                      ],
+                      "meta": {
+                        "1": "test1",
+                           "2": "test2"
+
+
+
+
+상담톡 API (DKT) v 1.2 (25.03.25)                                                             8
+                      }
+                  }
+
+
+             6. Button
+
+
+                  {
+                      "version": 123,
+                      "chapters": [
+                          {
+                              "sections": [
+                                  {
+                                       "type": "title",
+                                       "data": "    포켓몬 마스터"
+                                  },
+                                  {
+                                       "type": "action",
+                                       "actions": [
+                                         {
+                                            "type": "message",
+                                                "name": " 마스터"
+                                           },
+                                           {
+                                                "type": "link",
+                                                "name": " 마스터    ",
+                                                "data": "http://dn-
+                  m.talk.kakao.com/talkm/o1v8qNsrfL/CAoqzOkR36BYPOZ0yc2BRK/i_5mcclh.png"
+                                }
+                                       ]
+                                  }
+                              ]
+                          }
+                      ],
+                      "meta": {
+                          "1": "test1",
+                          "2": "test2"
+                      }
+                  }
+
+
+             7.   버튼 링크 type (WL, AL)
+                  {
+                      "version": 123,
+                      "chapters": [
+
+
+
+상담톡 API (DKT) v 1.2 (25.03.25)                                                             9
+                         {
+                             "sections": [
+                               {
+                                      "type": "title",
+                                      "data": "WL - AL - 2"
+                                 },
+                                 {
+                                      "type": "action",
+                                      "actions": [
+                                 {"name": "WL             이름
+                                                 ", "type": "link", "params": {"type": "WL",
+                  "url_mobile": "http://www.daum.net", "url_pc": "http://www.daum.net"}, "extra":
+                  "1111111111"},
+                                          {"name": "AL   이름", "type": "link", "params": {"type": "AL",
+                  "scheme_android": "http://www.daum.net", "scheme_ios": "http://www.daum.net",
+                  "url_mobile": "http://www.daum.net", "url_pc": "http://www.daum.net"}, "extra":
+                  "22222"}
+                                      ]
+                                 }
+                             ]
+                         }
+                      ], "meta": { }
+                  }
+
+
+             8.   바로연결
+                  {
+                      "version": 123,
+                      "chapters": [
+                        {
+                             "sections": [
+                               {
+                                      "type": "title",
+                                      "data": "WL - AL - 4"
+                                 },
+                                 {
+                                      "type": "supplement",
+                                      "supplement" : {
+                                          "quick_reply": [
+                                            {"name": "WL    이름", "type": "WL", "scheme_android": "",
+                  "scheme_ios": "", "url_mobile": "http://www.daum.net", "url_pc": "", "extra": "",
+                  "chat_extra": "", "chat_event": ""},
+                                 {"name": "AL              이름
+                                                 ", "type": "AL", "scheme_android":
+                  "http://www.daum.net", "scheme_ios": "http://www.daum.net", "url_mobile":
+
+
+
+
+상담톡 API (DKT) v 1.2 (25.03.25)                                                                           10
+                  "http://www.daum.net", "url_pc": "", "extra": "", "chat_extra": "", "chat_event": ""},
+                                 {"name": "BK           이름
+                                                    ", "type": "BK", "scheme_android": "",
+                  "scheme_ios": "", "url_mobile": "", "url_pc": "", "extra": "     해당버튼 텍스트 발송",
+                  "chat_extra": "", "chat_event": ""},
+                                   {"name": "BT         이름
+                                                      ", "type": "BT", "scheme_android": "",
+                  "scheme_ios": "", "url_mobile": "", "url_pc": "", "extra": "", "chat_extra": "metainfo",
+                  "chat_event": "eventname"}
+                                 ]
+                                     }
+                                 }
+                             ]
+                         }
+                      ], "meta": { }
+                  }
+
+
+             9.   시스템 메시지(auto_answer)
+                  {
+                      "version": 123,
+                      "chapters": [
+                        {
+                             "sections": [
+                               {
+                                     "type": "platform_answer",
+                                                        상담불가
+                                     "data": "off" // off (     ), no_operator(   상담부재), no_answer(무응
+                  답), wait(상담대기)                    }
+                             ]
+                         }
+                      ], "meta": { }
+                  }
+
+
+                  챗봇 대화 이력 연동 API : /chatbot
+                    설명 : 채널 진입 후 챗봇과의 대화 이력이 존재한다면 해당 대화 이력을 불러옵니
+                    다.
+                    송신 파라미터 목록
+                       X-Service-Key : BZM의 발신 프로필 키를 설정합니다.
+
+                       X-User-Key : 사용자 카카오 계정 ID에 대한 고유한 키값입니다.
+
+                    예제
+
+
+상담톡 API (DKT) v 1.2 (25.03.25)                                                                               11
+                       send >    상담 전 봇 대화 이력 조회 (상담사 → API CORE SERVER → BZM → 상
+                       담사 )
+
+
+
+
+                 파일 송신 API : /upload
+
+
+상담톡 API (DKT) v 1.2 (25.03.25)                                                      12
+                       설명 : 상담 대화 중 발생하는 파일 업로드 이벤트를 처리하기 위한 API로 상담원이
+                       상담고객에게 파일을 전달하기 위해 사용되는 API입니다. 해당 API의 경우 업로드
+                       이후 발생하는 URL Data를 다시 /message API로 송신해야 고객에게 정상적으로
+                       전달됩니다.
+                       file 명에 link 를 붙여서 upload 시, 복합타입형 용 이미지로 활용이 가능합니다.
+
+                       미디어 타입 : MULTIPART/FORM-DATA
+                       송신 파라미터 목록
+                            X-Service-Key : BZM의 발신 프로필 키를 설정합니다.
+
+                            X-User-Key : 사용자 카카오 계정 ID에 대한 고유한 키값입니다.
+
+                            file : 실제 카카오 비즈메시지로 전송되는 파일을 지정하며, 이는 binary로 전
+                            송됩니다.
+                       예제
+
+
+
+
+상담톡 API (DKT) v 1.2 (25.03.25)                                                 13
+                       업로드가 완료된 이후에는 파일을 업로드하고 비즈메시지로부터 수신받은 URL
+                       Data와 파일 사이즈를 함께 입력하여 메세지를 송신합니다.
+
+                          예제
+
+
+
+
+상담톡 API (DKT) v 1.2 (25.03.25)                                     14
+                            결과
+
+
+
+
+                       송신 가능한 파일 목록
+                         일반적인 파일 확장자 : pdf, odp, ppt, pptx, key, show, doc, docx, hwp,
+                            txt, rtf, xml, wks, wps, xps, md, odf, odt, pages, ods, csv, tsv, xls,
+                            xlsx, numbers, cell, psd, ai, sketch, tif, tiff, tga, webp, zip, gz, bz2,
+                            rar, 7z, lzh, alz
+
+                            이미지 파일 확장자 : jpg, jpeg, gif, bmp, png, tiff
+                            비디오 파일 확장자 : mp4, m4v, avi, asf, wmv, mkv, ts, mpg, mpeg,
+                            mov, flv, ogv
+
+
+
+상담톡 API (DKT) v 1.2 (25.03.25)                                                                          15
+                            오디오 파일 확장자 : mp3, wav, flac, tta, tak, aac, wma, ogg, m4a
+                            send > 파일업로드 (상담사 → API CORE SERVER → BZM)
+
+
+
+
+                 대화 종료 요청 API : /close
+                   설명 : 고객에게 '대화 종료' 메시지를 보내기 위해 사용합니다. 단, 상담원의 경우
+                   대화 자체를 종료할 수 없습니다.
+                   미디어 타입 : APPLICATION/JSON
+                   송신 파라미터 목록
+                      X-Platform-Type : Platform 타입을 설정합니다(solution web /
+                      kakao_counsel_talk). 여기선 kakao_counsel_talk으로 사용하시면 됩니다.
+
+                      X-Service-Key : BZM의 발신 프로필 키를 설정합니다.
+
+                      X-User-Key : 사용자 카카오 계정 ID에 대한 고유한 키값입니다.
+
+                      X-Event-Key : 해당 상담 대화에 대한 Event Key입니다.
+
+
+
+
+상담톡 API (DKT) v 1.2 (25.03.25)                                                          16
+                                  메시지 Payload 영역입니다. 아래 예제와 같은 양식으로 작
+                            RequestBody :
+                         성하여 송신하면 됩니다.
+                       예제
+
+
+
+
+상담톡 API (DKT) v 1.2 (25.03.25)                                          17
+                       결과
+
+
+
+
+                       send >    상담 종료 (상담사 → API CORE SERVER → BZM → CLIENT)
+
+
+
+
+상담톡 API (DKT) v 1.2 (25.03.25)                                                  18
+           Receive Service API(ROOT URL :
+           /api/v1/receive)
+                 챗봇을 통한 상담 요청 API : /reference
+                   설명 : 채널에 연동된 챗봇을 통하여 인입된 상담의 정보를 인계받는 API로 고객이
+                   '상담직원전환'버튼을 클릭하면 발생하는 이벤트
+
+                   미디어 타입 : APPLICATION/JSON
+                   송신 파라미터 목록
+                      HttpHeaders : 비즈메시지 수신 헤더 입니다.
+
+                      RequestParams : 비즈메시지 수신 파라미터들 입니다.
+
+                      RequestBody : 비즈메시지 수신 메시지 Payload 데이터 입니다.
+
+
+
+
+                 receive >       상담 요청
+                                (CLIENT → BZM →
+                 API CORE SERVER →      ) 상담사
+상담톡 API (DKT) v 1.2 (25.03.25)                                      19
+상담톡 API (DKT) v 1.2 (25.03.25)   20
+                 BZM    메시지 수신 API : /message
+                       설명 : 비즈메시지를 통하여 인입된 고객의 메시지를 수신하기 위한 API 입니다.
+                       미디어타입 : APPLICATION/JSON
+                       송신 파라미터 목록
+                         HttpHeaders : 비즈메시지 수신 헤더 입니다.
+
+                         RequestParams : 비즈메시지 수신 파라미터들 입니다.
+
+                         RequestBody : 비즈메시지 수신 메시지 Payload 데이터 입니다.
+
+
+
+                 receive >       메세지 전송
+                                  (CLIENT → BZM →
+                 API CORE SERVER →      )     상담사
+
+
+상담톡 API (DKT) v 1.2 (25.03.25)                                         21
+                 고객발 상담 종료 이벤트 수신 API : /expired_session
+                   설명 : 비즈메시지를 통하여 인입된 고객의 상담 종료 이벤트 메시지를 수신하기 위
+                   한 API 입니다.
+                   미디어타입 : APPLICATION/JSON
+                   송신 파라미터 목록
+                      HttpHeaders : 비즈메시지 수신 헤더 입니다.
+
+
+
+
+상담톡 API (DKT) v 1.2 (25.03.25)                                     22
+                            RequestParams :비즈메시지 수신 파라미터들 입니다.
+                            RequestBody : 비즈메시지 수신 메시지 Payload 데이터 입니다.
+
+
+
+           receive >              상담 종료
+                         (CLIENT → BZM → API
+           CORE SERVER →     )         상담사
+
+
+
+
+상담톡 API (DKT) v 1.2 (25.03.25)                                            23
+

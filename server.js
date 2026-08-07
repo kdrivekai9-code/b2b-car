@@ -30,6 +30,7 @@ const chatRoutes = require('./routes/chat');
 const inquiryRoutes = require('./routes/inquiries');
 const accessLogRoutes = require('./routes/accessLogs');
 const callmanerSyncRoutes = require('./routes/callmanerSync');
+const kakaoConsultRoutes = require('./routes/kakaoConsult');
 const { accessLogMiddleware, getClientIp, writeAccessLog } = require('./lib/accessLog');
 
 const app = express();
@@ -138,6 +139,9 @@ app.use('/upload', photoUploadRoutes);
 // 콜마너 상태동기화 크론도 세션 로그인 없는 서버 대 서버 호출이라 같은 이유로 먼저 등록한다
 // (자체 CRON_SECRET 검증은 routes/callmanerSync.js 안에서 한다).
 app.use('/callmaner', callmanerSyncRoutes);
+// 카카오 상담톡 수신 웹훅(ConsulTalk 중계서버 → b2b-car) — 같은 이유로 세션 없이 먼저 등록한다
+// (자체 공유시크릿 검증은 routes/kakaoConsult.js 안에서 한다).
+app.use('/kakao-consult', kakaoConsultRoutes);
 
 app.use('/', authRoutes);
 app.use('/', dashboardRoutes);
