@@ -14,7 +14,7 @@ const kakaoConsult = require('../lib/kakaoConsult');
 const { classifyAndExtract } = require('../lib/hybridChat');
 const { searchKnowledgeBase } = require('../lib/knowledgeSearch');
 const { parseKakaoIntake, buildMissingQuestion } = require('../lib/kakaoIntakeParser');
-const { findIntakeAccount, createOrdersFromIntake } = require('../lib/kakaoIntakeService');
+const { findIntakeAccount, resolveIntakeContext, createOrdersFromIntake } = require('../lib/kakaoIntakeService');
 const { getSmalltalkMessage } = require('../lib/smallTalk');
 const { runDispatchAgent } = require('../lib/mcpDispatchAgent');
 const { notify } = require('../lib/push');
@@ -105,6 +105,7 @@ async function findOrCreateKakaoSession(keys) {
        VALUES ('kakao', 'bot', ?, ?, ?, ?) RETURNING *`,
       [keys.userKey, keys.serviceKey, keys.userKey, keys.eventKey]
     );
+    session.isNew = true;
   } else if (session.kakao_service_key !== keys.serviceKey || session.kakao_event_key !== keys.eventKey) {
     // 인증 키가 바뀐 채로 들어올 수 있다(세션 재연결 등) — 다음 발신을 위해 항상 최신값으로 갱신.
     await db.run(
@@ -147,6 +148,45 @@ async function markNeedsAgent(session, lastUserMessage, requestedFeature) {
       url: `/chat/sessions/${session.id}`,
     });
   } catch (e) { console.error('카카오 상담톡 상담원 호출 알림 실패:', e.message); }
+}
+
+// 개인정보 제공동의 요청 — 세션당 한 번만 보낸다. 동의 결과(이름/휴대폰)는 별도 웹훅
+// (/receive/personal_info)으로 들어와 chat_sessions에 저장된다.
+// 명세서 제약: 동의 말풍선은 상담 세션당 1회, 동의 절차는 발송 시점부터 3일간만 유효.
+// 이미 보냈으면 다시 보내지 않는다(카카오가 거부하고, 고객에게도 중복 노출된다).
+const PERSONAL_INFO_VALID_DAYS = 3;
+
+function consentAlreadyRequested(session) {
+  return !!(session && session.personal_info_requested_at);
+}
+
+// 동의를 요청해두고 아직 답이 없는 상태인지 — 3일이 지나면 기다리지 않고 상담원에게 넘긴다.
+function consentPending(session) {
+  if (!session || !session.personal_info_requested_at || session.personal_info_at) return false;
+  const requested = Date.parse(String(session.personal_info_requested_at).replace(' ', 'T') + '+09:00');
+  if (Number.isNaN(requested)) return false;
+  return (Date.now() - requested) < PERSONAL_INFO_VALID_DAYS * 24 * 60 * 60 * 1000;
+}
+
+async function requestPersonalInfo(session) {
+  if (consentAlreadyRequested(session)) return { ok: false, error: 'already_requested' };
+  const result = await kakaoConsult.sendPersonalInfoRequest(session);
+  if (result.ok) {
+    await db.run(
+      `UPDATE chat_sessions SET personal_info_requested_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS')
+       WHERE id = ?`,
+      [session.id]
+    ).catch((e) => console.error('개인정보 동의 요청 시각 저장 실패:', e.message));
+    session.personal_info_requested_at = 'now';
+  }
+  if (!result.ok && result.error !== 'already_requested') {
+    console.error('카카오 상담톡 개인정보 동의 요청 실패:', result.error);
+    logIntegrationErrorAsync({
+      source: 'kakao', operation: 'send_personal', refType: 'chat_session', refId: session.id,
+      message: result.error, context: { label: '개인정보 제공동의 요청' },
+    });
+  }
+  return result;
 }
 
 // 발신 실패는 고객에게는 보이지 않으니(카카오로 안 나간 채 우리 쪽 로그만 남는 상태) 반드시
@@ -270,11 +310,29 @@ async function tryHandleIntake(session, text) {
     return true;
   }
 
-  const account = await findIntakeAccount(session);
+  // 번호(개인정보 동의로 받은 것) → 채널 매핑 순으로 접수 주체를 찾는다.
+  const account = await resolveIntakeContext(session);
+
+  // 문맥을 못 찾았고 번호도 아직 없다면, 동의를 한 번 요청해보고 접수 내용은 들고 있는다 —
+  // 동의가 오면 /receive/personal_info에서 이 내용으로 접수를 이어간다(명세서상 세션당 1회).
+  if (!account && !session.external_phone && !consentAlreadyRequested(session)) {
+    await savePendingIntake(session, mergedRaw);
+    const asked = await requestPersonalInfo(session);
+    if (asked.ok) {
+      const notice = '접수를 위해 성함과 연락처가 필요합니다. 위 동의 버튼을 눌러주시면 바로 접수해드릴게요.';
+      await insertMessage(session.id, 'bot', notice);
+      await sendAndLog(session, notice, '개인정보 동의 요청 안내');
+      return true;
+    }
+  }
+
   if (!account || !account.auto_register) {
     // 매핑이 없거나 자동 등록을 켜지 않은 채널 — 파싱만 하고 상담원에게 넘긴다.
     await clearPendingIntake(session);
-    await handoffWithParsedSlots(session, parsed, mergedRaw, account ? '자동 등록 꺼짐' : '채널 매핑 없음');
+    const reason = !account
+      ? (consentPending(session) ? '개인정보 동의 대기' : '거래처 확인 불가')
+      : '자동 등록 꺼짐';
+    await handoffWithParsedSlots(session, parsed, mergedRaw, reason);
     return true;
   }
 
@@ -322,7 +380,7 @@ const ESCALATION_RE = /(사고|파손|스크래치|기스|찍힘|긁힘|클레�
 // 매핑으로 오더를 만들고 있으므로(lib/kakaoIntakeService.js) 조회 권한도 같은 기준을 따른다.
 // 매핑이 없으면(익명 채널) 예전처럼 상담원에게 넘긴다.
 async function tryDispatchAgent(session, text) {
-  const account = await findIntakeAccount(session).catch(() => null);
+  const account = await resolveIntakeContext(session).catch(() => null);
   if (!account || !account.user_id) return false;
 
   const user = await db.get('SELECT id, name, phone, role, branch_id, group_id FROM users WHERE id = ?', [account.user_id])
@@ -437,7 +495,13 @@ router.post(['/receive', '/receive/message', '/receive/message-simple'], asyncHa
   // 상담원이 이미 응대 중인 세션은 봇이 끼어들지 않는다(기존 웹 위젯 규칙과 동일).
   if (session.status !== 'agent_active') {
     runAfterResponse(
-      processBotTurn(session, text).catch(async (e) => {
+      (async () => {
+        // 새 세션이면 첫 응답에 개인정보 제공동의를 함께 요청한다 — 동의를 받아야 이름/연락처가
+        // 들어오고, 그래야 익명 카카오 고객을 거래처 계정과 이을 수 있다(기획서 5.7).
+        // 실패해도 대화는 그대로 진행한다(동의는 부가 정보이지 응대 조건이 아니다).
+        if (session.isNew) await requestPersonalInfo(session);
+        await processBotTurn(session, text);
+      })().catch(async (e) => {
         console.error('카카오 상담톡 봇 처리 실패:', e.message);
         await markNeedsAgent(session, text, null);
       }),
@@ -513,8 +577,66 @@ router.post('/receive/seen_info', asyncHandler(async (req, res) => {
 // (console.log 등)로는 절대 남기지 않는다.
 router.post('/receive/personal_info', asyncHandler(async (req, res) => {
   const keys = kakaoConsult.extractKeys(req);
-  await logEvent({ eventType: 'personal_info', keys, body: req.body, handled: false, errorMessage: 'field_spec_unconfirmed' });
+  const { name, phone } = kakaoConsult.extractPersonalInfo(req.body);
+  let resumeAfterConsent = null;
+
+  let session = null;
+  if (keys.userKey) {
+    session = await db.get(
+      `SELECT * FROM chat_sessions WHERE channel = 'kakao' AND external_user_key = ? AND status != 'closed'
+       ORDER BY id DESC LIMIT 1`,
+      [keys.userKey]
+    ).catch(() => null);
+  }
+
+  // 이름·휴대폰을 세션에 붙인다 — 이때부터 상담원 목록에 "-" 대신 실제 고객명이 뜨고(routes/chat.js
+  // CUSTOMER_NAME_SQL), 전화번호로 거래처 담당자를 찾는 경로(기획서 5.7 2단계)가 열린다.
+  // 평문 로그(console)에는 절대 남기지 않는다 — 명세서 경고(계획서 8.3).
+  let saved = false;
+  if (session && (name || phone)) {
+    await db.run(
+      `UPDATE chat_sessions SET external_name = COALESCE(?, external_name),
+       external_phone = COALESCE(?, external_phone),
+       personal_info_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') WHERE id = ?`,
+      [name || null, phone || null, session.id]
+    );
+    saved = true;
+    broadcastSessionListChangedAsync({ event: 'personal_info', sessionId: session.id });
+
+    // 동의를 기다리며 들고 있던 접수 내용이 있으면 지금 이어서 처리한다 — 고객이 같은 내용을
+    // 다시 보내지 않아도 되게. 응답(200)은 먼저 돌려주고 처리는 뒤로 넘긴다(계획서 8.4).
+    session.external_phone = phone || session.external_phone;
+    session.external_name = name || session.external_name;
+    const pending = await loadPendingIntake(session);
+    if (pending) {
+      resumeAfterConsent = { session, raw: pending.raw };
+    }
+  }
+
+  await logEvent({
+    sessionId: session ? session.id : null,
+    eventType: 'personal_info',
+    keys,
+    body: req.body,
+    handled: saved,
+    // 동의는 왔는데 값을 못 읽었다면 필드명이 예상과 다른 것이다 — 원본 payload가 함께 남으니
+    // 그걸 보고 lib/kakaoConsult.js extractPersonalInfo를 좁히면 된다.
+    errorMessage: saved ? null : (session ? 'personal_fields_unrecognized' : 'session_not_found'),
+  });
+
   res.json({ code: 200, message: 'SUCCESS' });
+
+  if (resumeAfterConsent) {
+    runAfterResponse(
+      tryHandleIntake(resumeAfterConsent.session, resumeAfterConsent.raw)
+        .then((handled) => {
+          if (handled) return;
+          // 번호를 받았는데도 거래처를 못 찾은 경우 — 그대로 두면 고객이 답을 못 받는다.
+          return markNeedsAgent(resumeAfterConsent.session, resumeAfterConsent.raw, '신규 오더 접수(동의 후 거래처 확인 필요)');
+        }),
+      'resume_after_consent'
+    );
+  }
 }));
 
 module.exports = router;
