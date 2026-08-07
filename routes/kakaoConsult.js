@@ -14,7 +14,7 @@ const kakaoConsult = require('../lib/kakaoConsult');
 const { classifyAndExtract } = require('../lib/hybridChat');
 const { searchKnowledgeBase } = require('../lib/knowledgeSearch');
 const { parseKakaoIntake, buildMissingQuestion } = require('../lib/kakaoIntakeParser');
-const { findIntakeAccount, resolveIntakeContext, createOrdersFromIntake } = require('../lib/kakaoIntakeService');
+const { findIntakeAccount, resolveIntakeContext, findAccountByPhone, linkUserKeyToAccount, createOrdersFromIntake } = require('../lib/kakaoIntakeService');
 const { getSmalltalkMessage } = require('../lib/smallTalk');
 const { runDispatchAgent } = require('../lib/mcpDispatchAgent');
 const { notify } = require('../lib/push');
@@ -648,6 +648,8 @@ router.post('/receive/personal_info', asyncHandler(async (req, res) => {
   const keys = kakaoConsult.extractKeys(req);
   const { name, phone } = kakaoConsult.extractPersonalInfo(req.body);
   let resumeAfterConsent = null;
+  let linked = null;
+  let newCustomer = false;
 
   let session = null;
   if (keys.userKey) {
@@ -672,10 +674,20 @@ router.post('/receive/personal_info', asyncHandler(async (req, res) => {
     saved = true;
     broadcastSessionListChangedAsync({ event: 'personal_info', sessionId: session.id });
 
-    // 동의를 기다리며 들고 있던 접수 내용이 있으면 지금 이어서 처리한다 — 고객이 같은 내용을
-    // 다시 보내지 않아도 되게. 응답(200)은 먼저 돌려주고 처리는 뒤로 넘긴다(계획서 8.4).
+    // 받은 번호가 우리 거래처와 이어지면 이 UserKey를 채널 매핑에 등록해둔다 — 다음 상담부터는
+    // 동의 없이 첫 메시지부터 거래처가 확정된다. 이어지지 않는 번호(우리 시스템에 없는 사람)는
+    // 등록하지 않고 상담원이 확인하도록 둔다.
     session.external_phone = phone || session.external_phone;
     session.external_name = name || session.external_name;
+    const matched = await findAccountByPhone(session.external_phone).catch(() => null);
+    if (matched) {
+      linked = await linkUserKeyToAccount(session, matched);
+    } else if (phone) {
+      newCustomer = true;
+    }
+
+    // 동의를 기다리며 들고 있던 접수 내용이 있으면 지금 이어서 처리한다 — 고객이 같은 내용을
+    // 다시 보내지 않아도 되게. 응답(200)은 먼저 돌려주고 처리는 뒤로 넘긴다(계획서 8.4).
     const pending = await loadPendingIntake(session);
     if (pending) {
       resumeAfterConsent = { session, raw: pending.raw, purpose: pending.purpose || 'intake' };
@@ -690,7 +702,9 @@ router.post('/receive/personal_info', asyncHandler(async (req, res) => {
     handled: saved,
     // 동의는 왔는데 값을 못 읽었다면 필드명이 예상과 다른 것이다 — 원본 payload가 함께 남으니
     // 그걸 보고 lib/kakaoConsult.js extractPersonalInfo를 좁히면 된다.
-    errorMessage: saved ? null : (session ? 'personal_fields_unrecognized' : 'session_not_found'),
+    errorMessage: saved
+      ? (newCustomer ? 'customer_not_registered' : null)
+      : (session ? 'personal_fields_unrecognized' : 'session_not_found'),
   });
 
   res.json({ code: 200, message: 'SUCCESS' });
@@ -698,18 +712,23 @@ router.post('/receive/personal_info', asyncHandler(async (req, res) => {
   if (resumeAfterConsent) {
     // 동의를 기다리느라 멈춰 있던 작업을 이어간다 — 고객이 같은 말을 다시 하지 않아도 되게.
     const { session: resumeSession, raw, purpose } = resumeAfterConsent;
+    const isNewCustomer = newCustomer;
     runAfterResponse((async () => {
       await clearPendingIntake(resumeSession);
       if (purpose === 'agent') {
         const notice = '확인되었습니다. 상담원을 연결해드릴게요.';
         await insertMessage(resumeSession.id, 'bot', notice);
         await sendAndLog(resumeSession, notice, '동의 후 상담원 연결');
-        await markNeedsAgent(resumeSession, raw, '상담원 연결(동의 완료)');
+        await markNeedsAgent(resumeSession, raw,
+          isNewCustomer ? '상담원 연결(미등록 고객 — 계정 등록 필요)' : '상담원 연결(동의 완료)');
         return;
       }
       const handled = await tryHandleIntake(resumeSession, raw);
       // 번호를 받았는데도 거래처를 못 찾은 경우 — 그대로 두면 고객이 답을 못 받는다.
-      if (!handled) await markNeedsAgent(resumeSession, raw, '신규 오더 접수(동의 후 거래처 확인 필요)');
+      if (!handled) {
+        await markNeedsAgent(resumeSession, raw,
+          isNewCustomer ? '신규 오더 접수(미등록 고객 — 계정 등록 필요)' : '신규 오더 접수(동의 후 거래처 확인 필요)');
+      }
     })(), 'resume_after_consent');
   }
 }));
