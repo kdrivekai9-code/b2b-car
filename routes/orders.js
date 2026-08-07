@@ -9,6 +9,8 @@ const { kstNow } = require('../lib/period');
 const { parseIntakeText } = require('../lib/aiIntakeParser');
 const { classifyAndExtract, classifyPhaseReply } = require('../lib/hybridChat');
 const { searchKnowledgeBase } = require('../lib/knowledgeSearch');
+// 인사·자기소개 응답은 카카오 상담톡(routes/kakaoConsult.js)과 같은 규칙을 써야 해서 공용 모듈로 뺐다.
+const { isGreeting, getSmalltalkMessage } = require('../lib/smallTalk');
 const { broadcastMessage, broadcastSessionListChanged, broadcastOrderListChanged, openOrderListStream, closeChannel } = require('../lib/realtimeChat');
 const { splitTypeAndPlate } = require('../lib/vehicleInfo');
 const callmaner = require('../lib/callmaner');
@@ -554,34 +556,6 @@ function classifyOrderIntentByRule(text, fields) {
 
 // 인사말은 의미 검색에 필요한 정보가 없어 어떤 지식 항목과도 우연히 유사해질 수 있다.
 // 이 경우 RAG와 의도 분류를 건너뛰고 대화 시작 안내를 반환한다.
-function isGreeting(text) {
-  return /^(?:안녕(?:하세요)?|안녕하십니까|반갑습니다|하이|hi|hello|헬로|좋은\s?(?:아침|오후|저녁))[!！?.\s]*$/i.test(text);
-}
-
-function hasBusinessKeyword(text) {
-  return /(오더|접수|출발|도착|경유|요금|결제|주소|연락처|배정|기사|등록|취소|수정|공지|푸시|알림|지사)/i.test(text);
-}
-
-// FAQ 검색 전에 스몰토크를 우선 처리해 "답변을 찾지 못했습니다" 같은 어색한 실패 응답을 줄인다.
-function getSmalltalkMessage(text) {
-  const normalized = String(text || '').toLowerCase().replace(/\s+/g, ' ').trim();
-  if (!normalized) return null;
-
-  if (!hasBusinessKeyword(normalized) && /(넌\s*누구(?:니|야)?|너(는|가)?\s*누구(?:니|야)?|누구(?:니|야)|정체|자기소개|소개해\s*줘|봇이야|ai야)/i.test(normalized)) {
-    return '저는 탁송·대리운전(프리미엄) 오더 접수와 업무 안내를 도와드리는 AI 챗봇입니다. 오더 접수 내용을 입력하시거나, 궁금한 점을 질문해주세요.';
-  }
-
-  if (!hasBusinessKeyword(normalized) && /(뭘\s*할\s*수\s*있|무엇을\s*도와|어떤\s*업무|사용법|어떻게\s*써|도움\s*줘)/i.test(normalized)) {
-    return '오더 접수 내용 자동 입력(탁송·대리운전), FAQ 안내, 처리 어려운 요청의 상담원 연결을 도와드릴 수 있습니다. 원하시는 내용을 말씀해주세요.';
-  }
-
-  if (/(^|\s)(안녕(?:하세요)?|하이|hello|hi|헬로|반가워)(\s|$)/i.test(normalized)) {
-    return '안녕하세요. 오더 접수 내용을 입력하시거나, 궁금한 점을 질문해주세요.';
-  }
-
-  return null;
-}
-
 // 하이브리드 챗봇 1단계: 지식검색(FAQ) + 오더접수. Gemini로 의도를 분류해 두 갈래로 라우팅하고,
 // Gemini 호출이 실패하면(쿼터/네트워크 등) 예전 규칙 기반 파서로 대체해 오더접수만이라도 동작하게 한다.
 router.post('/ai-intake/parse', asyncHandler(async (req, res) => {

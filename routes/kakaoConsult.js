@@ -15,6 +15,8 @@ const { classifyAndExtract } = require('../lib/hybridChat');
 const { searchKnowledgeBase } = require('../lib/knowledgeSearch');
 const { parseKakaoIntake, buildMissingQuestion } = require('../lib/kakaoIntakeParser');
 const { findIntakeAccount, createOrdersFromIntake } = require('../lib/kakaoIntakeService');
+const { getSmalltalkMessage } = require('../lib/smallTalk');
+const { runDispatchAgent } = require('../lib/mcpDispatchAgent');
 const { notify } = require('../lib/push');
 const { broadcastMessage, broadcastSessionListChanged } = require('../lib/realtimeChat');
 
@@ -156,7 +158,9 @@ async function sendAndLog(session, text, label) {
 
 // FAQ 자동응답 — 유사도가 낮으면(관련 항목 없음) 상담원 연결로 넘긴다.
 async function tryAnswerFaq(session, text) {
-  const matches = await searchKnowledgeBase(text, { limit: 1, threshold: 0.6 }).catch((e) => {
+  // 문턱은 웹 위젯(routes/orders.js)과 같은 0.7로 맞춘다 — 0.6일 때 "안녕하세요"에
+  // "공지사항 메뉴는…" 같은 무관한 항목이 매칭돼 실제로 잘못된 답이 발송됐다.
+  const matches = await searchKnowledgeBase(text, { limit: 1, threshold: 0.7 }).catch((e) => {
     console.error('카카오 상담톡 FAQ 검색 실패:', e.message);
     return [];
   });
@@ -306,8 +310,50 @@ const SMALL_TALK_RE = /^[\s]*(네+[~\s.!ㅣ]*|넵+[~\s.!]*|예[.,\s]*|응+[\s.!]
 // (기획서 5.7 인계 규칙. 지연 관련 단어는 "늦어도 3시까지"처럼 정상 요청에도 흔해서 넣지 않았다.)
 const ESCALATION_RE = /(사고|파손|스크래치|기스|찍힘|긁힘|클레임|분실|도난|고장|침수|변상|보상|항의|불만)/;
 
+// 주문 조회/변경/취소(intent: unsupported)를 MCP 배차 도우미로 처리한다.
+// 카카오 고객은 b2b-car 계정이 없는 게 기본값이지만, kakao_consult_accounts에 이 채널(또는 이
+// 고객)의 담당 계정이 매핑돼 있으면 그 계정 자격으로 조회할 수 있다 — 접수 자동화가 이미 같은
+// 매핑으로 오더를 만들고 있으므로(lib/kakaoIntakeService.js) 조회 권한도 같은 기준을 따른다.
+// 매핑이 없으면(익명 채널) 예전처럼 상담원에게 넘긴다.
+async function tryDispatchAgent(session, text) {
+  const account = await findIntakeAccount(session).catch(() => null);
+  if (!account || !account.user_id) return false;
+
+  const user = await db.get('SELECT id, name, phone, role, branch_id, group_id FROM users WHERE id = ?', [account.user_id])
+    .catch(() => null);
+  if (!user) return false;
+  // 매핑에 지사가 지정돼 있으면 그쪽을 우선한다(계정의 소속 지사와 다를 수 있다).
+  if (account.branch_id) user.branch_id = account.branch_id;
+
+  const history = await db.all(
+    `SELECT sender, message FROM chat_messages
+     WHERE session_id = ? AND sender IN ('user','bot') AND message IS NOT NULL
+     ORDER BY id DESC LIMIT 10`,
+    [session.id]
+  ).catch(() => []);
+  history.reverse();
+  if (history.length && history[history.length - 1].sender === 'user' && history[history.length - 1].message === text) {
+    history.pop();
+  }
+
+  const result = await runDispatchAgent({ user, sessionId: session.id, text, history });
+  if (!result || !result.handled || !result.message) return false;
+
+  await insertMessage(session.id, 'bot', result.message);
+  await sendAndLog(session, result.message, '배차 도우미 응답');
+  return true;
+}
+
 async function processBotTurn(session, text) {
   if (SMALL_TALK_RE.test(text)) return;
+
+  // 인사·자기소개는 지식검색으로 보내지 않는다 — 웹 위젯과 같은 규칙(lib/smallTalk.js).
+  const smallTalk = getSmalltalkMessage(text);
+  if (smallTalk) {
+    await insertMessage(session.id, 'bot', smallTalk);
+    await sendAndLog(session, smallTalk, '스몰토크 응답');
+    return;
+  }
 
   if (ESCALATION_RE.test(text)) {
     return handleUnsupported(session, text, '사고·클레임 문의');
@@ -326,8 +372,13 @@ async function processBotTurn(session, text) {
   }
 
   if (classified.intent === 'unsupported') {
-    // MCP 배차 도우미는 users row(전화번호 매칭)를 요구한다 — 카카오는 익명 고객이 기본값이라
-    // 지금은 시도하지 않고 바로 상담원으로 넘긴다(등록 고객 매칭은 8.3 해결 후 2차 작업).
+    // 주문 조회/변경/취소는 매핑된 계정이 있으면 배차 도우미가 직접 처리한다.
+    // 처리하지 못하면(매핑 없음·미등록 고객·도구 실패) 예전처럼 상담원으로 넘어간다.
+    const handledByAgent = await tryDispatchAgent(session, text).catch((e) => {
+      console.error('카카오 배차 도우미 처리 실패:', e.message);
+      return false;
+    });
+    if (handledByAgent) return;
     return handleUnsupported(session, text, classified.requestedFeature);
   }
   if (classified.intent === 'faq') {
