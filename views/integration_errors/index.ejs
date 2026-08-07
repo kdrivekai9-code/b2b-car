@@ -1,0 +1,151 @@
+<%- include('../partials/header') %>
+<div class="page-head-row">
+  <div>
+    <h1 class="page-title">연동 오류 현황</h1>
+    <p class="page-sub">콜마너 · MCP 배차 · 카카오 상담톡 연동에서 실패한 건을 모아 보여줍니다. 기록이 네 곳에 흩어져 있어 한 화면에 정리했습니다.</p>
+  </div>
+  <div class="page-head-actions">
+    <form method="GET" action="/integration-errors" class="inline-filter-form">
+      <select name="range" onchange="this.form.submit()">
+        <% rangeOptions.forEach(function (r) { %>
+          <option value="<%= r.key %>" <%= range.key === r.key ? 'selected' : '' %>><%= r.label %></option>
+        <% }) %>
+      </select>
+      <input type="hidden" name="limit" value="<%= limit %>">
+      <noscript><button class="btn secondary small" type="submit">조회</button></noscript>
+    </form>
+    <a class="btn secondary" href="/integration-errors?range=<%= range.key %>&limit=<%= limit %>">새로고침</a>
+  </div>
+</div>
+
+<%
+  // 섹션별 조회 실패(테이블 없음 등)를 화면에서 구분해 보여주기 위한 헬퍼.
+  function sectionNote(section) {
+    if (!section.error) return null;
+    return /does not exist/i.test(section.error)
+      ? '이 항목은 아직 마이그레이션이 적용되지 않아 조회할 수 없습니다.'
+      : '조회 실패: ' + section.error;
+  }
+  const totalCount = summary.rows.reduce(function (a, r) { return a + Number(r.cnt); }, 0);
+%>
+
+<div class="card">
+  <div class="section-title">📊 통합 오류 요약 <span class="page-sub" style="font-weight:400">(<%= range.label %>)</span></div>
+  <% var note = sectionNote(summary); if (note) { %>
+    <p class="page-sub" style="margin:0"><%= note %></p>
+  <% } else if (!summary.rows.length) { %>
+    <p class="page-sub" style="margin:0">이 기간에 기록된 연동 오류가 없습니다.</p>
+  <% } else { %>
+    <p class="page-sub" style="margin:0 0 10px">총 <strong><%= totalCount %></strong>건</p>
+    <table class="table">
+      <thead><tr><th>연동</th><th>동작</th><th style="width:90px">건수</th><th>최근 발생</th></tr></thead>
+      <tbody>
+        <% summary.rows.forEach(function (r) { %>
+          <tr>
+            <td><span class="badge <%= r.source === 'callmaner' ? 'blue' : (r.source === 'kakao' ? 'amber' : 'purple') %>"><%= r.source %></span></td>
+            <td><%= r.operation %></td>
+            <td><%= r.cnt %></td>
+            <td><%= r.last %></td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  <% } %>
+</div>
+
+<div class="card" style="margin-top:16px">
+  <div class="section-title">🧾 통합 오류 로그 (integration_errors)</div>
+  <p class="page-sub" style="margin:0 0 10px">상태동기화 크론 실패, 카카오 발신 실패, MCP 도구 예외처럼 다른 표에 남지 않는 실패입니다.</p>
+  <% note = sectionNote(unified); if (note) { %>
+    <p class="page-sub" style="margin:0"><%= note %></p>
+  <% } else if (!unified.rows.length) { %>
+    <p class="page-sub" style="margin:0">기록 없음</p>
+  <% } else { %>
+    <table class="table">
+      <thead><tr><th style="width:150px">발생시각</th><th style="width:90px">연동</th><th style="width:130px">동작</th><th style="width:110px">대상</th><th>내용</th></tr></thead>
+      <tbody>
+        <% unified.rows.forEach(function (r) { %>
+          <tr>
+            <td><%= r.created_at %></td>
+            <td><%= r.source %></td>
+            <td><%= r.operation %></td>
+            <td><%= r.ref_id ? (r.ref_type + ' ' + r.ref_id) : '-' %></td>
+            <td><%= r.error_code ? ('[' + r.error_code + '] ') : '' %><%= r.message %></td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  <% } %>
+</div>
+
+<div class="card" style="margin-top:16px">
+  <div class="section-title">🚚 콜마너 오더접수 실패</div>
+  <p class="page-sub" style="margin:0 0 10px">오더 상세 화면의 빨간 배지와 같은 값입니다.</p>
+  <% note = sectionNote(callmaner); if (note) { %>
+    <p class="page-sub" style="margin:0"><%= note %></p>
+  <% } else if (!callmaner.rows.length) { %>
+    <p class="page-sub" style="margin:0">기록 없음</p>
+  <% } else { %>
+    <table class="table">
+      <thead><tr><th style="width:150px">등록시각</th><th style="width:120px">오더</th><th style="width:80px">코드</th><th>사유</th></tr></thead>
+      <tbody>
+        <% callmaner.rows.forEach(function (r) { %>
+          <tr>
+            <td><%= r.created_at %></td>
+            <td><a href="/orders/<%= r.id %>"><%= r.oid %></a></td>
+            <td><%= r.code || '-' %></td>
+            <td><%= r.err %></td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  <% } %>
+</div>
+
+<div class="card" style="margin-top:16px">
+  <div class="section-title">🤖 MCP 배차 도구 호출 실패</div>
+  <% note = sectionNote(mcp); if (note) { %>
+    <p class="page-sub" style="margin:0"><%= note %></p>
+  <% } else if (!mcp.rows.length) { %>
+    <p class="page-sub" style="margin:0">기록 없음</p>
+  <% } else { %>
+    <table class="table">
+      <thead><tr><th style="width:150px">발생시각</th><th style="width:220px">도구</th><th style="width:100px">상담세션</th><th>사유</th></tr></thead>
+      <tbody>
+        <% mcp.rows.forEach(function (r) { %>
+          <tr>
+            <td><%= r.created_at %></td>
+            <td><%= r.tool_name %></td>
+            <td><%= r.session_id ? ('#' + r.session_id) : '-' %></td>
+            <td><%= r.error %></td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  <% } %>
+</div>
+
+<div class="card" style="margin-top:16px">
+  <div class="section-title">💬 카카오 상담톡 미처리 수신</div>
+  <p class="page-sub" style="margin:0 0 10px">missing_keys는 인증 키 없이 들어온 요청, field_spec_unconfirmed는 스펙 미확정으로 기록만 한 건입니다.</p>
+  <% note = sectionNote(kakao); if (note) { %>
+    <p class="page-sub" style="margin:0"><%= note %></p>
+  <% } else if (!kakao.rows.length) { %>
+    <p class="page-sub" style="margin:0">기록 없음</p>
+  <% } else { %>
+    <table class="table">
+      <thead><tr><th style="width:150px">수신시각</th><th style="width:170px">이벤트</th><th style="width:100px">상담세션</th><th>사유</th></tr></thead>
+      <tbody>
+        <% kakao.rows.forEach(function (r) { %>
+          <tr>
+            <td><%= r.created_at %></td>
+            <td><%= r.event_type %></td>
+            <td><%= r.session_id ? ('#' + r.session_id) : '-' %></td>
+            <td><%= r.error_message || '-' %></td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  <% } %>
+</div>
+<%- include('../partials/footer') %>

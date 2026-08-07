@@ -754,3 +754,7 @@ textarea.single-line-textarea{min-height:36px;height:36px;padding:8px 10px;resiz
 .call-type-choices{display:flex;flex-wrap:wrap;gap:14px;padding:6px 0;}
 .delay-minutes-input{display:flex;align-items:center;gap:8px;}
 .delay-minutes-input input{width:90px;}
+
+/* 연동 오류 현황 — 헤더의 기간 선택 폼 */
+.inline-filter-form{display:inline-flex;align-items:center;gap:8px;margin-right:8px;}
+.inline-filter-form select{min-height:38px;}

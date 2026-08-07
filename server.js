@@ -29,6 +29,7 @@ const faqRoutes = require('./routes/faq');
 const chatRoutes = require('./routes/chat');
 const inquiryRoutes = require('./routes/inquiries');
 const accessLogRoutes = require('./routes/accessLogs');
+const integrationErrorRoutes = require('./routes/integrationErrors');
 const callmanerSyncRoutes = require('./routes/callmanerSync');
 const kakaoConsultRoutes = require('./routes/kakaoConsult');
 const { accessLogMiddleware, getClientIp, writeAccessLog } = require('./lib/accessLog');
@@ -162,6 +163,7 @@ app.use('/faq', faqRoutes);
 app.use('/chat', chatRoutes);
 app.use('/inquiries', inquiryRoutes);
 app.use('/access-logs', accessLogRoutes);
+app.use('/integration-errors', integrationErrorRoutes);
 
 app.use((req, res) => {
   // fetch(X-Requested-With: fetch)로 온 AJAX 요청에 HTML 404 페이지를 그대로 돌려주면
