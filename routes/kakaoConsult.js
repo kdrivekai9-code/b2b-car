@@ -100,12 +100,31 @@ async function findOrCreateKakaoSession(keys) {
     [keys.userKey]
   );
   if (!session) {
+    // 같은 고객(UserKey)의 지난 대화에서 이미 개인정보 제공 동의를 받았다면 그 값을 새 세션에
+    // 물려준다. UserKey는 채널별로 고정이고 탈퇴/재가입 때만 바뀌므로(명세서 용어집) 같은 사람이다.
+    //
+    // 이게 없으면 상담이 끝날 때마다 번호가 사라져서, 거래처 담당자가 다음에 접수하려 할 때마다
+    // 동의를 다시 받아야 한다 — 동의 말풍선은 세션당 1회뿐이라 매번 한 번씩 소진되고, 고객은
+    // 매번 버튼을 눌러야 한다. 불특정 다수가 아니라 반복 이용하는 B2B 거래처라 특히 손해가 크다.
+    const previous = await db.get(
+      `SELECT external_name, external_phone, personal_info_at FROM chat_sessions
+       WHERE channel = 'kakao' AND external_user_key = ? AND external_phone IS NOT NULL
+       ORDER BY id DESC LIMIT 1`,
+      [keys.userKey]
+    ).catch(() => null);
+
     session = await db.get(
-      `INSERT INTO chat_sessions (channel, status, external_user_key, kakao_service_key, kakao_user_key, kakao_event_key)
-       VALUES ('kakao', 'bot', ?, ?, ?, ?) RETURNING *`,
-      [keys.userKey, keys.serviceKey, keys.userKey, keys.eventKey]
+      `INSERT INTO chat_sessions
+         (channel, status, external_user_key, kakao_service_key, kakao_user_key, kakao_event_key,
+          external_name, external_phone, personal_info_at)
+       VALUES ('kakao', 'bot', ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      [keys.userKey, keys.serviceKey, keys.userKey, keys.eventKey,
+        previous ? previous.external_name : null,
+        previous ? previous.external_phone : null,
+        previous ? previous.personal_info_at : null]
     );
     session.isNew = true;
+    session.inheritedPersonalInfo = !!previous;
   } else if (session.kakao_service_key !== keys.serviceKey || session.kakao_event_key !== keys.eventKey) {
     // 인증 키가 바뀐 채로 들어올 수 있다(세션 재연결 등) — 다음 발신을 위해 항상 최신값으로 갱신.
     await db.run(
