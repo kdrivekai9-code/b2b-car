@@ -11,6 +11,7 @@ const { notify } = require('../lib/push');
 const { kstNow } = require('../lib/period');
 const { getEffectivePaymentMethods } = require('../lib/branchPolicy');
 const { runDispatchAgent, checkDispatchDelay } = require('../lib/mcpDispatchAgent');
+const { buildSuggestion } = require('../lib/agentAssist');
 const kakaoConsult = require('../lib/kakaoConsult');
 const { logIntegrationErrorAsync } = require('../lib/integrationLog');
 const {
@@ -38,6 +39,34 @@ const SESSION_CREATE_WINDOW_SQL = `to_char(now() at time zone 'Asia/Seoul' - int
 const CUSTOMER_NAME_SQL = `COALESCE(u.name, cs.external_name, CASE WHEN cs.channel = 'kakao' THEN '카카오 상담톡 고객' END)`;
 const CUSTOMER_ROLE_SQL = `COALESCE(u.role, CASE WHEN cs.channel = 'kakao' THEN '카카오' END)`;
 const CUSTOMER_PHONE_SQL = `COALESCE(u.phone, cs.external_phone)`;
+
+// 상담원 도우미 — 상담원이 응대 중인 세션의 고객 메시지마다 답변 초안을 만들어 둔다.
+// 고객 응답 경로를 붙잡지 않도록 fire-and-forget으로 돌리고(초안이 몇 초 늦게 떠도 무방),
+// 실패는 삼킨다 — 초안이 없다고 상담 자체가 막히면 안 된다.
+function createSuggestionAsync(session, text, userMessageId) {
+  (async () => {
+    const suggestion = await buildSuggestion(text);
+    if (!suggestion) return; // 확신이 없으면 제안하지 않는다(소음 방지)
+
+    // 같은 세션에 쌓인 이전 대기 제안은 닫는다 — 고객이 새 메시지를 보냈으면 직전 초안은 낡았다.
+    await db.run(
+      `UPDATE chat_suggestions SET status = 'dismissed',
+       decided_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS')
+       WHERE session_id = ? AND status = 'pending'`,
+      [session.id]
+    );
+
+    await db.run(
+      `INSERT INTO chat_suggestions (session_id, user_message_id, kind, suggested_text, intake_json)
+       VALUES (?, ?, ?, ?, ?)`,
+      [session.id, userMessageId || null, suggestion.kind, suggestion.text,
+        suggestion.intake ? JSON.stringify(suggestion.intake) : null]
+    );
+    // 별도 실시간 신호는 보내지 않는다 — 메시지 스트림에 흘리면 클라이언트가 그걸 대화
+    // 말풍선으로 그려버린다(그 순간 제안이 고객에게 보이는 것과 같아진다). 상담원 화면은
+    // 고객 메시지가 도착할 때 초안을 따로 조회한다.
+  })().catch((e) => console.error('상담원 도우미 초안 생성 실패:', e.message));
+}
 
 function defaultReservedDateTime() {
   const now = kstNow();
@@ -314,6 +343,13 @@ router.post('/:sessionId/user-message', asyncHandler(async (req, res) => {
   );
   await db.run(`UPDATE chat_sessions SET updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') WHERE id = ?`, [session.id]);
   broadcastMessageAsync(session.id, inserted);
+
+  // 상담원 응대 중이면 봇이 답하지는 않되(기존 규칙 유지) 답변 초안은 만들어 둔다 —
+  // 상담원 화면에 "채택 대기"로 뜨고, 승인해야 고객에게 나간다.
+  if (session.status === 'agent_active') {
+    createSuggestionAsync(session, text, inserted.id);
+  }
+
   res.json({ status: session.status });
 }));
 
@@ -641,18 +677,33 @@ router.get('/sessions/:id/intake-order', requireRole('admin'), asyncHandler(asyn
     if (defaultMethod) paymentMethodId = String(defaultMethod.id);
   }
 
+  // 상담원 도우미가 만든 초안에 접수 슬롯이 있으면 그걸로 접수장을 채운다 — 상담원이 고객
+  // 메시지를 눈으로 읽고 폼에 옮겨 적던 일이 사라진다. 다만 draft_json(챗봇이 대화로 되물어
+  // 확정한 값)이 있으면 그쪽이 우선이다 — 사람이 확인한 값이 파싱 추정치보다 낫다.
+  const pendingSuggestion = await db.get(
+    `SELECT intake_json FROM chat_suggestions
+     WHERE session_id = ? AND status = 'pending' AND intake_json IS NOT NULL
+     ORDER BY id DESC LIMIT 1`,
+    [req.params.id]
+  ).catch(() => null);
+  let parsedFields = {};
+  if (pendingSuggestion && pendingSuggestion.intake_json) {
+    try { parsedFields = JSON.parse(pendingSuggestion.intake_json) || {}; } catch (e) { parsedFields = {}; }
+  }
+  const pick = (key) => fields[key] || parsedFields[key] || '';
+
   const intakeOrder = {
-    reserved_date: fields.reserved_date || defaults.reserved_date,
-    reserved_time: fields.reserved_time || defaults.reserved_time,
-    origin_address: fields.origin_address || '',
+    reserved_date: pick('reserved_date') || defaults.reserved_date,
+    reserved_time: pick('reserved_time') || defaults.reserved_time,
+    origin_address: pick('origin_address'),
     origin_detail_address: fields.origin_detail_address || '',
-    origin_contact: fields.origin_contact || '',
-    vehicle_number: fields.vehicle_number || '',
-    vehicle_type: fields.vehicle_type || '',
-    destination_address: fields.destination_address || '',
+    origin_contact: pick('origin_contact'),
+    vehicle_number: pick('vehicle_number'),
+    vehicle_type: pick('vehicle_type'),
+    destination_address: pick('destination_address'),
     destination_detail_address: fields.destination_detail_address || '',
-    destination_contact: fields.destination_contact || '',
-    memo_customer: fields.memo_customer || '',
+    destination_contact: pick('destination_contact'),
+    memo_customer: pick('memo_customer'),
     branch_id: branchId,
     requester_group_id: requesterGroupId,
     payment_method_id: paymentMethodId,
@@ -665,6 +716,8 @@ router.get('/sessions/:id/intake-order', requireRole('admin'), asyncHandler(asyn
     sessionId: Number(session.id),
     sessionStatus: session.status,
     intakeOrder,
+    // 폼에는 첫 차량만 들어간다 — 여러 대가 온 경우 상담원이 알 수 있게 함께 내려준다.
+    extraVehicles: parsedFields.extra_vehicles || [],
   });
 }));
 
@@ -845,6 +898,34 @@ router.post('/sessions/:id/assign', requireRole('admin'), asyncHandler(async (re
   res.redirect('/chat/sessions/' + req.params.id + '?notice=' + encodeURIComponent('담당 상담원이 지정되었습니다.'));
 }));
 
+// 상담원 답장 발송 — 직접 입력(/reply)과 봇 초안 승인(/suggestions/:sid/approve)이 같은 경로를
+// 타야 한다. 갈라지면 카카오 발신·상태 전이·읽음 처리가 경로마다 달라져 운영 중 원인 추적이
+// 불가능해진다.
+async function deliverAgentReply(session, agentUser, text) {
+  const inserted = await db.get(
+    `INSERT INTO chat_messages (session_id, sender, message) VALUES (?, 'agent', ?) RETURNING *`,
+    [session.id, text]
+  );
+  await db.run(
+    `UPDATE chat_sessions SET status = 'agent_active', assigned_agent_id = ?,
+     updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') WHERE id = ?`,
+    [agentUser.id, session.id]
+  );
+  broadcastMessageAsync(session.id, inserted);
+  broadcastSessionListChangedAsync();
+
+  // 카카오 출신 세션(routes/kakaoConsult.js)이면 상담원 답장을 중계서버로도 내보낸다
+  // (계획서 5.5 — 지금까지는 웹 위젯에만 반영되고 끝났다).
+  if (session.channel === 'kakao') {
+    const sendResult = await kakaoConsult.sendMessage(session, text);
+    if (!sendResult.ok) {
+      logIntegrationErrorAsync({ source: 'kakao', operation: 'send', refType: 'chat_session', refId: Number(session.id),
+        message: sendResult.error, context: { label: '상담원 답장', textHead: String(text).slice(0, 60) } });
+    }
+  }
+  return inserted;
+}
+
 router.post('/sessions/:id/reply', requireRole('admin'), asyncHandler(async (req, res) => {
   const existing = await db.get(
     `SELECT id, assigned_agent_id, channel, kakao_service_key, kakao_user_key, kakao_event_key
@@ -870,35 +951,83 @@ router.post('/sessions/:id/reply', requireRole('admin'), asyncHandler(async (req
     return res.redirect('/chat/sessions/' + req.params.id);
   }
 
-  let inserted = null;
-  if (text) {
-    inserted = await db.get(
-      `INSERT INTO chat_messages (session_id, sender, message) VALUES (?, 'agent', ?) RETURNING *`,
-      [req.params.id, text]
-    );
-    await db.run(
-      `UPDATE chat_sessions SET status = 'agent_active', assigned_agent_id = ?,
-       updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') WHERE id = ?`,
-      [u.id, req.params.id]
-    );
-    broadcastMessageAsync(req.params.id, inserted);
-    broadcastSessionListChangedAsync();
-
-    // 카카오 출신 세션(routes/kakaoConsult.js)이면 상담원 답장을 중계서버로도 내보낸다
-    // (계획서 5.5 — 지금까지는 웹 위젯에만 반영되고 끝났다).
-    if (existing.channel === 'kakao') {
-      const sendResult = await kakaoConsult.sendMessage(existing, text);
-      if (!sendResult.ok) {
-        logIntegrationErrorAsync({ source: 'kakao', operation: 'send', refType: 'chat_session', refId: Number(req.params.id),
-          message: sendResult.error, context: { label: '상담원 답장', textHead: String(text).slice(0, 60) } });
-      }
-    }
-  }
+  const inserted = await deliverAgentReply(existing, u, text);
 
   if (wantsJson) {
     return res.json({ ok: true, message: inserted || null, status: 'agent_active' });
   }
   res.redirect('/chat/sessions/' + req.params.id);
+}));
+
+// ---------------- 상담원 도우미: 답변 채택 대기 ----------------
+// 대기 중인 초안 조회 — 상담원 화면이 고객 메시지를 받을 때마다 호출한다.
+router.get('/sessions/:id/suggestion', requireRole('admin'), asyncHandler(async (req, res) => {
+  const row = await db.get(
+    `SELECT * FROM chat_suggestions WHERE session_id = ? AND status = 'pending'
+     ORDER BY id DESC LIMIT 1`,
+    [req.params.id]
+  ).catch(() => null);
+  if (!row) return res.json({ suggestion: null });
+
+  let intake = null;
+  try { intake = row.intake_json ? JSON.parse(row.intake_json) : null; } catch (e) { intake = null; }
+  res.json({
+    suggestion: {
+      id: row.id,
+      kind: row.kind,
+      text: row.suggested_text,
+      userMessageId: row.user_message_id,
+      intake,
+      createdAt: row.created_at,
+    },
+  });
+}));
+
+// 승인 — 상담원이 초안을 그대로 또는 고쳐서 보낸다. 실제 발송은 직접 답장과 같은 경로를 탄다.
+router.post('/sessions/:id/suggestions/:sid/approve', requireRole('admin'), asyncHandler(async (req, res) => {
+  const session = await db.get(
+    `SELECT id, assigned_agent_id, channel, kakao_service_key, kakao_user_key, kakao_event_key
+     FROM chat_sessions WHERE id = ?`,
+    [req.params.id]
+  );
+  if (!session) return res.status(404).json({ error: '세션을 찾을 수 없습니다.' });
+
+  const u = req.session.user;
+  if (session.assigned_agent_id && Number(session.assigned_agent_id) !== Number(u.id)) {
+    return res.status(409).json({ error: '이미 다른 상담원이 담당 중인 세션입니다.' });
+  }
+
+  const suggestion = await db.get(
+    'SELECT * FROM chat_suggestions WHERE id = ? AND session_id = ?',
+    [req.params.sid, req.params.id]
+  );
+  if (!suggestion) return res.status(404).json({ error: '초안을 찾을 수 없습니다.' });
+  if (suggestion.status !== 'pending') return res.status(409).json({ error: '이미 처리된 초안입니다.' });
+
+  // 상담원이 고친 문구가 오면 그걸 보낸다. 원문(suggested_text)은 그대로 남겨 두어
+  // "얼마나 고쳐 쓰는가"를 나중에 측정할 수 있게 한다.
+  const text = String(req.body.text || suggestion.suggested_text || '').trim();
+  if (!text) return res.status(400).json({ error: '보낼 내용이 비어 있습니다.' });
+
+  const inserted = await deliverAgentReply(session, u, text);
+  await db.run(
+    `UPDATE chat_suggestions SET status = 'approved', sent_text = ?, decided_by = ?,
+     decided_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') WHERE id = ?`,
+    [text, u.id, suggestion.id]
+  );
+
+  res.json({ ok: true, message: inserted, edited: text !== suggestion.suggested_text });
+}));
+
+// 무시 — 쓰지 않은 초안도 남겨 둔다(채택률 측정용).
+router.post('/sessions/:id/suggestions/:sid/dismiss', requireRole('admin'), asyncHandler(async (req, res) => {
+  const { rowCount } = await db.run(
+    `UPDATE chat_suggestions SET status = 'dismissed', decided_by = ?,
+     decided_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS')
+     WHERE id = ? AND session_id = ? AND status = 'pending'`,
+    [req.session.user.id, req.params.sid, req.params.id]
+  );
+  res.json({ ok: rowCount > 0 });
 }));
 
 router.post('/sessions/:id/close', requireRole('admin'), asyncHandler(async (req, res) => {

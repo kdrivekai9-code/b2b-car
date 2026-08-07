@@ -55,6 +55,44 @@ function MessageBubble({ message }) {
   );
 }
 
+// 봇이 만든 답변 초안 — 고객 말풍선 바로 아래에, 아직 나가지 않았다는 게 한눈에 보이는
+// 점선 말풍선으로 그린다. 상담원이 그대로 승인하거나 고쳐서 승인할 수 있고, 무시해도 된다.
+// 여기 있는 동안에는 고객에게 전혀 보이지 않는다(chat_messages에 저장되지 않는다).
+const SUGGESTION_KIND_LABEL = { intake: '접수 내용 파싱', faq: '지식베이스 답변' };
+
+function SuggestionBubble({ suggestion, text, onChange, onApprove, onDismiss, disabled }) {
+  return (
+    <div className="ai-chat-item ai-agent" data-suggestion-id={suggestion.id}>
+      <div
+        className="ai-chat-bubble ai-agent"
+        style={{ borderStyle: 'dashed', opacity: 0.95, width: '100%', maxWidth: '100%' }}
+      >
+        <span className="bubble-label">
+          AI 초안 · 채택 대기
+          {SUGGESTION_KIND_LABEL[suggestion.kind] ? ` (${SUGGESTION_KIND_LABEL[suggestion.kind]})` : ''}
+        </span>
+        <textarea
+          value={text}
+          onChange={(e) => onChange(e.target.value)}
+          rows={Math.min(10, Math.max(3, String(text || '').split('\n').length + 1))}
+          disabled={disabled}
+          style={{ width: '100%', marginTop: 6, fontSize: 13, lineHeight: 1.6, resize: 'vertical' }}
+          aria-label="AI 답변 초안 (수정 가능)"
+        />
+        <div style={{ display: 'flex', gap: 6, marginTop: 8, justifyContent: 'flex-end' }}>
+          <button className="btn small secondary" type="button" onClick={onDismiss} disabled={disabled}>무시</button>
+          <button className="btn small" type="button" onClick={onApprove} disabled={disabled || !String(text || '').trim()}>
+            승인하고 전송
+          </button>
+        </div>
+      </div>
+      <div className="bubble-footer">
+        <div className="bubble-time">아직 고객에게 보내지 않았습니다</div>
+      </div>
+    </div>
+  );
+}
+
 export async function fetchJson(url, options) {
   const res = await fetch(url, {
     ...options,
@@ -94,10 +132,15 @@ export default function SessionViewer({
   const [replyError, setReplyError] = useState('');
   const [isSendingReply, setIsSendingReply] = useState(false);
   const [isAssigningSelf, setIsAssigningSelf] = useState(false);
+  // 상담원 도우미 — 봇이 만든 답변 초안(채택 대기). 승인해야 고객에게 나간다.
+  const [suggestion, setSuggestion] = useState(null);
+  const [suggestionText, setSuggestionText] = useState('');
+  const [isDecidingSuggestion, setIsDecidingSuggestion] = useState(false);
 
   const knownMessageIdsRef = useRef(new Set());
   const oldestMessageIdRef = useRef(null);
   const streamRef = useRef(null);
+  const suggestionTimerRef = useRef(null);
   const messagesElRef = useRef(null);
   const sessionIdRef = useRef(null);
   const onNewMessageRef = useRef(onNewMessage);
@@ -130,8 +173,51 @@ export default function SessionViewer({
       // 마무리 패널(IntakeMiniForm)은 세션 선택 시 한 번만 불러오므로 새 메시지가 올 때마다
       // 호출부(CardBoard)가 draft를 다시 조회해 반영할 수 있도록 신호를 준다.
       if (payload.sender === 'user' && onNewMessageRef.current) onNewMessageRef.current(payload);
+      // 고객 메시지가 오면 봇 초안이 만들어졌는지 확인한다. 초안은 메시지 스트림으로 보내지
+      // 않는다 — 스트림에 실으면 대화 말풍선으로 그려져 고객에게 보이는 것과 같아진다.
+      if (payload.sender === 'user') scheduleSuggestionFetch(id);
     };
     streamRef.current = es;
+  }
+
+  // 초안 생성은 응답 뒤 비동기라 메시지보다 조금 늦게 준비된다 — 짧게 기다렸다 조회한다.
+  function scheduleSuggestionFetch(id) {
+    clearTimeout(suggestionTimerRef.current);
+    suggestionTimerRef.current = setTimeout(() => fetchSuggestion(id), 900);
+  }
+
+  function fetchSuggestion(id) {
+    if (!id) return;
+    fetchJson(`/chat/sessions/${id}/suggestion`)
+      .then((data) => {
+        if (sessionIdRef.current !== id) return; // 그 사이 다른 세션으로 전환됨
+        const next = (data && data.suggestion) || null;
+        setSuggestion(next);
+        setSuggestionText(next ? next.text : '');
+      })
+      .catch(() => {});
+  }
+
+  function decideSuggestion(action) {
+    if (!sessionId || !suggestion || isDecidingSuggestion) return;
+    setIsDecidingSuggestion(true);
+    setReplyError('');
+    const url = `/chat/sessions/${sessionId}/suggestions/${suggestion.id}/${action}`;
+    const options = action === 'approve'
+      ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: suggestionText.trim() }) }
+      : { method: 'POST' };
+    fetchJson(url, options)
+      .then((data) => {
+        setSuggestion(null);
+        setSuggestionText('');
+        if (action === 'approve') {
+          const agentId = currentUser ? String(currentUser.id) : '';
+          const agentName = currentUser ? currentUser.name : '';
+          if (onStatusChange) onStatusChange({ status: 'agent_active', assignedAgentId: agentId, assignedAgentName: agentName });
+        }
+      })
+      .catch((err) => setReplyError(err.message || '초안 처리에 실패했습니다.'))
+      .finally(() => setIsDecidingSuggestion(false));
   }
 
   function fetchOlder(id, beforeId) {
@@ -150,6 +236,8 @@ export default function SessionViewer({
     setMessagesLoading(true);
     setReplyError('');
     setReplyText('');
+    setSuggestion(null);
+    setSuggestionText('');
 
     let cancelled = false;
 
@@ -190,11 +278,14 @@ export default function SessionViewer({
       setMessagesLoading(false);
       requestAnimationFrame(scrollToBottom);
       openStream(sessionId);
+      // 화면을 열었을 때 이미 대기 중인 초안이 있을 수 있다(상담원이 자리를 비운 사이 도착).
+      fetchSuggestion(sessionId);
     }
     load();
 
     return () => {
       cancelled = true;
+      clearTimeout(suggestionTimerRef.current);
       if (streamRef.current) { streamRef.current.close(); streamRef.current = null; }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -278,6 +369,16 @@ export default function SessionViewer({
           {sessionId && messagesLoading && <div className="empty">대화를 불러오는 중...</div>}
           {sessionId && !messagesLoading && messages.length === 0 && <div className="empty">아직 메시지가 없습니다.</div>}
           {sessionId && messages.map((m) => <MessageBubble key={m.id} message={m} />)}
+          {sessionId && suggestion && !isClosed && (
+            <SuggestionBubble
+              suggestion={suggestion}
+              text={suggestionText}
+              onChange={setSuggestionText}
+              onApprove={() => decideSuggestion('approve')}
+              onDismiss={() => decideSuggestion('dismiss')}
+              disabled={isDecidingSuggestion || hasOtherAssignee}
+            />
+          )}
         </div>
       </div>
 

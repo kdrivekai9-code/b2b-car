@@ -208,9 +208,122 @@ function isQuestionBubble(msg) {
           return;
         }
         appendMessage(payload);
+        // 고객 메시지가 오면 봇 초안(채택 대기)이 만들어졌는지 확인한다. 초안은 메시지
+        // 스트림으로 오지 않는다 — 스트림에 실으면 대화 말풍선으로 그려져 고객에게 보이는 것과
+        // 같아지기 때문이다(서버에서도 chat_messages에 저장하지 않는다).
+        if (payload && payload.sender === 'user') scheduleSuggestionFetch();
       } catch (err) { /* noop */ }
     };
   }
+
+  // ---------------- 상담원 도우미: 답변 채택 대기 ----------------
+  var suggestionTimer = null;
+  var suggestionEl = null;
+  var currentSuggestion = null;
+
+  function scheduleSuggestionFetch() {
+    clearTimeout(suggestionTimer);
+    suggestionTimer = setTimeout(fetchSuggestion, 900); // 초안 생성은 응답 뒤 비동기라 조금 늦다
+  }
+
+  function clearSuggestion() {
+    if (suggestionEl && suggestionEl.parentNode) suggestionEl.parentNode.removeChild(suggestionEl);
+    suggestionEl = null;
+    currentSuggestion = null;
+  }
+
+  function fetchSuggestion() {
+    fetch('/chat/sessions/<%= session.id %>/suggestion')
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        var s = data && data.suggestion;
+        if (!s) { clearSuggestion(); return; }
+        if (currentSuggestion && currentSuggestion.id === s.id) return; // 이미 떠 있음(편집 중일 수 있다)
+        renderSuggestion(s);
+      })
+      .catch(function () {});
+  }
+
+  function decideSuggestion(action, textarea, buttons) {
+    if (!currentSuggestion) return;
+    buttons.forEach(function (b) { b.disabled = true; });
+    var body = action === 'approve'
+      ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: textarea.value.trim() }) }
+      : { method: 'POST', headers: { 'X-Requested-With': 'fetch' } };
+    fetch('/chat/sessions/<%= session.id %>/suggestions/' + currentSuggestion.id + '/' + action, body)
+      .then(function (res) { return res.json().then(function (d) { if (!res.ok) throw new Error(d.error || '처리 실패'); return d; }); })
+      .then(function () { clearSuggestion(); catchUp(); })
+      .catch(function (err) {
+        setReplyError(err.message || '초안 처리에 실패했습니다.');
+        buttons.forEach(function (b) { b.disabled = false; });
+      });
+  }
+
+  var SUGGESTION_KIND_LABEL = { intake: '접수 내용 파싱', faq: '지식베이스 답변' };
+
+  function renderSuggestion(s) {
+    clearSuggestion();
+    currentSuggestion = s;
+
+    var item = document.createElement('div');
+    item.className = 'ai-chat-item ai-agent';
+
+    var bubble = document.createElement('div');
+    bubble.className = 'ai-chat-bubble ai-agent';
+    bubble.style.borderStyle = 'dashed';
+    bubble.style.width = '100%';
+    bubble.style.maxWidth = '100%';
+
+    var label = document.createElement('span');
+    label.className = 'bubble-label';
+    label.textContent = 'AI 초안 · 채택 대기' + (SUGGESTION_KIND_LABEL[s.kind] ? ' (' + SUGGESTION_KIND_LABEL[s.kind] + ')' : '');
+    bubble.appendChild(label);
+
+    var textarea = document.createElement('textarea');
+    textarea.value = s.text || '';
+    textarea.rows = Math.min(10, Math.max(3, String(s.text || '').split('\n').length + 1));
+    textarea.setAttribute('aria-label', 'AI 답변 초안 (수정 가능)');
+    textarea.style.width = '100%';
+    textarea.style.marginTop = '6px';
+    textarea.style.fontSize = '13px';
+    textarea.style.lineHeight = '1.6';
+    textarea.style.resize = 'vertical';
+    bubble.appendChild(textarea);
+
+    var actions = document.createElement('div');
+    actions.style.cssText = 'display:flex;gap:6px;margin-top:8px;justify-content:flex-end;';
+    var dismissBtn = document.createElement('button');
+    dismissBtn.type = 'button';
+    dismissBtn.className = 'btn small secondary';
+    dismissBtn.textContent = '무시';
+    var approveBtn = document.createElement('button');
+    approveBtn.type = 'button';
+    approveBtn.className = 'btn small';
+    approveBtn.textContent = '승인하고 전송';
+    var buttons = [dismissBtn, approveBtn];
+    dismissBtn.addEventListener('click', function () { decideSuggestion('dismiss', textarea, buttons); });
+    approveBtn.addEventListener('click', function () { decideSuggestion('approve', textarea, buttons); });
+    actions.appendChild(dismissBtn);
+    actions.appendChild(approveBtn);
+    bubble.appendChild(actions);
+
+    item.appendChild(bubble);
+
+    var footer = document.createElement('div');
+    footer.className = 'bubble-footer';
+    var note = document.createElement('div');
+    note.className = 'bubble-time';
+    note.textContent = '아직 고객에게 보내지 않았습니다';
+    footer.appendChild(note);
+    item.appendChild(footer);
+
+    suggestionEl = item;
+    messagesEl.appendChild(item);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  // 화면을 열었을 때 이미 대기 중인 초안이 있을 수 있다(상담원이 자리를 비운 사이 도착).
+  fetchSuggestion();
 
   var replyForm = document.getElementById('agentReplyForm');
   var replyText = document.getElementById('agentReplyText');
