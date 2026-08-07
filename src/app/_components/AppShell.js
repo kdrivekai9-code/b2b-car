@@ -64,6 +64,7 @@ export default function AppShell({ currentUser, activePath, topNav = false, chil
               <a href="/chat/sessions" className={isActive(activePath, '/chat/sessions') ? 'active' : ''} title="상담 관리"><span className="nav-icon">🎧</span><span className="nav-label">상담 관리</span><span className="nav-badge" id="agentCallBadge" style={{ display: 'none' }}></span></a>
               <a href="/chat/guide" className={isActive(activePath, '/chat/guide') ? 'active' : ''} title="상담 운영안"><span className="nav-icon">🧭</span><span className="nav-label">상담 운영안</span></a>
               <a href="/access-logs" className={isActive(activePath, '/access-logs') ? 'active' : ''} title="접속기록"><span className="nav-icon">🛡️</span><span className="nav-label">접속기록</span></a>
+              <a href="/kakao-accounts" className={isActive(activePath, '/kakao-accounts') ? 'active' : ''} title="카카오 채널 매핑"><span className="nav-icon">💬</span><span className="nav-label">카카오 채널</span></a>
               <a href="/integration-errors" className={isActive(activePath, '/integration-errors') ? 'active' : ''} title="연동 오류"><span className="nav-icon">🔌</span><span className="nav-label">연동 오류</span></a>
               <a href="/settings" className={isActive(activePath, '/settings') ? 'active' : ''} title="설정"><span className="nav-icon">⚙️</span><span className="nav-label">설정</span></a>
             </>

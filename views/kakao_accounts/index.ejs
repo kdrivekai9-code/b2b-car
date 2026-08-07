@@ -1,0 +1,179 @@
+<%- include('../partials/header') %>
+<div class="page-head-row">
+  <div>
+    <h1 class="page-title">카카오 채널 매핑</h1>
+    <p class="page-sub">카카오 상담톡 고객은 b2b-car 계정이 없어서, 어느 계정·지사로 접수하고 조회할지 채널 단위로 지정합니다. 등록되지 않은 채널은 상담원 연결로만 처리됩니다.</p>
+  </div>
+  <div class="page-head-actions">
+    <a class="btn secondary" href="/chat/sessions">상담 관리로</a>
+    <button class="btn" type="submit" form="kakaoAccountForm">등록</button>
+  </div>
+</div>
+
+<% if (error) { %><div class="error-msg"><%= error %></div><% } %>
+<% if (notice) { %><div class="success-msg"><%= notice %></div><% } %>
+
+<div class="card">
+  <form id="kakaoAccountForm" method="POST" action="/kakao-accounts">
+    <div class="section-title">🔗 채널 매핑 등록</div>
+
+    <div class="row">
+      <div class="field">
+        <label>service_key (발신프로필 키)</label>
+        <input type="text" name="service_key" placeholder="예: b85d2bbb95062ed615…">
+        <p class="page-sub">이 값만 넣으면 <strong>채널 전체</strong>에 적용됩니다.</p>
+      </div>
+      <div class="field">
+        <label>고객 키 (external_user_key)</label>
+        <input type="text" name="external_user_key" placeholder="특정 고객만 지정할 때">
+        <p class="page-sub">함께 넣으면 <strong>그 고객만</strong> 적용되고, 채널 전체 매핑보다 우선합니다.</p>
+      </div>
+    </div>
+
+    <% if (recentSessions.length) { %>
+      <div class="field full">
+        <label>최근 카카오 세션에서 키 가져오기</label>
+        <select id="sessionKeyPicker">
+          <option value="">직접 입력</option>
+          <% recentSessions.forEach(function (s) { %>
+            <option value="<%= s.kakao_service_key %>|<%= s.external_user_key || '' %>">
+              #<%= s.id %> · <%= s.created_at %> · service=<%= String(s.kakao_service_key).slice(0, 12) %>… user=<%= s.external_user_key || '-' %>
+            </option>
+          <% }) %>
+        </select>
+        <p class="page-sub">고르면 위 두 칸이 자동으로 채워집니다.</p>
+      </div>
+    <% } %>
+
+    <div class="row">
+      <div class="field">
+        <label>담당 계정 <span class="req">*</span></label>
+        <select name="user_id" required>
+          <option value="">계정을 선택하세요</option>
+          <% users.forEach(function (u) { %>
+            <option value="<%= u.id %>"><%= u.name %> (<%= u.login_id %>)</option>
+          <% }) %>
+        </select>
+        <p class="page-sub">이 계정 이름으로 오더가 등록되고, 주문 조회 권한도 이 계정 기준입니다.</p>
+      </div>
+      <div class="field">
+        <label>지사 <span class="req">*</span></label>
+        <select name="branch_id" required>
+          <option value="">지사를 선택하세요</option>
+          <% branches.forEach(function (b) { %>
+            <option value="<%= b.id %>"><%= b.name %></option>
+          <% }) %>
+        </select>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="field">
+        <label>요청 법인</label>
+        <select name="requester_group_id">
+          <option value="">지정 안 함</option>
+          <% groups.forEach(function (g) { %>
+            <option value="<%= g.id %>" data-branch="<%= g.branch_id %>"><%= g.name %></option>
+          <% }) %>
+        </select>
+        <p class="page-sub">선택한 지사에 속한 법인만 등록됩니다.</p>
+      </div>
+      <div class="field">
+        <label>결제수단</label>
+        <select name="payment_method_id">
+          <option value="">지정 안 함</option>
+          <% paymentMethods.forEach(function (p) { %>
+            <option value="<%= p.id %>"><%= p.name %></option>
+          <% }) %>
+        </select>
+      </div>
+    </div>
+
+    <div class="field full">
+      <label class="checkline">
+        <input type="checkbox" name="auto_register" value="1">
+        접수 폼을 받으면 <strong>오더를 자동 등록</strong>한다
+      </label>
+      <p class="page-sub">새 채널은 꺼둔 채로 파싱 결과만 관찰하다가 켜는 순서를 권장합니다. 꺼져 있어도 <strong>주문 조회·변경·취소(배차 도우미)는 동작</strong>합니다.</p>
+    </div>
+  </form>
+</div>
+
+<div class="card" style="margin-top:16px">
+  <div class="section-title">📋 등록된 채널 매핑</div>
+  <% if (!accounts.length) { %>
+    <p class="page-sub" style="margin:0">등록된 매핑이 없습니다. 지금은 모든 카카오 문의가 상담원 연결로 넘어갑니다.</p>
+  <% } else { %>
+    <table class="table">
+      <thead>
+        <tr>
+          <th>대상</th><th>담당 계정</th><th>지사 / 법인</th><th>결제수단</th>
+          <th style="width:90px">자동등록</th><th style="width:80px">사용</th><th style="width:150px">등록일시</th><th style="width:70px"></th>
+        </tr>
+      </thead>
+      <tbody>
+        <% accounts.forEach(function (a) { %>
+          <tr>
+            <td>
+              <% if (a.label) { %><strong><%= a.label %></strong><br><% } %>
+              <span class="page-sub">
+                <% if (a.external_user_key) { %>고객 <%= a.external_user_key %><br><% } %>
+                service <%= a.service_key ? String(a.service_key).slice(0, 16) + '…' : '(전체)' %>
+              </span>
+            </td>
+            <td><%= a.user_name || '(삭제된 계정)' %><br><span class="page-sub"><%= a.login_id || '' %></span></td>
+            <td><%= a.branch_name || '-' %><br><span class="page-sub"><%= a.group_name || '법인 미지정' %></span></td>
+            <td><%= a.payment_name || '-' %></td>
+            <td>
+              <form method="POST" action="/kakao-accounts/<%= a.id %>/toggle-auto">
+                <button class="btn small <%= a.auto_register ? '' : 'secondary' %>" type="submit"><%= a.auto_register ? '켜짐' : '꺼짐' %></button>
+              </form>
+            </td>
+            <td>
+              <form method="POST" action="/kakao-accounts/<%= a.id %>/toggle-enabled">
+                <button class="btn small <%= a.enabled ? '' : 'secondary' %>" type="submit"><%= a.enabled ? '사용' : '중지' %></button>
+              </form>
+            </td>
+            <td><%= a.created_at %></td>
+            <td>
+              <form method="POST" action="/kakao-accounts/<%= a.id %>/delete"
+                    onsubmit="return confirm('이 채널 매핑을 삭제할까요? 해당 채널은 상담원 연결로만 처리됩니다.')">
+                <button class="btn small danger" type="submit">삭제</button>
+              </form>
+            </td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  <% } %>
+</div>
+
+<script>
+  // 최근 세션에서 키 자동 채우기
+  (function () {
+    var picker = document.getElementById('sessionKeyPicker');
+    if (!picker) return;
+    picker.addEventListener('change', function () {
+      var parts = String(this.value || '').split('|');
+      var form = document.getElementById('kakaoAccountForm');
+      form.service_key.value = parts[0] || '';
+      form.external_user_key.value = parts[1] || '';
+    });
+  })();
+
+  // 지사를 고르면 그 지사 법인만 남긴다 — 서버에서도 같은 검증을 한다.
+  (function () {
+    var form = document.getElementById('kakaoAccountForm');
+    var branchSelect = form.branch_id;
+    var groupSelect = form.requester_group_id;
+    var allGroups = Array.prototype.slice.call(groupSelect.options);
+    branchSelect.addEventListener('change', function () {
+      var branchId = this.value;
+      groupSelect.innerHTML = '';
+      allGroups.forEach(function (opt) {
+        if (!opt.value || !branchId || opt.dataset.branch === branchId) groupSelect.appendChild(opt.cloneNode(true));
+      });
+    });
+  })();
+</script>
+<%- include('../partials/footer') %>
