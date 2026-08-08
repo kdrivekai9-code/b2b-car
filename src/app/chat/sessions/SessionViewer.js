@@ -256,6 +256,11 @@ export default function SessionViewer({
         setMessages((prev) => prev.map((m) => (m.sender === targetSender ? { ...m, [field]: new Date().toISOString() } : m)));
         return;
       }
+      // type이 붙은 payload는 말풍선이 아니라 제어 신호다(예: 고객 창에 보내는
+      // bot_handover_replay). 상담원 화면에서는 그릴 게 없으므로 흘려보낸다.
+      if (payload.type) {
+        return;
+      }
       if (!payload.id || knownMessageIdsRef.current.has(payload.id)) return;
       knownMessageIdsRef.current.add(payload.id);
       setMessages((prev) => [...prev, payload]);

@@ -3415,7 +3415,18 @@
     var es = new EventSource('/chat/' + sessionId + '/stream');
     es.onopen = catchUpMessages;
     es.onmessage = function (e) {
-      try { applyIncomingMessages([JSON.parse(e.data)]); } catch (err) { /* noop */ }
+      try {
+        var payload = JSON.parse(e.data);
+        // 상담원 무응답으로 봇에게 응대가 넘어왔다 — 고객이 이미 한 말을 다시 시키지 않고
+        // 이 창이 그 문장으로 봇 경로를 한 번 태운다.
+        if (payload && payload.type === 'bot_handover_replay') {
+          if (payload.text) extractAndProcess(payload.text);
+          return;
+        }
+        // 그 밖의 제어성 payload(read_receipt 등)는 말풍선이 아니므로 무시한다.
+        if (payload && payload.type) return;
+        applyIncomingMessages([payload]);
+      } catch (err) { /* noop */ }
     };
   }
 
@@ -3423,20 +3434,27 @@
     sendBtn.disabled = !textarea.value.trim() || sendBtn.dataset.processing === '1';
   }
 
-  function extractAndProcess() {
-    var text = textarea.value.trim();
-    if (!text || sendBtn.disabled) return;
+  // replayText가 오면 "이미 화면과 DB에 남아 있는 고객 발화를 봇이 다시 처리"하는 흐름이다
+  // (상담원 무응답으로 봇에게 응대가 넘어온 경우 — 서버가 SSE로 신호를 준다).
+  // 이때는 말풍선을 새로 그리거나 다시 저장하면 안 된다. 중복으로 남는다.
+  function extractAndProcess(replayText) {
+    var isReplay = typeof replayText === 'string' && replayText.trim();
+    var text = isReplay ? String(replayText).trim() : textarea.value.trim();
+    if (!text) return;
+    if (!isReplay && sendBtn.disabled) return;
     resetTurnBotRow();
-    addBubble(text, 'user');
+    if (!isReplay) {
+      addBubble(text, 'user');
+      textarea.value = '';
+      clearGuidePlaceholder();
+      collapseChatInput();
+    }
     touchAiActivity(true);
-    textarea.value = '';
-    clearGuidePlaceholder();
-    collapseChatInput();
     sendBtn.dataset.processing = '1';
     updateSendButton();
 
     ensureSession()
-      .then(function () { return logUserMessage(text); })
+      .then(function () { return isReplay ? 'bot' : logUserMessage(text); })
       .then(function (status) {
         if (status === 'needs_agent' || status === 'agent_active') {
           // 상담원 세션에서는 봇을 다시 호출하지 않는다. 상담원이 이미 응대 중(agent_active)이면

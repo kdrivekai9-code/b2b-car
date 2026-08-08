@@ -329,6 +329,8 @@ export default function AiIntakeClient({
   const lastSeenIdRef = useRef(maxMessageId(restoredMessages));
   const seenIdsRef = useRef(createSeenIdSet(restoredMessages));
   const streamRef = useRef(null);
+  // 봇 인계 재처리 신호를 받을 때 쓸 최신 handleSend(아래에서 매 렌더 갱신).
+  const handleSendRef = useRef(null);
   const troubleStreakRef = useRef(0);
   const vehicleNumberFailCountRef = useRef(0);
 
@@ -1027,29 +1029,43 @@ export default function AiIntakeClient({
     });
   }
 
-  async function handleSend() {
-    const text = input.trim();
-    if (!text || isSending) return;
+  // replayText가 오면 "이미 화면과 DB에 남아 있는 고객 발화를 봇이 다시 처리"하는 흐름이다
+  // (상담원 무응답으로 봇에게 응대가 넘어온 경우 — 서버가 SSE로 신호를 준다).
+  // 말풍선을 새로 그리거나 다시 저장하지 않는다. 중복으로 남는다.
+  // 버튼 onClick으로 들어오는 이벤트 객체와 구분해야 해서 문자열인지 확인한다.
+  // useEffect의 SSE 콜백은 sessionId에만 의존해 다시 붙으므로, 그대로 handleSend를 참조하면
+  // 초기 렌더의 phase를 캡처한 낡은 함수를 부르게 된다. 매 렌더 최신 것을 ref에 걸어둔다.
+  handleSendRef.current = handleSend;
+
+  async function handleSend(replayText) {
+    const isReplay = typeof replayText === 'string' && !!replayText.trim();
+    const text = isReplay ? replayText.trim() : input.trim();
+    if (!text) return;
+    if (!isReplay && isSending) return;
 
     setIsSending(true);
     setError('');
-    setInput('');
-    pushMessage('user', text, null, { pending: true });
+    if (!isReplay) {
+      setInput('');
+      pushMessage('user', text, null, { pending: true });
+    }
 
     try {
       let sid = await ensureSession();
 
-      if (status === 'needs_agent' && looksLikeNewOrderWhileWaiting(text)) {
-        await closeCurrentSessionForNewOrder(sid);
-        sid = await createFreshSession();
-      }
+      if (!isReplay) {
+        if (status === 'needs_agent' && looksLikeNewOrderWhileWaiting(text)) {
+          await closeCurrentSessionForNewOrder(sid);
+          sid = await createFreshSession();
+        }
 
-      await fetchJson('/chat/' + sid + '/user-message', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
-      });
-      await catchUpMessages(sid);
+        await fetchJson('/chat/' + sid + '/user-message', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text }),
+        });
+        await catchUpMessages(sid);
+      }
 
       if (phase === 'offer_agent') {
         await handleOfferAgentPhase(sid, text);
@@ -1097,6 +1113,14 @@ export default function AiIntakeClient({
         if (disposed) return;
         try {
           const payload = JSON.parse(event.data);
+          // 상담원 무응답으로 봇에게 응대가 넘어왔다 — 고객이 이미 한 말을 다시 시키지 않고
+          // 이 창이 그 문장으로 봇 경로를 한 번 태운다.
+          if (payload && payload.type === 'bot_handover_replay') {
+            if (payload.text && handleSendRef.current) handleSendRef.current(payload.text);
+            return;
+          }
+          // 그 밖의 제어성 payload(read_receipt 등)는 말풍선이 아니므로 무시한다.
+          if (payload && payload.type) return;
           mergeServerMessages([payload]);
         } catch (err) {
           // ignore malformed payload

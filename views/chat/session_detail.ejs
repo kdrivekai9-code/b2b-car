@@ -244,6 +244,9 @@ function isQuestionBubble(msg) {
           markBubblesRead(payload.reader === 'agent' ? 'ai-user' : 'ai-agent');
           return;
         }
+        // type이 붙은 payload는 말풍선이 아니라 제어 신호다(예: 고객 창에 보내는
+        // bot_handover_replay). 상담원 화면에서는 그릴 게 없으므로 흘려보낸다.
+        if (payload && payload.type) return;
         appendMessage(payload);
         // 고객 메시지가 오면 봇 초안(채택 대기)이 만들어졌는지 확인한다. 초안은 메시지
         // 스트림으로 오지 않는다 — 스트림에 실으면 대화 말풍선으로 그려져 고객에게 보이는 것과

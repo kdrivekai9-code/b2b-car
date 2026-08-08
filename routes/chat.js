@@ -1190,6 +1190,13 @@ async function autoSendPendingSuggestions() {
         // 태워 실제 접수까지 진행한다. 카카오만 서버에서 봇 턴을 돌릴 수 있다(웹 위젯은 브라우저가
         // /orders/ai-parse를 호출하는 구조라 서버가 대신 실행할 수 없다).
         const userText = String(row.user_text || '').trim();
+        if (userText && session.channel !== 'kakao') {
+          // 웹 위젯은 대화 진행을 브라우저 FSM이 들고 있어 서버가 봇 턴을 대신 돌릴 수 없다.
+          // 대신 "이 문장을 다시 처리하라"는 신호만 SSE로 보내 열려 있는 창이 평소 쓰는 봇
+          // 경로를 스스로 한 번 태우게 한다. 창이 닫혀 있으면 신호를 못 받지만, 그 경우
+          // 세션이 이미 bot 상태라 다음 메시지부터 봇이 정상 응대한다.
+          broadcastMessageAsync(row.session_id, { type: 'bot_handover_replay', text: userText });
+        }
         if (userText && session.channel === 'kakao') {
           try {
             // 지연 require — server.js가 두 라우터를 모두 로드하므로 최상단에서 서로 참조하면
