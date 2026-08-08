@@ -343,6 +343,9 @@ router.post('/:sessionId/user-message', asyncHandler(async (req, res) => {
   );
   await db.run(`UPDATE chat_sessions SET updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') WHERE id = ?`, [session.id]);
   broadcastMessageAsync(session.id, inserted);
+  // 상담관리 목록이 열려 있으면 스스로 다시 그리도록 신호를 준다 — 세션을 선택해 열어두지
+  // 않은 상담원에게는 이 신호가 새 메시지를 알아채는 유일한 경로다.
+  broadcastSessionListChangedAsync({ event: 'new_message', sessionId: session.id });
 
   // 상담원 응대 중이면 봇이 답하지는 않되(기존 규칙 유지) 답변 초안은 만들어 둔다 —
   // 상담원 화면에 "채택 대기"로 뜨고, 승인해야 고객에게 나간다.

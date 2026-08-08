@@ -233,12 +233,25 @@ async function createAgentSuggestion(session, text) {
   }
 }
 
+// 메시지를 저장할 때 세션의 updated_at도 함께 올린다.
+//
+// 이게 빠져 있어서 실제로 문제가 났다 — 상담관리 목록은 updated_at 내림차순으로 정렬하는데,
+// 카카오 고객이 새 메시지를 보내도 세션 시각이 옛날 그대로라 목록에서 위로 올라오지 않았다.
+// 메시지는 DB에 멀쩡히 저장돼 있고 세션을 열어보면 보이는데, 목록만 보고 있는 상담원 눈에는
+// 아무 일도 없는 것처럼 보인다(세션 676: 마지막 메시지 08:57, 세션 시각 00:28).
+// 목록 갱신 신호까지 함께 보내야 열려 있는 상담관리 화면이 스스로 다시 그린다.
 async function insertMessage(sessionId, sender, message) {
   const inserted = await db.get(
     `INSERT INTO chat_messages (session_id, sender, message) VALUES (?, ?, ?) RETURNING *`,
     [sessionId, sender, message]
   );
+  await db.run(
+    `UPDATE chat_sessions SET updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS')
+     WHERE id = ?`,
+    [sessionId]
+  ).catch((e) => console.error('카카오 상담톡 세션 시각 갱신 실패:', e.message));
   broadcastMessageAsync(sessionId, inserted);
+  if (sender === 'user') broadcastSessionListChangedAsync({ event: 'new_message', sessionId });
   return inserted;
 }
 
@@ -701,6 +714,27 @@ async function processBotTurn(session, text) {
   return handleOrderIntake(session, text, classified.requestedFeature);
 }
 
+// 텍스트가 없는 수신 메시지를 대화 이력에 남길 때 쓸 표시. 섹션 타입(image/file/…)을 그대로
+// 보여줘 상담원이 "무엇이 왔는지"는 알 수 있게 한다. 첨부 URL은 남기지 않는다 — 카카오 첨부
+// 링크는 만료되고, 원본 보관은 사진 파이프라인(기획서 Phase 3)에서 따로 다룰 문제다.
+const NON_TEXT_LABEL = { image: '사진', file: '파일', video: '동영상', audio: '음성' };
+
+function describeNonTextMessage(body) {
+  const types = [];
+  if (body && Array.isArray(body.chapters)) {
+    body.chapters.forEach((chapter) => {
+      (chapter.sections || []).forEach((section) => {
+        if (section && section.type && section.type !== 'text') types.push(section.type);
+      });
+    });
+  }
+  if (!types.length) return '[내용 없는 메시지]';
+  const counts = types.reduce((acc, t) => { acc[t] = (acc[t] || 0) + 1; return acc; }, {});
+  return '[' + Object.entries(counts)
+    .map(([t, n]) => `${NON_TEXT_LABEL[t] || t}${n > 1 ? ' ' + n + '건' : ''}`)
+    .join(', ') + ']';
+}
+
 // ---------------- 고객 메시지 수신 ----------------
 router.post(['/receive', '/receive/message', '/receive/message-simple'], asyncHandler(async (req, res) => {
   const keys = kakaoConsult.extractKeys(req);
@@ -723,26 +757,30 @@ router.post(['/receive', '/receive/message', '/receive/message-simple'], asyncHa
   keys.userKey = keys.userKey || session.kakao_user_key;
   keys.serviceKey = keys.serviceKey || session.kakao_service_key;
 
-  // 재전송(같은 일련번호)이면 통째로 무시한다 — 이미 저장·처리한 메시지다.
+  // 중복 판정은 **봇이 두 번 답하지 않게 하는 용도로만** 쓴다. 고객 발화 자체는 무슨 일이
+  // 있어도 대화 이력에 남는다(사용자 확정 규칙) — 상담원 화면에서 사라지는 것이 중복 말풍선이
+  // 하나 더 보이는 것보다 훨씬 나쁘다. 중복이면 "안 보이는" 게 아니라 "두 번 보이는" 쪽으로 튄다.
   const serialNumber = req.body && req.body.meta && req.body.meta.serialNumber;
-  if (text && await isResentEvent(serialNumber)) {
-    console.warn(`카카오 상담톡 재전송 무시 (session=${session.id}, serial=${serialNumber})`);
-    return res.json({ code: 200, message: 'SUCCESS' });
-  }
-  // 일련번호가 없으면 확신할 수 없다 — 메시지는 저장하고 봇의 중복 응답만 막는다.
-  const repeated = text && !serialNumber ? await looksRepeated(keys.userKey, text) : false;
+  const resent = text ? await isResentEvent(serialNumber) : false;
+  const repeated = resent || (text && !serialNumber ? await looksRepeated(keys.userKey, text) : false);
+  if (resent) console.warn(`카카오 상담톡 재전송 감지 — 저장은 하고 봇 응답만 생략 (session=${session.id}, serial=${serialNumber})`);
 
   await logEvent({ sessionId: session.id, eventType: 'message', keys, body: req.body, headers, handled: true });
 
   if (!text) {
-    // 이미지/파일만 온 경우 — 1차 범위가 텍스트라 처리는 못 하지만 무반응으로 두지 않는다.
+    // 사진·파일만 온 경우. 지금까지는 고객 발화를 아예 저장하지 않고 봇 안내만 남겼다 —
+    // 상담원 화면에는 봇이 혼자 "사진은 확인이 어려워요"라고 말한 것처럼 보이고, 고객이 무언가
+    // 보냈다는 사실 자체가 사라진다. 내용을 못 읽더라도 "보냈다"는 것은 반드시 남겨야 한다.
+    const placeholder = describeNonTextMessage(req.body);
+    await insertMessage(session.id, 'user', placeholder);
+
     if (kakaoConsult.hasNonTextSection(req.body) && session.status !== 'agent_active') {
       const notice = '사진·파일은 아직 확인이 어려워요. 상담원을 연결해드릴게요.';
       await insertMessage(session.id, 'bot', notice);
       res.json({ code: 200, message: 'SUCCESS' });
       runAfterResponse((async () => {
         await sendAndLog(session, notice, '비텍스트 메시지 안내');
-        await markNeedsAgent(session, null, '사진/파일 문의');
+        await markNeedsAgent(session, placeholder, '사진/파일 문의');
       })(), 'non_text');
       return;
     }
