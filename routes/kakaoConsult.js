@@ -16,7 +16,7 @@ const { searchKnowledgeBase } = require('../lib/knowledgeSearch');
 const { parseKakaoIntake, buildMissingQuestion, normalizePhone, normalizePlate } = require('../lib/kakaoIntakeParser');
 const { findIntakeAccount, resolveIntakeContext, findAccountByPhone, linkUserKeyToAccount, createOrdersFromIntake } = require('../lib/kakaoIntakeService');
 const { getSmalltalkMessage } = require('../lib/smallTalk');
-const { buildSuggestion, buildFareSuggestion } = require('../lib/agentAssist');
+const { buildSuggestion, buildFareSuggestion, buildHoursSuggestion } = require('../lib/agentAssist');
 const { runDispatchAgent } = require('../lib/mcpDispatchAgent');
 const { notify } = require('../lib/push');
 const { broadcastMessage, broadcastSessionListChanged } = require('../lib/realtimeChat');
@@ -345,6 +345,19 @@ async function tryAnswerFare(session, text, extracted) {
   return true;
 }
 
+// 운영시간 문의도 지식검색보다 먼저 실제 설정(operating_hours)을 읽어 답한다 — 요금과 같은
+// 이유다. KB에 문구를 넣어두면 지사가 시간을 바꿔도 조용히 낡는데, 오더 등록은 이미 이 테이블로
+// 접수를 막고 있어서 안내와 실제 동작이 어긋나면 그게 더 나쁘다.
+async function tryAnswerOperatingHours(session, text) {
+  const account = await resolveIntakeContext(session).catch(() => null);
+  const draft = await buildHoursSuggestion(text, { branchId: account && account.branch_id })
+    .catch((e) => { console.error('카카오 운영시간 안내 실패:', e.message); return null; });
+  if (!draft) return false;
+  await insertMessage(session.id, 'bot', draft.text);
+  await sendAndLog(session, draft.text, '운영시간 안내');
+  return true;
+}
+
 async function tryAnswerFaq(session, text) {
   // 문턱은 웹 위젯(routes/orders.js)과 같은 0.7로 맞춘다 — 0.6일 때 "안녕하세요"에
   // "공지사항 메뉴는…" 같은 무관한 항목이 매칭돼 실제로 잘못된 답이 발송됐다.
@@ -666,6 +679,11 @@ async function processBotTurn(session, text) {
   // 정형 접수 폼이 이 채널 트래픽의 절반이라 LLM 분류보다 먼저 태운다.
   const handled = await tryHandleIntake(session, text);
   if (handled) return;
+
+  // 운영시간 문의도 LLM 분류보다 먼저 처리한다. 분기 안(intent==='faq')에 두었더니 실측에서
+  // "고객센터 운영시간은?"이 unsupported로 분류돼 그대로 상담원 연결로 넘어갔다 — 답을 우리가
+  // 데이터로 갖고 있는 질문에 사람을 부르는 건 낭비다. 키워드 판정이라 LLM 호출도 아낀다.
+  if (await tryAnswerOperatingHours(session, text)) return;
 
   // 자유 문장 되묻기 중이면 앞선 원문에 이어붙여 분류한다 — 폼 파서는 블록 형식만 매칭하므로
   // 보충 답변("지금요")만 넘기면 앞서 받은 출발지·도착지·차량이 사라져 처음부터 다시 묻게 된다.
