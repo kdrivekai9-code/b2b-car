@@ -13,7 +13,7 @@ const asyncHandler = require('../middleware/asyncHandler');
 const kakaoConsult = require('../lib/kakaoConsult');
 const { classifyAndExtract } = require('../lib/hybridChat');
 const { searchKnowledgeBase } = require('../lib/knowledgeSearch');
-const { parseKakaoIntake, buildMissingQuestion, normalizePhone, normalizePlate } = require('../lib/kakaoIntakeParser');
+const { parseKakaoIntake, buildParsedFromClassified, buildMissingQuestion, normalizePhone, normalizePlate } = require('../lib/kakaoIntakeParser');
 const { findIntakeAccount, resolveIntakeContext, findAccountByPhone, linkUserKeyToAccount, createOrdersFromIntake } = require('../lib/kakaoIntakeService');
 const { getSmalltalkMessage } = require('../lib/smallTalk');
 const { buildSuggestion, buildFareSuggestion, buildHoursSuggestion } = require('../lib/agentAssist');
@@ -427,51 +427,6 @@ async function handleUnsupported(session, text, requestedFeature) {
   await markNeedsAgent(session, text, requestedFeature);
 }
 
-// Gemini가 뽑은 필드를 블록 폼 파서(parseKakaoIntake)와 같은 모양으로 맞춘다 — 그래야
-// completeIntake가 두 경로를 구분하지 않고 처리한다.
-//
-// 날짜/시간은 여기서 계산하지 않는다. hybridChat이 이미 "오늘=YYYY-MM-DD" 기준을 프롬프트로
-// 받아 계산한 값(reservationDate/reservationTime)을 주므로 그대로 옮기고, 둘 다 없을 때만
-// resolveReservation의 즉시 처리에 맡긴다(when.immediate).
-function buildParsedFromClassified(classified, text) {
-  // 정규화는 폼 파서 것을 그대로 쓴다 — 같은 원문이 경로에 따라 다른 값으로 등록되면 안 된다.
-  const plates = [classified.originVehicleNumber, classified.waypointVehicleNumber]
-    .map((v) => normalizePlate(v)).filter(Boolean);
-  const vehicleType = String(classified.vehicleType || '').trim() || null;
-  // 차량 1대 = 오더 1건(파서와 동일). 차종은 첫 대에만 붙인다 — 두 번째 차량의 차종은 별도 필드가 없다.
-  const vehicles = plates.map((plate, i) => ({ plate, type: i === 0 ? vehicleType : null }));
-
-  const date = String(classified.reservationDate || '').trim() || null;
-  const time = String(classified.reservationTime || '').trim() || null;
-  // 날짜/시간은 여기서 계산하지 않는다. hybridChat이 "오늘=YYYY-MM-DD"를 프롬프트로 받아 이미
-  // 계산한 값을 주므로 그대로 옮기고, 둘 다 없으면 즉시 요청으로 둔다(resolveReservation이 처리).
-  const when = (date || time)
-    ? { immediate: false, date, time, dateRolled: false, raw: [date, time].filter(Boolean).join(' ') }
-    : { immediate: true, date: null, time: null, dateRolled: false, raw: null };
-
-  const join = (a, b) => [a, b].map((v) => String(v || '').trim()).filter(Boolean).join(' ') || null;
-  const originAddress = join(classified.originAddress, classified.originAddressDetail);
-  const destAddress = join(classified.destinationAddress, classified.destinationAddressDetail);
-
-  const missing = [];
-  if (!originAddress) missing.push('origin_address');
-  if (!destAddress) missing.push('destination_address');
-  if (!vehicles.length) missing.push('vehicle_number');
-
-  return {
-    matched: true,
-    complete: missing.length === 0,
-    missing,
-    // normalizePhone은 빈 값에 ''를 돌려주지만 폼 파서는 null을 넣는다 — 저장값을 맞춘다.
-    origin: { address: originAddress, contact: normalizePhone(classified.originContact) || null },
-    destination: { address: destAddress, contact: normalizePhone(classified.destinationContact) || null },
-    when,
-    vehicles,
-    options: {},
-    memo: String(classified.memo || '').trim() || null,
-    raw: text,
-  };
-}
 
 // 신규 오더 접수 — 상담톡 로그 2년치를 분석해보니 고객 메시지의 47%가 `[출발지]…[도착지]`
 // 형식의 정형 폼이고, 그 폼은 룰 파서만으로 98%가 필수 4종(출발지·도착지·차량번호·일시)까지
@@ -1014,5 +969,3 @@ router.post('/receive/personal_info', asyncHandler(async (req, res) => {
 }));
 
 module.exports = router;
-// 자유 문장 필드 매핑은 폼 파서와 결과가 같아야 해서 따로 검증한다(scripts/kakao-freetext-intake-test.js).
-module.exports.buildParsedFromClassified = buildParsedFromClassified;
