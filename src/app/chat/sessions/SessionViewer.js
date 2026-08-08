@@ -206,7 +206,6 @@ export default function SessionViewer({
   const [suggestion, setSuggestion] = useState(null);
   const [suggestionText, setSuggestionText] = useState('');
   const [isDecidingSuggestion, setIsDecidingSuggestion] = useState(false);
-  suggestionRef.current = suggestion;
   // 빠른 답변(상용구) — 열 때 한 번만 불러온다. {상담원} 치환은 서버에서 끝내서 내려온다.
   const [quickReplies, setQuickReplies] = useState(null);
   const [quickRepliesOpen, setQuickRepliesOpen] = useState(false);
@@ -217,7 +216,9 @@ export default function SessionViewer({
   const streamRef = useRef(null);
   const suggestionTimersRef = useRef([]);
   // 폴링·타이머 콜백이 최신 초안 상태를 봐야 해서 ref로도 들고 있는다.
+  // 대입은 반드시 선언 뒤에 와야 한다 — 상태 선언부에 붙였다가 TDZ 오류로 화면이 통째로 죽었다.
   const suggestionRef = useRef(null);
+  suggestionRef.current = suggestion;
   const lastTypingSentRef = useRef(0);
   const pollTimerRef = useRef(null);
   const messagesElRef = useRef(null);
