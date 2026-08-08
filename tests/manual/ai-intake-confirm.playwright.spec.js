@@ -12,6 +12,8 @@ const { test, expect } = require('@playwright/test');
 const { loginWithRetry, openAiIntakeWithRetry } = require('./helpers/auth');
 
 const BASE_URL = process.env.E2E_BASE_URL || 'http://127.0.0.1:3000';
+// 경기지사(callmaner_enabled=false). 등록 경로만 보려는 테스트라 콜마너로 나가지 않는 지사를 쓴다.
+const NON_CALLMANER_BRANCH_ID = Number(process.env.E2E_NON_CALLMANER_BRANCH_ID || 2);
 const LOGIN_ID = process.env.E2E_LOGIN_ID || 'admin';
 const PASSWORD = process.env.E2E_PASSWORD || 'Admin!2345';
 
@@ -255,6 +257,68 @@ test.describe('AI intake 확인 단계', () => {
     const summary = (await botBubbles(page)).find((t) => t.includes('▪ 출발지:')) || '';
     expect(summary).toContain('서버가-만든-요약');
     expect(summary).toContain('서버 응답 표식');
+  });
+
+  // 확인 단계의 나머지 절반 — "네"는 실제로 오더를 만든다. 연결된 콜마너는 알파 서비스라
+  // 실배차로 이어지지 않는다(사용자 확인, 2026-08-09). 이 실행이 만든 오더는 끝에서 취소한다.
+  test('확인 질문에 "네"라고 답하면 오더가 실제로 등록된다', async ({ page }) => {
+    await setupMocks(page);
+    await login(page);
+    await openAiIntake(page);
+
+    // 등록에 성공하면 화면이 /orders로 넘어간다 — 넘어가면 말풍선을 읽을 수 없으므로 이동만 막는다.
+    // POST(등록)는 그대로 통과시킨다.
+    await page.route('**/orders', async (route) => {
+      const request = route.request();
+      if (request.method() === 'GET' && request.resourceType() === 'document') return route.abort();
+      return route.continue();
+    });
+
+    // 등록 직전 관문(submit-precheck)은 지사의 운영시간을 본다. 실제로 태우면 테스트를 돌린
+    // 시각에 따라 결과가 갈린다 — 운영시간 정책은 이 테스트가 볼 대상이 아니라서 통과시킨다.
+    // 뒤이어 나가는 POST /orders는 모킹하지 않는다. 오더는 실제로 만들어진다.
+    await page.route('**/orders/ai-intake/submit-precheck', async (route) => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+    });
+
+    // qa_test_bot은 admin이라 소속 지사가 없다 — 실사용 admin과 마찬가지로 접수장에서 직접 고른다.
+    // 콜마너 미사용 지사를 고른다. 알파 서비스라 태워도 되지만 이 테스트가 보려는 건 등록 경로다.
+    await page.selectOption('#branch_id', String(NON_CALLMANER_BRANCH_ID));
+
+    await reachConfirmStep(page);
+
+    // 등록 성공 안내는 화면에 뜨는 동시에 대화 이력으로도 저장된다. 화면 쪽은 곧바로 이어지는
+    // /orders 이동 때문에 읽을 틈이 들쭉날쭉해서(실행 컨텍스트가 파괴된다), 저장 요청으로 본다 —
+    // 어차피 상담관리에서 나중에 다시 볼 때 남아 있어야 하는 것도 이쪽이다.
+    const okNotice = page.waitForRequest(
+      (req) => req.method() === 'POST'
+        && /\/chat\/\d+\/bot-message/.test(req.url())
+        && String(req.postData() || '').includes('정상적으로 등록되었습니다'),
+      { timeout: 30000 },
+    );
+    const submitted = page.waitForResponse(
+      (res) => res.request().method() === 'POST' && /\/orders(?:\?|$)/.test(res.url()),
+      { timeout: 30000 },
+    );
+    await sendChat(page, '네', { waitForParse: false });
+
+    const response = await submitted;
+    expect(response.status()).toBeLessThan(400);
+    const body = await response.json();
+    expect(body.orderId).toBeTruthy();
+    expect(body.oid).toBeTruthy();
+
+    try {
+      const noticeRequest = await okNotice;
+      expect(String(noticeRequest.postData() || '')).toContain(body.oid);
+    } finally {
+      // 만든 오더만 지목해 취소한다 — 이 DB는 프로덕션과 같아서, 목록에서 골라 지우면
+      // 남의 오더가 날아간다. 등록 검증이 실패했더라도 정리는 반드시 한다.
+      const cancelled = await page.request.post(`${BASE_URL}/orders/${body.orderId}/status`, {
+        form: { status: '취소', note: 'e2e 확인 단계 테스트 정리' },
+      });
+      expect(cancelled.status()).toBeLessThan(400);
+    }
   });
 
   test('요약 요청이 실패해도 접수가 멈추지 않는다', async ({ page }) => {
