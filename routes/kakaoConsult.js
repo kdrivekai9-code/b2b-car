@@ -208,7 +208,9 @@ async function findOrCreateKakaoSession(keys) {
 // 같은 규칙이다. 초안이 없다고 상담이 막히면 안 되므로 실패는 로그만 남긴다.
 async function createAgentSuggestion(session, text) {
   try {
-    const suggestion = await buildSuggestion(text);
+    // 요금 초안은 지사 요금표로 계산한다 — 매핑이 없으면 기본 요금표 지사로 폴백한다.
+    const account = await resolveIntakeContext(session).catch(() => null);
+    const suggestion = await buildSuggestion(text, { branchId: account && account.branch_id });
     if (!suggestion) return;
 
     const lastUserMessage = await db.get(
