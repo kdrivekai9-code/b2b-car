@@ -16,6 +16,8 @@ const { searchKnowledgeBase } = require('../lib/knowledgeSearch');
 const { parseKakaoIntake, buildParsedFromClassified, buildMissingQuestion, normalizePhone, normalizePlate } = require('../lib/kakaoIntakeParser');
 const { findIntakeAccount, resolveIntakeContext, findAccountByPhone, linkUserKeyToAccount, createOrdersFromIntake } = require('../lib/kakaoIntakeService');
 const { previewIntakeAddresses } = require('../lib/intakeAddressPreview');
+// 주소 후보 검색·선택은 웹 접수 화면과 같은 규칙을 쓴다(lib/addressCandidates.js).
+const { searchAddressCandidates, needsDisambiguation, buildCandidateListText, matchCandidateChoice, getClarifyText } = require('../lib/addressCandidates');
 const { getSmalltalkMessage } = require('../lib/smallTalk');
 const { buildSuggestion, buildFareSuggestion, buildHoursSuggestion } = require('../lib/agentAssist');
 const { runDispatchAgent } = require('../lib/mcpDispatchAgent');
@@ -514,6 +516,80 @@ async function clearPendingIntake(session) {
     .catch((e) => console.error('접수 슬롯 정리 실패:', e.message));
 }
 
+// 주소 후보를 고르는 중인 상태를 저장한다 — 웹 접수 화면의 choose_address_candidate 단계와
+// 같은 역할이다. 카카오는 화면이 없어 번호로 받는다.
+async function savePendingAddressChoice(session, state) {
+  await db.run(
+    `UPDATE chat_sessions SET intake_slots_json = ?,
+     intake_updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') WHERE id = ?`,
+    [JSON.stringify({ ...state, savedAt: Date.now() }), session.id]
+  ).catch((e) => console.error('주소 선택 대기 저장 실패:', e.message));
+}
+
+// 접수 진행 전에 주소가 여러 곳으로 검색되면 물어본다. 물어봤으면 true를 돌려준다.
+//
+// 왜 묻는가: 예전에는 서버가 첫 검색 결과를 조용히 확정했다. "사당역"처럼 짧게 말하면 엉뚱한
+// 지점으로 등록돼도 기사가 출발한 뒤에야 드러나는데, 그 비용이 한 번 더 묻는 것보다 훨씬 크다.
+// 웹 접수 화면은 원래 이렇게 후보를 보여주고 고르게 하고 있었다 — 같은 규칙을 카카오에도 쓴다.
+async function askAddressChoiceIfNeeded(session, parsed, mergedRaw) {
+  const sides = [
+    { key: 'origin', label: '출발지', query: parsed.origin && parsed.origin.address },
+    { key: 'destination', label: '도착지', query: parsed.destination && parsed.destination.address },
+  ];
+
+  for (const side of sides) {
+    if (!side.query) continue;
+    const candidates = await searchAddressCandidates(side.query).catch((e) => {
+      console.error('주소 후보 검색 실패(자동 확정으로 진행):', e.message);
+      return [];
+    });
+    if (!needsDisambiguation(side.query, candidates)) continue;
+
+    await savePendingAddressChoice(session, {
+      raw: mergedRaw,
+      awaiting: 'address_choice',
+      side: side.key,
+      sideLabel: side.label,
+      query: side.query,
+      candidates,
+    });
+    await botSay(session, buildCandidateListText(side.label, candidates), '주소 후보 확인');
+    return true;
+  }
+  return false;
+}
+
+// 고객이 번호로 답했을 때 — 고른 주소를 원문에 반영해 접수를 이어간다.
+// 못 알아들으면 한 번 더 안내한다(웹의 getDisambiguationClarifyText와 같은 역할).
+async function handleAddressChoiceReply(session, pending, text) {
+  const chosen = matchCandidateChoice(text, pending.candidates || []);
+  if (!chosen) {
+    await botSay(session, getClarifyText(pending.candidates), '주소 후보 재안내');
+    return true;
+  }
+
+  // 고른 주소로 원문의 해당 주소를 바꿔 다시 파싱한다 — 슬롯을 따로 들고 다니지 않고 원문을
+  // 고치는 이유는, 이후 경로(폼 파서 → 접수)가 전부 원문 기준으로 동작하기 때문이다.
+  const replacedRaw = String(pending.raw || '').replace(pending.query, chosen.address);
+  const parsed = parseKakaoIntake(replacedRaw);
+  if (!parsed.matched) {
+    await clearPendingIntake(session);
+    await botSay(session, '접수 내용을 다시 알려주시겠어요?', '주소 선택 후 재파싱 실패');
+    return true;
+  }
+
+  await botSay(session, `${pending.sideLabel}를 "${chosen.label}"로 확인했습니다.`, '주소 확정 안내');
+  if (!parsed.complete) {
+    await savePendingIntake(session, replacedRaw);
+    const addressPreview = await previewIntakeAddresses(parsed);
+    await botSay(session, buildMissingQuestion(parsed.missing, parsed, addressPreview), '접수 되묻기');
+    return true;
+  }
+  // 남은 쪽(도착지)도 애매하면 이어서 묻는다.
+  if (await askAddressChoiceIfNeeded(session, parsed, replacedRaw)) return true;
+  return completeIntake(session, parsed, replacedRaw);
+}
+
 // 접수 폼 처리 — 처리했으면 true, 폼이 아니면 false를 돌려준다(호출부가 다음 경로로 넘긴다).
 async function tryHandleIntake(session, text) {
   let parsed = parseKakaoIntake(text);
@@ -523,6 +599,8 @@ async function tryHandleIntake(session, text) {
     // 폼이 아니면, 진행 중인 접수의 보충 정보일 수 있다 — 있으면 원문에 이어붙여 재파싱한다.
     const pending = await loadPendingIntake(session);
     if (!pending) return false;
+    // 주소 후보를 고르는 중이면 이 답변은 보충 정보가 아니라 "번호 선택"이다.
+    if (pending.awaiting === 'address_choice') return handleAddressChoiceReply(session, pending, text);
     mergedRaw = pending.raw + '\n' + text;
     parsed = parseKakaoIntake(mergedRaw);
     if (!parsed.matched) return false;
@@ -535,6 +613,9 @@ async function tryHandleIntake(session, text) {
     await botSay(session, question, '접수 되묻기');
     return true;
   }
+
+  // 필수 항목이 다 있어도 주소가 애매하면 먼저 확정한다 — 등록 후에 고치는 비용이 더 크다.
+  if (await askAddressChoiceIfNeeded(session, parsed, mergedRaw)) return true;
 
   // 접수는 반드시 동의가 있어야 한다(사용자 확정 규칙) — 동의가 오면 저장해둔 내용으로 이어간다.
   return completeIntake(session, parsed, mergedRaw);
@@ -705,10 +786,13 @@ async function processBotTurn(session, text) {
       // 모르는 단계에서 써버리면 정작 등록 직전에 다시 띄울 수 없다. completeIntake가 요구한다.
       await savePendingIntake(session, intakeText);
       const addressPreview = await previewIntakeAddresses(parsed);
-    const question = buildMissingQuestion(parsed.missing, parsed, addressPreview);
+      const question = buildMissingQuestion(parsed.missing, parsed, addressPreview);
       await botSay(session, question, '접수 되묻기(자유문장)');
       return;
     }
+    // 자유 문장도 주소가 애매하면 먼저 확정한다 — 폼 경로와 같은 규칙이다. 여기가 빠져 있으면
+    // "판교역에서 사당역까지"처럼 지명만 말한 접수가 첫 검색 결과로 조용히 등록된다.
+    if (await askAddressChoiceIfNeeded(session, parsed, intakeText)) return;
     await completeIntake(session, parsed, intakeText);
     return;
   }
