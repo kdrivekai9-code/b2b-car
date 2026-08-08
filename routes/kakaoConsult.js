@@ -15,6 +15,7 @@ const { classifyAndExtract } = require('../lib/hybridChat');
 const { searchKnowledgeBase } = require('../lib/knowledgeSearch');
 const { parseKakaoIntake, buildParsedFromClassified, buildMissingQuestion, normalizePhone, normalizePlate } = require('../lib/kakaoIntakeParser');
 const { findIntakeAccount, resolveIntakeContext, findAccountByPhone, linkUserKeyToAccount, createOrdersFromIntake } = require('../lib/kakaoIntakeService');
+const { previewIntakeAddresses } = require('../lib/intakeAddressPreview');
 const { getSmalltalkMessage } = require('../lib/smallTalk');
 const { buildSuggestion, buildFareSuggestion, buildHoursSuggestion } = require('../lib/agentAssist');
 const { runDispatchAgent } = require('../lib/mcpDispatchAgent');
@@ -318,6 +319,28 @@ async function requestPersonalInfo(session) {
   return result;
 }
 
+// 상담원 무응답으로 봇이 응대를 이어받은 구간(chat_sessions.bot_handover_at)에서는 봇 응답에
+// 표시를 붙인다. 고객은 방금까지 사람과 이야기하고 있었기 때문에, 표시가 없으면 답하는 주체가
+// 바뀐 것을 모른 채 계속 대화하게 된다 — 사람에게 하려던 부탁을 봇에게 하게 되는 상황이 나쁘다.
+// 처음부터 봇 세션이었던 경우(bot_handover_at 없음)에는 붙이지 않는다.
+const HANDOVER_MARK = '(AI 자동응답)';
+
+function withHandoverMark(session, text) {
+  if (!session || !session.bot_handover_at) return text;
+  const body = String(text || '');
+  if (!body.trim() || body.includes(HANDOVER_MARK)) return body;
+  return `${body}\n${HANDOVER_MARK}`;
+}
+
+// 봇이 고객에게 말하는 단 하나의 통로 — 대화 이력 저장과 카카오 발신을 같은 문구로 함께 한다.
+// 예전에는 호출부마다 insertMessage + sendAndLog를 나란히 불렀는데, 그러면 인계 표시 같은
+// 가공을 한쪽에만 적용해 저장된 내용과 실제 발송 내용이 갈라지기 쉽다.
+async function botSay(session, text, label) {
+  const marked = withHandoverMark(session, text);
+  await insertMessage(session.id, 'bot', marked);
+  return sendAndLog(session, marked, label);
+}
+
 // 발신 실패는 고객에게는 보이지 않으니(카카오로 안 나간 채 우리 쪽 로그만 남는 상태) 반드시
 // 로그를 남겨야 운영 중 "봇이 답장을 안 한다"는 문의가 왔을 때 원인을 바로 알 수 있다.
 async function sendAndLog(session, text, label) {
@@ -340,8 +363,7 @@ async function tryAnswerFare(session, text, extracted) {
   const draft = await buildFareSuggestion(text, { branchId: account && account.branch_id, extracted })
     .catch((e) => { console.error('카카오 요금 안내 실패:', e.message); return null; });
   if (!draft) return false;
-  await insertMessage(session.id, 'bot', draft.text);
-  await sendAndLog(session, draft.text, '요금 안내');
+  await botSay(session, draft.text, '요금 안내');
   return true;
 }
 
@@ -353,8 +375,7 @@ async function tryAnswerOperatingHours(session, text) {
   const draft = await buildHoursSuggestion(text, { branchId: account && account.branch_id })
     .catch((e) => { console.error('카카오 운영시간 안내 실패:', e.message); return null; });
   if (!draft) return false;
-  await insertMessage(session.id, 'bot', draft.text);
-  await sendAndLog(session, draft.text, '운영시간 안내');
+  await botSay(session, draft.text, '운영시간 안내');
   return true;
 }
 
@@ -366,8 +387,7 @@ async function tryAnswerFaq(session, text) {
     return [];
   });
   if (matches.length) {
-    await insertMessage(session.id, 'bot', matches[0].answer);
-    await sendAndLog(session, matches[0].answer, 'FAQ 응답');
+    await botSay(session, matches[0].answer, 'FAQ 응답');
     return true;
   }
   return false;
@@ -400,8 +420,7 @@ async function ensurePersonalConsent(session, purpose, rawText) {
       const notice = purpose === 'agent'
         ? '상담원 연결을 위해 성함과 연락처가 필요합니다. 위 동의 버튼을 눌러주시면 바로 연결해드릴게요.'
         : '접수를 위해 성함과 연락처가 필요합니다. 위 동의 버튼을 눌러주시면 바로 접수해드릴게요.';
-      await insertMessage(session.id, 'bot', notice);
-      await sendAndLog(session, notice, '개인정보 동의 요청 안내');
+      await botSay(session, notice, '개인정보 동의 요청 안내');
       return false;
     }
     // 말풍선 발송 자체가 실패했으면 고객을 붙잡아둘 이유가 없다.
@@ -411,8 +430,7 @@ async function ensurePersonalConsent(session, purpose, rawText) {
   if (consentPending(session)) {
     await savePendingConsentPurpose(session, purpose, rawText);
     const notice = '앞서 보내드린 개인정보 제공 동의 버튼을 눌러주시면 이어서 도와드리겠습니다.';
-    await insertMessage(session.id, 'bot', notice);
-    await sendAndLog(session, notice, '개인정보 동의 재안내');
+    await botSay(session, notice, '개인정보 동의 재안내');
     return false;
   }
 
@@ -422,8 +440,7 @@ async function ensurePersonalConsent(session, purpose, rawText) {
 
 async function handleUnsupported(session, text, requestedFeature) {
   const notice = '상담원을 연결해드릴게요. 잠시만 기다려주세요.';
-  await insertMessage(session.id, 'bot', notice);
-  await sendAndLog(session, notice, '상담원 연결 안내');
+  await botSay(session, notice, '상담원 연결 안내');
   await markNeedsAgent(session, text, requestedFeature);
 }
 
@@ -434,8 +451,7 @@ async function handleUnsupported(session, text, requestedFeature) {
 // 더 빠르고, 더 정확하고, 실패하면 그때 LLM 경로로 떨어뜨리면 되기 때문이다.
 async function handleOrderIntake(session, text, requestedFeature) {
   const notice = '신규 접수는 상담원 연결을 통해 도와드릴게요. 잠시만 기다려주세요.';
-  await insertMessage(session.id, 'bot', notice);
-  await sendAndLog(session, notice, '신규접수 안내');
+  await botSay(session, notice, '신규접수 안내');
   await markNeedsAgent(session, text, requestedFeature || '신규 오더 접수');
 }
 
@@ -514,9 +530,9 @@ async function tryHandleIntake(session, text) {
 
   if (!parsed.complete) {
     await savePendingIntake(session, mergedRaw);
-    const question = buildMissingQuestion(parsed.missing, parsed);
-    await insertMessage(session.id, 'bot', question);
-    await sendAndLog(session, question, '접수 되묻기');
+    const addressPreview = await previewIntakeAddresses(parsed);
+    const question = buildMissingQuestion(parsed.missing, parsed, addressPreview);
+    await botSay(session, question, '접수 되묻기');
     return true;
   }
 
@@ -567,8 +583,7 @@ async function completeIntake(session, parsed, rawText) {
     return true;
   }
 
-  await insertMessage(session.id, 'bot', result.message);
-  await sendAndLog(session, result.message, '접수 확인');
+  await botSay(session, result.message, '접수 확인');
   broadcastSessionListChangedAsync({ event: 'order_created', sessionId: session.id });
   return true;
 }
@@ -610,8 +625,7 @@ async function tryDispatchAgent(session, text) {
   const result = await runDispatchAgent({ user, sessionId: session.id, text, history });
   if (!result || !result.handled || !result.message) return false;
 
-  await insertMessage(session.id, 'bot', result.message);
-  await sendAndLog(session, result.message, '배차 도우미 응답');
+  await botSay(session, result.message, '배차 도우미 응답');
   return true;
 }
 
@@ -621,8 +635,7 @@ async function processBotTurn(session, text) {
   // 인사·자기소개는 지식검색으로 보내지 않는다 — 웹 위젯과 같은 규칙(lib/smallTalk.js).
   const smallTalk = getSmalltalkMessage(text);
   if (smallTalk) {
-    await insertMessage(session.id, 'bot', smallTalk);
-    await sendAndLog(session, smallTalk, '스몰토크 응답');
+    await botSay(session, smallTalk, '스몰토크 응답');
     return;
   }
 
@@ -691,9 +704,9 @@ async function processBotTurn(session, text) {
       // 동의는 여기서 받지 않는다(폼 경로와 동일) — 동의 말풍선은 세션당 1회뿐이라, 아직 등록할지도
       // 모르는 단계에서 써버리면 정작 등록 직전에 다시 띄울 수 없다. completeIntake가 요구한다.
       await savePendingIntake(session, intakeText);
-      const question = buildMissingQuestion(parsed.missing, parsed);
-      await insertMessage(session.id, 'bot', question);
-      await sendAndLog(session, question, '접수 되묻기(자유문장)');
+      const addressPreview = await previewIntakeAddresses(parsed);
+    const question = buildMissingQuestion(parsed.missing, parsed, addressPreview);
+      await botSay(session, question, '접수 되묻기(자유문장)');
       return;
     }
     await completeIntake(session, parsed, intakeText);
@@ -773,8 +786,7 @@ router.post(['/receive', '/receive/message', '/receive/message-simple'], asyncHa
       // 사진·파일만 온 경우 — 내용은 못 읽어도 "보냈다"는 사실은 위에서 이미 남겼다.
       if (kakaoConsult.hasNonTextSection(req.body) && session.status !== 'agent_active') {
         const notice = '사진·파일은 아직 확인이 어려워요. 상담원을 연결해드릴게요.';
-        await insertMessage(session.id, 'bot', notice);
-        await sendAndLog(session, notice, '비텍스트 메시지 안내');
+        await botSay(session, notice, '비텍스트 메시지 안내');
         await markNeedsAgent(session, placeholder, '사진/파일 문의');
       }
       return;
@@ -952,8 +964,7 @@ router.post('/receive/personal_info', asyncHandler(async (req, res) => {
       await clearPendingIntake(resumeSession);
       if (purpose === 'agent') {
         const notice = '확인되었습니다. 상담원을 연결해드릴게요.';
-        await insertMessage(resumeSession.id, 'bot', notice);
-        await sendAndLog(resumeSession, notice, '동의 후 상담원 연결');
+        await botSay(resumeSession, notice, '동의 후 상담원 연결');
         await markNeedsAgent(resumeSession, raw,
           isNewCustomer ? '상담원 연결(미등록 고객 — 계정 등록 필요)' : '상담원 연결(동의 완료)');
         return;

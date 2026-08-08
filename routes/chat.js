@@ -961,11 +961,17 @@ async function deliverAgentReply(session, agentUser, text) {
     `INSERT INTO chat_messages (session_id, sender, message) VALUES (?, 'agent', ?) RETURNING *`,
     [session.id, text]
   );
+  // 상담원이 답하면 봇 인계 표시를 지운다 — 사람이 돌아왔으므로 이후 봇 응답에 "(AI 자동응답)"이
+  // 붙으면 안 된다. 컬럼이 아직 없는 DB(마이그레이션 전)에서도 답장 자체는 되어야 하므로 폴백을 둔다.
   await db.run(
+    `UPDATE chat_sessions SET status = 'agent_active', assigned_agent_id = ?, bot_handover_at = NULL,
+     updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') WHERE id = ?`,
+    [agentUser.id, session.id]
+  ).catch(() => db.run(
     `UPDATE chat_sessions SET status = 'agent_active', assigned_agent_id = ?,
      updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') WHERE id = ?`,
     [agentUser.id, session.id]
-  );
+  ));
   broadcastMessageAsync(session.id, inserted);
   broadcastSessionListChangedAsync();
 
@@ -1172,11 +1178,23 @@ async function autoSendPendingSuggestions() {
         // 접수 건은 봇에게 응대를 넘긴다. 초안 문구("접수하겠습니다…")를 대신 보내면 약속만
         // 나가고 오더는 만들어지지 않는다 — 봇이 이어받아 실제 접수 경로를 태우게 한다.
         await deliverBotMessage(session, BOT_HANDOVER_NOTICE);
+        // bot_handover_at을 함께 세운다 — 이 값이 있는 동안 봇 응답에 "(AI 자동응답)" 표시가
+        // 붙는다(routes/kakaoConsult.js withHandoverMark). status='bot'만으로는 처음부터 봇이
+        // 응대한 세션과 구분할 수 없어, 고객이 응답 주체가 바뀐 것을 모른 채 대화하게 된다.
         await db.run(
           `UPDATE chat_sessions SET status = 'bot',
+           bot_handover_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS'),
            updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') WHERE id = ?`,
           [row.session_id]
-        );
+        ).catch(async (e) => {
+          // 마이그레이션(20260808030000) 전이면 컬럼이 없다 — 표시만 못 붙일 뿐 인계는 되어야 한다.
+          console.error('봇 인계 표시 기록 실패(인계는 계속):', e.message);
+          await db.run(
+            `UPDATE chat_sessions SET status = 'bot',
+             updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') WHERE id = ?`,
+            [row.session_id]
+          );
+        });
         // 초안은 handed_to_bot으로 남긴다 — dismissed로 지우면 상담원이 뒤늦게 들어왔을 때
         // 우측 접수장 프리필(intake_json)이 사라진다.
         await db.run(
