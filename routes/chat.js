@@ -704,7 +704,7 @@ router.get('/sessions/:id/intake-order', requireRole('admin'), asyncHandler(asyn
   // 확정한 값)이 있으면 그쪽이 우선이다 — 사람이 확인한 값이 파싱 추정치보다 낫다.
   const pendingSuggestion = await db.get(
     `SELECT intake_json FROM chat_suggestions
-     WHERE session_id = ? AND status = 'pending' AND intake_json IS NOT NULL
+     WHERE session_id = ? AND status IN ('pending', 'handed_to_bot') AND intake_json IS NOT NULL
      ORDER BY id DESC LIMIT 1`,
     [req.params.id]
   ).catch(() => null);
@@ -1049,8 +1049,12 @@ router.post('/sessions/:id/suggestions/:sid/approve', requireRole('admin'), asyn
 //   · 초안이 뜬 뒤 30초 동안 상담원이 아무 입력(타이핑·발송)도 하지 않으면 발송한다.
 //   · 상담원이 타이핑을 시작하면 발송하지 않는다 — 답이 두 번 나가는 걸 막는다. 카카오는
 //     발송 취소가 안 되므로 이 판단은 되돌릴 수 없다.
-const AUTO_SEND_DELAY_SECONDS = 30;
-const AUTO_SEND_NOTICE = '상담원이 30초동안 응답이 없어 AI가 응답을 먼저 생성하였습니다. 상담원이 접속하면 다시 확인해 드리겠습니다.';
+const AUTO_SEND_DELAY_SECONDS = 60;
+const AUTO_SEND_NOTICE = '상담원이 1분동안 응답이 없어 AI가 응답을 먼저 생성하였습니다. 상담원이 접속하면 다시 확인해 드리겠습니다.';
+// 접수(intake) 초안은 답변을 대신 보내는 것으로 끝나지 않는다 — "접수하겠습니다"라고 약속만
+// 나가고 오더는 아무도 만들지 않는 상태가 된다. 그래서 문구를 대신 보내는 대신 봇에게 응대를
+// 넘겨, 이후 고객 메시지를 봇이 접수 경로로 처리하게 한다(사용자 확정 규칙).
+const BOT_HANDOVER_NOTICE = '상담원 응답이 1분동안 없어서 주문접수를 제가 도와드리겠습니다.';
 
 // 상담원이 입력창에 타이핑하는 중이라는 신호. 화면에서 짧은 주기로 던진다.
 router.post('/sessions/:id/typing', requireRole('admin'), asyncHandler(async (req, res) => {
@@ -1061,6 +1065,29 @@ router.post('/sessions/:id/typing', requireRole('admin'), asyncHandler(async (re
   ).catch((e) => console.error('상담원 타이핑 신호 기록 실패:', e.message));
   res.json({ ok: true });
 }));
+
+// 봇 명의로 고객에게 보낸다. 상담원 답장(deliverAgentReply)과 달리 sender가 'bot'이고
+// 담당 상담원을 세우지 않는다 — 봇이 응대를 이어받는 상황이기 때문이다.
+async function deliverBotMessage(session, text) {
+  const inserted = await db.get(
+    `INSERT INTO chat_messages (session_id, sender, message) VALUES (?, 'bot', ?) RETURNING *`,
+    [session.id, text]
+  );
+  await db.run(
+    `UPDATE chat_sessions SET updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS')
+     WHERE id = ?`,
+    [session.id]
+  );
+  broadcastMessageAsync(session.id, inserted);
+  if (session.channel === 'kakao') {
+    const sendResult = await kakaoConsult.sendMessage(session, text);
+    if (!sendResult.ok) {
+      logIntegrationErrorAsync({ source: 'kakao', operation: 'send', refType: 'chat_session', refId: Number(session.id),
+        message: sendResult.error, context: { label: '봇 인계 안내', textHead: String(text).slice(0, 60) } });
+    }
+  }
+  return inserted;
+}
 
 // 자동 발송 대상 조회 — 마이그레이션(20260808020000) 전에는 agent_typing_at이 없어 쿼리가
 // 통째로 실패한다. 그 경우 조용히 빈 목록으로 떨어뜨려 크론이 죽지 않게 한다.
@@ -1102,17 +1129,39 @@ async function autoSendPendingSuggestions() {
       continue;
     }
 
-    const text = `${row.suggested_text}\n\n${AUTO_SEND_NOTICE}`;
     try {
-      // 담당 상담원을 그대로 유지한다 — 자동 발송이 담당자를 바꾸면 안 된다.
       const session = await db.get('SELECT * FROM chat_sessions WHERE id = ?', [row.session_id]);
+
+      if (row.kind === 'intake') {
+        // 접수 건은 봇에게 응대를 넘긴다. 초안 문구("접수하겠습니다…")를 대신 보내면 약속만
+        // 나가고 오더는 만들어지지 않는다 — 봇이 이어받아 실제 접수 경로를 태우게 한다.
+        await deliverBotMessage(session, BOT_HANDOVER_NOTICE);
+        await db.run(
+          `UPDATE chat_sessions SET status = 'bot',
+           updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') WHERE id = ?`,
+          [row.session_id]
+        );
+        // 초안은 handed_to_bot으로 남긴다 — dismissed로 지우면 상담원이 뒤늦게 들어왔을 때
+        // 우측 접수장 프리필(intake_json)이 사라진다.
+        await db.run(
+          `UPDATE chat_suggestions SET status = 'handed_to_bot',
+           decided_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') WHERE id = ?`,
+          [row.suggestion_id]
+        );
+        broadcastSessionListChangedAsync({ event: 'bot_handover', sessionId: row.session_id });
+        sent.push({ sessionId: row.session_id, suggestionId: row.suggestion_id, kind: row.kind, action: 'bot_handover' });
+        continue;
+      }
+
+      // 담당 상담원을 그대로 유지한다 — 자동 발송이 담당자를 바꾸면 안 된다.
+      const text = `${row.suggested_text}\n\n${AUTO_SEND_NOTICE}`;
       await deliverAgentReply(session, { id: session.assigned_agent_id || null }, text);
       await db.run(
         `UPDATE chat_suggestions SET status = 'auto_sent', sent_text = ?,
          decided_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') WHERE id = ?`,
         [text, row.suggestion_id]
       );
-      sent.push({ sessionId: row.session_id, suggestionId: row.suggestion_id, kind: row.kind });
+      sent.push({ sessionId: row.session_id, suggestionId: row.suggestion_id, kind: row.kind, action: 'auto_sent' });
     } catch (e) {
       console.error(`초안 자동 발송 실패(세션 ${row.session_id}):`, e.message);
       logIntegrationErrorAsync({
