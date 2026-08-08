@@ -386,11 +386,10 @@ router.get('/ai-intake/fields.json', asyncHandler(async (req, res) => {
 // (lib/intakeSummary.js). 예전에는 세 곳이 각자 만들어서, 옵션(주유·서류)이 카카오 요약에만
 // 들어가는 식으로 항목이 갈라졌다.
 //
-// 브라우저는 이 응답을 쓰지 않고 자기 화면에서 직접 그린다 — 요약을 만드는 두 지점이 동기
-// 함수라 서버 호출로 바꾸면 "요약 → 확인 질문" 말풍선 순서가 흔들린다(실사용 화면이라 그
-// 위험을 지금 감수할 이유가 없다). 대신 scripts/check-intake-summary.js가 같은 값으로 양쪽
-// 문구를 대조해 어긋나면 실패한다. 이 엔드포인트는 그 대조의 기준이자, 브라우저 쪽을 나중에
-// 서버 호출로 바꿀 때 쓸 자리다.
+// 웹 접수 화면(public/js/ai-intake.js)이 등록 확인 직전에 이걸 부른다. 응답이 늦거나 실패하면
+// 화면 안의 폴백(buildSummaryTextLocal)으로 넘어간다 — 고객이 확인하는 문구라 네트워크 때문에
+// 접수가 멈추면 안 된다. 그 폴백이 여기와 같은 문구를 내는지는 scripts/check-intake-summary.js가
+// 대조한다.
 router.post('/ai-intake/summary.json', asyncHandler(async (req, res) => {
   const b = req.body || {};
   const text = buildSummaryText({

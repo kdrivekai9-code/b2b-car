@@ -1859,7 +1859,58 @@
 
   // 차량번호는 그 번호가 매겨진 지점(출발지 또는 해당 경유지) 바로 아래에 붙여서 보여준다 —
   // 목록 맨 끝에 몰아서 보여주면 어느 지점의 차량인지 헷갈리기 때문.
-  function buildSummaryText() {
+  // 확인 요약을 만드는 서버 계약(POST /orders/ai-intake/summary.json)에 맞춘 입력.
+  // 폼 필드 id를 아는 곳을 여기 하나로 모아둔다 — 폴백 계산도 같은 값을 본다.
+  function collectSummaryPayload() {
+    var waypoints = [];
+    document.querySelectorAll('#waypointsWrap .waypoint-row').forEach(function (row) {
+      var id = row.dataset.slot;
+      var addr = val(id + '_address');
+      if (!addr) return;
+      waypoints.push({
+        address: addr,
+        contact: val(id + '_contact'),
+        vehicleNumber: val(id + '_vehicle_number'),
+      });
+    });
+    return {
+      reserved_date: val('reserved_date'),
+      reserved_time: val('reserved_time'),
+      origin_address: val('origin_address'),
+      origin_detail_address: val('origin_detail_address'),
+      origin_contact: val('origin_contact'),
+      destination_address: val('destination_address'),
+      destination_detail_address: val('destination_detail_address'),
+      destination_contact: val('destination_contact'),
+      vehicle_number: val('vehicle_number'),
+      vehicle_type: val('vehicle_type'),
+      waypoints: waypoints,
+      memo_customer: val('memo_customer'),
+      memo_billing: val('memo_billing'),
+    };
+  }
+
+  // 요약 문구는 서버가 만든다 — 카카오 상담톡의 등록 후 통보, 상담원 초안과 같은 모듈이라
+  // 항목이 늘거나 표기가 바뀔 때 한 곳만 고치면 된다. 예전에는 세 곳이 각자 만들어서 옵션
+  // (주유·서류)이 카카오 요약에만 들어가는 식으로 갈라졌다.
+  //
+  // 네트워크가 느리거나 실패해도 접수가 멈추면 안 되므로 아래 로컬 계산으로 넘어간다.
+  // 고객이 확인하는 문구라 응답을 마냥 기다릴 수 없어서 시간 제한도 둔다 — 이 시점에는
+  // 이미 phase가 'confirming'이라, 요약이 늦게 뜨면 "네"라는 답이 먼저 올 수 있다.
+  var SUMMARY_FETCH_TIMEOUT_MS = 2000;
+
+  function fetchSummaryText() {
+    var fallback = new Promise(function (resolve) {
+      setTimeout(function () { resolve(null); }, SUMMARY_FETCH_TIMEOUT_MS);
+    });
+    return Promise.race([api.fetchIntakeSummary(collectSummaryPayload()), fallback])
+      .then(function (text) { return text || buildSummaryTextLocal(); })
+      .catch(function () { return buildSummaryTextLocal(); });
+  }
+
+  // 서버 요약의 폴백. scripts/check-intake-summary.js가 이 함수와 서버 모듈을 같은 값으로
+  // 돌려 문구가 갈라지지 않았는지 대조한다.
+  function buildSummaryTextLocal() {
     var lines = [];
     lines.push('▪ 예약: ' + val('reserved_date') + ' ' + val('reserved_time'));
     lines.push('▪ 출발지: ' + val('origin_address') + (val('origin_detail_address') ? ' ' + val('origin_detail_address') : '') + ' (' + val('origin_contact') + ')');
@@ -1972,7 +2023,6 @@
 
     setPendingField(null);
     phase = 'confirming';
-    var summary = buildSummaryText();
     var confirmQ = prefix ? '다시 접수내용을 등록해 드릴까요?' : '위 내용으로 등록해 드릴까요?';
     // 접수내용 요약과 등록 확인 질문은 화면(addBubble)에서만이 아니라 저장(logBotMessage)도
     // 각각 따로 해야 한다 — 하나로 합쳐 저장하면 새로고침하거나 상담관리에서 나중에 볼 때
@@ -1981,10 +2031,16 @@
       addBubble(prefix, 'bot');
       logBotMessage({ logText: prefix, needsAgent: false, requestedFeature: null });
     }
-    addBubble(summary, 'bot');
-    logBotMessage({ logText: summary, needsAgent: false, requestedFeature: null });
-    addBubble(confirmQ, 'bot', null, true);
-    logBotMessage({ logText: confirmQ, needsAgent: false, requestedFeature: null });
+    // 요약만 서버에서 받아오므로 여기서 흐름이 잠시 비동기가 된다. 이 함수의 반환값은 그대로
+    // null이라(요약·확인 질문은 각자 logBotMessage로 저장한다) 호출부 스무 곳은 손대지 않는다 —
+    // 요약 때문에 proceedAfterCollecting 전체를 Promise로 바꾸면 그 스무 곳의 반환값 처리를
+    // 모두 고쳐야 하고, 그게 이 전환을 미뤄온 이유였다.
+    fetchSummaryText().then(function (summary) {
+      addBubble(summary, 'bot');
+      logBotMessage({ logText: summary, needsAgent: false, requestedFeature: null });
+      addBubble(confirmQ, 'bot', null, true);
+      logBotMessage({ logText: confirmQ, needsAgent: false, requestedFeature: null });
+    });
     return null;
   }
 
@@ -2152,16 +2208,19 @@
   function finishPremiumCollection() {
     if (!val('destination_contact')) setField('destination_contact', val('origin_contact'));
     setPendingField(null);
-    return announceFareGuideFromDb().then(function () {
-      phase = 'confirming';
-      var summary = buildSummaryText();
-      addBubble(summary, 'bot');
-      logBotMessage({ logText: summary, needsAgent: false, requestedFeature: null });
-      var confirmQ = '위 내용으로 등록해 드릴까요?';
-      addBubble(confirmQ, 'bot', null, true);
-      logBotMessage({ logText: confirmQ, needsAgent: false, requestedFeature: null });
-      return null;
-    });
+    return announceFareGuideFromDb()
+      .then(function () {
+        phase = 'confirming';
+        return fetchSummaryText();
+      })
+      .then(function (summary) {
+        addBubble(summary, 'bot');
+        logBotMessage({ logText: summary, needsAgent: false, requestedFeature: null });
+        var confirmQ = '위 내용으로 등록해 드릴까요?';
+        addBubble(confirmQ, 'bot', null, true);
+        logBotMessage({ logText: confirmQ, needsAgent: false, requestedFeature: null });
+        return null;
+      });
   }
 
   function handleOrderIntent(data, sourceText) {

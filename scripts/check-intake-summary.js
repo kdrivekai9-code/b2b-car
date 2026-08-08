@@ -1,9 +1,9 @@
-// 접수 요약 문구가 웹 화면과 서버에서 같은지 대조한다.
+// 접수 요약 문구가 웹 화면의 폴백과 서버에서 같은지 대조한다.
 //
-// 서버(lib/intakeSummary.js)는 카카오 상담톡의 등록 후 통보와 상담원 초안이 쓴다. 웹 접수
-// 화면은 아직 브라우저에서 직접 그린다 — 요약을 만드는 두 지점이 동기 함수라 서버 호출로
-// 바꾸면 "요약 → 확인 질문" 말풍선 순서가 흔들리기 때문이다(실사용 화면이라 그 위험을 지금
-// 감수하지 않는다). 두 벌이 존재하는 한 항목이 갈라질 수 있으므로 여기서 못박는다.
+// 웹 접수 화면은 이제 서버(lib/intakeSummary.js)에 요약을 요청한다 — 카카오 상담톡의 등록 후
+// 통보, 상담원 초안과 같은 모듈이다. 다만 네트워크가 느리거나 실패해도 접수가 멈추면 안 되므로
+// 브라우저 안에 같은 문구를 만드는 폴백(buildSummaryTextLocal)이 남아 있다. 폴백이 서버와
+// 다른 문구를 내면 "가끔 요약이 달라지는" 형태로 드러나고, 그건 재현도 어렵다. 여기서 못박는다.
 //
 // 브라우저 함수는 DOM(val, document)에 의존해서 그대로 실행할 수 없다 — 필요한 것만 흉내 낸다.
 //
@@ -33,11 +33,11 @@ const WAYPOINTS = [
   { address: '경기 성남시 중원구 성남대로 1', contact: '010-5555-6666', vehicleNumber: '34나5678' },
 ];
 
-// 브라우저 buildSummaryText만 떼어내 DOM 없이 실행한다.
+// 브라우저 폴백(buildSummaryTextLocal)만 떼어내 DOM 없이 실행한다.
 function runBrowserSummary() {
   const src = fs.readFileSync(BROWSER_FILE, 'utf8');
-  const start = src.indexOf('function buildSummaryText() {');
-  if (start === -1) throw new Error('브라우저 buildSummaryText를 찾지 못했습니다.');
+  const start = src.indexOf('function buildSummaryTextLocal() {');
+  if (start === -1) throw new Error('브라우저 buildSummaryTextLocal을 찾지 못했습니다.');
   const end = src.indexOf('\n  }', start) + 4;
   const body = src.slice(start, end);
 
@@ -58,7 +58,7 @@ function runBrowserSummary() {
     return VALUES[id] || '';
   };
   // eslint-disable-next-line no-new-func
-  const fn = new Function('val', 'document', `${body}; return buildSummaryText();`);
+  const fn = new Function('val', 'document', `${body}; return buildSummaryTextLocal();`);
   return fn(val, fakeDocument);
 }
 
@@ -96,7 +96,7 @@ function main() {
     if (!same) console.log(`  불일치 줄 ${i + 1}\n    브라우저: ${b[i] || '(없음)'}\n    서버    : ${s[i] || '(없음)'}`);
   }
   if (ok) console.log('  모든 줄 일치');
-  console.log(ok ? '\n웹 화면과 서버가 같은 요약을 만든다' : '\n요약이 갈라져 있습니다');
+  console.log(ok ? '\n브라우저 폴백과 서버가 같은 요약을 만든다' : '\n요약이 갈라져 있습니다');
   process.exitCode = ok ? 0 : 1;
 }
 

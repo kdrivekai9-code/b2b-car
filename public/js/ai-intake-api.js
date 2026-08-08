@@ -62,6 +62,15 @@
         .catch(function () { return null; });
     },
 
+    // 등록 전 확인 요약 — 카카오 상담톡·상담원 초안과 같은 모듈(lib/intakeSummary.js)이 만든다.
+    // 실패하면 null을 돌려주고, 호출부가 화면 안에서 직접 그리는 폴백으로 넘어간다.
+    fetchIntakeSummary: function (payload) {
+      return postJson('/orders/ai-intake/summary.json', payload)
+        .then(function (res) { return res.ok ? res.json() : null; })
+        .then(function (data) { return (data && data.text) || null; })
+        .catch(function () { return null; });
+    },
+
     submitOrderForm: function (action, params) {
       return postForm(action, params).then(function (res) {
         if (!res.ok) {

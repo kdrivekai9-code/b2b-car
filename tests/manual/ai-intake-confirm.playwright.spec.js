@@ -233,4 +233,47 @@ test.describe('AI intake 확인 단계', () => {
     await expect.poll(async () => (await botBubbles(page)).some((t) => /어느 부분을 수정/.test(t)), { timeout: 20000 }).toBe(true);
     expect(orderSubmitted).toBe(false);
   });
+
+  // 아래 두 가지는 "요약을 누가 만드는가"를 본다. 위 테스트들만으로는 구분이 안 된다 —
+  // 폴백이 서버와 같은 문구를 내도록 맞춰져 있어서, 서버 호출이 아예 안 나가도 통과한다.
+  test('요약은 서버가 만든 문구를 그대로 쓴다', async ({ page }) => {
+    await setupMocks(page);
+    await login(page);
+    await openAiIntake(page);
+
+    // 폴백이 절대 만들 수 없는 문구를 서버 응답으로 준다 — 화면에 이게 뜨면 서버 응답을 쓴 것이다.
+    const serverText = '▪ 예약: 서버가-만든-요약\n▪ 출발지: 서버 응답 표식';
+    let summaryRequested = false;
+    await page.route('**/orders/ai-intake/summary.json', async (route) => {
+      summaryRequested = true;
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ text: serverText }) });
+    });
+
+    await reachConfirmStep(page);
+
+    expect(summaryRequested).toBe(true);
+    const summary = (await botBubbles(page)).find((t) => t.includes('▪ 출발지:')) || '';
+    expect(summary).toContain('서버가-만든-요약');
+    expect(summary).toContain('서버 응답 표식');
+  });
+
+  test('요약 요청이 실패해도 접수가 멈추지 않는다', async ({ page }) => {
+    await setupMocks(page);
+    await login(page);
+    await openAiIntake(page);
+
+    // 고객이 확인하는 문구라, 서버가 죽었다고 확인 단계가 사라지면 안 된다.
+    await page.route('**/orders/ai-intake/summary.json', async (route) => {
+      await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'boom' }) });
+    });
+
+    await reachConfirmStep(page);
+
+    const bubbles = await botBubbles(page);
+    const summary = bubbles.find((t) => t.includes('▪ 출발지:')) || '';
+    // 폴백이 그린 요약이라도 항목은 그대로여야 한다.
+    expect(summary).toContain('010-1111-2222');
+    expect(summary).toContain('12가3456');
+    expect(bubbles.some((t) => t.includes('등록해 드릴까요'))).toBe(true);
+  });
 });
