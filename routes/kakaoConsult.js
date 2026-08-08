@@ -17,6 +17,8 @@ const { parseKakaoIntake, buildParsedFromClassified, buildMissingQuestion, norma
 const { findIntakeAccount, resolveIntakeContext, findAccountByPhone, linkUserKeyToAccount, createOrdersFromIntake } = require('../lib/kakaoIntakeService');
 const { previewIntakeAddresses } = require('../lib/intakeAddressPreview');
 const { runKakaoOrderNotifications } = require('../lib/kakaoOrderNotify');
+const kakaoOrderPhotos = require('../lib/kakaoOrderPhotos');
+const { sendOrderPhotos, isPhotoRequest } = kakaoOrderPhotos;
 // 주소 후보 검색·선택은 웹 접수 화면과 같은 규칙을 쓴다(lib/addressCandidates.js).
 const { searchAddressCandidates, needsDisambiguation, buildCandidateListText, matchCandidateChoice, getClarifyText } = require('../lib/addressCandidates');
 const { getSmalltalkMessage } = require('../lib/smallTalk');
@@ -396,6 +398,42 @@ async function tryAnswerFaq(session, text) {
   return false;
 }
 
+// 사진 요청("사진 좀 보내주세요", "인수증 사진") — 로그 분석에서 상담원 발화의 61.6%가 여기
+// 걸려 있었다. 기사가 우리 업로드 페이지로 올린 사진을 상담원이 받아 고객에게 다시 전달하는
+// 일이 대부분이었다. 그 전달을 봇이 한다.
+//
+// LLM 분류보다 먼저 본다 — 요금·운영시간과 같은 이유다. "사진"이라는 말은 뜻이 좁아서 규칙으로
+// 충분하고, 분류를 거치면 unsupported로 떨어져 상담원에게 넘어간다.
+// 판정 규칙은 lib/kakaoOrderPhotos.js가 갖고 있다(검증 스크립트가 같은 정의를 쓴다).
+async function tryAnswerPhotoRequest(session, text) {
+  if (!isPhotoRequest(text)) return false;
+
+  // 이 대화로 접수한 오더만 대상으로 한다. 전화번호로 매칭된 계정의 다른 오더까지 열면
+  // "누구의 사진인지"를 이 자리에서 판단해야 하는데, 그 판단을 틀리면 남의 차 사진이 나간다.
+  const order = await db.get(
+    `SELECT id, oid, branch_id FROM orders WHERE chat_session_id = ? ORDER BY id DESC LIMIT 1`,
+    [session.id]
+  ).catch(() => null);
+  if (!order) return false;
+
+  const result = await sendOrderPhotos(session, order).catch((e) => {
+    console.error('카카오 사진 전달 실패:', e.message);
+    return { skipped: 'error', message: kakaoOrderPhotos.MESSAGES.allFailed };
+  });
+
+  if (result.sent) {
+    // 발신 자체는 sendOrderPhotos가 이미 했다(이미지 섹션이라 botSay로는 못 보낸다). 상담
+    // 이력에는 무엇을 보냈는지 남겨야 상담원이 "이미 나간 사진"을 또 보내지 않는다.
+    await insertMessage(session.id, 'bot', result.caption);
+    return true;
+  }
+
+  await botSay(session, result.message, '사진 요청 응답');
+  // 권한이 없어 못 보낸 경우는 상담원이 이어받아야 한다.
+  if (result.skipped === 'not_allowed') await markNeedsAgent(session, text, '사진 요청(고객 열람 불가 지사)');
+  return true;
+}
+
 // 오더 조회/변경/취소(intent: unsupported) — 로그인 계정이 있는 웹 위젯과 달리 카카오 고객은
 // b2b-car 계정이 없는 게 기본값이라(계획서 5.1) runDispatchAgent가 요구하는 users row가 없다.
 // 등록 고객 매칭(전화번호 기반)은 personal_info 필드 스펙이 아직 미확정이라(계획서 8.3) 이번
@@ -734,6 +772,13 @@ async function processBotTurn(session, text) {
   // "고객센터 운영시간은?"이 unsupported로 분류돼 그대로 상담원 연결로 넘어갔다 — 답을 우리가
   // 데이터로 갖고 있는 질문에 사람을 부르는 건 낭비다. 키워드 판정이라 LLM 호출도 아낀다.
   if (await tryAnswerOperatingHours(session, text)) return;
+
+  // 사진 요청도 마찬가지로 분류보다 먼저 본다 — 우리가 이미 갖고 있는 파일을 건네는 일이라
+  // 상담원을 부를 이유가 없다. 이 대화로 접수한 오더가 있을 때만 반응한다.
+  if (await tryAnswerPhotoRequest(session, text).catch((e) => {
+    console.error('카카오 사진 요청 처리 실패:', e.message);
+    return false;
+  })) return;
 
   // 자유 문장 되묻기 중이면 앞선 원문에 이어붙여 분류한다 — 폼 파서는 블록 형식만 매칭하므로
   // 보충 답변("지금요")만 넘기면 앞서 받은 출발지·도착지·차량이 사라져 처음부터 다시 묻게 된다.
