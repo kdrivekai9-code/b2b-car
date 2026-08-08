@@ -49,8 +49,24 @@ export default function CardBoard({ initialSessions, initialOnlineAgents, curren
       listRefreshTimerRef.current = setTimeout(refreshList, 400);
     }
     window.addEventListener('agent-needs-count', onNeedsCount);
+
+    // 이벤트만 믿지 않는다. 이 신호는 헤더의 agent-presence SSE → Supabase Realtime 브로드캐스트를
+    // 거쳐 오는데, 그 사슬 어디가 끊겨도(서버리스에서 SSE가 잘리거나 브로드캐스트가 유실되면)
+    // 화면을 열어둔 채로는 새 고객 발화가 영영 안 보인다. 목록은 가벼운 조회라 주기적으로도
+    // 다시 읽는다 — 실측으로 카카오 고객 메시지가 목록에 안 뜨던 문제의 마지막 안전장치다.
+    const listPoll = setInterval(() => {
+      if (document.hidden) return; // 백그라운드 탭에서는 돌리지 않는다
+      refreshList();
+    }, 10000);
+
+    // 다른 탭에 갔다 돌아오면 그동안 놓친 것을 즉시 따라잡는다.
+    function onVisible() { if (!document.hidden) refreshList(); }
+    document.addEventListener('visibilitychange', onVisible);
+
     return () => {
       window.removeEventListener('agent-needs-count', onNeedsCount);
+      document.removeEventListener('visibilitychange', onVisible);
+      clearInterval(listPoll);
       clearTimeout(listRefreshTimerRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

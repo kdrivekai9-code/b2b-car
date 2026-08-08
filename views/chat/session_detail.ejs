@@ -185,9 +185,19 @@ function isQuestionBubble(msg) {
   function catchUp() {
     fetch('/chat/sessions/<%= session.id %>/poll?since=' + lastId)
       .then(function (res) { return res.json(); })
-      .then(function (data) { (data.messages || []).forEach(appendMessage); })
+      .then(function (data) {
+        var before = lastId;
+        (data.messages || []).forEach(appendMessage);
+        // 새 고객 발화가 따라잡혔으면 봇 초안도 함께 확인한다.
+        if (lastId !== before) scheduleSuggestionFetch();
+      })
       .catch(function () {});
   }
+
+  // 실시간 스트림이 끊기거나 브로드캐스트가 유실돼도 고객 발화가 화면에서 누락되면 안 된다 —
+  // 마지막으로 받은 id 이후만 주기적으로 확인한다(새 메시지가 없으면 빈 배열이라 비용이 거의 없다).
+  setInterval(function () { if (!document.hidden) catchUp(); }, 7000);
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) catchUp(); });
 
   function markBubblesRead(bubbleClass) {
     var spans = messagesEl.querySelectorAll('.ai-chat-item.' + bubbleClass + ' .bubble-read.unread');

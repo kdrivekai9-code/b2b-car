@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 // 카드뷰(CardBoard.js)와 상세페이지(SessionDetailView.js) 둘 다 쓰는 공유 대화 뷰어 —
 // 메시지 목록/SSE 실시간 수신/답장/담당지정(self)/삭제, 이 다섯 가지는 legacy에서도
@@ -141,14 +141,26 @@ export default function SessionViewer({
   const oldestMessageIdRef = useRef(null);
   const streamRef = useRef(null);
   const suggestionTimerRef = useRef(null);
+  const pollTimerRef = useRef(null);
   const messagesElRef = useRef(null);
+  // 폴링 콜백이 최신 메시지 목록을 봐야 해서(setInterval은 최초 클로저를 붙잡는다) ref로 둔다.
+  const messagesRef = useRef([]);
+  messagesRef.current = messages;
   const sessionIdRef = useRef(null);
   const onNewMessageRef = useRef(onNewMessage);
   onNewMessageRef.current = onNewMessage;
 
+  // 최신 메시지가 항상 보이게 한다. rAF 한 번만으로는 부족한 경우가 있다 — 초안 말풍선의
+  // textarea처럼 렌더 직후 높이가 더 커지는 요소가 있으면 그 전에 스크롤이 끝나 마지막 줄이
+  // 가려진다. 다음 프레임에서 한 번 더 맞춘다.
   function scrollToBottom() {
     const el = messagesElRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+    requestAnimationFrame(() => {
+      const again = messagesElRef.current;
+      if (again) again.scrollTop = again.scrollHeight;
+    });
   }
 
   function openStream(id) {
@@ -226,6 +238,32 @@ export default function SessionViewer({
     return fetchJson(`/chat/sessions/${id}/messages?${qs.toString()}`);
   }
 
+  // 실시간 스트림이 끊기거나(서버리스에서 SSE가 잘리는 경우가 있다) 브로드캐스트가 유실돼도
+  // 고객 발화가 화면에서 누락되면 안 된다. 마지막으로 받은 id 이후만 주기적으로 확인한다 —
+  // 새 메시지가 없으면 빈 배열이라 비용이 거의 없다.
+  const CATCH_UP_INTERVAL_MS = 7000;
+
+  function startCatchUpPolling(id) {
+    clearInterval(pollTimerRef.current);
+    pollTimerRef.current = setInterval(() => {
+      if (document.hidden) return; // 백그라운드 탭에서는 굳이 돌리지 않는다
+      const lastId = messagesRef.current.length ? messagesRef.current[messagesRef.current.length - 1].id : 0;
+      fetchJson(`/chat/sessions/${id}/poll?since=${lastId || 0}`)
+        .then((data) => {
+          if (sessionIdRef.current !== id) return;
+          const fresh = (data.messages || []).filter((m) => m && m.id && !knownMessageIdsRef.current.has(m.id));
+          if (!fresh.length) return;
+          fresh.forEach((m) => knownMessageIdsRef.current.add(m.id));
+          setMessages((prev) => [...prev, ...fresh]);
+          if (fresh.some((m) => m.sender === 'user')) {
+            if (onNewMessageRef.current) onNewMessageRef.current(fresh[fresh.length - 1]);
+            scheduleSuggestionFetch(id);
+          }
+        })
+        .catch(() => {});
+    }, CATCH_UP_INTERVAL_MS);
+  }
+
   useEffect(() => {
     sessionIdRef.current = sessionId;
     if (!sessionId) return;
@@ -280,16 +318,30 @@ export default function SessionViewer({
       openStream(sessionId);
       // 화면을 열었을 때 이미 대기 중인 초안이 있을 수 있다(상담원이 자리를 비운 사이 도착).
       fetchSuggestion(sessionId);
+      startCatchUpPolling(sessionId);
     }
     load();
 
     return () => {
       cancelled = true;
       clearTimeout(suggestionTimerRef.current);
+      clearInterval(pollTimerRef.current);
       if (streamRef.current) { streamRef.current.close(); streamRef.current = null; }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
+
+  // 메시지나 초안이 늘어나면 무조건 맨 아래로 붙인다 — 스트림 콜백에서만 스크롤하면
+  // "이전 메시지 더 보기"나 초안 렌더처럼 다른 경로로 늘어난 경우를 놓친다.
+  // 이전 메시지를 위로 불러올 때는 그 함수가 스크롤 위치를 직접 보정하므로 여기서 건드리지 않는다.
+  const messageCountRef = useRef(0);
+  const skipAutoScrollRef = useRef(false);
+  useLayoutEffect(() => {
+    const grew = messages.length > messageCountRef.current;
+    messageCountRef.current = messages.length;
+    if (skipAutoScrollRef.current) { skipAutoScrollRef.current = false; return; }
+    if (grew || suggestion) scrollToBottom();
+  }, [messages, suggestion]);
 
   function loadOlderMessages() {
     if (!sessionId || !hasMoreOlder || !oldestMessageIdRef.current) return;
@@ -301,6 +353,8 @@ export default function SessionViewer({
         const prevHeight = el ? el.scrollHeight : 0;
         msgs.forEach((m) => knownMessageIdsRef.current.add(m.id));
         oldestMessageIdRef.current = msgs[0].id;
+        // 위로 붙는 경우다 — 아래로 끌어내리면 읽던 위치를 잃는다.
+        skipAutoScrollRef.current = true;
         setMessages((prev) => [...msgs, ...prev]);
         setHasMoreOlder(!!data.hasMore);
         requestAnimationFrame(() => {
