@@ -792,63 +792,65 @@ router.post(['/receive', '/receive/message', '/receive/message-simple'], asyncHa
   keys.userKey = keys.userKey || session.kakao_user_key;
   keys.serviceKey = keys.serviceKey || session.kakao_service_key;
 
-  // 중복 판정은 **봇이 두 번 답하지 않게 하는 용도로만** 쓴다. 고객 발화 자체는 무슨 일이
-  // 있어도 대화 이력에 남는다(사용자 확정 규칙) — 상담원 화면에서 사라지는 것이 중복 말풍선이
-  // 하나 더 보이는 것보다 훨씬 나쁘다. 중복이면 "안 보이는" 게 아니라 "두 번 보이는" 쪽으로 튄다.
-  const serialNumber = req.body && req.body.meta && req.body.meta.serialNumber;
-  const resent = text ? await isResentEvent(serialNumber) : false;
-  const repeated = resent || (text && !serialNumber ? await looksRepeated(keys.userKey, text) : false);
-  if (resent) console.warn(`카카오 상담톡 재전송 감지 — 저장은 하고 봇 응답만 생략 (session=${session.id}, serial=${serialNumber})`);
+  // 고객 발화를 **가장 먼저** 저장하고 브로드캐스트한다. 이 앞에 조회를 끼워 넣으면 그만큼
+  // 상담원 화면에 늦게 뜬다 — 예전에는 재전송 판정·반복 판정·이벤트 로그(모두 DB 왕복)를
+  // 먼저 돌리느라 저장이 뒤로 밀렸다. 그 셋은 "봇이 답할지"를 정하는 판단일 뿐이라 응답 뒤로
+  // 미뤄도 되고, 상담원이 고객 질문을 보는 일이 그보다 급하다.
+  // (AI 초안 생성은 원래도 응답 뒤였다 — 초안 때문에 메시지가 늦은 게 아니다.)
+  const placeholder = text ? null : describeNonTextMessage(req.body);
+  const stored = await insertMessage(session.id, 'user', text || placeholder);
 
-  await logEvent({ sessionId: session.id, eventType: 'message', keys, body: req.body, headers, handled: true });
-
-  if (!text) {
-    // 사진·파일만 온 경우. 지금까지는 고객 발화를 아예 저장하지 않고 봇 안내만 남겼다 —
-    // 상담원 화면에는 봇이 혼자 "사진은 확인이 어려워요"라고 말한 것처럼 보이고, 고객이 무언가
-    // 보냈다는 사실 자체가 사라진다. 내용을 못 읽더라도 "보냈다"는 것은 반드시 남겨야 한다.
-    const placeholder = describeNonTextMessage(req.body);
-    await insertMessage(session.id, 'user', placeholder);
-
-    if (kakaoConsult.hasNonTextSection(req.body) && session.status !== 'agent_active') {
-      const notice = '사진·파일은 아직 확인이 어려워요. 상담원을 연결해드릴게요.';
-      await insertMessage(session.id, 'bot', notice);
-      res.json({ code: 200, message: 'SUCCESS' });
-      runAfterResponse((async () => {
-        await sendAndLog(session, notice, '비텍스트 메시지 안내');
-        await markNeedsAgent(session, placeholder, '사진/파일 문의');
-      })(), 'non_text');
-      return;
-    }
-    return res.json({ code: 200, message: 'SUCCESS' });
-  }
-  // 반복 문구여도 저장은 한다 — 상담원 화면에서 사라지면 "보냈는데 못 봤다"가 된다.
-  await insertMessage(session.id, 'user', text);
-  if (repeated) console.warn(`카카오 상담톡 반복 문구 — 저장만 하고 봇 응답은 생략 (session=${session.id})`);
-
-  // 여기까지는 빠른 DB 쓰기뿐이라 곧바로 200을 돌려주고, 봇 처리(Gemini 분류 → 지식검색 →
-  // 카카오 발신, 합쳐서 수십 초까지 걸릴 수 있다)는 응답 뒤로 넘긴다(계획서 8.4).
+  // 여기까지가 화면에 뜨는 데 필요한 전부다. 나머지(감사로그·중복판정·봇 처리·초안)는
+  // 응답 뒤로 넘긴다(계획서 8.4).
   res.json({ code: 200, message: 'SUCCESS' });
 
-  // 상담원이 이미 응대 중인 세션은 봇이 끼어들지 않는다(기존 웹 위젯 규칙과 동일).
-  if (!repeated && session.status !== 'agent_active') {
-    runAfterResponse(
-      (async () => {
-        // 동의 요청은 첫 메시지에 무조건 보내지 않는다 — 요금문의·지식검색만 하고 끝나는 고객에게는
-        // 불필요하다. 상담원 연결이나 접수처럼 실제로 신원이 필요한 시점에만 요청한다
-        // (ensurePersonalConsent, 사용자 확정 규칙).
-        await processBotTurn(session, text);
-      })().catch(async (e) => {
-        console.error('카카오 상담톡 봇 처리 실패:', e.message);
-        await markNeedsAgent(session, text, null);
-      }),
-      'bot_turn'
-    );
-  } else {
-    // 상담원 응대 중 — 봇은 고객에게 답하지 않지만(기존 규칙 유지) 답변 초안은 만들어 둔다.
-    // 상담원 화면에 "채택 대기"로 뜨고, 승인해야 고객에게 나간다(lib/agentAssist.js).
-    runAfterResponse(createAgentSuggestion(session, text), 'agent_suggestion');
-  }
+  runAfterResponse((async () => {
+    // 중복 판정은 **봇이 두 번 답하지 않게 하는 용도로만** 쓴다. 고객 발화는 이미 저장됐다 —
+    // 상담원 화면에서 사라지는 것이 중복 말풍선이 하나 더 보이는 것보다 훨씬 나쁘다.
+    const serialNumber = req.body && req.body.meta && req.body.meta.serialNumber;
+    const resent = text ? await isResentEvent(serialNumber) : false;
+    const repeated = resent || (text && !serialNumber ? await looksRepeated(keys.userKey, text) : false);
+    if (resent) console.warn(`카카오 상담톡 재전송 감지 — 저장은 하고 봇 응답만 생략 (session=${session.id}, serial=${serialNumber})`);
+
+    await logEvent({ sessionId: session.id, eventType: 'message', keys, body: req.body, headers, handled: true });
+
+    if (!text) {
+      // 사진·파일만 온 경우 — 내용은 못 읽어도 "보냈다"는 사실은 위에서 이미 남겼다.
+      if (kakaoConsult.hasNonTextSection(req.body) && session.status !== 'agent_active') {
+        const notice = '사진·파일은 아직 확인이 어려워요. 상담원을 연결해드릴게요.';
+        await insertMessage(session.id, 'bot', notice);
+        await sendAndLog(session, notice, '비텍스트 메시지 안내');
+        await markNeedsAgent(session, placeholder, '사진/파일 문의');
+      }
+      return;
+    }
+    if (repeated) {
+      console.warn(`카카오 상담톡 반복 문구 — 저장만 하고 봇 응답은 생략 (session=${session.id})`);
+      return;
+    }
+    await handleBotTurnOrSuggestion(session, text);
+  })().catch((e) => console.error('카카오 상담톡 수신 후처리 실패:', e.message)), 'inbound_followup');
 }));
+
+// 봇 응대 / 상담원 도우미 초안 — 수신 후처리에서 갈라지는 지점만 따로 뺐다.
+async function handleBotTurnOrSuggestion(session, text) {
+  // 상담원이 이미 응대 중인 세션은 봇이 끼어들지 않는다(기존 웹 위젯 규칙과 동일).
+  if (session.status !== 'agent_active') {
+    // 동의 요청은 첫 메시지에 무조건 보내지 않는다 — 요금문의·지식검색만 하고 끝나는 고객에게는
+    // 불필요하다. 상담원 연결이나 접수처럼 실제로 신원이 필요한 시점에만 요청한다
+    // (ensurePersonalConsent, 사용자 확정 규칙).
+    try {
+      await processBotTurn(session, text);
+    } catch (e) {
+      console.error('카카오 상담톡 봇 처리 실패:', e.message);
+      await markNeedsAgent(session, text, null);
+    }
+    return;
+  }
+  // 상담원 응대 중 — 봇은 고객에게 답하지 않지만(기존 규칙 유지) 답변 초안은 만들어 둔다.
+  // 상담원 화면에 "채택 대기"로 뜨고, 승인해야 고객에게 나간다(lib/agentAssist.js).
+  await createAgentSuggestion(session, text);
+}
 
 // ---------------- "상담원 연결" 버튼 ----------------
 router.post('/receive/reference', asyncHandler(async (req, res) => {

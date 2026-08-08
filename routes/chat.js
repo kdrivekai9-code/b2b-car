@@ -188,6 +188,34 @@ async function markAgentMessagesReadByUser(sessionId) {
 // 경우에도 이 함수 자체가 불리지 않으므로, "읽지도 않았는데 읽음으로 표시되는" 일이 없다.
 const AGENT_READ_NOTICE = '상담원이 확인했습니다. 곧 답변드리겠습니다.';
 
+// 같은 안내를 이 간격 안에 두 번 보내지 않는다. 상담원 화면이 주기적으로 폴링하며 읽음 처리를
+// 하기 때문에, 제한이 없으면 고객이 메시지를 보낼 때마다 "상담원이 확인했습니다"가 따라붙는다.
+// 고객 입장에서는 답을 기다리는데 같은 말만 반복되는 꼴이라 오히려 신뢰를 깎는다.
+const AGENT_READ_NOTICE_COOLDOWN_MINUTES = 5;
+
+async function shouldSendAgentReadNotice(sessionId) {
+  // 최근에 같은 안내를 이미 보냈으면 생략.
+  const recentNotice = await db.get(
+    `SELECT id FROM chat_messages
+     WHERE session_id = ? AND sender = 'system' AND message = ?
+       AND created_at >= to_char((now() at time zone 'Asia/Seoul') - interval '${AGENT_READ_NOTICE_COOLDOWN_MINUTES} minutes', 'YYYY-MM-DD HH24:MI:SS')
+     LIMIT 1`,
+    [sessionId, AGENT_READ_NOTICE]
+  ).catch(() => null);
+  if (recentNotice) return false;
+
+  // 상담원이 최근에 실제로 답장을 보냈으면 생략 — 답장 자체가 "확인했다"는 신호이고,
+  // 카카오 쪽 안읽음 표시도 그 답장으로 이미 지워진다.
+  const recentReply = await db.get(
+    `SELECT id FROM chat_messages
+     WHERE session_id = ? AND sender = 'agent'
+       AND created_at >= to_char((now() at time zone 'Asia/Seoul') - interval '${AGENT_READ_NOTICE_COOLDOWN_MINUTES} minutes', 'YYYY-MM-DD HH24:MI:SS')
+     LIMIT 1`,
+    [sessionId]
+  ).catch(() => null);
+  return !recentReply;
+}
+
 async function notifyKakaoAgentRead(sessionId) {
   const session = await db.get(
     `SELECT id, channel, kakao_service_key, kakao_user_key, kakao_event_key
@@ -195,6 +223,7 @@ async function notifyKakaoAgentRead(sessionId) {
     [sessionId]
   );
   if (!session || session.channel !== 'kakao') return;
+  if (!await shouldSendAgentReadNotice(sessionId)) return;
 
   const result = await kakaoConsult.sendMessage(session, AGENT_READ_NOTICE);
   if (!result.ok) {
