@@ -43,7 +43,29 @@ function runAfterResponse(promise, label) {
 // 메시지에 봇이 두 번 답한다 — 최근에 같은 내용을 이미 받았으면 저장/응답만 하고 봇 처리는 건너뛴다.
 const DUPLICATE_WINDOW_SECONDS = 60;
 
-async function isDuplicateInbound(userKey, text) {
+// 카카오는 메시지마다 고유 일련번호(meta.serialNumber)를 준다 — 재전송이면 이 값이 같다.
+// 이게 있으면 정확히 판정할 수 있어 텍스트 비교를 쓰지 않는다.
+async function isResentEvent(serialNumber) {
+  if (!serialNumber) return false;
+  try {
+    const row = await db.get(
+      `SELECT id FROM kakao_consult_events
+       WHERE event_type = 'message' AND handled = true AND payload_json LIKE ?
+       LIMIT 1`,
+      ['%"serialNumber":"' + String(serialNumber) + '"%']
+    );
+    return !!row;
+  } catch (e) {
+    console.error('카카오 상담톡 재전송 확인 실패(중복 아님으로 진행):', e.message);
+    return false;
+  }
+}
+
+// 일련번호가 없는 형식일 때의 차선책 — 같은 고객이 같은 문구를 짧은 시간에 다시 보낸 경우다.
+// ⚠ 이건 재전송이라는 증거가 아니다. 고객이 "네", "확인부탁드립니다"를 연달아 두 번 치는 일은
+// 흔하다(로그상 단순 응대가 접수 외 메시지의 13.6%). 그래서 이 판정으로는 **메시지를 버리지
+// 않는다** — 저장과 상담원 노출은 그대로 하고 봇의 중복 응답만 막는다.
+async function looksRepeated(userKey, text) {
   try {
     const row = await db.get(
       `SELECT id FROM kakao_consult_events
@@ -55,7 +77,7 @@ async function isDuplicateInbound(userKey, text) {
     );
     return !!row;
   } catch (e) {
-    console.error('카카오 상담톡 중복 수신 확인 실패(중복 아님으로 진행):', e.message);
+    console.error('카카오 상담톡 반복 수신 확인 실패(반복 아님으로 진행):', e.message);
     return false;
   }
 }
@@ -78,17 +100,60 @@ function checkWebhookAuth(req, res, next) {
 }
 router.use(checkWebhookAuth);
 
-async function logEvent({ sessionId, eventType, keys, body, handled, errorMessage }) {
+async function logEvent({ sessionId, eventType, keys, body, handled, errorMessage, headers }) {
   try {
+    // 키가 안 잡혀 버려진 요청을 나중에 되짚으려면 바디만으로는 부족하다 — 헤더로만 키가 오는
+    // 형식(카카오 원본 /receive/message)에서 "헤더가 아예 없었는지, 우리가 못 읽었는지"를
+    // 구분할 수 있어야 해서 진단용 헤더를 payload에 함께 남긴다.
+    const payload = headers ? { ...(body || {}), _headers: headers } : (body || {});
     await db.run(
       `INSERT INTO kakao_consult_events (session_id, event_type, user_key, service_key, event_key, payload_json, handled, error_message)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [sessionId || null, eventType, keys.userKey || null, keys.serviceKey || null, keys.eventKey || null,
-        JSON.stringify(body || {}), !!handled, errorMessage || null]
+        JSON.stringify(payload), !!handled, errorMessage || null]
     );
   } catch (e) {
     console.error('카카오 상담톡 이벤트 로그 저장 실패:', e.message);
   }
+}
+
+// 인증 키가 안 왔을 때의 마지막 복구 수단 — 카카오 원본 /receive/message는 바디에 키가 없고
+// meta.sessionId만 있다. 그 sessionId는 우리가 세션에 저장해 둔 kakao_event_key와 같은 값이라,
+// 그것만으로도 어느 대화인지 특정할 수 있다. 이 복구가 없으면 본문이 멀쩡히 들어 있는 메시지를
+// 400으로 버리게 된다(실제로 그렇게 버려지고 있었다).
+async function recoverSessionByEventKey(eventKey) {
+  if (!eventKey) return null;
+  return db.get(
+    `SELECT * FROM chat_sessions WHERE channel = 'kakao' AND kakao_event_key = ? AND status != 'closed'
+     ORDER BY id DESC LIMIT 1`,
+    [String(eventKey)]
+  ).catch(() => null);
+}
+
+// 수신 요청 → 세션. 지금까지는 userKey와 serviceKey가 **둘 다** 있어야만 진행했는데, 그건
+// 발신 기준이지 수신 기준이 아니다. 수신에서 필요한 건 "누구의 대화인가"뿐이다.
+//   1) userKey가 있으면 그걸로 찾거나 만든다(serviceKey는 지난 세션에서 물려받는다)
+//   2) userKey가 없어도 sessionId(=event_key)가 있으면 그 세션을 찾는다
+//   3) 둘 다 없으면 식별 불가 — 그때만 버린다
+async function resolveInboundSession(keys) {
+  if (keys.userKey) {
+    if (!keys.serviceKey) {
+      const previous = await db.get(
+        `SELECT kakao_service_key FROM chat_sessions
+         WHERE channel = 'kakao' AND external_user_key = ? AND kakao_service_key IS NOT NULL
+         ORDER BY id DESC LIMIT 1`,
+        [keys.userKey]
+      ).catch(() => null);
+      if (previous) keys.serviceKey = previous.kakao_service_key;
+    }
+    return findOrCreateKakaoSession(keys);
+  }
+
+  const recovered = await recoverSessionByEventKey(keys.eventKey);
+  if (recovered) {
+    console.warn(`카카오 상담톡 userKey 누락 — sessionId(${keys.eventKey})로 세션 ${recovered.id} 복구`);
+  }
+  return recovered;
 }
 
 // 같은 고객의 카카오 세션을 재사용한다(계획서 5.1) — 닫히지 않은 세션이 있으면 그걸 쓰고,
@@ -640,14 +705,34 @@ async function processBotTurn(session, text) {
 router.post(['/receive', '/receive/message', '/receive/message-simple'], asyncHandler(async (req, res) => {
   const keys = kakaoConsult.extractKeys(req);
   const text = kakaoConsult.extractPlainText(req.body);
-  if (!keys.userKey || !keys.serviceKey) {
-    await logEvent({ eventType: 'message', keys, body: req.body, handled: false, errorMessage: 'missing_keys' });
-    return res.status(400).json({ code: 400, message: '필수 인증 키가 없습니다.' });
-  }
+  const headers = kakaoConsult.extractDiagnosticHeaders(req);
 
-  const session = await findOrCreateKakaoSession(keys);
-  const duplicate = text ? await isDuplicateInbound(keys.userKey, text) : false;
-  await logEvent({ sessionId: session.id, eventType: 'message', keys, body: req.body, handled: true });
+  // 키가 없어도 곧바로 버리지 않는다 — meta.sessionId만 온 형식(카카오 원본 /receive/message)은
+  // 그 값으로 기존 세션을 찾을 수 있다. 본문이 멀쩡한 메시지를 400으로 버리면 고객 입장에서는
+  // "보냈는데 상담원이 못 봤다"가 된다(실측: message 이벤트 16건 중 6건이 이렇게 버려졌다).
+  // 세션을 찾는 데 필요한 건 userKey다. serviceKey는 **발신할 때** 필요한 값이라, 없다고 해서
+  // 수신 메시지를 버릴 이유가 없다 — 없으면 같은 고객의 지난 세션에서 물려받는다.
+  // (실측: /receive/reference는 serviceKey 없이 userKey만 보내와서 전부 버려지고 있었다.)
+  let session = await resolveInboundSession(keys);
+  if (!session) {
+    await logEvent({ eventType: 'message', keys, body: req.body, headers, handled: false, errorMessage: 'missing_keys' });
+    // 400을 주면 중계서버가 같은 요청을 계속 재시도할 수 있는데, 식별할 수 없는 요청은 재시도해도
+    // 결과가 같다. 200으로 받아 삼키고 로그로만 남긴다(계획서 8.4의 재시도 유발 회피와 같은 판단).
+    return res.json({ code: 200, message: 'SUCCESS' });
+  }
+  keys.userKey = keys.userKey || session.kakao_user_key;
+  keys.serviceKey = keys.serviceKey || session.kakao_service_key;
+
+  // 재전송(같은 일련번호)이면 통째로 무시한다 — 이미 저장·처리한 메시지다.
+  const serialNumber = req.body && req.body.meta && req.body.meta.serialNumber;
+  if (text && await isResentEvent(serialNumber)) {
+    console.warn(`카카오 상담톡 재전송 무시 (session=${session.id}, serial=${serialNumber})`);
+    return res.json({ code: 200, message: 'SUCCESS' });
+  }
+  // 일련번호가 없으면 확신할 수 없다 — 메시지는 저장하고 봇의 중복 응답만 막는다.
+  const repeated = text && !serialNumber ? await looksRepeated(keys.userKey, text) : false;
+
+  await logEvent({ sessionId: session.id, eventType: 'message', keys, body: req.body, headers, handled: true });
 
   if (!text) {
     // 이미지/파일만 온 경우 — 1차 범위가 텍스트라 처리는 못 하지만 무반응으로 두지 않는다.
@@ -663,19 +748,16 @@ router.post(['/receive', '/receive/message', '/receive/message-simple'], asyncHa
     }
     return res.json({ code: 200, message: 'SUCCESS' });
   }
-  if (duplicate) {
-    console.warn(`카카오 상담톡 중복 수신 무시 (session=${session.id}): ${text.slice(0, 40)}`);
-    return res.json({ code: 200, message: 'SUCCESS' });
-  }
-
+  // 반복 문구여도 저장은 한다 — 상담원 화면에서 사라지면 "보냈는데 못 봤다"가 된다.
   await insertMessage(session.id, 'user', text);
+  if (repeated) console.warn(`카카오 상담톡 반복 문구 — 저장만 하고 봇 응답은 생략 (session=${session.id})`);
 
   // 여기까지는 빠른 DB 쓰기뿐이라 곧바로 200을 돌려주고, 봇 처리(Gemini 분류 → 지식검색 →
   // 카카오 발신, 합쳐서 수십 초까지 걸릴 수 있다)는 응답 뒤로 넘긴다(계획서 8.4).
   res.json({ code: 200, message: 'SUCCESS' });
 
   // 상담원이 이미 응대 중인 세션은 봇이 끼어들지 않는다(기존 웹 위젯 규칙과 동일).
-  if (session.status !== 'agent_active') {
+  if (!repeated && session.status !== 'agent_active') {
     runAfterResponse(
       (async () => {
         // 동의 요청은 첫 메시지에 무조건 보내지 않는다 — 요금문의·지식검색만 하고 끝나는 고객에게는
@@ -698,13 +780,20 @@ router.post(['/receive', '/receive/message', '/receive/message-simple'], asyncHa
 // ---------------- "상담원 연결" 버튼 ----------------
 router.post('/receive/reference', asyncHandler(async (req, res) => {
   const keys = kakaoConsult.extractKeys(req);
-  if (!keys.userKey || !keys.serviceKey) {
-    await logEvent({ eventType: 'reference', keys, body: req.body, handled: false, errorMessage: 'missing_keys' });
-    return res.status(400).json({ code: 400, message: '필수 인증 키가 없습니다.' });
-  }
+  const headers = kakaoConsult.extractDiagnosticHeaders(req);
 
-  const session = await findOrCreateKakaoSession(keys);
-  await logEvent({ sessionId: session.id, eventType: 'reference', keys, body: req.body, handled: true });
+  // 상담원 연결 버튼도 메시지 수신과 같은 이유로 버려지고 있었다(실측 2건) — 이 요청의 바디는
+  // camelCase(userKey)로 오는데 snake_case만 보고 있었다. extractKeys가 둘 다 보게 고쳤고,
+  // 그래도 못 찾으면 sessionId로 기존 세션을 찾는다. 여기서 놓치면 고객은 "상담원 연결"을
+  // 눌렀는데 아무도 호출되지 않는 상태가 된다 — 가장 티나는 실패다.
+  const session = await resolveInboundSession(keys);
+  if (!session) {
+    await logEvent({ eventType: 'reference', keys, body: req.body, headers, handled: false, errorMessage: 'missing_keys' });
+    return res.json({ code: 200, message: 'SUCCESS' });
+  }
+  keys.userKey = keys.userKey || session.kakao_user_key;
+  keys.serviceKey = keys.serviceKey || session.kakao_service_key;
+  await logEvent({ sessionId: session.id, eventType: 'reference', keys, body: req.body, headers, handled: true });
 
   // 원본 스펙의 reference.text(상담원 연결 버튼 직전 발화, 계획서 4.6)를 인계 메시지로 남겨두면
   // 상담원 카드보드에서 "고객이 방금 뭐라고 했는지"가 바로 보인다.
