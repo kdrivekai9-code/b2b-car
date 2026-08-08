@@ -60,20 +60,7 @@ check(
   buildMessage('cancelled', withDriver),
   '[OID1234] 오더가 취소되었습니다. 문의사항은 상담원에게 말씀해주세요.'
 );
-check(
-  '미배정 알림',
-  buildMessage('not_dispatched', withDriver),
-  '[OID1234] 배차가 지연되고 있습니다. 기사님을 계속 찾고 있으니 조금만 기다려주세요.'
-);
-check('사건 다섯 가지 모두 기본 문구가 있다', Object.keys(DEFAULT_EVENT_SETTINGS).length, 5);
-// 미배정 알림은 상태 전이가 아니라 시간 경과로 찾는다 — 전이 판정이 이걸 만들어내면 안 된다.
-check(
-  '미배정 알림은 상태 전이에서 나오지 않는다',
-  ['접수', '대기', '예약', '기사배정', '완료', '취소']
-    .flatMap((a) => ['접수', '대기', '예약', '기사배정', '완료', '취소'].map((b) => classifyTransition(a, b)))
-    .includes('not_dispatched'),
-  false
-);
+check('사건 네 가지 모두 기본 문구가 있다', Object.keys(DEFAULT_EVENT_SETTINGS).length, 4);
 
 console.log('\n[지사가 고친 문구]');
 const order = {

@@ -188,46 +188,6 @@ async function main() {
       }
     }
 
-    console.log('\n[미배정 알림]');
-    // 이건 상태가 "안 바뀌어서" 나가는 통보라, 이력이 아니라 접수 시각으로 찾는다.
-    await db.run('DELETE FROM kakao_order_notifications WHERE order_id = ?', [created.orderId]);
-    await db.run('UPDATE orders SET status = ? WHERE id = ?', ['접수', created.orderId]);
-
-    // 방금 접수한 것처럼 만들어두면 아직 때가 아니다.
-    await db.run(
-      `UPDATE orders SET created_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') WHERE id = ?`,
-      [created.orderId]
-    );
-    const tooEarly = await notify.collectUnassigned();
-    check('접수 직후에는 예약하지 않는다', tooEarly.scheduled, 0);
-
-    // 기본값(30분)을 넘긴 상황으로 되돌린다.
-    await db.run(
-      `UPDATE orders SET created_at = to_char((now() at time zone 'Asia/Seoul') - interval '31 minutes', 'YYYY-MM-DD HH24:MI:SS') WHERE id = ?`,
-      [created.orderId]
-    );
-    const overdue = await notify.collectUnassigned();
-    check('설정한 시간이 지나면 예약한다', overdue.scheduled, 1);
-
-    const twice = await notify.collectUnassigned();
-    check('오더당 한 번만 — 매분 재촉하지 않는다', twice.scheduled, 0);
-
-    const unassignedSend = await notify.sendDue({ send: fakeSend });
-    check('미배정 알림을 보낸다', unassignedSend.sent, 1);
-    check('문구가 배차 지연 안내다', sentTexts[sentTexts.length - 1].includes('배차가 지연'), true);
-
-    // 기다리는 사이에 배차가 됐으면 보내지 않아야 한다.
-    await db.run('DELETE FROM kakao_order_notifications WHERE order_id = ?', [created.orderId]);
-    await db.run(
-      `INSERT INTO kakao_order_notifications (order_id, chat_session_id, event_type, dedupe_key, scheduled_at)
-       VALUES (?, ?, 'not_dispatched', '', now() - interval '1 second')`,
-      [created.orderId, created.sessionId]
-    );
-    await db.run('UPDATE orders SET status = ? WHERE id = ?', ['기사배정', created.orderId]);
-    const nowDispatched = await notify.sendDue({ send: fakeSend });
-    check('그사이 배차가 됐으면 보내지 않는다', nowDispatched.sent, 0);
-    check('보내지 않은 건은 skipped로 남는다', nowDispatched.skipped, 1);
-
     console.log('\n[상담 이력]');
     const logged = await db.all(
       `SELECT message FROM chat_messages WHERE session_id = ? ORDER BY id ASC`,
