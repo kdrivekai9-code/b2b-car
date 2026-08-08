@@ -15,6 +15,7 @@ const TAB_DEFS = [
   { key: 'extra', label: '추가기능', path: 'extra-settings' },
   { key: 'callmaner', label: '콜마너 연동', path: 'callmaner' },
   { key: 'dispatch_delay', label: '배차지연 알림', path: 'dispatch-delay' },
+  { key: 'customer_notifications', label: '고객 통보', path: 'customer-notifications' },
 ];
 
 export default function BranchTabs({ active, branches = [], branch = null }) {

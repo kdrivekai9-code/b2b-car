@@ -37,9 +37,13 @@ async function main() {
 
     const branch = await db.get('SELECT id FROM branches ORDER BY id LIMIT 1');
     const order = await db.get(
-      `INSERT INTO orders (oid, branch_id, status, chat_session_id, callmaner_driver_name, callmaner_driver_phone, memo_customer)
-       VALUES (?, ?, '접수', ?, '홍길동', '010-1111-2222', ?) RETURNING id`,
-      [`${MARK}-oid`, branch.id, created.sessionId, MARK]
+      `INSERT INTO orders (oid, branch_id, status, chat_session_id, callmaner_driver_name, callmaner_driver_phone,
+                           memo_customer, origin_address, destination_address, reserved_date, reserved_time)
+       VALUES (?, ?, '접수', ?, '홍길동', '010-1111-2222', ?, ?, ?, ?, ?) RETURNING id`,
+      [
+        `${MARK}-oid`, branch.id, created.sessionId, MARK,
+        '서울 강서구 양천로53길 30', '경기 성남시 분당구 판교역로 160', '2026-08-20', '14:00',
+      ]
     );
     created.orderId = order.id;
 
@@ -108,6 +112,81 @@ async function main() {
       sentTexts[sentTexts.length - 1].includes('다른 기사님께 배차 진행중'),
       true
     );
+
+    console.log('\n[운행완료 · 오더취소]');
+    await db.run('UPDATE orders SET status = ? WHERE id = ?', ['완료', created.orderId]);
+    await db.run(
+      `INSERT INTO order_status_history (order_id, actor_user_id, old_status, new_status, note) VALUES (?, NULL, '기사배정', '완료', ?)`,
+      [created.orderId, MARK]
+    );
+    const completed = await notify.runKakaoOrderNotifications({ send: fakeSend });
+    check('운행완료는 미루지 않고 보낸다', completed.delivered.sent, 1);
+    check('문구가 운행완료 안내다', sentTexts[sentTexts.length - 1].includes('운행이 완료'), true);
+
+    await db.run('UPDATE orders SET status = ? WHERE id = ?', ['취소', created.orderId]);
+    await db.run(
+      `INSERT INTO order_status_history (order_id, actor_user_id, old_status, new_status, note) VALUES (?, NULL, '완료', '취소', ?)`,
+      [created.orderId, MARK]
+    );
+    const cancelled = await notify.runKakaoOrderNotifications({ send: fakeSend });
+    check('오더취소도 보낸다', cancelled.delivered.sent, 1);
+    check('문구가 오더취소 안내다', sentTexts[sentTexts.length - 1].includes('취소되었습니다'), true);
+
+    // 지사 설정 — 테이블이 없으면(마이그레이션 미적용) 이 구간만 건너뛴다.
+    const hasSettings = await db.get(
+      "SELECT 1 AS ok FROM information_schema.tables WHERE table_name = 'branch_customer_notifications'"
+    );
+    if (!hasSettings) {
+      console.log('\n[지사 설정] 건너뜀 — 마이그레이션 20260809020000 미적용');
+    } else {
+      console.log('\n[지사 설정]');
+      // 위에서 이미 이 오더로 운행완료·오더취소를 한 번씩 보냈다. 중복 방지가 살아 있어서
+      // 그대로 두면 여기서 만드는 예약이 "이미 보낸 통보"로 막힌다(그게 정상 동작이다).
+      // 이 구간은 설정이 반영되는지를 보는 것이므로, 이 테스트가 만든 통보 기록만 비우고 시작한다.
+      await db.run('DELETE FROM kakao_order_notifications WHERE order_id = ?', [created.orderId]);
+      const settingKeys = [];
+      const putSetting = async (eventType, enabled, delayMinutes, template) => {
+        settingKeys.push(eventType);
+        await db.run(`
+          INSERT INTO branch_customer_notifications (branch_id, event_type, enabled, delay_minutes, message_template)
+          VALUES (?, ?, ?, ?, ?)
+          ON CONFLICT (branch_id, event_type) DO UPDATE SET
+            enabled = excluded.enabled, delay_minutes = excluded.delay_minutes, message_template = excluded.message_template
+        `, [branch.id, eventType, enabled, delayMinutes, template]);
+      };
+
+      try {
+        // 껐을 때 — 예약 자체가 만들어지지 않아야 한다.
+        await putSetting('completed', false, 0, '쓰이지 않아야 하는 문구');
+        await db.run('UPDATE orders SET status = ? WHERE id = ?', ['완료', created.orderId]);
+        await db.run(
+          `INSERT INTO order_status_history (order_id, actor_user_id, old_status, new_status, note) VALUES (?, NULL, '접수', '완료', ?)`,
+          [created.orderId, MARK]
+        );
+        const offRun = await notify.collectFromHistory();
+        check('지사가 끈 통보는 예약하지 않는다', offRun.scheduled, 0);
+        check('끈 건수는 따로 센다', offRun.disabled, 1);
+
+        // 켜고 문구를 바꿨을 때 — 그 문구가 그대로 나가야 한다.
+        await putSetting('cancelled', true, 0, '{oid} 지사가 정한 취소 안내입니다');
+        await db.run('UPDATE orders SET status = ? WHERE id = ?', ['취소', created.orderId]);
+        await db.run(
+          `INSERT INTO order_status_history (order_id, actor_user_id, old_status, new_status, note) VALUES (?, NULL, '완료', '취소', ?)`,
+          [created.orderId, MARK]
+        );
+        const customRun = await notify.runKakaoOrderNotifications({ send: fakeSend });
+        check('지사 문구로 보낸다', customRun.delivered.sent, 1);
+        check(
+          '보낸 문구가 지사가 정한 그대로다',
+          sentTexts[sentTexts.length - 1],
+          `${MARK}-oid 지사가 정한 취소 안내입니다`
+        );
+      } finally {
+        for (const key of settingKeys) {
+          await db.run('DELETE FROM branch_customer_notifications WHERE branch_id = ? AND event_type = ?', [branch.id, key]);
+        }
+      }
+    }
 
     console.log('\n[상담 이력]');
     const logged = await db.all(

@@ -4,6 +4,9 @@ const { requireAuth, requireRole } = require('../middleware/auth');
 const asyncHandler = require('../middleware/asyncHandler');
 const { ORDER_STATUSES } = require('../config');
 const { getEffectivePaymentMethods, getEffectiveStatuses } = require('../lib/branchPolicy');
+// 고객 통보 설정 화면이 "어떤 사건이 있고 기본값이 무엇인지"를 통보 모듈에서 그대로 가져온다 —
+// 화면에만 따로 목록을 적어두면 사건이 하나 늘 때 설정에서 빠진 채로 남는다.
+const kakaoOrderNotify = require('../lib/kakaoOrderNotify');
 
 const router = express.Router();
 router.use(requireAuth, requireRole('admin'));
@@ -542,6 +545,103 @@ router.post('/:id/dispatch-delay', asyncHandler(async (req, res) => {
 router.post('/:id/dispatch-delay/:settingId/delete', asyncHandler(async (req, res) => {
   await db.run('DELETE FROM dispatch_delay_settings WHERE id = ? AND branch_id = ?', [req.params.settingId, req.params.id]);
   res.redirect('/branches/' + req.params.id + '/dispatch-delay?notice=' + encodeURIComponent('설정이 삭제되었습니다.'));
+}));
+
+// ---------------- 고객 통보 (카카오 상담톡 능동 통보) ----------------
+//
+// 어떤 상태 변화를 언제 어떤 문구로 알릴지 지사가 정한다. 설정을 저장하지 않은 지사는 코드
+// 기본값(lib/kakaoOrderNotify.js의 DEFAULT_EVENT_SETTINGS)으로 동작한다 — 지사를 새로 만들 때마다
+// 설정을 넣어주지 않아도 통보가 나가야 해서 옵트아웃으로 뒀다.
+const NOTIFY_EVENT_HINTS = {
+  dispatched: '기사가 배정되었을 때. 배차 직후 취소되는 경우가 있어 기본값은 1분 뒤에 보내고, 그사이 배차가 풀리면 보내지 않습니다.',
+  completed: '운행이 완료되었을 때.',
+  dispatch_cancelled: '배차받은 기사가 취소해서 다시 배차를 찾는 중일 때. 오더는 살아 있습니다.',
+  cancelled: '오더 자체가 취소되었을 때.',
+};
+
+async function loadCustomerNotificationPage(branchId) {
+  const [branch, branches] = await Promise.all([
+    db.get('SELECT * FROM branches WHERE id = ?', [branchId]),
+    db.all('SELECT id, name FROM branches ORDER BY id'),
+  ]);
+  if (!branch) return { branch: null };
+
+  // 마이그레이션(20260809020000) 적용 전에도 화면이 뜨게 한다 — 저장된 값이 없으면 기본값을 보여준다.
+  const saved = await db.all(
+    'SELECT event_type, enabled, delay_minutes, message_template FROM branch_customer_notifications WHERE branch_id = ?',
+    [branchId]
+  ).catch((e) => {
+    console.error('고객 통보 설정 조회 실패(기본값으로 표시):', e.message);
+    return [];
+  });
+  const savedByEvent = new Map(saved.map((row) => [row.event_type, row]));
+
+  const events = kakaoOrderNotify.EVENT_TYPES.map((key) => {
+    const fallback = kakaoOrderNotify.DEFAULT_EVENT_SETTINGS[key];
+    const row = savedByEvent.get(key);
+    return {
+      key,
+      label: fallback.label,
+      hint: NOTIFY_EVENT_HINTS[key] || '',
+      enabled: row ? row.enabled !== false : fallback.enabled,
+      delayMinutes: row && Number.isFinite(Number(row.delay_minutes)) ? Number(row.delay_minutes) : fallback.delayMinutes,
+      template: (row && String(row.message_template || '').trim()) || fallback.template,
+    };
+  });
+
+  return { branch, branches, events };
+}
+
+router.get('/:id/customer-notifications', asyncHandler(async (req, res) => {
+  const { branch, branches, events } = await loadCustomerNotificationPage(req.params.id);
+  if (!branch) return res.status(404).send('지사를 찾을 수 없습니다.');
+  res.render('branches/customer_notifications', {
+    title: '고객 통보 - ' + branch.name,
+    branch,
+    branches,
+    events,
+    error: req.query.error || null,
+    notice: req.query.notice || null,
+  });
+}));
+
+router.post('/:id/customer-notifications', asyncHandler(async (req, res) => {
+  const base = '/branches/' + req.params.id + '/customer-notifications';
+  const branch = await db.get('SELECT id FROM branches WHERE id = ?', [req.params.id]);
+  if (!branch) return res.status(404).send('지사를 찾을 수 없습니다.');
+
+  // 저장은 네 사건을 한 번에 받는다 — 하나라도 잘못되면 아무것도 저장하지 않는다. 절반만
+  // 반영되면 화면에 보이는 것과 실제로 나가는 문구가 어긋난다.
+  const rows = [];
+  for (const key of kakaoOrderNotify.EVENT_TYPES) {
+    const fallback = kakaoOrderNotify.DEFAULT_EVENT_SETTINGS[key];
+    const delayMinutes = Number(req.body['delay_' + key]);
+    // textarea는 개행을 \r\n으로 보낸다. 그대로 저장하면 고객에게 나가는 문구에 캐리지 리턴이
+    // 섞이고, 기본값과 글자가 같은데도 "다른 문구"로 저장된 것처럼 보인다(실제로 그렇게 됐다).
+    const template = String(req.body['message_' + key] || '').replace(/\r\n?/g, '\n').trim();
+
+    if (!Number.isInteger(delayMinutes) || delayMinutes < 0 || delayMinutes > 120) {
+      return res.redirect(base + '?error=' + encodeURIComponent(`${fallback.label}의 보내는 시점은 0~120분 사이로 입력해주세요.`));
+    }
+    if (!template) {
+      return res.redirect(base + '?error=' + encodeURIComponent(`${fallback.label}의 문구를 입력해주세요.`));
+    }
+    rows.push({ key, enabled: !!req.body['enabled_' + key], delayMinutes, template });
+  }
+
+  for (const row of rows) {
+    await db.run(`
+      INSERT INTO branch_customer_notifications (branch_id, event_type, enabled, delay_minutes, message_template)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT (branch_id, event_type) DO UPDATE SET
+        enabled = excluded.enabled,
+        delay_minutes = excluded.delay_minutes,
+        message_template = excluded.message_template,
+        updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS')
+    `, [req.params.id, row.key, row.enabled, row.delayMinutes, row.template]);
+  }
+
+  res.redirect(base + '?notice=' + encodeURIComponent('고객 통보 설정이 저장되었습니다.'));
 }));
 
 // ---------------- 프리미엄 요금표 ----------------
