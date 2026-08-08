@@ -4,6 +4,7 @@ import AppShell from '../../_components/AppShell';
 import OrderForm from '../new/OrderForm';
 import OrderDetailAdminPanels from './OrderDetailAdminPanels';
 import OrderVocPanel from './OrderVocPanel';
+import OdometerSummary from './OdometerSummary';
 
 // 오더 상세페이지를 기존 접수폼(OrderForm.js, /orders/new)의 edit 모드로 재사용 —
 // views/orders/detail.ejs는 수정이 아예 불가능한 읽기전용 화면이었다. 모든 역할(admin/
@@ -94,11 +95,15 @@ export default async function OrderDetailPage({ params }) {
           {data.photos.length === 0 ? (
             <p className="page-sub" style={{ margin: 0 }}>업로드된 사진이 없습니다.</p>
           ) : (
-            <div className="upload-gallery">
-              {data.photos.map((p) => (
-                <a key={p.id} href={p.url} target="_blank" rel="noreferrer"><img src={p.url} alt="업로드된 사진" /></a>
-              ))}
-            </div>
+            <>
+              <div className="upload-gallery">
+                {data.photos.map((p) => (
+                  <a key={p.id} href={p.url} target="_blank" rel="noreferrer"><img src={p.url} alt="업로드된 사진" /></a>
+                ))}
+              </div>
+              {/* 기사가 계기판 사진과 함께 적어둔 값. views/orders/detail.ejs에도 같은 요약이 있다. */}
+              <OdometerSummary photos={data.photos} />
+            </>
           )}
         </div>
       )}

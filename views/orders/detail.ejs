@@ -70,6 +70,22 @@
           <a href="<%= p.url %>" target="_blank"><img src="<%= p.url %>" alt="업로드된 사진"></a>
         <% }) %>
       </div>
+      <%
+        // 기사가 계기판 사진과 함께 적어둔 값. 사진을 열어 숫자를 읽지 않아도 되도록 여기 요약한다.
+        // 같은 계산을 챗봇도 쓴다(lib/kakaoOrderPhotos.js의 summarizeOdometer).
+        const odometerValues = photos.map(function (p) { return Number(p.odometer_km); })
+          .filter(function (v) { return Number.isFinite(v) && v > 0; })
+          .sort(function (a, b) { return a - b; });
+      %>
+      <% if (odometerValues.length) { %>
+        <p class="page-sub" style="margin:8px 0 0;">
+          계기판 <%= odometerValues[0].toLocaleString('ko-KR') %>km
+          <% if (odometerValues.length > 1) { %>
+            → <%= odometerValues[odometerValues.length - 1].toLocaleString('ko-KR') %>km
+            (주행 <%= (odometerValues[odometerValues.length - 1] - odometerValues[0]).toLocaleString('ko-KR') %>km)
+          <% } %>
+        </p>
+      <% } %>
     <% } %>
     <% } %>
   </div>

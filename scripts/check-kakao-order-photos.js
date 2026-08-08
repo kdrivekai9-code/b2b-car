@@ -51,6 +51,35 @@ async function main() {
       ['요금이 얼마인가요', false],
     ].forEach(([sentence, want]) => check(`"${sentence}"`, photos.isPhotoRequest(sentence), want));
 
+    console.log('\n[주행거리 문의 판정]');
+    [
+      ['주행거리 얼마나 나왔나요', true],
+      ['계기판 몇 km예요', true],
+      ['킬로수 알려주세요', true],
+      ['사진 보내주세요', false],
+      ['배차 됐나요?', false],
+    ].forEach(([sentence, want]) => check(`"${sentence}"`, photos.isOdometerRequest(sentence), want));
+
+    console.log('\n[주행거리 요약]');
+    check('기록이 없으면 아무 말도 만들지 않는다', photos.summarizeOdometer([]).text, null);
+    // 한 건뿐이면 뺄 상대가 없다. 0을 상대로 두면 주행거리가 계기판 숫자 전체가 되어버린다.
+    check(
+      '한 건이면 그 값만 알린다',
+      photos.summarizeOdometer([{ odometer_km: 123456 }]).text,
+      '계기판 기록은 123,456km 한 건입니다.'
+    );
+    check(
+      '두 건이면 차이를 낸다',
+      photos.summarizeOdometer([{ odometer_km: 123900 }, { odometer_km: 123456 }]).text,
+      '계기판 123,456km → 123,900km, 주행거리는 444km입니다.'
+    );
+    check(
+      '순서가 뒤섞여 들어와도 최소·최대로 잡는다',
+      photos.summarizeOdometer([{ odometer_km: 200 }, { odometer_km: 900 }, { odometer_km: 500 }]).distance,
+      700
+    );
+    check('빈 값은 세지 않는다', photos.summarizeOdometer([{ odometer_km: null }, { odometer_km: 0 }]).count, 0);
+
     console.log('\n[파일명 추출]');
     check('URL 끝의 파일명을 쓴다', photos.fileNameFromUrl('https://x/y/abc.jpg', 0), 'abc.jpg');
     check('쿼리스트링은 떼어낸다', photos.fileNameFromUrl('https://x/y/abc.png?token=1', 0), 'abc.png');
@@ -155,6 +184,34 @@ async function main() {
       const result = await photos.sendOrderPhotos(session, orderRow, { ...stubs, limit: 2 });
       // 수십 장을 한꺼번에 보내면 대화창이 묻힌다.
       check('상한을 넘기지 않는다', result.sent, 2);
+    }
+
+    // 주행거리 컬럼은 마이그레이션(20260809030000) 이후에만 있다. 위의 요약·판정은 순수
+    // 계산이라 컬럼 없이도 확인되므로, DB를 쓰는 이 구간만 건너뛴다.
+    const hasOdometer = await db.get(
+      "SELECT 1 AS ok FROM information_schema.columns WHERE table_name = 'order_photos' AND column_name = 'odometer_km'"
+    );
+    if (!hasOdometer) {
+      console.log('\n[주행거리 응답 — DB] 건너뜀 — 마이그레이션 20260809030000 미적용');
+    } else {
+      console.log('\n[주행거리 응답 — DB]');
+      const before = await photos.answerOdometer(orderRow);
+      check('기록이 없으면 그렇게 알린다', before.skipped, 'no_odometer');
+
+      // 방금 만든 사진 세 장 중 둘에 계기판 값을 적어둔다.
+      await db.run('UPDATE order_photos SET odometer_km = ? WHERE id = ?', [123456, created.photoIds[0]]);
+      await db.run('UPDATE order_photos SET odometer_km = ? WHERE id = ?', [124000, created.photoIds[1]]);
+
+      const after = await photos.answerOdometer(orderRow);
+      check('값이 있으면 답한다', after.answered, true);
+      check('주행거리를 계산한다', after.summary.distance, 544);
+      check('어느 오더인지 밝힌다', after.message.includes(`${MARK}-oid`), true);
+
+      // 사진을 못 보는 지사면 거기 적힌 숫자도 알려주지 않는다 — 앞뒤가 맞아야 한다.
+      await setViewable(false);
+      const blocked = await photos.answerOdometer(orderRow);
+      check('사진 열람이 막힌 지사면 주행거리도 막는다', blocked.skipped, 'not_allowed');
+      await setViewable(true);
     }
   } finally {
     if (created.photoIds.length) {

@@ -17,6 +17,19 @@ const upload = multer({
   },
 });
 
+// 계기판 주행거리. 기사가 손으로 적는 값이라 "123,456"이나 "123456km"처럼 들어온다.
+// 범위를 벗어난 값(오타로 자릿수가 하나 더 붙는 경우)은 저장하지 않는다 — 잘못된 숫자가 남으면
+// 고객에게 그대로 안내되고, 그건 값이 없는 것보다 나쁘다.
+const MAX_ODOMETER_KM = 2000000;
+
+function parseOdometer(raw) {
+  const digits = String(raw == null ? '' : raw).replace(/[^0-9]/g, '');
+  if (!digits) return null;
+  const km = Number(digits);
+  if (!Number.isInteger(km) || km <= 0 || km > MAX_ODOMETER_KM) return null;
+  return km;
+}
+
 // 원본 파일명(사용자 입력)을 스토리지 경로에 그대로 쓰지 않는다 — 경로 조작 문자를 제거하고
 // 확장자만 남긴 안전한 이름으로 바꾼다.
 function safeFilename(originalname) {
@@ -29,7 +42,9 @@ router.get('/:token/data.json', asyncHandler(async (req, res) => {
   if (!order) return res.status(404).json({ order: null, guide: null, photos: [] });
   const [guide, photos] = await Promise.all([
     db.get('SELECT guide_text, guide_image_url FROM branch_photo_settings WHERE branch_id = ?', [order.branch_id]),
-    db.all('SELECT id, url FROM order_photos WHERE order_id = ? ORDER BY id DESC', [order.id]),
+    db.all('SELECT id, url, odometer_km FROM order_photos WHERE order_id = ? ORDER BY id DESC', [order.id])
+      // 마이그레이션(20260809030000) 적용 전이면 컬럼이 없다 — 화면은 주행거리 없이 그대로 뜬다.
+      .catch(() => db.all('SELECT id, url FROM order_photos WHERE order_id = ? ORDER BY id DESC', [order.id])),
   ]);
   res.json({ order, guide: guide || null, photos });
 }));
@@ -56,7 +71,18 @@ router.post('/:token', (req, res, next) => {
   if (req.file) {
     await ensureBucket();
     const url = await uploadPhoto(order.id, safeFilename(req.file.originalname), req.file.buffer, req.file.mimetype);
-    await db.run('INSERT INTO order_photos (order_id, url) VALUES (?, ?)', [order.id, url]);
+    // 계기판 사진일 때만 적는 값이라 비어 있는 게 정상이다. 숫자가 아니면 조용히 버린다 —
+    // 여기서 막아 세우면 사진 자체가 안 올라간다. 사진이 우선이다.
+    const odometer = parseOdometer(req.body && req.body.odometer_km);
+    await db.run(
+      'INSERT INTO order_photos (order_id, url, odometer_km) VALUES (?, ?, ?)',
+      [order.id, url, odometer]
+    ).catch(async (e) => {
+      // 마이그레이션(20260809030000) 적용 전이면 컬럼이 없다 — 주행거리 때문에 사진 업로드가
+      // 막히면 안 되므로 컬럼 없는 형태로 한 번 더 시도한다.
+      if (!e || e.code !== '42703') throw e;
+      await db.run('INSERT INTO order_photos (order_id, url) VALUES (?, ?)', [order.id, url]);
+    });
   }
   res.redirect('/upload/' + req.params.token);
 }));

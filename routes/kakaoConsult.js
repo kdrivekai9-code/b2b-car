@@ -18,7 +18,7 @@ const { findIntakeAccount, resolveIntakeContext, findAccountByPhone, linkUserKey
 const { previewIntakeAddresses } = require('../lib/intakeAddressPreview');
 const { runKakaoOrderNotifications } = require('../lib/kakaoOrderNotify');
 const kakaoOrderPhotos = require('../lib/kakaoOrderPhotos');
-const { sendOrderPhotos, isPhotoRequest } = kakaoOrderPhotos;
+const { sendOrderPhotos, isPhotoRequest, isOdometerRequest, answerOdometer } = kakaoOrderPhotos;
 // 주소 후보 검색·선택은 웹 접수 화면과 같은 규칙을 쓴다(lib/addressCandidates.js).
 const { searchAddressCandidates, needsDisambiguation, buildCandidateListText, matchCandidateChoice, getClarifyText } = require('../lib/addressCandidates');
 const { getSmalltalkMessage } = require('../lib/smallTalk');
@@ -405,15 +405,37 @@ async function tryAnswerFaq(session, text) {
 // LLM 분류보다 먼저 본다 — 요금·운영시간과 같은 이유다. "사진"이라는 말은 뜻이 좁아서 규칙으로
 // 충분하고, 분류를 거치면 unsupported로 떨어져 상담원에게 넘어간다.
 // 판정 규칙은 lib/kakaoOrderPhotos.js가 갖고 있다(검증 스크립트가 같은 정의를 쓴다).
-async function tryAnswerPhotoRequest(session, text) {
-  if (!isPhotoRequest(text)) return false;
-
-  // 이 대화로 접수한 오더만 대상으로 한다. 전화번호로 매칭된 계정의 다른 오더까지 열면
-  // "누구의 사진인지"를 이 자리에서 판단해야 하는데, 그 판단을 틀리면 남의 차 사진이 나간다.
-  const order = await db.get(
+// 이 대화로 접수한 오더. 전화번호로 매칭된 계정의 다른 오더까지 열면 "누구의 것인지"를 이
+// 자리에서 판단해야 하는데, 그 판단을 틀리면 남의 차 사진이 나간다.
+function loadSessionOrder(session) {
+  return db.get(
     `SELECT id, oid, branch_id FROM orders WHERE chat_session_id = ? ORDER BY id DESC LIMIT 1`,
     [session.id]
   ).catch(() => null);
+}
+
+// 주행거리 문의("몇 km 뛰었나요") — 기사가 계기판 사진과 함께 적어둔 값으로 답한다.
+// 사진과 같은 열람 권한을 따른다(lib/kakaoOrderPhotos.js).
+async function tryAnswerOdometer(session, text) {
+  if (!isOdometerRequest(text) || isPhotoRequest(text)) return false;
+  const order = await loadSessionOrder(session);
+  if (!order) return false;
+
+  const result = await answerOdometer(order).catch((e) => {
+    console.error('카카오 주행거리 안내 실패:', e.message);
+    return null;
+  });
+  if (!result) return false;
+
+  await botSay(session, result.message, '주행거리 안내');
+  if (result.skipped === 'not_allowed') await markNeedsAgent(session, text, '주행거리 문의(고객 열람 불가 지사)');
+  return true;
+}
+
+async function tryAnswerPhotoRequest(session, text) {
+  if (!isPhotoRequest(text)) return false;
+
+  const order = await loadSessionOrder(session);
   if (!order) return false;
 
   const result = await sendOrderPhotos(session, order).catch((e) => {
@@ -777,6 +799,12 @@ async function processBotTurn(session, text) {
   // 상담원을 부를 이유가 없다. 이 대화로 접수한 오더가 있을 때만 반응한다.
   if (await tryAnswerPhotoRequest(session, text).catch((e) => {
     console.error('카카오 사진 요청 처리 실패:', e.message);
+    return false;
+  })) return;
+
+  // 주행거리도 우리가 이미 갖고 있는 값이다(기사가 계기판 사진과 함께 적어둔 숫자).
+  if (await tryAnswerOdometer(session, text).catch((e) => {
+    console.error('카카오 주행거리 처리 실패:', e.message);
     return false;
   })) return;
 

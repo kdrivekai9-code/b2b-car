@@ -38,8 +38,13 @@ export default async function PhotoUploadPage({ params }) {
               {guide?.guide_text || '차량 인도/회수 시점의 사진을 촬영하여 업로드해주세요.'}
             </div>
 
+            {/* 계기판 사진일 때만 적는 값이라 선택 입력이다. views/photo_upload.ejs에도 같은 입력란이 있다. */}
             <form method="POST" action={'/upload/' + order.photo_upload_token} encType="multipart/form-data" className="upload-form">
               <input type="file" name="photo" accept="image/*" capture="environment" required />
+              <label className="upload-odometer">
+                계기판 주행거리 (선택)
+                <input type="number" name="odometer_km" min="1" max="2000000" step="1" inputMode="numeric" placeholder="예: 123456" />
+              </label>
               <button className="btn" type="submit">사진 업로드</button>
             </form>
 
