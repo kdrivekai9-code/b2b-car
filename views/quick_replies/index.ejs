@@ -1,0 +1,86 @@
+<%- include('../partials/header') %>
+<div class="page-head-row">
+  <div>
+    <h1 class="page-title">빠른 답변 관리</h1>
+    <p class="page-sub">상담 중 반복해서 치는 문구를 등록해 두면, 채팅 입력창 옆 <strong>⚡ 버튼</strong>에서 골라 바로 넣을 수 있습니다. 본문에 <code>{상담원}</code>을 쓰면 보낼 때 로그인한 상담원 이름으로 바뀝니다.</p>
+  </div>
+  <div class="page-head-actions">
+    <a class="btn secondary" href="/chat/sessions?view=card">상담 관리로</a>
+    <button class="btn" type="submit" form="quickReplyForm">등록</button>
+  </div>
+</div>
+
+<% if (error) { %><div class="error-msg"><%= error %></div><% } %>
+<% if (notice) { %><div class="success-msg"><%= notice %></div><% } %>
+
+<div class="card">
+  <form id="quickReplyForm" method="POST" action="/quick-replies">
+    <div class="section-title">⚡ 빠른 답변 등록</div>
+    <div class="row">
+      <div class="field">
+        <label for="qr_category">분류</label>
+        <select id="qr_category" name="category">
+          <% categories.forEach(function (c) { %><option value="<%= c %>"><%= c %></option><% }) %>
+        </select>
+      </div>
+      <div class="field">
+        <label for="qr_title">제목</label>
+        <input type="text" id="qr_title" name="title" placeholder="예: 확인 후 답변" required>
+        <p class="page-sub">목록에서 고를 때 보이는 짧은 이름입니다.</p>
+      </div>
+      <div class="field">
+        <label for="qr_sort">정렬</label>
+        <input type="number" id="qr_sort" name="sort_order" value="0">
+        <p class="page-sub">작을수록 위에 나옵니다.</p>
+      </div>
+    </div>
+    <div class="field full">
+      <label for="qr_body">문구 내용</label>
+      <textarea id="qr_body" name="body" rows="3" placeholder="예: 안녕하세요, {상담원} 상담원입니다. 무엇을 도와드릴까요?" required></textarea>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <div class="section-title">등록된 빠른 답변 (<%= replies.length %>)</div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>분류</th><th>제목</th><th>문구</th><th>정렬</th><th>사용</th><th>관리</th></tr>
+      </thead>
+      <tbody>
+        <% if (replies.length === 0) { %>
+          <tr><td colspan="6" class="empty">등록된 빠른 답변이 없습니다.</td></tr>
+        <% } %>
+        <% replies.forEach(function (r) { %>
+          <tr>
+            <form method="POST" action="/quick-replies/<%= r.id %>" id="qrEdit<%= r.id %>"></form>
+            <td>
+              <select name="category" form="qrEdit<%= r.id %>">
+                <% categories.forEach(function (c) { %>
+                  <option value="<%= c %>" <%= r.category === c ? 'selected' : '' %>><%= c %></option>
+                <% }) %>
+              </select>
+            </td>
+            <td><input type="text" name="title" value="<%= r.title %>" form="qrEdit<%= r.id %>" style="min-width:140px;"></td>
+            <td><textarea name="body" rows="2" form="qrEdit<%= r.id %>" style="min-width:320px;width:100%;"><%= r.body %></textarea></td>
+            <td><input type="number" name="sort_order" value="<%= r.sort_order %>" form="qrEdit<%= r.id %>" style="width:70px;"></td>
+            <td>
+              <span class="badge <%= r.is_active ? 'green' : 'gray' %>"><%= r.is_active ? '사용' : '중지' %></span>
+            </td>
+            <td style="white-space:nowrap;">
+              <button class="btn small" type="submit" form="qrEdit<%= r.id %>">저장</button>
+              <form method="POST" action="/quick-replies/<%= r.id %>/toggle" style="display:inline;">
+                <button class="btn small secondary" type="submit"><%= r.is_active ? '중지' : '사용' %></button>
+              </form>
+              <form method="POST" action="/quick-replies/<%= r.id %>/delete" style="display:inline;" onsubmit="return confirm('이 빠른 답변을 삭제하시겠습니까?');">
+                <button class="btn small danger" type="submit">삭제</button>
+              </form>
+            </td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+</div>
+<%- include('../partials/footer') %>

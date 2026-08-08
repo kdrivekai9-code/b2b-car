@@ -93,6 +93,68 @@ function SuggestionBubble({ suggestion, text, onChange, onApprove, onDismiss, di
   );
 }
 
+// 빠른 답변 고르기 — 입력창 바로 위에 뜬다. 분류별로 묶어 보여줘야 "인사말이 어디 있더라"를
+// 뒤지지 않는다(등록 문구가 20개를 넘어가면 평평한 목록은 못 쓴다).
+function QuickReplyPicker({ replies, onPick, onClose }) {
+  const [keyword, setKeyword] = useState('');
+  const q = keyword.trim();
+  const filtered = q
+    ? replies.filter((r) => (r.title + ' ' + r.body).toLowerCase().includes(q.toLowerCase()))
+    : replies;
+
+  const grouped = filtered.reduce((acc, r) => {
+    (acc[r.category] = acc[r.category] || []).push(r);
+    return acc;
+  }, {});
+
+  return (
+    <div className="card" style={{ marginBottom: 8, padding: 12, maxHeight: 260, overflowY: 'auto' }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+        <input
+          type="search"
+          value={keyword}
+          onChange={(e) => setKeyword(e.target.value)}
+          placeholder="문구 검색"
+          autoFocus
+          style={{ flex: 1 }}
+          aria-label="빠른 답변 검색"
+        />
+        <a className="btn small secondary" href="/quick-replies">관리</a>
+        <button className="btn small secondary" type="button" onClick={onClose}>닫기</button>
+      </div>
+
+      {replies.length === 0 && (
+        <div className="empty" style={{ padding: 8 }}>
+          등록된 빠른 답변이 없습니다. <a href="/quick-replies">지금 등록하기</a>
+        </div>
+      )}
+      {replies.length > 0 && filtered.length === 0 && (
+        <div className="empty" style={{ padding: 8 }}>검색 결과가 없습니다.</div>
+      )}
+
+      {Object.entries(grouped).map(([category, items]) => (
+        <div key={category} style={{ marginBottom: 8 }}>
+          <div style={{ fontSize: 11, color: 'var(--muted)', margin: '4px 0' }}>{category}</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {items.map((r) => (
+              <button
+                key={r.id}
+                className="btn small secondary"
+                type="button"
+                onClick={() => onPick(r.body)}
+                title={r.body}
+                style={{ maxWidth: '100%' }}
+              >
+                {r.title}
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export async function fetchJson(url, options) {
   const res = await fetch(url, {
     ...options,
@@ -136,6 +198,10 @@ export default function SessionViewer({
   const [suggestion, setSuggestion] = useState(null);
   const [suggestionText, setSuggestionText] = useState('');
   const [isDecidingSuggestion, setIsDecidingSuggestion] = useState(false);
+  // 빠른 답변(상용구) — 열 때 한 번만 불러온다. {상담원} 치환은 서버에서 끝내서 내려온다.
+  const [quickReplies, setQuickReplies] = useState(null);
+  const [quickRepliesOpen, setQuickRepliesOpen] = useState(false);
+  const replyInputRef = useRef(null);
 
   const knownMessageIdsRef = useRef(new Set());
   const oldestMessageIdRef = useRef(null);
@@ -386,6 +452,18 @@ export default function SessionViewer({
       .finally(() => setIsSendingReply(false));
   }
 
+  function toggleQuickReplies() {
+    setQuickRepliesOpen((open) => {
+      const next = !open;
+      if (next && quickReplies === null) {
+        fetchJson('/quick-replies/data.json')
+          .then((data) => setQuickReplies(data.replies || []))
+          .catch(() => setQuickReplies([]));
+      }
+      return next;
+    });
+  }
+
   function assignSelf() {
     if (!sessionId || isAssigningSelf) return;
     setIsAssigningSelf(true);
@@ -437,17 +515,45 @@ export default function SessionViewer({
       </div>
 
       {sessionId && !isClosed && (
-        <form className="chat-reply-row" onSubmit={sendReply} autoComplete="off">
-          <textarea
-            value={replyText}
-            onChange={(e) => setReplyText(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendReply(e); } }}
-            placeholder={hasOtherAssignee ? '담당 상담원만 고객에게 응답할 수 있습니다.' : '상담원으로 답변을 입력하세요... (Enter 전송 / Shift+Enter 줄바꿈)'}
-            required
-            disabled={replyDisabled}
-          />
-          <button className="btn" type="submit" disabled={replyDisabled || isSendingReply || !replyText.trim()}>전송</button>
-        </form>
+        <>
+          {quickRepliesOpen && (
+            <QuickReplyPicker
+              replies={quickReplies || []}
+              onPick={(body) => {
+                // 입력창에 이미 쓰던 내용이 있으면 지우지 않고 뒤에 붙인다 — 반쯤 쓰다가
+                // 상용구를 덧붙이는 경우가 실제로 많다.
+                setReplyText((prev) => (prev.trim() ? prev.replace(/\s*$/, '\n') + body : body));
+                setQuickRepliesOpen(false);
+                requestAnimationFrame(() => { if (replyInputRef.current) replyInputRef.current.focus(); });
+              }}
+              onClose={() => setQuickRepliesOpen(false)}
+            />
+          )}
+          <form className="chat-reply-row" onSubmit={sendReply} autoComplete="off">
+            <button
+              className="btn secondary"
+              type="button"
+              onClick={toggleQuickReplies}
+              disabled={replyDisabled}
+              title="빠른 답변 (자주 쓰는 문구 넣기)"
+              aria-label="빠른 답변 열기"
+              aria-expanded={quickRepliesOpen}
+              style={{ flex: 'none', padding: '0 12px' }}
+            >
+              ⚡
+            </button>
+            <textarea
+              ref={replyInputRef}
+              value={replyText}
+              onChange={(e) => setReplyText(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendReply(e); } }}
+              placeholder={hasOtherAssignee ? '담당 상담원만 고객에게 응답할 수 있습니다.' : '상담원으로 답변을 입력하세요... (Enter 전송 / Shift+Enter 줄바꿈)'}
+              required
+              disabled={replyDisabled}
+            />
+            <button className="btn" type="submit" disabled={replyDisabled || isSendingReply || !replyText.trim()}>전송</button>
+          </form>
+        </>
       )}
       {replyError && <div className="chat-inline-error">{replyError}</div>}
       {hasOtherAssignee && (

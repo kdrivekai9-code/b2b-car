@@ -179,6 +179,7 @@ export default function CardBoard({ initialSessions, initialOnlineAgents, curren
           </p>
         </div>
         <div className="page-head-actions">
+          <a className="btn secondary" href="/quick-replies">⚡ 빠른 답변 관리</a>
           <a className="btn secondary" href="/chat/guide">상담 운영안</a>
           <a className="btn secondary" href="/chat/sessions?view=list">리스트 보기</a>
           <a className="btn" href="/chat/sessions?view=card">챗봇 카드 보기</a>
