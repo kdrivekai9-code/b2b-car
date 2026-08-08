@@ -17,3 +17,6 @@ server.pid
 .vscode/
 .claude/
 artifacts/*.local.*
+
+# e2e 로그인 쿠키 캐시 — 세션 쿠키라 저장소에 올리지 않는다(tests/manual/helpers/auth.js).
+tests/manual/.auth-cookies.json

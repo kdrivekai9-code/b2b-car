@@ -1,7 +1,56 @@
+const fs = require('fs');
+const path = require('path');
 const { expect } = require('@playwright/test');
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// 로그인 성공 쿠키를 재사용한다 — 같은 실행 안에서도, 실행과 실행 사이에서도.
+//
+// 서버는 로그인 POST를 IP당 15분에 10회로 막는다(server.js의 loginLimiter). 테스트마다 새로
+// 로그인하면 한 파일에 테스트 서너 개만 있어도 한도에 닿고, 실패 재시도까지 겹치면 그 뒤로는
+// 코드가 멀쩡해도 전부 "로그인 실패"로 떨어진다 — 확인 단계 테스트를 고치는 동안 실제로 두 번
+// 그렇게 막혔고, 그때마다 원인이 코드인지 한도인지부터 가려내야 했다. 테스트를 고치며 여러 번
+// 돌리는 게 정상인데 그 반복 자체가 한도를 채우니, 파일에 남겨 실행 사이에도 이어 쓴다.
+// 로그인 자체를 검증하는 테스트는 이 헬퍼를 쓰지 않으면 된다.
+//
+// 세션 쿠키가 담기므로 저장소에 올리지 않는다(.gitignore).
+const STATE_FILE = path.join(__dirname, '..', '.auth-cookies.json');
+
+let cachedCookies = null;
+
+function loadCachedCookies() {
+  if (cachedCookies) return cachedCookies;
+  try {
+    const raw = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+    if (Array.isArray(raw) && raw.length) cachedCookies = raw;
+  } catch (_error) {
+    cachedCookies = null;
+  }
+  return cachedCookies;
+}
+
+function saveCachedCookies(cookies) {
+  cachedCookies = cookies;
+  try {
+    fs.writeFileSync(STATE_FILE, JSON.stringify(cookies), 'utf8');
+  } catch (_error) {
+    // 저장에 실패해도 테스트는 진행한다 — 다음 실행이 다시 로그인할 뿐이다.
+  }
+}
+
+async function tryCachedLogin(page, protectedUrl) {
+  const cookies = loadCachedCookies();
+  if (!cookies || !cookies.length) return false;
+  try {
+    await page.context().clearCookies();
+    await page.context().addCookies(cookies);
+    await page.goto(protectedUrl, { waitUntil: 'domcontentloaded' });
+    return !/\/login(?:\?|$)/.test(page.url());
+  } catch (_error) {
+    return false;
+  }
 }
 
 async function loginWithRetry(page, options = {}) {
@@ -11,6 +60,9 @@ async function loginWithRetry(page, options = {}) {
   const attempts = Number(options.attempts || 6);
   const loginUrl = baseUrl + '/login';
   const protectedUrl = baseUrl + '/chat/sessions?view=list';
+
+  if (await tryCachedLogin(page, protectedUrl)) return;
+  cachedCookies = null;
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     await page.context().clearCookies();
@@ -27,7 +79,10 @@ async function loginWithRetry(page, options = {}) {
 
     if (!/\/login(?:\?|$)/.test(page.url())) {
       await page.goto(protectedUrl, { waitUntil: 'domcontentloaded' });
-      if (!/\/login(?:\?|$)/.test(page.url())) return;
+      if (!/\/login(?:\?|$)/.test(page.url())) {
+        saveCachedCookies(await page.context().cookies());
+        return;
+      }
     }
 
     const errorText = await page.locator('.error-msg').textContent().catch(() => '');

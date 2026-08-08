@@ -42,6 +42,31 @@ async function setupMocks(page) {
       if (!input) return Promise.resolve({ success: false, resolvedText: null });
       return Promise.resolve({ success: true, resolvedText: String(input.value || '') });
     };
+
+    // 경로 거리를 고정한다. 요약은 announceFareGuideFromDb → waitForFinalRouteDistance(20초)를
+    // 거쳐야 나오는데, 그 값은 카카오 지도 SDK가 채우는 #routeTotalDistance를 읽는다. 테스트에는
+    // SDK가 없어 order-form.js가 "0.0km"을 써두고, 거리가 0이라 20초를 꽉 기다린 뒤 요약 없이
+    // 끝난다. 한 번만 넣어두는 것으로는 부족했다 — 주소가 바뀔 때마다 order-form.js가 다시
+    // 0.0km으로 덮어쓴다. 그래서 감시하며 되돌린다. 거리 계산 자체는 다른 테스트의 관심사다.
+    const FIXED_DISTANCE = '32.5 km';
+    Object.defineProperty(window, '__aiIntakeRouteFinal', {
+      get: () => true,
+      set: () => {},
+      configurable: true,
+    });
+    document.addEventListener('DOMContentLoaded', () => {
+      const pin = () => {
+        const el = document.getElementById('routeTotalDistance');
+        // 값이 이미 같으면 손대지 않는다 — 안 그러면 이 관찰자가 자기 변경에 다시 반응한다.
+        if (el && el.textContent !== FIXED_DISTANCE) el.textContent = FIXED_DISTANCE;
+      };
+      pin();
+      new MutationObserver(pin).observe(document.body, {
+        subtree: true,
+        childList: true,
+        characterData: true,
+      });
+    });
   });
 
   await page.route('**/orders/ai-intake/parse', async (route) => {
@@ -55,6 +80,16 @@ async function setupMocks(page) {
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({ documents: [placeResult(q, q, 37.5, 127.0)] }),
+    });
+  });
+
+  // 요금은 지사 요금표에 따라 달라져 검증에 쓸 수 없다 — 고정값을 준다. 요금표가 비어 있으면
+  // "구간요금이 없어 안내가 어렵습니다"로 흐름이 갈라지는데, 그것도 이 테스트가 볼 대상이 아니다.
+  await page.route('**/orders/fare-preview**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ enabled: true, baseFare: 90000, ferryFare: 0, totalFare: 90000 }),
     });
   });
 
@@ -84,22 +119,62 @@ async function sendChat(page, text, options = {}) {
 }
 
 // 봇 말풍선 텍스트를 순서대로 — 순서 자체가 검증 대상이라 배열로 본다.
+// 접수 화면은 말풍선 div에 직접 클래스를 준다(ai-intake-render.js의 addBubble). 질문 말풍선은
+// 여기에 ai-bot-question이 더 붙을 뿐이라 같이 잡힌다. 상담관리 카드 쪽의 .ai-chat-item 래퍼는
+// 이 화면에 없다 — 그걸 셀렉터에 넣었다가 말풍선을 하나도 못 잡고 헤맸다.
 async function botBubbles(page) {
-  return page.locator('.ai-chat-item.ai-bot .ai-chat-bubble').allTextContents();
+  return page.locator('.ai-chat-bubble.ai-bot').allTextContents();
 }
 
+function findSummary(bubbles) {
+  return bubbles.find((t) => t.includes('▪ 출발지:')) || null;
+}
+
+// 요약 말풍선이 "다 그려질 때까지" 기다린다.
+//
+// 봇 말풍선은 한 글자씩 흘려 쓴다(ai-intake-render.js의 streamPlainText). "▪ 출발지:"가 보이자마자
+// 텍스트를 읽으면 "▪ 출발지: 서울 강서구"처럼 중간까지만 잡혀서, 뒤쪽 항목을 검사하는 테스트가
+// 내용이 멀쩡한데도 실패한다. 길이가 더 늘지 않는 걸 확인하고 나서 넘어간다.
 async function waitForSummary(page) {
-  await expect.poll(async () => (await botBubbles(page)).some((t) => t.includes('▪ 출발지:')), { timeout: 20000 }).toBe(true);
+  await expect.poll(async () => findSummary(await botBubbles(page)) !== null, { timeout: 20000 }).toBe(true);
+
+  let previous = null;
+  await expect
+    .poll(
+      async () => {
+        const current = findSummary(await botBubbles(page));
+        const settled = current !== null && current === previous;
+        previous = current;
+        return settled;
+      },
+      { timeout: 20000, intervals: [300] },
+    )
+    .toBe(true);
+}
+
+// 첫 발화 → 요금 안내 → 추가 요청사항 답변 → 요약. 확인 단계에 닿기까지의 공통 경로다.
+// 필드가 다 채워져도 봇은 "추가 요청사항이 있으시면 알려주세요"를 한 번 묻고 기다린다 —
+// 여기에 답해야 요약으로 넘어간다. 세 테스트 모두 같은 자리에서 시작해야 해서 묶어둔다.
+async function reachConfirmStep(page) {
+  await sendChat(page, '8월 20일 2시 서울 강서구 양천로53길 30에서 판교역로 160까지 토레스 12가3456 탁송');
+  await expect
+    .poll(async () => (await botBubbles(page)).some((t) => t.includes('추가 요청사항')), { timeout: 30000 })
+    .toBe(true);
+  await sendChat(page, '없음', { waitForParse: false });
+  await waitForSummary(page);
 }
 
 test.describe('AI intake 확인 단계', () => {
+  // 로그인 → 화면 진입 → 발화 두 번 → 주소 확정·요금 안내를 거쳐야 확인 단계에 닿는다.
+  // 기본 30초로는 흐름이 끝나기 전에 끊긴다(다른 접수 e2e도 같은 이유로 90초를 쓴다).
+  test.describe.configure({ timeout: 90000 });
+
   test('요약 말풍선이 등록 확인 질문보다 먼저, 서로 다른 말풍선으로 나온다', async ({ page }) => {
     await setupMocks(page);
     await login(page);
     await openAiIntake(page);
 
-    await sendChat(page, '8월 20일 2시 서울 강서구 양천로53길 30에서 판교역로 160까지 토레스 12가3456 탁송');
-    await waitForSummary(page);
+    await reachConfirmStep(page);
 
     const bubbles = await botBubbles(page);
     const summaryIdx = bubbles.findIndex((t) => t.includes('▪ 출발지:'));
@@ -118,8 +193,7 @@ test.describe('AI intake 확인 단계', () => {
     await login(page);
     await openAiIntake(page);
 
-    await sendChat(page, '8월 20일 2시 서울 강서구 양천로53길 30에서 판교역로 160까지 토레스 12가3456 탁송');
-    await waitForSummary(page);
+    await reachConfirmStep(page);
 
     const summary = (await botBubbles(page)).find((t) => t.includes('▪ 출발지:')) || '';
 
@@ -145,8 +219,7 @@ test.describe('AI intake 확인 단계', () => {
     await login(page);
     await openAiIntake(page);
 
-    await sendChat(page, '8월 20일 2시 서울 강서구 양천로53길 30에서 판교역로 160까지 토레스 12가3456 탁송');
-    await waitForSummary(page);
+    await reachConfirmStep(page);
 
     // 등록이 나가면 안 된다 — 오더 등록 요청을 감시한다.
     let orderSubmitted = false;
