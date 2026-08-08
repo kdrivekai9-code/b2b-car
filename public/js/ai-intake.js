@@ -43,6 +43,11 @@
     renderer.clearGuidePlaceholder();
   }
 
+  // 접수에 필요한 필드와 질문 문구는 서버가 단 하나의 정의를 갖는다(lib/intakeFields.js) —
+  // 카카오 상담톡도 같은 정의를 쓰므로, 문구를 고칠 때 양쪽이 갈라지지 않는다.
+  // 아래 값은 그 정의를 못 받아왔을 때(네트워크 실패 등) 쓰는 폴백이다. 서버 응답이 오면
+  // loadFieldDefinitions()가 같은 배열을 제자리에서 교체한다 — 다른 코드가 이 배열을 참조로
+  // 들고 있어서 재할당하면 반영되지 않는다.
   var REQUIRED_FIELDS = [
     { id: 'reserved_date', label: '예약일시', type: 'datetime', question: '예약시간을 말씀해주세요? (예: 내일오후 3시출발, 23일 2시 도착)' },
     { id: 'origin_address', label: '출발지 주소', type: 'address', kind: 'origin', question: '차량을 픽업할 출발지 주소를 알려주세요?' },
@@ -51,6 +56,21 @@
     { id: 'destination_address', label: '도착지 주소', type: 'address', kind: 'destination', question: '차량을 인도할 도착지 주소를 알려주세요?' },
     { id: 'destination_contact', label: '도착지 연락처', type: 'phone', question: '도착지 담당자 연락처를 알려주세요? (예: 010-1234-5678)' },
   ];
+
+  // 서버 정의로 갈아끼운다. 실패하면 위 폴백으로 그대로 진행한다 — 정의를 못 받았다고 접수가
+  // 멈추면 안 된다. 필드 id 집합이 다르면(서버에만 있는 새 필드 등) 그것도 그대로 반영한다.
+  function loadFieldDefinitions() {
+    if (!window.fetch) return;
+    fetch('/orders/ai-intake/fields.json', { headers: { Accept: 'application/json', 'X-Requested-With': 'fetch' } })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (data) {
+        if (!data || !Array.isArray(data.fields) || !data.fields.length) return;
+        REQUIRED_FIELDS.length = 0;
+        data.fields.forEach(function (f) { REQUIRED_FIELDS.push(f); });
+      })
+      .catch(function () { /* 폴백 유지 */ });
+  }
+  loadFieldDefinitions();
   // 채팅으로 "수정"을 물어볼 때 자연어로 어느 항목인지 알아듣기 위한 키워드 매칭.
   // 차량번호를 맨 앞에 둔다 — "차량번호 출발 전에 다시 확인해주세요"처럼 "출발"/"도착"이
   // 우연히 함께 들어간 문장이 뒤쪽 일반 패턴에 먼저 걸려 엉뚱한 필드로 잘못 라우팅되는 걸 막는다.

@@ -20,6 +20,8 @@ const callmaner = require('../lib/callmaner');
 const { registerOrderWithCallmaner, tryUpdateWithErrorCodeColumn } = require('../lib/callmanerRegister');
 // 오더 저장은 세 경로(웹·문의전환·카카오)가 같은 구현을 쓴다.
 const { createOrder } = require('../lib/orderCreate');
+// 접수 필드 정의는 카카오 상담톡과 공유한다(lib/intakeFields.js).
+const { DISPATCH_FIELDS } = require('../lib/intakeFields');
 
 // 폼에서 온 좌표 문자열을 숫자로 — 빈 문자열/미입력/숫자 아님은 전부 null(컬럼이 numeric이라
 // 빈 문자열을 그대로 넣으면 22P02로 터진다). 출발·도착지와 경유지 양쪽에서 같이 쓴다.
@@ -367,6 +369,15 @@ router.get('/ai-intake/data.json', asyncHandler(async (req, res) => {
     currentUserPhone: req.session.user.phone || '',
     currentUser: req.session.user,
   });
+}));
+
+// 접수에 필요한 필드와 질문 문구 — 서버가 단 하나의 정의를 갖고(lib/intakeFields.js) 브라우저가
+// 그걸 받아 쓴다. 예전에는 같은 목록이 public/js/ai-intake.js(REQUIRED_FIELDS)에도 있어서,
+// 문구를 고칠 때 카카오 쪽 정의와 갈라지기 쉬웠다.
+//
+// 브라우저는 이 응답이 없으면 자기 기본값으로 계속 동작한다(네트워크 실패 시 접수가 멈추면 안 된다).
+router.get('/ai-intake/fields.json', asyncHandler(async (req, res) => {
+  res.json({ fields: DISPATCH_FIELDS });
 }));
 
 // 복원 대상 세션/메시지/draft를 화면 렌더와 분리해 JSON 계약으로 고정한다.
