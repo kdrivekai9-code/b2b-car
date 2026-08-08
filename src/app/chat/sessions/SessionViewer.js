@@ -206,6 +206,7 @@ export default function SessionViewer({
   const [suggestion, setSuggestion] = useState(null);
   const [suggestionText, setSuggestionText] = useState('');
   const [isDecidingSuggestion, setIsDecidingSuggestion] = useState(false);
+  suggestionRef.current = suggestion;
   // 빠른 답변(상용구) — 열 때 한 번만 불러온다. {상담원} 치환은 서버에서 끝내서 내려온다.
   const [quickReplies, setQuickReplies] = useState(null);
   const [quickRepliesOpen, setQuickRepliesOpen] = useState(false);
@@ -214,7 +215,9 @@ export default function SessionViewer({
   const knownMessageIdsRef = useRef(new Set());
   const oldestMessageIdRef = useRef(null);
   const streamRef = useRef(null);
-  const suggestionTimerRef = useRef(null);
+  const suggestionTimersRef = useRef([]);
+  // 폴링·타이머 콜백이 최신 초안 상태를 봐야 해서 ref로도 들고 있는다.
+  const suggestionRef = useRef(null);
   const lastTypingSentRef = useRef(0);
   const pollTimerRef = useRef(null);
   const messagesElRef = useRef(null);
@@ -267,10 +270,18 @@ export default function SessionViewer({
     streamRef.current = es;
   }
 
-  // 초안 생성은 응답 뒤 비동기라 메시지보다 조금 늦게 준비된다 — 짧게 기다렸다 조회한다.
+  // 초안은 고객 메시지보다 늦게 준비된다 — 접수 분류나 요금 계산이 들어가면 LLM·외부 API를
+  // 거쳐 실측 3초까지 걸린다. 한 번만 조회하면(예전엔 0.9초 뒤 단발이었다) 그 사이에 없으면
+  // 다음 고객 메시지가 올 때까지 영영 안 뜬다. 준비될 때까지 몇 번 더 확인한다.
+  const SUGGESTION_RETRY_DELAYS = [800, 2000, 4000, 7000, 11000];
+
   function scheduleSuggestionFetch(id) {
-    clearTimeout(suggestionTimerRef.current);
-    suggestionTimerRef.current = setTimeout(() => fetchSuggestion(id), 900);
+    suggestionTimersRef.current.forEach(clearTimeout);
+    suggestionTimersRef.current = SUGGESTION_RETRY_DELAYS.map((delay) => setTimeout(() => {
+      // 이미 떠 있으면 더 두드리지 않는다(상담원이 편집 중일 수 있다).
+      if (suggestionRef.current) return;
+      fetchSuggestion(id);
+    }, delay));
   }
 
   function fetchSuggestion(id) {
@@ -279,6 +290,8 @@ export default function SessionViewer({
       .then((data) => {
         if (sessionIdRef.current !== id) return; // 그 사이 다른 세션으로 전환됨
         const next = (data && data.suggestion) || null;
+        // 상담원이 초안을 고치는 중이면 같은 초안으로 덮어쓰지 않는다.
+        if (next && suggestionRef.current && next.id === suggestionRef.current.id) return;
         setSuggestion(next);
         setSuggestionText(next ? next.text : '');
       })
@@ -322,6 +335,9 @@ export default function SessionViewer({
     clearInterval(pollTimerRef.current);
     pollTimerRef.current = setInterval(() => {
       if (document.hidden) return; // 백그라운드 탭에서는 굳이 돌리지 않는다
+      // 초안이 아직 없으면 같이 확인한다 — 생성이 늦어져 재시도 타이머를 다 소진했어도
+      // 여기서 결국 잡힌다.
+      if (!suggestionRef.current) fetchSuggestion(id);
       const lastId = messagesRef.current.length ? messagesRef.current[messagesRef.current.length - 1].id : 0;
       fetchJson(`/chat/sessions/${id}/poll?since=${lastId || 0}`)
         .then((data) => {
@@ -399,7 +415,7 @@ export default function SessionViewer({
 
     return () => {
       cancelled = true;
-      clearTimeout(suggestionTimerRef.current);
+      suggestionTimersRef.current.forEach(clearTimeout);
       clearInterval(pollTimerRef.current);
       if (streamRef.current) { streamRef.current.close(); streamRef.current = null; }
     };
