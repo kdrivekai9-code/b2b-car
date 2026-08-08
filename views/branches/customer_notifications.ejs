@@ -36,11 +36,11 @@
           <div class="field">
             <label>보내는 시점</label>
             <div class="delay-minutes-input">
-              <span>상태 변경 후</span>
+              <span><%= e.delayBefore %></span>
               <input type="number" name="delay_<%= e.key %>" value="<%= e.delayMinutes %>" min="0" max="120" step="1" required>
-              <span>분 뒤</span>
+              <span><%= e.delayAfter %></span>
             </div>
-            <p class="page-sub">0이면 곧바로 보냅니다. 보내기 직전에 상태를 한 번 더 확인해서, 그사이 상황이 바뀌었으면 보내지 않습니다.</p>
+            <p class="page-sub">보내기 직전에 상태를 한 번 더 확인해서, 그사이 상황이 바뀌었으면 보내지 않습니다.</p>
           </div>
         </div>
         <div class="field">

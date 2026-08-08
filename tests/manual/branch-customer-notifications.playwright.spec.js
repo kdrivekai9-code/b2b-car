@@ -54,11 +54,11 @@ async function openPage(page) {
 test.describe('지사관리 · 고객 통보', () => {
   test.describe.configure({ timeout: 90000 });
 
-  test('네 가지 상태가 모두 설정 대상으로 나온다', async ({ page }) => {
+  test('다섯 가지 사건이 모두 설정 대상으로 나온다', async ({ page }) => {
     await openPage(page);
 
     // 사건이 하나 늘었는데 화면에서 빠지면, 그 통보만 아무도 못 끄는 상태가 된다.
-    for (const key of ['dispatched', 'completed', 'dispatch_cancelled', 'cancelled']) {
+    for (const key of ['dispatched', 'completed', 'dispatch_cancelled', 'cancelled', 'not_dispatched']) {
       await expect(page.locator(`textarea[name="message_${key}"]`)).toBeVisible();
       await expect(page.locator(`input[name="delay_${key}"]`)).toBeVisible();
       await expect(page.locator(`input[name="enabled_${key}"]`)).toBeVisible();
@@ -67,6 +67,12 @@ test.describe('지사관리 · 고객 통보', () => {
     // 배차완료만 기본이 1분 뒤다(배차 직후 취소 때문에).
     await expect(page.locator('input[name="delay_dispatched"]')).toHaveValue('1');
     await expect(page.locator('input[name="delay_completed"]')).toHaveValue('0');
+    await expect(page.locator('input[name="delay_not_dispatched"]')).toHaveValue('30');
+
+    // 미배정만 시점의 뜻이 다르다("접수 후 30분이 지나도 미배차면"). 같은 라벨을 쓰면 30을
+    // 넣어놓고 "상태 변경 30분 뒤"로 읽게 된다.
+    await expect(page.locator('.notify-event-block').last()).toContainText('접수 후');
+    await expect(page.locator('.notify-event-block').last()).toContainText('미배차면');
   });
 
   test('바꾼 문구와 시점이 저장되고 다시 열어도 남아 있다', async ({ page }) => {

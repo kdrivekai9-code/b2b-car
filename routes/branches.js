@@ -557,6 +557,15 @@ const NOTIFY_EVENT_HINTS = {
   completed: '운행이 완료되었을 때.',
   dispatch_cancelled: '배차받은 기사가 취소해서 다시 배차를 찾는 중일 때. 오더는 살아 있습니다.',
   cancelled: '오더 자체가 취소되었을 때.',
+  not_dispatched: '접수했는데 기사가 계속 배정되지 않을 때. 오더당 한 번만 보냅니다.',
+};
+
+// 시점 입력의 앞뒤 문구. 미배정 알림만 뜻이 다르다 — 다른 사건은 "상태가 바뀌고 나서 얼마 뒤"에
+// 보내는 것이지만, 미배정은 "접수하고 이만큼 지나도 배차가 안 되면" 보내는 것이다. 같은 라벨을
+// 쓰면 30을 넣어놓고 "상태 변경 30분 뒤"로 읽게 된다.
+const NOTIFY_DELAY_LABELS = {
+  not_dispatched: { before: '접수 후', after: '분이 지나도 미배차면' },
+  default: { before: '상태 변경 후', after: '분 뒤' },
 };
 
 async function loadCustomerNotificationPage(branchId) {
@@ -579,10 +588,13 @@ async function loadCustomerNotificationPage(branchId) {
   const events = kakaoOrderNotify.EVENT_TYPES.map((key) => {
     const fallback = kakaoOrderNotify.DEFAULT_EVENT_SETTINGS[key];
     const row = savedByEvent.get(key);
+    const delayLabel = NOTIFY_DELAY_LABELS[key] || NOTIFY_DELAY_LABELS.default;
     return {
       key,
       label: fallback.label,
       hint: NOTIFY_EVENT_HINTS[key] || '',
+      delayBefore: delayLabel.before,
+      delayAfter: delayLabel.after,
       enabled: row ? row.enabled !== false : fallback.enabled,
       delayMinutes: row && Number.isFinite(Number(row.delay_minutes)) ? Number(row.delay_minutes) : fallback.delayMinutes,
       template: (row && String(row.message_template || '').trim()) || fallback.template,
