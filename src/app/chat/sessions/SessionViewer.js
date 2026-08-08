@@ -32,6 +32,14 @@ function readStateText(message) {
   return '';
 }
 
+// 자동 발송된 초안인지 — chat_messages에는 발신 주체 구분이 'agent' 하나뿐이라, 서버가 붙이는
+// 안내 문구로 판별한다(routes/chat.js AUTO_SEND_NOTICE와 같은 문장이어야 한다).
+const AUTO_SENT_MARK = '상담원이 30초동안 응답이 없어 AI가 응답을 먼저 생성하였습니다.';
+
+function isAutoSent(message) {
+  return message.sender === 'agent' && String(message.message || '').includes(AUTO_SENT_MARK);
+}
+
 function MessageBubble({ message }) {
   const who = SENDER_CLASS[message.sender] || 'ai-bot';
   const label = SENDER_LABEL[message.sender] || message.sender;
@@ -42,7 +50,7 @@ function MessageBubble({ message }) {
   return (
     <div className={`ai-chat-item ${who}`} data-id={message.id} data-sender={message.sender}>
       <div className={bubbleClass}>
-        <span className="bubble-label">{label}</span>
+        <span className="bubble-label">{label}{isAutoSent(message) ? ' · 자동 발송됨' : ''}</span>
         {message.message || ''}
       </div>
       {(time || readText) && (
@@ -207,6 +215,7 @@ export default function SessionViewer({
   const oldestMessageIdRef = useRef(null);
   const streamRef = useRef(null);
   const suggestionTimerRef = useRef(null);
+  const lastTypingSentRef = useRef(0);
   const pollTimerRef = useRef(null);
   const messagesElRef = useRef(null);
   // 폴링 콜백이 최신 메시지 목록을 봐야 해서(setInterval은 최초 클로저를 붙잡는다) ref로 둔다.
@@ -430,6 +439,17 @@ export default function SessionViewer({
       .catch(() => {});
   }
 
+  // 상담원이 입력창에 타이핑하는 중이라는 신호. 이게 없으면 답을 쓰고 있는 사이에 서버가
+  // 초안을 자동 발송해 같은 질문에 답이 두 번 나간다(카카오는 발송 취소가 안 된다).
+  // 매 글자마다 보내지 않고 5초에 한 번으로 묶는다 — 서버는 "최근에 타이핑이 있었나"만 본다.
+  function notifyTyping() {
+    if (!sessionId) return;
+    const now = Date.now();
+    if (now - lastTypingSentRef.current < 5000) return;
+    lastTypingSentRef.current = now;
+    fetchJson(`/chat/sessions/${sessionId}/typing`, { method: 'POST' }).catch(() => {});
+  }
+
   function sendReply(e) {
     e.preventDefault();
     if (!sessionId || isSendingReply) return;
@@ -545,7 +565,7 @@ export default function SessionViewer({
             <textarea
               ref={replyInputRef}
               value={replyText}
-              onChange={(e) => setReplyText(e.target.value)}
+              onChange={(e) => { setReplyText(e.target.value); notifyTyping(); }}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendReply(e); } }}
               placeholder={hasOtherAssignee ? '담당 상담원만 고객에게 응답할 수 있습니다.' : '상담원으로 답변을 입력하세요... (Enter 전송 / Shift+Enter 줄바꿈)'}
               required

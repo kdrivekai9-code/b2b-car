@@ -11,6 +11,12 @@ function formatChatTime(raw) {
   var h12 = h % 12 || 12;
   return ampm + ' ' + h12 + ':' + mm;
 }
+// 자동 발송된 초안인지 — chat_messages에는 발신 주체가 'agent' 하나뿐이라 서버가 붙이는
+// 안내 문구로 판별한다(routes/chat.js AUTO_SEND_NOTICE와 같은 문장이어야 한다).
+var AUTO_SENT_MARK = '상담원이 30초동안 응답이 없어 AI가 응답을 먼저 생성하였습니다.';
+function isAutoSent(msg) {
+  return msg && msg.sender === 'agent' && String(msg.message || '').indexOf(AUTO_SENT_MARK) !== -1;
+}
 function readStateText(msg) {
   if (!msg) return '';
   if (msg.sender === 'user') return msg.read_by_agent_at ? '읽음' : '미읽음';
@@ -73,7 +79,7 @@ function isQuestionBubble(msg) {
         <% var senderClass = { user: 'ai-user', agent: 'ai-agent' }; %>
         <% messages.forEach(function(m){ %>
           <div class="ai-chat-item <%= senderClass[m.sender] || 'ai-bot' %>" data-id="<%= m.id %>">
-            <div class="ai-chat-bubble <%= senderClass[m.sender] || 'ai-bot' %><%= isQuestionBubble(m) ? ' ai-bot-question' : '' %>"><span class="bubble-label"><%= senderLabel[m.sender] || m.sender %></span><%= m.message %></div>
+            <div class="ai-chat-bubble <%= senderClass[m.sender] || 'ai-bot' %><%= isQuestionBubble(m) ? ' ai-bot-question' : '' %>"><span class="bubble-label"><%= (senderLabel[m.sender] || m.sender) + (isAutoSent(m) ? ' · 자동 발송됨' : '') %></span><%= m.message %></div>
             <div class="bubble-footer">
               <div class="bubble-time"><%= formatChatTime(m.created_at) %></div>
               <% if (readStateText(m)) { %>
@@ -145,6 +151,13 @@ function isQuestionBubble(msg) {
     return '';
   }
 
+  // 서버가 자동 발송한 초안인지 — 붙여 보내는 안내 문구로 판별한다(서버의 AUTO_SEND_NOTICE와
+  // 같은 문장이어야 한다). chat_messages에는 발신 주체가 'agent' 하나뿐이라 별도 플래그가 없다.
+  var AUTO_SENT_MARK_JS = '상담원이 30초동안 응답이 없어 AI가 응답을 먼저 생성하였습니다.';
+  function isAutoSentJs(msg) {
+    return msg && msg.sender === 'agent' && String(msg.message || '').indexOf(AUTO_SENT_MARK_JS) !== -1;
+  }
+
   function isQuestionBubble(m) {
     return m.sender === 'bot' && /\?\s*$/.test(String(m.message || '').trim());
   }
@@ -161,7 +174,7 @@ function isQuestionBubble(msg) {
 
     var labelSpan = document.createElement('span');
     labelSpan.className = 'bubble-label';
-    labelSpan.textContent = labelBySender[m.sender] || m.sender;
+    labelSpan.textContent = (labelBySender[m.sender] || m.sender) + (isAutoSentJs(m) ? ' · 자동 발송됨' : '');
     bubble.appendChild(labelSpan);
     bubble.appendChild(document.createTextNode(m.message));
     item.appendChild(bubble);
@@ -236,6 +249,21 @@ function isQuestionBubble(msg) {
   }
 
   // ---------------- 상담원 도우미: 답변 채택 대기 ----------------
+  // 상담원이 입력창에 타이핑하는 중이라는 신호 — 이게 없으면 답을 쓰고 있는 사이에 서버가
+  // 초안을 자동 발송해 같은 질문에 답이 두 번 나간다(카카오는 발송 취소가 안 된다).
+  // 매 글자마다 보내지 않고 5초에 한 번으로 묶는다.
+  var lastTypingSent = 0;
+  (function () {
+    var input = document.getElementById('agentReplyText');
+    if (!input) return;
+    input.addEventListener('input', function () {
+      var now = Date.now();
+      if (now - lastTypingSent < 5000) return;
+      lastTypingSent = now;
+      fetch('/chat/sessions/<%= session.id %>/typing', { method: 'POST' }).catch(function () {});
+    });
+  })();
+
   var suggestionTimer = null;
   var suggestionEl = null;
   var currentSuggestion = null;

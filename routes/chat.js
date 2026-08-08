@@ -20,6 +20,21 @@ const {
 } = require('../lib/realtimeChat');
 
 const router = express.Router();
+// 초안 자동 발송 크론 — 세션 로그인 사용자가 없는 서버 대 서버 호출이라 requireAuth 앞에 둔다
+// (routes/callmanerSync.js와 같은 방식). 상담원이 화면을 보고 있지 않을 때도 돌아야 해서
+// 브라우저 타이머가 아니라 서버에서 처리한다.
+function checkCronAuth(req, res, next) {
+  const secret = process.env.CRON_SECRET;
+  if (!secret) return res.status(500).json({ error: 'CRON_SECRET 환경변수가 설정되어 있지 않습니다.' });
+  if (req.get('Authorization') !== `Bearer ${secret}`) return res.status(401).json({ error: 'Unauthorized' });
+  next();
+}
+
+router.get('/cron/auto-send-suggestions', checkCronAuth, asyncHandler(async (req, res) => {
+  const sent = await autoSendPendingSuggestions();
+  res.json({ ok: true, sent: sent.length, details: sent });
+}));
+
 router.use(requireAuth);
 
 const DEFAULT_SESSION_CREATE_LIMIT = 20;
@@ -1025,6 +1040,89 @@ router.post('/sessions/:id/suggestions/:sid/approve', requireRole('admin'), asyn
 
   res.json({ ok: true, message: inserted, edited: text !== suggestion.suggested_text });
 }));
+
+// ---------------- 상담원 무응답 시 초안 자동 발송 ----------------
+//
+// 규칙(사용자 확정):
+//   · 승인 대기(pending) 초안이 있는 세션만 대상이다 — 상담원 연결 중에 봇이 새로 끼어드는 게
+//     아니라, 이미 대기열에 올라와 있던 초안만 내보낸다.
+//   · 초안이 뜬 뒤 30초 동안 상담원이 아무 입력(타이핑·발송)도 하지 않으면 발송한다.
+//   · 상담원이 타이핑을 시작하면 발송하지 않는다 — 답이 두 번 나가는 걸 막는다. 카카오는
+//     발송 취소가 안 되므로 이 판단은 되돌릴 수 없다.
+const AUTO_SEND_DELAY_SECONDS = 30;
+const AUTO_SEND_NOTICE = '상담원이 30초동안 응답이 없어 AI가 응답을 먼저 생성하였습니다. 상담원이 접속하면 다시 확인해 드리겠습니다.';
+
+// 상담원이 입력창에 타이핑하는 중이라는 신호. 화면에서 짧은 주기로 던진다.
+router.post('/sessions/:id/typing', requireRole('admin'), asyncHandler(async (req, res) => {
+  await db.run(
+    `UPDATE chat_sessions SET agent_typing_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS')
+     WHERE id = ?`,
+    [req.params.id]
+  ).catch((e) => console.error('상담원 타이핑 신호 기록 실패:', e.message));
+  res.json({ ok: true });
+}));
+
+// 자동 발송 대상 조회 — 마이그레이션(20260808020000) 전에는 agent_typing_at이 없어 쿼리가
+// 통째로 실패한다. 그 경우 조용히 빈 목록으로 떨어뜨려 크론이 죽지 않게 한다.
+async function loadAutoSendTargets() {
+  const sql = `
+    SELECT g.id AS suggestion_id, g.session_id, g.suggested_text, g.kind, g.created_at,
+           s.channel, s.status, s.assigned_agent_id, s.agent_typing_at,
+           s.kakao_service_key, s.kakao_user_key, s.kakao_event_key,
+           (SELECT max(m.created_at) FROM chat_messages m
+             WHERE m.session_id = s.id AND m.sender = 'agent') AS last_agent_at
+      FROM chat_suggestions g
+      JOIN chat_sessions s ON s.id = g.session_id
+     WHERE g.status = 'pending'
+       AND s.status = 'agent_active'
+       -- 초안이 뜬 지 충분히 지났고
+       AND g.created_at <= to_char((now() at time zone 'Asia/Seoul') - interval '${AUTO_SEND_DELAY_SECONDS} seconds', 'YYYY-MM-DD HH24:MI:SS')
+       -- 그 사이 상담원이 타이핑하지 않았고
+       AND (s.agent_typing_at IS NULL OR s.agent_typing_at < g.created_at)
+     ORDER BY g.id`;
+  try {
+    return await db.all(sql);
+  } catch (e) {
+    console.error('자동 발송 대상 조회 실패:', e.message);
+    return [];
+  }
+}
+
+async function autoSendPendingSuggestions() {
+  const rows = await loadAutoSendTargets();
+  const sent = [];
+  for (const row of rows) {
+    // 초안이 만들어진 뒤 상담원이 이미 답을 보냈으면 자동 발송할 이유가 없다.
+    if (row.last_agent_at && row.last_agent_at >= row.created_at) {
+      await db.run(
+        `UPDATE chat_suggestions SET status = 'dismissed',
+         decided_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') WHERE id = ?`,
+        [row.suggestion_id]
+      ).catch(() => {});
+      continue;
+    }
+
+    const text = `${row.suggested_text}\n\n${AUTO_SEND_NOTICE}`;
+    try {
+      // 담당 상담원을 그대로 유지한다 — 자동 발송이 담당자를 바꾸면 안 된다.
+      const session = await db.get('SELECT * FROM chat_sessions WHERE id = ?', [row.session_id]);
+      await deliverAgentReply(session, { id: session.assigned_agent_id || null }, text);
+      await db.run(
+        `UPDATE chat_suggestions SET status = 'auto_sent', sent_text = ?,
+         decided_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') WHERE id = ?`,
+        [text, row.suggestion_id]
+      );
+      sent.push({ sessionId: row.session_id, suggestionId: row.suggestion_id, kind: row.kind });
+    } catch (e) {
+      console.error(`초안 자동 발송 실패(세션 ${row.session_id}):`, e.message);
+      logIntegrationErrorAsync({
+        source: 'kakao', operation: 'auto_send', refType: 'chat_session', refId: Number(row.session_id),
+        message: e.message, context: { suggestionId: row.suggestion_id },
+      });
+    }
+  }
+  return sent;
+}
 
 // 무시 — 쓰지 않은 초안도 남겨 둔다(채택률 측정용).
 router.post('/sessions/:id/suggestions/:sid/dismiss', requireRole('admin'), asyncHandler(async (req, res) => {

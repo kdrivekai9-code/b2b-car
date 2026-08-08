@@ -7,10 +7,25 @@
       "includeFiles": "{views,public}/**"
     }
   },
-  "regions": ["icn1"],
+  "regions": [
+    "icn1"
+  ],
   "crons": [
-    { "path": "/login", "schedule": "*/5 * * * *" },
-    { "path": "/", "schedule": "*/5 * * * *" },
-    { "path": "/callmaner/sync", "schedule": "* * * * *" }
+    {
+      "path": "/login",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/callmaner/sync",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/chat/cron/auto-send-suggestions",
+      "schedule": "* * * * *"
+    }
   ]
 }
