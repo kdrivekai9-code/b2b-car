@@ -16,6 +16,7 @@ const { searchKnowledgeBase } = require('../lib/knowledgeSearch');
 const { parseKakaoIntake, buildParsedFromClassified, buildMissingQuestion, normalizePhone, normalizePlate } = require('../lib/kakaoIntakeParser');
 const { findIntakeAccount, resolveIntakeContext, findAccountByPhone, linkUserKeyToAccount, createOrdersFromIntake } = require('../lib/kakaoIntakeService');
 const { previewIntakeAddresses } = require('../lib/intakeAddressPreview');
+const { runKakaoOrderNotifications } = require('../lib/kakaoOrderNotify');
 // 주소 후보 검색·선택은 웹 접수 화면과 같은 규칙을 쓴다(lib/addressCandidates.js).
 const { searchAddressCandidates, needsDisambiguation, buildCandidateListText, matchCandidateChoice, getClarifyText } = require('../lib/addressCandidates');
 const { getSmalltalkMessage } = require('../lib/smallTalk');
@@ -1061,6 +1062,19 @@ router.post('/receive/personal_info', asyncHandler(async (req, res) => {
       }
     })(), 'resume_after_consent');
   }
+}));
+
+// 능동 통보(배차 완료 / 배차 취소) — 매분 크론이 부른다.
+//
+// 웹훅 수신과 달리 중계서버가 아니라 우리 크론이 부르는 것이라, 이 파일의 공유 시크릿이 아니라
+// 다른 크론들과 같은 CRON_SECRET으로 검증한다.
+router.get('/cron/order-notifications', asyncHandler(async (req, res) => {
+  const secret = process.env.CRON_SECRET;
+  if (!secret) return res.status(500).json({ error: 'CRON_SECRET 환경변수가 설정되어 있지 않습니다.' });
+  if (req.get('Authorization') !== `Bearer ${secret}`) return res.status(401).json({ error: 'Unauthorized' });
+
+  const result = await runKakaoOrderNotifications();
+  res.json(result);
 }));
 
 module.exports = router;

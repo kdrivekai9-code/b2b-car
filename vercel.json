@@ -26,6 +26,10 @@
     {
       "path": "/chat/cron/auto-send-suggestions",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/kakao-consult/cron/order-notifications",
+      "schedule": "* * * * *"
     }
   ]
 }

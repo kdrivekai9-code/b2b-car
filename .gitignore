@@ -20,3 +20,6 @@ artifacts/*.local.*
 
 # e2e 로그인 쿠키 캐시 — 세션 쿠키라 저장소에 올리지 않는다(tests/manual/helpers/auth.js).
 tests/manual/.auth-cookies.json
+
+# 원문 PDF는 저장소에 두지 않는다(사용자 지시) — 텍스트 추출본만 docs/에 보관한다.
+docs/*.pdf
