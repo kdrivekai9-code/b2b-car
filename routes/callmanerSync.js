@@ -170,6 +170,17 @@ async function syncOrdersByConfSlip(branch) {
       await syncFare(order, { charge: info.price }).catch((e) => console.error(`요금 동기화 실패 (conf_slip=${order.callmaner_conf_slip}):`, e.message));
     }
 
+    // 기사 정보도 여기서 맞춘다. 예전에는 전체조회(OrderAllStatus) 경로에만 있었는데, 그 경로가
+    // 사실상 죽어 있어(위 주석) 실제로는 대부분의 오더가 기사 이름·연락처 없이 남았다. 그 탓에
+    // "기사님 연락처요"에 답하지 못했고, 배차 통보 문구의 기사 줄도 비어서 통째로 빠졌다.
+    // OrderInfo는 wk_info("사번*이름")를 주고, 연락처는 배차 상태일 때 WkContactSearch로 채운다.
+    await syncDriverInfo(
+      branch,
+      order,
+      { wk_name: info.wkInfo, conf_slip: order.callmaner_conf_slip },
+      info.status === '배차' ? '02' : null
+    ).catch((e) => console.error(`기사정보 동기화 실패 (conf_slip=${order.callmaner_conf_slip}):`, e.message));
+
     const mappedStatus = callmaner.STATUS_TEXT_TO_LOCAL_STATUS[info.status];
     const note = `[콜마너] 상태동기화(단건조회): ${info.status || '-'}`;
     if (info.status === order.callmaner_status && (!mappedStatus || mappedStatus === order.status)) continue;
