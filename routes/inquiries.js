@@ -4,7 +4,7 @@ const { pool } = require('../db');
 const { requireAuth, requireRole, scopeFilter } = require('../middleware/auth');
 const asyncHandler = require('../middleware/asyncHandler');
 const { kstNow } = require('../lib/period');
-const { splitTypeAndPlate } = require('../lib/vehicleInfo');
+const { createOrder } = require('../lib/orderCreate');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -243,54 +243,36 @@ router.post('/:id/convert-order', requireRole('admin', 'branch_manager'), asyncH
   const finalOrigin = combineAddress(inquiry.resolved_origin || inquiry.origin_text, null);
   const finalDestination = combineAddress(inquiry.resolved_destination || inquiry.destination_text, null);
   if (!finalOrigin || !finalDestination) return res.status(400).send('출발지/도착지 정보가 부족하여 오더로 전환할 수 없습니다.');
-  const splitVehicle = splitTypeAndPlate(inquiry.vehicle_type || null, null);
 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
-    const insertedOrder = await client.query(
-      `INSERT INTO orders (
-         oid, branch_id, requester_group_id,
-         origin_address, origin_address_detail, origin_contact,
-         destination_address, destination_address_detail, destination_contact,
-         vehicle_number, vehicle_type, reserved_date, reserved_time,
-         payment_method_id, fare_amount, ferry_fare_amount, status, memo_customer, created_by
-       ) VALUES (
-         $1, $2, $3,
-         $4, NULL, $5,
-         $6, NULL, $7,
-         $8, $9, $10, $11,
-         NULL, $12, $13, '오더등록', $14, $15
-       ) RETURNING id`,
-      [
-        `PENDING-${Date.now()}`,
-        finalBranch,
-        inquiry.requester_group_id || null,
-        finalOrigin,
-        '미정',
-        finalDestination,
-        '미정',
-        splitVehicle.vehicleNumber,
-        splitVehicle.vehicleType,
-        defaultDateTime.reserved_date,
-        defaultDateTime.reserved_time,
-        Number(inquiry.estimated_fare) || 0,
-        Number(inquiry.estimated_ferry_fare) || 0,
-        `[문의 전환] ${inquiry.inquiry_text}`,
-        user.id,
-      ]
-    );
+    // 오더 저장은 웹 오더등록·카카오 자동접수와 같은 함수를 쓴다(lib/orderCreate.js).
+    // 이 경로는 문의 상태 변경과 한 트랜잭션이어야 해서 client를 넘긴다 — 오더만 만들어지고
+    // 문의가 그대로 남거나 그 반대가 되면 같은 문의가 두 번 전환될 수 있다.
+    const created = await createOrder({
+      branchId: finalBranch,
+      requesterGroupId: inquiry.requester_group_id || null,
+      originAddress: finalOrigin,
+      originContact: '미정',
+      destinationAddress: finalDestination,
+      destinationContact: '미정',
+      vehicleNumber: null,
+      vehicleType: inquiry.vehicle_type || null,
+      reservedDate: defaultDateTime.reserved_date,
+      reservedTime: defaultDateTime.reserved_time,
+      paymentMethodId: null,
+      fareAmount: inquiry.estimated_fare,
+      ferryFareAmount: inquiry.estimated_ferry_fare,
+      memoCustomer: `[문의 전환] ${inquiry.inquiry_text}`,
+      createdBy: user.id,
+      sourceChannel: 'inquiry',
+      historyNote: '문의에서 오더로 전환',
+    }, { client });
 
-    const orderId = Number(insertedOrder.rows[0].id);
-    const oid = `OID${1000 + orderId}`;
-    await client.query('UPDATE orders SET oid = $1 WHERE id = $2', [oid, orderId]);
-
-    await client.query(
-      `INSERT INTO order_status_history (order_id, actor_user_id, old_status, new_status, note)
-       VALUES ($1, $2, NULL, '오더등록', '문의에서 오더로 전환')`,
-      [orderId, user.id]
-    );
+    const orderId = created.orderId;
+    const oid = created.oid;
 
     await client.query(
       `UPDATE inquiries

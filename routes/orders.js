@@ -18,6 +18,8 @@ const callmaner = require('../lib/callmaner');
 // 콜마너 오더접수는 카카오 상담톡 자동 접수(lib/kakaoIntakeService.js)도 같은 함수를 타야 해서
 // lib/callmanerRegister.js로 옮겼다 — 여기서는 그대로 가져다 쓴다.
 const { registerOrderWithCallmaner, tryUpdateWithErrorCodeColumn } = require('../lib/callmanerRegister');
+// 오더 저장은 세 경로(웹·문의전환·카카오)가 같은 구현을 쓴다.
+const { createOrder } = require('../lib/orderCreate');
 
 // 폼에서 온 좌표 문자열을 숫자로 — 빈 문자열/미입력/숫자 아님은 전부 null(컬럼이 numeric이라
 // 빈 문자열을 그대로 넣으면 22P02로 터진다). 출발·도착지와 경유지 양쪽에서 같이 쓴다.
@@ -883,84 +885,49 @@ router.post('/', asyncHandler(async (req, res) => {
   const finalOriginAddress = combineAddress(origin_address, origin_detail_address);
   const finalDestinationAddress = combineAddress(destination_address, destination_detail_address);
 
-  const toNumOrNull = toNumOrNullShared;
-  const originLat = toNumOrNull(origin_lat);
-  const originLon = toNumOrNull(origin_lon);
-  const destinationLat = toNumOrNull(destination_lat);
-  const destinationLon = toNumOrNull(destination_lon);
-
-  const tempOid = 'PENDING-' + Date.now();
-  let inserted;
-  try {
-    inserted = await db.run(`
-      INSERT INTO orders (oid, branch_id, requester_group_id, origin_address, origin_address_detail, origin_contact,
-        destination_address, destination_address_detail, destination_contact, vehicle_number,
-        vehicle_type, reserved_date, reserved_time, payment_method_id, fare_amount, ferry_fare_amount,
-        order_type, trip_type, final_destination_address, final_destination_address_detail,
-        destination_wait_minutes, reservation_hours_bracket,
-        origin_lat, origin_lon, origin_sido, origin_sigugun, origin_dong,
-        destination_lat, destination_lon, destination_sido, destination_sigugun, destination_dong,
-        status, memo_customer, memo_billing, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '오더등록', ?, ?, ?)
-      RETURNING id
-    `, [
-      tempOid, finalBranch, finalGroup, finalOriginAddress, origin_detail_address || null, origin_contact || null,
-      finalDestinationAddress, destination_detail_address || null, destination_contact || null, splitVehicle.vehicleNumber,
-      splitVehicle.vehicleType, effectiveReservedDate, effectiveReservedTime, payment_method_id || null, Number(fare_amount) || 0, Number(ferry_fare_amount) || 0,
-      finalOrderType, trip_type || null, final_destination_address || null, final_destination_address_detail || null,
-      destination_wait_minutes ? Number(destination_wait_minutes) : null,
-      ['within_4h', 'within_8h', 'over_8h'].includes(reservation_hours_bracket) ? reservation_hours_bracket : null,
-      originLat, originLon, origin_sido || null, origin_sigugun || null, origin_dong || null,
-      destinationLat, destinationLon, destination_sido || null, destination_sigugun || null, destination_dong || null,
-      memo_customer || null, memo_billing || null, u.id,
-    ]);
-  } catch (e) {
-    const msg = String((e && e.message) || '');
-    const missingCompatColumns = e && e.code === '42703' && /(vehicle_type|ferry_fare_amount|memo_billing|order_type|trip_type|final_destination|destination_wait|reservation_hours|origin_lat|origin_lon|origin_sido|origin_sigugun|origin_dong|destination_lat|destination_lon|destination_sido|destination_sigugun|destination_dong)/.test(msg);
-    if (!missingCompatColumns) throw e;
-
-    // 구버전 DB(마이그레이션 미적용)에서는 vehicle_type/ferry_fare_amount/memo_billing 없이 저장해도 기본 흐름을 유지한다.
-    inserted = await db.run(`
-      INSERT INTO orders (oid, branch_id, requester_group_id, origin_address, origin_address_detail, origin_contact,
-        destination_address, destination_address_detail, destination_contact, vehicle_number,
-        reserved_date, reserved_time, payment_method_id, fare_amount, status, memo_customer, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '오더등록', ?, ?)
-      RETURNING id
-    `, [
-      tempOid, finalBranch, finalGroup, finalOriginAddress, origin_detail_address || null, origin_contact || null,
-      finalDestinationAddress, destination_detail_address || null, destination_contact || null, splitVehicle.vehicleNumber,
-      effectiveReservedDate, effectiveReservedTime, payment_method_id || null, Number(fare_amount) || 0, memo_customer || null, u.id,
-    ]);
-  }
-
-  const newId = Number(inserted.lastInsertRowid);
-  const oid = 'OID' + (1000 + newId);
-  await db.run('UPDATE orders SET oid = ? WHERE id = ?', [oid, newId]);
-
-  for (let i = 0; i < finalWaypoints.length; i++) {
-    await db.run(
-      'INSERT INTO order_waypoints (order_id, seq, address, address_detail, contact_phone, vehicle_number, lat, lon) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      [newId, i + 1, finalWaypoints[i].address, finalWaypoints[i].addressDetail, finalWaypoints[i].contact, finalWaypoints[i].vehicleNumber, finalWaypoints[i].lat, finalWaypoints[i].lon]
-    );
-  }
-
-  // 구간 릴레이: 경유지 N개 = 구간 N+1개(출발지→경유지1→...→도착지). driver_id는 전부
-  // NULL로 시작 — 상세페이지에서 구간별로 나중에 배정한다(기존 단일 기사배정과 같은 흐름,
-  // 생성 시점엔 배정 안 함). order_legs 마이그레이션이 아직 안 된 DB에서도 오더 생성
-  // 자체는 실패하면 안 되므로(구버전 DB 호환 처리, 위 catch 블록과 같은 방어), 실패해도
-  // 무시하고 그 오더는 계속 레거시 단일 배정 화면으로 동작한다.
-  try {
-    for (let i = 0; i < finalWaypoints.length + 1; i++) {
-      await db.run('INSERT INTO order_legs (order_id, seq, driver_id) VALUES (?, ?, NULL)', [newId, i + 1]);
-    }
-  } catch (e) {
-    console.error('order_legs 생성 실패(마이그레이션 미적용 가능성, 무시하고 진행):', e.message);
-  }
-
-  await db.run(`
-    INSERT INTO order_status_history (order_id, actor_user_id, old_status, new_status, note)
-    VALUES (?, ?, NULL, '오더등록', '최초 등록')
-  `, [newId, u.id]);
+  // 오더 저장은 lib/orderCreate.js 한 곳에서만 한다 — 웹·문의전환·카카오 자동접수가 같은 함수를
+  // 쓴다(예전에는 같은 INSERT가 네 벌로 흩어져 있어 컬럼 추가 때 누락이 생기기 쉬웠다).
+  // 검증·요금·콜마너 접수·자동 승격은 경로마다 규칙이 달라 여기 남는다.
+  const created = await createOrder({
+    branchId: finalBranch,
+    requesterGroupId: finalGroup,
+    originAddress: finalOriginAddress,
+    originAddressDetail: origin_detail_address || null,
+    originContact: origin_contact || null,
+    destinationAddress: finalDestinationAddress,
+    destinationAddressDetail: destination_detail_address || null,
+    destinationContact: destination_contact || null,
+    vehicleNumber: vehicle_number || null,
+    vehicleType: vehicle_type || null,
+    reservedDate: effectiveReservedDate,
+    reservedTime: effectiveReservedTime,
+    paymentMethodId: payment_method_id || null,
+    fareAmount: fare_amount,
+    ferryFareAmount: ferry_fare_amount,
+    orderType: finalOrderType,
+    tripType: trip_type || null,
+    finalDestinationAddress: final_destination_address || null,
+    finalDestinationAddressDetail: final_destination_address_detail || null,
+    destinationWaitMinutes: destination_wait_minutes,
+    reservationHoursBracket: reservation_hours_bracket,
+    originLat: origin_lat,
+    originLon: origin_lon,
+    originSido: origin_sido || null,
+    originSigugun: origin_sigugun || null,
+    originDong: origin_dong || null,
+    destinationLat: destination_lat,
+    destinationLon: destination_lon,
+    destinationSido: destination_sido || null,
+    destinationSigugun: destination_sigugun || null,
+    destinationDong: destination_dong || null,
+    memoCustomer: memo_customer || null,
+    memoBilling: memo_billing || null,
+    createdBy: u.id,
+    waypoints: finalWaypoints,
+    sourceChannel: 'web',
+  });
+  const newId = created.orderId;
+  const oid = created.oid;
 
   // 콜마너 오더접수 — 오더 등록(생성) 시점에 바로 나간다(사용자 확정 사항). registerOrderWithCallmaner가
   // 항상 대기(status='5')로 등록하므로(lib/callmaner.js), 담당자가 검토하기 전에 곧바로 배차
