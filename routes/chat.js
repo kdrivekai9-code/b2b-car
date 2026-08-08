@@ -30,7 +30,11 @@ function checkCronAuth(req, res, next) {
   next();
 }
 
-router.get('/cron/auto-send-suggestions', checkCronAuth, asyncHandler(async (req, res) => {
+// 별도 라우터로 뺀다 — server.js가 '/'에 마운트한 authRoutes/dashboardRoutes가 모든 경로를
+// 가로채기 때문에, 이 라우터를 그보다 **먼저** 등록해야 세션 없는 크론 호출이 로그인 화면으로
+// 리다이렉트되지 않는다(/callmaner, /kakao-consult와 같은 이유).
+const cronRouter = express.Router();
+cronRouter.get('/cron/auto-send-suggestions', checkCronAuth, asyncHandler(async (req, res) => {
   const sent = await autoSendPendingSuggestions();
   res.json({ ok: true, sent: sent.length, details: sent });
 }));
@@ -1331,3 +1335,4 @@ router.get('/sessions/:id/poll', requireRole('admin'), asyncHandler(async (req, 
 }));
 
 module.exports = router;
+module.exports.cronRouter = cronRouter;

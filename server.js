@@ -145,6 +145,9 @@ app.use('/callmaner', callmanerSyncRoutes);
 // 카카오 상담톡 수신 웹훅(ConsulTalk 중계서버 → b2b-car) — 같은 이유로 세션 없이 먼저 등록한다
 // (자체 공유시크릿 검증은 routes/kakaoConsult.js 안에서 한다).
 app.use('/kakao-consult', kakaoConsultRoutes);
+// 상담원 무응답 시 AI 초안 자동 발송 크론 — 같은 이유로 세션 없이 먼저 등록한다
+// (자체 CRON_SECRET 검증은 routes/chat.js의 checkCronAuth에서 한다).
+app.use('/chat', chatRoutes.cronRouter);
 
 app.use('/', authRoutes);
 app.use('/', dashboardRoutes);
