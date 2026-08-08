@@ -514,7 +514,7 @@ async function tryHandleIntake(session, text) {
 
   if (!parsed.complete) {
     await savePendingIntake(session, mergedRaw);
-    const question = buildMissingQuestion(parsed.missing);
+    const question = buildMissingQuestion(parsed.missing, parsed);
     await insertMessage(session.id, 'bot', question);
     await sendAndLog(session, question, '접수 되묻기');
     return true;
@@ -691,7 +691,7 @@ async function processBotTurn(session, text) {
       // 동의는 여기서 받지 않는다(폼 경로와 동일) — 동의 말풍선은 세션당 1회뿐이라, 아직 등록할지도
       // 모르는 단계에서 써버리면 정작 등록 직전에 다시 띄울 수 없다. completeIntake가 요구한다.
       await savePendingIntake(session, intakeText);
-      const question = buildMissingQuestion(parsed.missing);
+      const question = buildMissingQuestion(parsed.missing, parsed);
       await insertMessage(session.id, 'bot', question);
       await sendAndLog(session, question, '접수 되묻기(자유문장)');
       return;
