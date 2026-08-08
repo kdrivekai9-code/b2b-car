@@ -22,6 +22,8 @@ const { registerOrderWithCallmaner, tryUpdateWithErrorCodeColumn } = require('..
 const { createOrder } = require('../lib/orderCreate');
 // 접수 필드 정의는 카카오 상담톡과 공유한다(lib/intakeFields.js).
 const { DISPATCH_FIELDS } = require('../lib/intakeFields');
+// 접수 요약 문구는 카카오 상담톡과 같은 모듈이 만든다.
+const { buildSummaryText } = require('../lib/intakeSummary');
 
 // 폼에서 온 좌표 문자열을 숫자로 — 빈 문자열/미입력/숫자 아님은 전부 null(컬럼이 numeric이라
 // 빈 문자열을 그대로 넣으면 22P02로 터진다). 출발·도착지와 경유지 양쪽에서 같이 쓴다.
@@ -378,6 +380,30 @@ router.get('/ai-intake/data.json', asyncHandler(async (req, res) => {
 // 브라우저는 이 응답이 없으면 자기 기본값으로 계속 동작한다(네트워크 실패 시 접수가 멈추면 안 된다).
 router.get('/ai-intake/fields.json', asyncHandler(async (req, res) => {
   res.json({ fields: DISPATCH_FIELDS });
+}));
+
+// 접수 확인 요약 — 카카오 상담톡(등록 후 통보·상담원 초안)과 같은 모듈로 만든다
+// (lib/intakeSummary.js). 예전에는 세 곳이 각자 만들어서, 옵션(주유·서류)이 카카오 요약에만
+// 들어가는 식으로 항목이 갈라졌다.
+//
+// 브라우저는 이 응답을 쓰지 않고 자기 화면에서 직접 그린다 — 요약을 만드는 두 지점이 동기
+// 함수라 서버 호출로 바꾸면 "요약 → 확인 질문" 말풍선 순서가 흔들린다(실사용 화면이라 그
+// 위험을 지금 감수할 이유가 없다). 대신 scripts/check-intake-summary.js가 같은 값으로 양쪽
+// 문구를 대조해 어긋나면 실패한다. 이 엔드포인트는 그 대조의 기준이자, 브라우저 쪽을 나중에
+// 서버 호출로 바꿀 때 쓸 자리다.
+router.post('/ai-intake/summary.json', asyncHandler(async (req, res) => {
+  const b = req.body || {};
+  const text = buildSummaryText({
+    reservedDate: b.reserved_date,
+    reservedTime: b.reserved_time,
+    origin: { address: b.origin_address, detail: b.origin_detail_address, contact: b.origin_contact },
+    destination: { address: b.destination_address, detail: b.destination_detail_address, contact: b.destination_contact },
+    waypoints: Array.isArray(b.waypoints) ? b.waypoints : [],
+    vehicles: [{ type: b.vehicle_type, number: b.vehicle_number }],
+    memoCustomer: b.memo_customer,
+    memoBilling: b.memo_billing,
+  }, { bullet: '▪' });
+  res.json({ text });
 }));
 
 // 복원 대상 세션/메시지/draft를 화면 렌더와 분리해 JSON 계약으로 고정한다.
