@@ -16,7 +16,7 @@ const { searchKnowledgeBase } = require('../lib/knowledgeSearch');
 const { parseKakaoIntake, buildMissingQuestion, normalizePhone, normalizePlate } = require('../lib/kakaoIntakeParser');
 const { findIntakeAccount, resolveIntakeContext, findAccountByPhone, linkUserKeyToAccount, createOrdersFromIntake } = require('../lib/kakaoIntakeService');
 const { getSmalltalkMessage } = require('../lib/smallTalk');
-const { buildSuggestion } = require('../lib/agentAssist');
+const { buildSuggestion, buildFareSuggestion } = require('../lib/agentAssist');
 const { runDispatchAgent } = require('../lib/mcpDispatchAgent');
 const { notify } = require('../lib/push');
 const { broadcastMessage, broadcastSessionListChanged } = require('../lib/realtimeChat');
@@ -332,6 +332,19 @@ async function sendAndLog(session, text, label) {
 }
 
 // FAQ 자동응답 — 유사도가 낮으면(관련 항목 없음) 상담원 연결로 넘긴다.
+// 구간이 붙은 요금 문의("사당역에서 반포역까지 얼마?")는 지식검색으로 풀 수 없다 —
+// 거리마다 답이 달라 등록해 둘 수 있는 항목이 아니다. 그래서 FAQ보다 먼저 실제 요금표로
+// 계산해 답한다. 구간이 없는 "요금조회 되나요?" 같은 안내성 질문은 그대로 FAQ가 받는다.
+async function tryAnswerFare(session, text, extracted) {
+  const account = await resolveIntakeContext(session).catch(() => null);
+  const draft = await buildFareSuggestion(text, { branchId: account && account.branch_id, extracted })
+    .catch((e) => { console.error('카카오 요금 안내 실패:', e.message); return null; });
+  if (!draft) return false;
+  await insertMessage(session.id, 'bot', draft.text);
+  await sendAndLog(session, draft.text, '요금 안내');
+  return true;
+}
+
 async function tryAnswerFaq(session, text) {
   // 문턱은 웹 위젯(routes/orders.js)과 같은 0.7로 맞춘다 — 0.6일 때 "안녕하세요"에
   // "공지사항 메뉴는…" 같은 무관한 항목이 매칭돼 실제로 잘못된 답이 발송됐다.
@@ -682,6 +695,8 @@ async function processBotTurn(session, text) {
   }
   if (classified.intent === 'faq') {
     // 요금문의·지식검색은 동의 없이 응답한다. 답을 못 찾아 상담원으로 넘길 때만 동의를 요구한다.
+    // 구간이 있는 요금 문의는 지식검색보다 먼저 실제 요금표로 계산한다.
+    if (await tryAnswerFare(session, text, classified)) return;
     const answered = await tryAnswerFaq(session, text);
     if (answered) return;
     if (!await ensurePersonalConsent(session, 'agent', text)) return;

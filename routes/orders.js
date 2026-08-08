@@ -9,6 +9,7 @@ const { kstNow } = require('../lib/period');
 const { parseIntakeText } = require('../lib/aiIntakeParser');
 const { classifyAndExtract, classifyPhaseReply } = require('../lib/hybridChat');
 const { searchKnowledgeBase } = require('../lib/knowledgeSearch');
+const { buildFareSuggestion } = require('../lib/agentAssist');
 // 인사·자기소개 응답은 카카오 상담톡(routes/kakaoConsult.js)과 같은 규칙을 써야 해서 공용 모듈로 뺐다.
 const { isGreeting, getSmalltalkMessage } = require('../lib/smallTalk');
 const { broadcastMessage, broadcastSessionListChanged, broadcastOrderListChanged, openOrderListStream, closeChannel } = require('../lib/realtimeChat');
@@ -594,6 +595,14 @@ router.post('/ai-intake/parse', asyncHandler(async (req, res) => {
   const seemsFrustrated = !!(geminiResult && geminiResult.seemsFrustrated);
 
   if (geminiResult && geminiResult.intent === 'faq') {
+    // 구간이 붙은 요금 문의("사당역에서 반포역까지 얼마?")는 지식검색으로 풀 수 없다 —
+    // 거리마다 답이 달라 등록해 둘 수 있는 항목이 아니다. 실제 요금표로 계산해 답한다.
+    // 화면은 matches[].category/answer를 그대로 그리므로 같은 모양으로 실어 보낸다.
+    const fare = await buildFareSuggestion(text, { branchId: req.session.user.branch_id, extracted: geminiResult })
+      .catch((e) => { console.error('요금 안내 계산 실패:', e.message); return null; });
+    if (fare) {
+      return res.json({ intent: 'faq', matches: [{ category: '요금안내', answer: fare.text }], seemsFrustrated });
+    }
     const matches = await knowledgeSearchPromise;
     return res.json({ intent: 'faq', matches, seemsFrustrated });
   }
