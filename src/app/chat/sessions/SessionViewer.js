@@ -34,7 +34,7 @@ function readStateText(message) {
 
 // 자동 발송된 초안인지 — chat_messages에는 발신 주체 구분이 'agent' 하나뿐이라, 서버가 붙이는
 // 안내 문구로 판별한다(routes/chat.js AUTO_SEND_NOTICE와 같은 문장이어야 한다).
-const AUTO_SENT_MARK = '상담원이 1분동안 응답이 없어 AI가 응답을 먼저 생성하였습니다.';
+const AUTO_SENT_MARK = '상담원이 30초동안 응답이 없어 AI가 응답을 먼저 생성하였습니다.';
 
 function isAutoSent(message) {
   return message.sender === 'agent' && String(message.message || '').includes(AUTO_SENT_MARK);

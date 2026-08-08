@@ -969,3 +969,6 @@ router.post('/receive/personal_info', asyncHandler(async (req, res) => {
 }));
 
 module.exports = router;
+// 상담원 무응답으로 봇에게 응대를 넘길 때(routes/chat.js), 고객이 이미 한 발화를 그대로
+// 봇 경로에 태우기 위해 노출한다.
+module.exports.processBotTurn = processBotTurn;

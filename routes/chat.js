@@ -1082,12 +1082,12 @@ router.post('/sessions/:id/suggestions/:sid/approve', requireRole('admin'), asyn
 //   · 초안이 뜬 뒤 30초 동안 상담원이 아무 입력(타이핑·발송)도 하지 않으면 발송한다.
 //   · 상담원이 타이핑을 시작하면 발송하지 않는다 — 답이 두 번 나가는 걸 막는다. 카카오는
 //     발송 취소가 안 되므로 이 판단은 되돌릴 수 없다.
-const AUTO_SEND_DELAY_SECONDS = 60;
-const AUTO_SEND_NOTICE = '상담원이 1분동안 응답이 없어 AI가 응답을 먼저 생성하였습니다. 상담원이 접속하면 다시 확인해 드리겠습니다.';
+const AUTO_SEND_DELAY_SECONDS = 30;
+const AUTO_SEND_NOTICE = '상담원이 30초동안 응답이 없어 AI가 응답을 먼저 생성하였습니다. 상담원이 접속하면 다시 확인해 드리겠습니다.';
 // 접수(intake) 초안은 답변을 대신 보내는 것으로 끝나지 않는다 — "접수하겠습니다"라고 약속만
 // 나가고 오더는 아무도 만들지 않는 상태가 된다. 그래서 문구를 대신 보내는 대신 봇에게 응대를
 // 넘겨, 이후 고객 메시지를 봇이 접수 경로로 처리하게 한다(사용자 확정 규칙).
-const BOT_HANDOVER_NOTICE = '상담원 응답이 1분동안 없어서 주문접수를 제가 도와드리겠습니다.';
+const BOT_HANDOVER_NOTICE = '상담원 응답이 30초동안 없어서 주문접수를 제가 도와드리겠습니다.';
 
 // 상담원이 입력창에 타이핑하는 중이라는 신호. 화면에서 짧은 주기로 던진다.
 router.post('/sessions/:id/typing', requireRole('admin'), asyncHandler(async (req, res) => {
@@ -1127,12 +1127,15 @@ async function deliverBotMessage(session, text) {
 async function loadAutoSendTargets() {
   const sql = `
     SELECT g.id AS suggestion_id, g.session_id, g.suggested_text, g.kind, g.created_at,
+           COALESCE(um.message, (SELECT m2.message FROM chat_messages m2
+             WHERE m2.session_id = s.id AND m2.sender = 'user' ORDER BY m2.id DESC LIMIT 1)) AS user_text,
            s.channel, s.status, s.assigned_agent_id, s.agent_typing_at,
            s.kakao_service_key, s.kakao_user_key, s.kakao_event_key,
            (SELECT max(m.created_at) FROM chat_messages m
              WHERE m.session_id = s.id AND m.sender = 'agent') AS last_agent_at
       FROM chat_suggestions g
       JOIN chat_sessions s ON s.id = g.session_id
+      LEFT JOIN chat_messages um ON um.id = g.user_message_id
      WHERE g.status = 'pending'
        AND s.status = 'agent_active'
        -- 초안이 뜬 지 충분히 지났고
@@ -1182,6 +1185,26 @@ async function autoSendPendingSuggestions() {
           [row.suggestion_id]
         );
         broadcastSessionListChangedAsync({ event: 'bot_handover', sessionId: row.session_id });
+
+        // 안내만 하고 끝내면 고객이 같은 말을 다시 해야 한다 — 이미 한 발화를 그대로 봇 경로에
+        // 태워 실제 접수까지 진행한다. 카카오만 서버에서 봇 턴을 돌릴 수 있다(웹 위젯은 브라우저가
+        // /orders/ai-parse를 호출하는 구조라 서버가 대신 실행할 수 없다).
+        const userText = String(row.user_text || '').trim();
+        if (userText && session.channel === 'kakao') {
+          try {
+            // 지연 require — server.js가 두 라우터를 모두 로드하므로 최상단에서 서로 참조하면
+            // 로드 순서에 묶인다.
+            const { processBotTurn } = require('./kakaoConsult');
+            // 봇 경로는 최신 세션 상태(bot)를 봐야 한다.
+            const fresh = await db.get('SELECT * FROM chat_sessions WHERE id = ?', [row.session_id]);
+            await processBotTurn(fresh, userText);
+          } catch (e) {
+            console.error(`봇 인계 후 처리 실패(세션 ${row.session_id}):`, e.message);
+            logIntegrationErrorAsync({ source: 'kakao', operation: 'bot_handover', refType: 'chat_session',
+              refId: Number(row.session_id), message: e.message, context: { textHead: userText.slice(0, 60) } });
+          }
+        }
+
         sent.push({ sessionId: row.session_id, suggestionId: row.suggestion_id, kind: row.kind, action: 'bot_handover' });
         continue;
       }
