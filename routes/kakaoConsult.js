@@ -606,12 +606,40 @@ async function savePendingConsentPurpose(session, purpose, raw) {
   ).catch((e) => console.error('동의 대기 상태 저장 실패:', e.message));
 }
 
-async function savePendingIntake(session, raw) {
+// missing을 함께 남긴다 — 다음 메시지에서 "이번 답변으로 무엇이 채워졌는지"를 알아야
+// 그 값을 되읽어줄 수 있다(고객은 자기가 보낸 차량번호가 제대로 들어갔는지 알 방법이 없다).
+async function savePendingIntake(session, raw, missing) {
   await db.run(
     `UPDATE chat_sessions SET intake_slots_json = ?,
      intake_updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') WHERE id = ?`,
-    [JSON.stringify({ raw, savedAt: Date.now() }), session.id]
+    [JSON.stringify({ raw, missing: missing || [], savedAt: Date.now() }), session.id]
   ).catch((e) => console.error('접수 슬롯 저장 실패:', e.message));
+}
+
+// 되묻기 답변으로 채워진 항목을 그대로 되읽어준다.
+//
+// 예전에는 차량번호를 보내면 아무 확인 없이 곧바로 다음 질문(주소 후보 등)으로 넘어갔다.
+// 고객 입장에서는 자기가 보낸 번호가 들어갔는지, 오타로 읽혔는지 알 수 없다 — 접수가 끝난 뒤
+// 잘못된 차량번호가 드러나면 되돌리는 비용이 훨씬 크다. 웹 접수 화면은 항목마다 이 확인을
+// 이미 하고 있어서(public/js/ai-intake.js) 같은 규칙을 카카오에도 맞춘다.
+async function announceFilledFields(session, pendingIntake, parsed) {
+  const before = new Set((pendingIntake && pendingIntake.missing) || []);
+  if (!before.size) return;
+
+  const lines = [];
+  if (before.has('vehicle_number') && parsed.vehicles && parsed.vehicles.length) {
+    const v = parsed.vehicles[0];
+    const label = [v.plate, v.type ? `(${v.type})` : null].filter(Boolean).join(' ');
+    if (label) lines.push(`차량번호는 ${label}(으)로 확인했습니다.`);
+  }
+  if (before.has('when') && parsed.when) {
+    const when = parsed.when.immediate
+      ? '즉시'
+      : [parsed.when.date, parsed.when.time].filter(Boolean).join(' ');
+    if (when) lines.push(`일시는 ${when}(으)로 확인했습니다.`);
+  }
+  if (!lines.length) return;
+  await botSay(session, lines.join('\n'), '되묻기 답변 확인');
 }
 
 async function clearPendingIntake(session) {
@@ -704,7 +732,7 @@ async function handleAddressChoiceReply(session, pending, text) {
 
   await botSay(session, `${pending.sideLabel}를 "${chosen.label}"로 확인했습니다.`, '주소 확정 안내');
   if (!parsed.complete) {
-    await savePendingIntake(session, replacedRaw);
+    await savePendingIntake(session, replacedRaw, parsed.missing);
     const addressPreview = await previewIntakeAddresses(parsed);
     await botSay(session, buildMissingQuestion(parsed.missing, parsed, addressPreview), '접수 되묻기');
     return true;
@@ -731,7 +759,7 @@ async function tryHandleIntake(session, text) {
   }
 
   if (!parsed.complete) {
-    await savePendingIntake(session, mergedRaw);
+    await savePendingIntake(session, mergedRaw, parsed.missing);
     const addressPreview = await previewIntakeAddresses(parsed);
     const question = buildMissingQuestion(parsed.missing, parsed, addressPreview);
     await botSay(session, question, '접수 되묻기');
@@ -921,12 +949,17 @@ async function processBotTurn(session, text) {
       //
       // 동의는 여기서 받지 않는다(폼 경로와 동일) — 동의 말풍선은 세션당 1회뿐이라, 아직 등록할지도
       // 모르는 단계에서 써버리면 정작 등록 직전에 다시 띄울 수 없다. completeIntake가 요구한다.
-      await savePendingIntake(session, intakeText);
+      // 이번 답변으로 채워진 항목이 있으면 먼저 되읽어준다 — 그 뒤에 남은 항목을 묻는다.
+      await announceFilledFields(session, pendingIntake, parsed);
+      await savePendingIntake(session, intakeText, parsed.missing);
       const addressPreview = await previewIntakeAddresses(parsed);
       const question = buildMissingQuestion(parsed.missing, parsed, addressPreview);
       await botSay(session, question, '접수 되묻기(자유문장)');
       return;
     }
+    // 필수 항목이 다 찼을 때도 이번 답변으로 채워진 값은 되읽어준다 — 여기서 확인을 건너뛰면
+    // 차량번호를 보낸 고객이 아무 응답 없이 주소 후보 질문만 받는다.
+    await announceFilledFields(session, pendingIntake, parsed);
     // 자유 문장도 주소가 애매하면 먼저 확정한다 — 폼 경로와 같은 규칙이다. 여기가 빠져 있으면
     // "판교역에서 사당역까지"처럼 지명만 말한 접수가 첫 검색 결과로 조용히 등록된다.
     if (await askAddressChoiceIfNeeded(session, parsed, intakeText)) return;

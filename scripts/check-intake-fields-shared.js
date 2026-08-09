@@ -8,7 +8,7 @@
 //   node scripts/check-intake-fields-shared.js
 const fs = require('fs');
 const path = require('path');
-const { DISPATCH_FIELDS, shortLabelsFor, nextMissingField } = require('../lib/intakeFields');
+const { DISPATCH_FIELDS, shortLabelsFor, exampleFor, nextMissingField } = require('../lib/intakeFields');
 
 const BROWSER_FILE = path.join(__dirname, '..', 'public', 'js', 'ai-intake.js');
 
@@ -42,8 +42,10 @@ function main() {
   });
 
   // 되묻기 라벨과 다음 질문 결정도 함께 확인한다 — 카카오가 쓰는 경로다.
-  checks.push(['되묻기 라벨 생성', shortLabelsFor(['origin_address', 'vehicle_number']).join('/') === '출발지 주소/차량번호',
-    shortLabelsFor(['origin_address', 'vehicle_number']).join('/')]);
+  // 차량번호 라벨은 "차종 / 차량번호"다 — 차종을 함께 청해야 도선료 계산에서 다시 묻지 않는다.
+  checks.push(['되묻기 라벨 생성', shortLabelsFor(['origin_address', 'vehicle_number']).join(' + ') === '출발지 주소 + 차종 / 차량번호',
+    shortLabelsFor(['origin_address', 'vehicle_number']).join(' + ')]);
+  checks.push(['차량번호 예시 제공', exampleFor('vehicle_number') === '그랜저 12가 1234', String(exampleFor('vehicle_number'))]);
   const next = nextMissingField({ reserved_date: '2026-08-20', origin_address: '서울역' });
   checks.push(['다음 미입력 필드 = 출발지 연락처', next && next.id === 'origin_contact', next ? next.id : '없음']);
   const done = nextMissingField({
