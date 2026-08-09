@@ -33,7 +33,7 @@ function makeStubs(options = {}) {
 }
 
 async function main() {
-  const created = { orderId: null, branchId: null, photoIds: [], settingExisted: false, settingBefore: null };
+  const created = { orderId: null, branchId: null, photoIds: [], settingExisted: false, settingBefore: null, extraSessionId: null };
 
   try {
     console.log('[사진 요청 판정]');
@@ -178,6 +178,31 @@ async function main() {
       check('상담원이 이어받는다고 알린다', result.message, photos.MESSAGES.allFailed);
     }
 
+    console.log('\n[재요청 판정]');
+    {
+      // 기사에게 직접 알릴 방법이 없어서 재촉은 상담원을 거쳐야 한다. 첫 질문부터 사람을
+      // 부르면 자동화 이득이 사라지므로, "이미 없다고 답한 적이 있는지"로 재요청을 가른다.
+      const sessionRow = await db.get(
+        `INSERT INTO chat_sessions (user_id, status, channel) VALUES (NULL, 'bot', 'kakao') RETURNING id`
+      );
+      created.extraSessionId = sessionRow.id;
+
+      check('처음에는 0', await photos.countNoPhotoAnswers(sessionRow.id), 0);
+
+      await db.run(
+        `INSERT INTO chat_messages (session_id, sender, message) VALUES (?, 'bot', ?)`,
+        [sessionRow.id, photos.MESSAGES.noPhotos]
+      );
+      check('한 번 답하면 1', await photos.countNoPhotoAnswers(sessionRow.id), 1);
+
+      // 다른 봇 발화는 세지 않는다 — 이걸 못 가리면 아무 대화나 재요청으로 취급된다.
+      await db.run(
+        `INSERT INTO chat_messages (session_id, sender, message) VALUES (?, 'bot', '배차가 완료되었습니다.')`,
+        [sessionRow.id]
+      );
+      check('다른 안내는 세지 않는다', await photos.countNoPhotoAnswers(sessionRow.id), 1);
+    }
+
     console.log('\n[사진이 많을 때]');
     {
       const stubs = makeStubs();
@@ -219,6 +244,10 @@ async function main() {
     }
     if (created.orderId) {
       await db.run('DELETE FROM orders WHERE id = ? AND memo_customer = ?', [created.orderId, MARK]).catch(() => {});
+    }
+    if (created.extraSessionId) {
+      await db.run('DELETE FROM chat_messages WHERE session_id = ?', [created.extraSessionId]).catch(() => {});
+      await db.run('DELETE FROM chat_sessions WHERE id = ?', [created.extraSessionId]).catch(() => {});
     }
     // 지사 설정은 원래대로 되돌린다 — 이 DB는 프로덕션과 같다.
     if (created.branchId) {

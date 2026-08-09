@@ -18,7 +18,7 @@ const { findIntakeAccount, resolveIntakeContext, findAccountByPhone, linkUserKey
 const { previewIntakeAddresses } = require('../lib/intakeAddressPreview');
 const { runKakaoOrderNotifications } = require('../lib/kakaoOrderNotify');
 const kakaoOrderPhotos = require('../lib/kakaoOrderPhotos');
-const { sendOrderPhotos, isPhotoRequest, isOdometerRequest, answerOdometer } = kakaoOrderPhotos;
+const { sendOrderPhotos, isPhotoRequest, isOdometerRequest, answerOdometer, countNoPhotoAnswers } = kakaoOrderPhotos;
 // 주소 후보 검색·선택은 웹 접수 화면과 같은 규칙을 쓴다(lib/addressCandidates.js).
 const { searchAddressCandidates, needsDisambiguation, buildCandidateListText, matchCandidateChoice, getClarifyText } = require('../lib/addressCandidates');
 const { getSmalltalkMessage } = require('../lib/smallTalk');
@@ -447,6 +447,31 @@ async function tryAnswerPhotoRequest(session, text) {
     // 발신 자체는 sendOrderPhotos가 이미 했다(이미지 섹션이라 botSay로는 못 보낸다). 상담
     // 이력에는 무엇을 보냈는지 남겨야 상담원이 "이미 나간 사진"을 또 보내지 않는다.
     await insertMessage(session.id, 'bot', result.caption);
+    return true;
+  }
+
+  // 사진이 없어서 못 보낸 경우 — 재요청인지 본다.
+  //
+  // 기사에게 직접 알릴 방법이 없다(푸시는 관리자·상담원 대상이고 기사 SMS 경로는 없다). 그래서
+  // 재촉은 상담원을 거쳐야 하는데, 처음 물었을 때부터 사람을 부르면 자동화 이득이 사라진다 —
+  // 기사가 곧 올릴 수도 있다. 두 번째로 물으면 그때는 기다리게 두지 않는다.
+  if (result.skipped === 'no_photos') {
+    const askedBefore = await countNoPhotoAnswers(session.id).catch(() => 0);
+    if (askedBefore > 0) {
+      await botSay(session, kakaoOrderPhotos.MESSAGES.noPhotosAgain, '사진 재요청');
+      await markNeedsAgent(session, text, '사진 재요청(기사 확인 필요)');
+      return true;
+    }
+    await botSay(session, result.message, '사진 요청 응답');
+    // 상담원이 미리 알고 기사에게 확인해두면, 고객이 다시 묻기 전에 사진이 올라와 있을 수 있다.
+    notify({
+      branchId: order.branch_id,
+      eventType: 'order_events',
+      excludeUserId: 0,
+      title: '고객이 사진을 요청했습니다',
+      body: `${order.oid}: 아직 등록된 사진이 없습니다. 기사님께 확인이 필요합니다.`,
+      url: `/orders/${order.id}`,
+    }).catch((e) => console.error('사진 요청 알림 실패:', e.message));
     return true;
   }
 
