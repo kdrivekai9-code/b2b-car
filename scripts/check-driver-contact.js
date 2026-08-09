@@ -72,6 +72,30 @@ console.log('\n[이름만 있고 연락처가 아직 없을 때]');
   check('연락처는 null로 구분된다', row.기사연락처, null);
 }
 
+console.log('\n[주소는 우리 값을 우선한다]');
+{
+  // 콜마너 응답 주소는 잘려서 온다("판교역로 160" → "판교역로 16"). 그대로 쓰면 고객에게 틀린
+  // 주소를 읽어주고, 그 값으로 재접수를 시도하면 좌표를 못 찾아 실패한다.
+  const map = new Map([['179098847', {
+    oid: 'OID1132',
+    origin_address: '경기 성남시 분당구 판교역로 160',
+    destination_address: '서울 동작구 남부순환로 2089',
+  }]]);
+  const [row] = summarizeOrders([{
+    ...order,
+    departure: { address: '경기 성남시 분당구 판교역로 16' },
+    arrival: { address: '서울 동작구 남부순환로 2089 지' },
+  }], map);
+  check('출발지는 우리 원본', row.출발지, '경기 성남시 분당구 판교역로 160');
+  check('도착지도 우리 원본', row.도착지, '서울 동작구 남부순환로 2089');
+}
+
+{
+  // 우리 오더가 없으면(콜마너에만 있는 건) 콜마너 값이라도 보여준다 — 없는 것보다 낫다.
+  const [row] = summarizeOrders([{ ...order, departure: { address: '경기 성남시 분당구 판교역로 16' } }], new Map());
+  check('매칭이 없으면 콜마너 값', row.출발지, '경기 성남시 분당구 판교역로 16');
+}
+
 console.log('\n[우리 오더로 매칭되지 않은 콜마너 건]');
 {
   const [row] = summarizeOrders([order], new Map());
