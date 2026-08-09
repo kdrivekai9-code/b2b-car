@@ -55,7 +55,18 @@ const SESSION_CREATE_WINDOW_SQL = `to_char(now() at time zone 'Asia/Seoul' - int
 // 채널을 반영한 표시값을 만들어 내려보낸다. 연락처는 접수 폼에서 받은 external_phone으로 채운다.
 // 개인정보 제공동의를 받은 카카오 고객은 실제 이름이 external_name에 들어온다
 // (routes/kakaoConsult.js /receive/personal_info) — 있으면 그 이름을 먼저 쓴다.
-const CUSTOMER_NAME_SQL = `COALESCE(u.name, cs.external_name, CASE WHEN cs.channel = 'kakao' THEN '카카오 상담톡 고객' END)`;
+//
+// 동의 전에는 이름이 없어 모든 고객이 "카카오 상담톡 고객"으로 똑같이 보인다 — 목록에 여러
+// 세션이 나란히 있으면 누가 누구인지 구분할 수가 없다. 그 경우 UserKey를 함께 보여준다.
+// UserKey는 채널별로 고정이라(명세서 용어집) 같은 고객의 재방문을 알아보는 데도 쓸 수 있다.
+const CUSTOMER_NAME_SQL = `COALESCE(
+  u.name,
+  cs.external_name,
+  CASE WHEN cs.channel = 'kakao' THEN
+    '카카오 상담톡 고객' ||
+    COALESCE(' (' || NULLIF(COALESCE(cs.external_user_key, cs.kakao_user_key), '') || ')', '')
+  END
+)`;
 const CUSTOMER_ROLE_SQL = `COALESCE(u.role, CASE WHEN cs.channel = 'kakao' THEN '카카오' END)`;
 const CUSTOMER_PHONE_SQL = `COALESCE(u.phone, cs.external_phone)`;
 
