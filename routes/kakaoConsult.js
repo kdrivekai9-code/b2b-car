@@ -455,7 +455,10 @@ async function tryAnswerPhotoRequest(session, text) {
   const order = await loadSessionOrder(session);
   if (!order) return false;
 
-  const result = await sendOrderPhotos(session, order).catch((e) => {
+  const result = await sendOrderPhotos(session, order, {
+    // 보낼 사진이 있을 때만 알린다 — 내려받아 다시 올리는 동안 몇 초씩 걸린다.
+    onStart: (count) => botSay(session, `사진 ${count}장을 준비하고 있습니다. 잠시만 기다려주세요.`, '사진 전달 대기 안내'),
+  }).catch((e) => {
     console.error('카카오 사진 전달 실패:', e.message);
     return { skipped: 'error', message: kakaoOrderPhotos.MESSAGES.allFailed };
   });
@@ -854,6 +857,14 @@ async function tryDispatchAgent(session, text) {
   if (history.length && history[history.length - 1].sender === 'user' && history[history.length - 1].message === text) {
     history.pop();
   }
+
+  // 조회는 LLM과 콜마너를 왕복해서 몇 초씩 걸린다. 그동안 아무 말이 없으면 고객은 못 알아들은
+  // 줄 알고 다음 질문을 덧붙이는데, 그러면 새 질문으로 다시 분류돼 앞 조회가 헛돈다(실사용에서
+  // 실제로 그랬다). 먼저 기다려달라고 알린다.
+  //
+  // 카카오는 보낸 말풍선을 고칠 수 없어서(발신 API에 메시지 수정·삭제가 없다) 이 안내는 그대로
+  // 남고 결과가 새 말풍선으로 온다. 웹 위젯처럼 점이 깜빡이는 표시를 쓸 방법은 없다.
+  await botSay(session, '요청하신 내용을 확인하고 있습니다. 잠시만 기다려주세요.', '조회 대기 안내');
 
   const result = await runDispatchAgent({ user, sessionId: session.id, text, history });
   if (!result || !result.handled || !result.message) return false;
