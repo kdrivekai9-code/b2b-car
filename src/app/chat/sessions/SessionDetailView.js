@@ -67,7 +67,8 @@ export default function SessionDetailView({ initialSession, agents, currentUser 
             상담 #{session.id} <span className={`badge ${STATUS_BADGE[session.status] || 'gray'}`}>{STATUS_LABEL[session.status] || session.status}</span>
           </h1>
           <p className="page-sub">
-            고객: {session.user_name || '-'} ({session.user_role || '-'}){session.user_phone ? ` · ${session.user_phone}` : ''}
+            {/* 카카오 세션은 아래 배지가 채널을 말해준다 — 역할까지 적으면 중복이다. */}
+            고객: {session.user_name || '-'}{session.channel === 'kakao' ? '' : ` (${session.user_role || '-'})`}{session.user_phone ? ` · ${session.user_phone}` : ''}
             {/* 여기서 보내는 답장이 카카오 상담톡으로 나간다는 걸 입력 전에 알 수 있어야 한다. */}
             {session.channel === 'kakao' && <span className="badge amber">카카오 상담톡</span>}
           </p>

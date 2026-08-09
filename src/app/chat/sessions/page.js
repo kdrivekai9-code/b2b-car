@@ -80,7 +80,10 @@ export default async function ChatSessionListPage({ searchParams }) {
                 <tr key={s.id} className={s.status === 'needs_agent' ? 'session-row-needs-agent' : ''}>
                   <td>#{s.id}</td>
                   <td>
-                    {s.user_name || '-'} <span style={{ color: 'var(--muted)' }}>({s.user_role || '-'})</span>
+                    {/* 카카오 세션은 옆의 배지가 이미 채널을 말해준다 — 역할까지 "(카카오)"로 적으면
+                        같은 말이 세 번 나온다. views/chat/session_list.ejs도 같은 규칙. */}
+                    {s.user_name || '-'}
+                    {s.channel !== 'kakao' && <span style={{ color: 'var(--muted)' }}> ({s.user_role || '-'})</span>}
                     {s.channel === 'kakao' && <span className="badge amber">카카오</span>}
                   </td>
                   <td><span className={`badge ${STATUS_BADGE[s.status] || 'gray'}`}>{STATUS_LABEL[s.status] || s.status}</span></td>
