@@ -1101,12 +1101,23 @@ async function buildOrderLegs(orderId, order, waypoints) {
   let legRows;
   try {
     legRows = await db.all(`
-      SELECT ol.seq, ol.driver_id, d.name AS driver_name, d.phone AS driver_phone
+      SELECT ol.seq, ol.driver_id, ol.photo_upload_token, d.name AS driver_name, d.phone AS driver_phone
       FROM order_legs ol
       LEFT JOIN drivers d ON d.id = ol.driver_id
       WHERE ol.order_id = ?
       ORDER BY ol.seq ASC
-    `, [orderId]);
+    `, [orderId]).catch(async (e) => {
+      // photo_upload_token은 20260809040000에서 추가된다 — 적용 전 DB에서도 구간 배정 화면은
+      // 그대로 떠야 하므로 그 컬럼 없이 한 번 더 조회한다.
+      if (!e || e.code !== '42703') throw e;
+      return db.all(`
+        SELECT ol.seq, ol.driver_id, NULL AS photo_upload_token, d.name AS driver_name, d.phone AS driver_phone
+        FROM order_legs ol
+        LEFT JOIN drivers d ON d.id = ol.driver_id
+        WHERE ol.order_id = ?
+        ORDER BY ol.seq ASC
+      `, [orderId]);
+    });
   } catch (e) {
     return []; // order_legs 테이블이 아직 없는 DB(마이그레이션 미적용) — 조용히 폴백
   }
@@ -1123,6 +1134,9 @@ async function buildOrderLegs(orderId, order, waypoints) {
     driverId: row.driver_id,
     driverName: row.driver_name,
     driverPhone: row.driver_phone,
+    // 구간마다 다른 기사에게 줄 업로드 링크. 오더 토큰 하나를 여럿에게 주면 올라온 사진이
+    // 어느 구간 것인지 알 수 없다.
+    photoUploadToken: row.photo_upload_token || null,
   }));
 }
 

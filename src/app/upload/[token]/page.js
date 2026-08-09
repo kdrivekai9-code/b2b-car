@@ -19,7 +19,7 @@ export default async function PhotoUploadPage({ params }) {
     if (res.ok) data = await res.json();
   } catch {}
 
-  const { order, guide, photos } = data;
+  const { order, guide, photos, leg } = data;
 
   return (
     <div className="upload-wrap">
@@ -31,6 +31,17 @@ export default async function PhotoUploadPage({ params }) {
           <>
             <p className="upload-order-oid">오더번호 <b>{order.oid}</b></p>
 
+            {/* 구간 링크로 들어온 기사에게는 "내가 맡은 구간이 맞는지"를 먼저 보여준다.
+                views/photo_upload.ejs에도 같은 표시가 있다. */}
+            {leg && (
+              <>
+                <div className="upload-leg-badge">
+                  {leg.seq}구간 / 전체 {leg.total}구간{leg.driverName ? ` · ${leg.driverName} 기사님` : ''}
+                </div>
+                <div className="upload-leg-route">{leg.from} → {leg.to}</div>
+              </>
+            )}
+
             {guide?.guide_image_url && (
               <img src={guide.guide_image_url} alt="안내 이미지" className="upload-guide-image" />
             )}
@@ -39,7 +50,7 @@ export default async function PhotoUploadPage({ params }) {
             </div>
 
             {/* 계기판 사진일 때만 적는 값이라 선택 입력이다. views/photo_upload.ejs에도 같은 입력란이 있다. */}
-            <form method="POST" action={'/upload/' + order.photo_upload_token} encType="multipart/form-data" className="upload-form">
+            <form method="POST" action={'/upload/' + token} encType="multipart/form-data" className="upload-form">
               <input type="file" name="photo" accept="image/*" capture="environment" required />
               <label className="upload-odometer">
                 계기판 주행거리 (선택)

@@ -24,7 +24,15 @@
         <div class="upload-guide-text">차량 인도/회수 시점의 사진을 촬영하여 업로드해주세요.</div>
       <% } %>
 
-      <form method="POST" action="/upload/<%= order.photo_upload_token %>" enctype="multipart/form-data" class="upload-form">
+      <% if (typeof leg !== 'undefined' && leg) { %>
+        <%# 구간 링크로 들어온 기사에게는 "내가 맡은 구간이 맞는지"를 먼저 보여준다. %>
+        <div class="upload-leg-badge">
+          <%= leg.seq %>구간 / 전체 <%= leg.total %>구간<% if (leg.driverName) { %> · <%= leg.driverName %> 기사님<% } %>
+        </div>
+        <div class="upload-leg-route"><%= leg.from %> → <%= leg.to %></div>
+      <% } %>
+
+      <form method="POST" action="/upload/<%= typeof token !== 'undefined' && token ? token : order.photo_upload_token %>" enctype="multipart/form-data" class="upload-form">
         <input type="file" name="photo" accept="image/*" capture="environment" required>
         <label class="upload-odometer">
           계기판 주행거리 (선택)

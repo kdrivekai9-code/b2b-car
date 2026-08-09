@@ -689,6 +689,13 @@ textarea.single-line-textarea{min-height:36px;height:36px;padding:8px 10px;resiz
 .upload-order-oid{text-align:center;color:var(--muted);font-size:13px;margin:0 0 16px;}
 .upload-guide-image{width:100%;border-radius:8px;margin-bottom:12px;}
 .upload-guide-text{background:var(--bg);border-radius:8px;padding:12px 14px;font-size:13px;color:var(--text);margin-bottom:18px;white-space:pre-wrap;}
+/* 구간 릴레이: 구간마다 다른 기사에게 줄 링크라 어느 구간인지 라벨을 붙인다. */
+.leg-photo-link{display:flex;align-items:center;gap:8px;margin-bottom:6px;}
+.leg-photo-link-label{flex:0 0 auto;font-size:12px;color:var(--muted,#6b7280);min-width:96px;}
+.upload-leg-badge{display:inline-block;padding:4px 10px;border-radius:999px;background:rgba(37,99,235,.12);color:#2563eb;font-size:13px;font-weight:600;margin-bottom:6px;}
+.upload-leg-route{font-size:13px;color:var(--muted,#6b7280);margin-bottom:12px;}
+.upload-photo-item{position:relative;display:inline-block;}
+.upload-photo-leg{position:absolute;left:4px;top:4px;padding:1px 6px;border-radius:4px;background:rgba(0,0,0,.6);color:#fff;font-size:11px;}
 .upload-form{display:flex;flex-direction:column;gap:10px;margin-bottom:18px;}
 /* 계기판 주행거리는 선택 입력이라 파일 선택보다 눈에 덜 띄게 둔다 — 필수처럼 보이면 기사가 매번 채우려 한다. */
 .upload-odometer{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted,#6b7280);}

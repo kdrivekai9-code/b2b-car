@@ -67,7 +67,12 @@
     <% } else { %>
       <div class="upload-gallery">
         <% photos.forEach(function(p){ %>
-          <a href="<%= p.url %>" target="_blank"><img src="<%= p.url %>" alt="업로드된 사진"></a>
+          <%# 구간 링크로 올라온 사진은 어느 구간인지 표시한다 — 인수 시점과 인도 시점 사진이
+              섞이면 분쟁 때 어느 쪽 증빙인지 가릴 수 없다. %>
+          <a href="<%= p.url %>" target="_blank" class="upload-photo-item">
+            <img src="<%= p.url %>" alt="업로드된 사진">
+            <% if (p.leg_seq) { %><span class="upload-photo-leg"><%= p.leg_seq %>구간</span><% } %>
+          </a>
         <% }) %>
       </div>
       <%
@@ -184,7 +189,22 @@
       </div>
       <% } %>
       <div class="section-title small">사진 업로드 링크(기사 전달용, 로그인 불필요)</div>
-      <input type="text" class="photo-link-input" readonly value="<%= baseUrl %>/upload/<%= order.photo_upload_token %>" onclick="this.select()">
+      <%
+        // 구간 릴레이 오더는 기사가 여럿이라 링크도 구간마다 따로 준다 — 오더 링크 하나를
+        // 셋에게 주면 올라온 사진이 어느 구간 것인지 알 수 없다. 구간이 없는 오더(단일 배정,
+        // 옛 오더)는 예전처럼 오더 링크 하나만 보여준다.
+        const legLinks = (typeof legs !== 'undefined' ? legs : []).filter(function (l) { return l.photoUploadToken; });
+      %>
+      <% if (legLinks.length) { %>
+        <% legLinks.forEach(function(leg){ %>
+          <div class="leg-photo-link">
+            <span class="leg-photo-link-label"><%= leg.seq %>구간<% if (leg.driverName) { %> · <%= leg.driverName %><% } %></span>
+            <input type="text" class="photo-link-input" readonly value="<%= baseUrl %>/upload/<%= leg.photoUploadToken %>" onclick="this.select()">
+          </div>
+        <% }) %>
+      <% } else { %>
+        <input type="text" class="photo-link-input" readonly value="<%= baseUrl %>/upload/<%= order.photo_upload_token %>" onclick="this.select()">
+      <% } %>
     </div>
 
     <div class="card">
