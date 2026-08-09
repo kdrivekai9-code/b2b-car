@@ -1020,10 +1020,11 @@ async function processBotTurn(session, text) {
   // dispatch_order / proxy_order / daily_driver_order — 폼 파서가 못 잡은 자유 문장 접수다.
   // Gemini가 뽑은 필드를 폼과 같은 모양으로 바꿔 같은 등록 경로를 태운다. 탁송(dispatch_order)만
   // 대상이다 — 프리미엄/일일기사는 오더 컬럼과 요금 체계가 달라 이번 범위 밖이다.
-  // 경유지는 파서도 접수 서비스도 지원하지 않는다 — 자동 등록하면 경유지가 조용히 사라지므로
-  // 상담원에게 넘긴다.
-  const hasWaypoint = !!String(classified.waypointAddress || '').trim();
-  if (classified.intent === 'dispatch_order' && !hasWaypoint) {
+  // 경유지가 있어도 여기서 막지 않는다. 수행일이 갈리면 구간마다 별도 오더로 나뉘어(lib/orderSplit.js)
+  // 각 건이 A→B가 되므로 경유지가 사라질 일이 없다. 나뉘지 않는 경우(같은 날 경유)는
+  // createOrdersFromIntake가 waypoint_unsupported로 되돌려 상담원에게 넘긴다 — 판단을 한 곳에
+  // 모아둔다. 예전에는 여기서 미리 막아서, 날짜가 갈린 접수까지 전부 상담원에게 갔다.
+  if (classified.intent === 'dispatch_order') {
     const parsed = buildParsedFromClassified(classified, intakeText);
     if (!parsed.complete) {
       // 빠진 항목만 되묻는다 — 폼 경로와 같은 문구를 쓴다. 다음 메시지는 위 intakeText 병합으로
