@@ -20,6 +20,8 @@ const callmaner = require('../lib/callmaner');
 const { registerOrderWithCallmaner, tryUpdateWithErrorCodeColumn } = require('../lib/callmanerRegister');
 // 오더 저장은 세 경로(웹·문의전환·카카오)가 같은 구현을 쓴다.
 const { createOrder } = require('../lib/orderCreate');
+// 수행일이 갈리면 구간마다 별도 오더로 나눈다 — 카카오 자동접수와 같은 규칙.
+const { splitIntake } = require('../lib/orderSplit');
 // 접수 필드 정의는 카카오 상담톡과 공유한다(lib/intakeFields.js).
 const { DISPATCH_FIELDS } = require('../lib/intakeFields');
 // 접수 요약 문구는 카카오 상담톡과 같은 모듈이 만든다.
@@ -871,6 +873,10 @@ router.post('/', asyncHandler(async (req, res) => {
   // 값과 실제 저장값이 어긋나지 않도록 함께 저장한다(콜마너 viaList 연동은 여전히 범위 밖).
   const waypointLats = [].concat(req.body.waypoint_lats || []);
   const waypointLons = [].concat(req.body.waypoint_lons || []);
+  // 경유지에서 "다른 날" 다시 출발하는 경우에만 채워 보낸다 — 그때 오더가 구간별로 나뉜다
+  // (lib/orderSplit.js). 같은 날 이어서 도는 평범한 경유는 비어 있다.
+  const waypointReservedDates = [].concat(req.body.waypoint_reserved_dates || []);
+  const waypointReservedTimes = [].concat(req.body.waypoint_reserved_times || []);
   const finalWaypoints = waypoints
     .map((w, i) => ({
       address: combineAddress(w, waypointDetails[i]),
@@ -879,6 +885,8 @@ router.post('/', asyncHandler(async (req, res) => {
       vehicleNumber: waypointVehicleNumbers[i] || null,
       lat: toNumOrNullShared(waypointLats[i]),
       lon: toNumOrNullShared(waypointLons[i]),
+      reservedDate: String(waypointReservedDates[i] || '').trim() || null,
+      reservedTime: String(waypointReservedTimes[i] || '').trim() || null,
     }))
     .filter((w) => w.address);
 
@@ -924,19 +932,43 @@ router.post('/', asyncHandler(async (req, res) => {
   // 오더 저장은 lib/orderCreate.js 한 곳에서만 한다 — 웹·문의전환·카카오 자동접수가 같은 함수를
   // 쓴다(예전에는 같은 INSERT가 네 벌로 흩어져 있어 컬럼 추가 때 누락이 생기기 쉬웠다).
   // 검증·요금·콜마너 접수·자동 승격은 경로마다 규칙이 달라 여기 남는다.
-  const created = await createOrder({
-    branchId: finalBranch,
-    requesterGroupId: finalGroup,
+  // 실제 운영 규칙대로 나눈다 — 수행일이 갈리면 구간마다 별도 오더다(lib/orderSplit.js).
+  // 갈리지 않으면 parts가 하나뿐이라 예전과 똑같이 한 건만 만들어진다(대부분의 등록).
+  // 카카오 자동접수(lib/kakaoIntakeService.js)와 같은 규칙을 쓴다.
+  const splitPlan = splitIntake({
     originAddress: finalOriginAddress,
     originAddressDetail: origin_detail_address || null,
     originContact: origin_contact || null,
     destinationAddress: finalDestinationAddress,
     destinationAddressDetail: destination_detail_address || null,
     destinationContact: destination_contact || null,
-    vehicleNumber: vehicle_number || null,
-    vehicleType: vehicle_type || null,
+    waypoints: finalWaypoints,
     reservedDate: effectiveReservedDate,
     reservedTime: effectiveReservedTime,
+    roundTrip: trip_type === 'round_trip',
+    returnReservedDate: String(req.body.return_reserved_date || '').trim() || null,
+    returnReservedTime: String(req.body.return_reserved_time || '').trim() || null,
+  });
+  const splitGroupId = splitPlan.parts.length > 1
+    ? `sg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    : null;
+
+  const createdRows = [];
+  for (const part of splitPlan.parts) {
+  const created = await createOrder({
+    branchId: finalBranch,
+    requesterGroupId: finalGroup,
+    originAddress: part.originAddress,
+    originAddressDetail: part.originAddressDetail || null,
+    originContact: part.originContact || null,
+    destinationAddress: part.destinationAddress,
+    destinationAddressDetail: part.destinationAddressDetail || null,
+    destinationContact: part.destinationContact || null,
+    vehicleNumber: vehicle_number || null,
+    vehicleType: vehicle_type || null,
+    // 나뉜 건은 그 구간의 출발 일시를 쓴다. 나뉘지 않았으면 원래 값 그대로다.
+    reservedDate: part.reservedDate || effectiveReservedDate,
+    reservedTime: part.reservedTime || effectiveReservedTime,
     paymentMethodId: payment_method_id || null,
     fareAmount: fare_amount,
     ferryFareAmount: ferry_fare_amount,
@@ -959,9 +991,19 @@ router.post('/', asyncHandler(async (req, res) => {
     memoCustomer: memo_customer || null,
     memoBilling: memo_billing || null,
     createdBy: u.id,
-    waypoints: finalWaypoints,
+    // 나뉜 건에는 그 구간에 남은 경유지만 실린다(같은 날 이어 도는 곳). 나뉘지 않았으면 전부.
+    waypoints: part.waypoints || [],
     sourceChannel: 'web',
+    splitGroupId,
+    splitSeq: splitGroupId ? part.splitSeq : null,
+    splitTotal: splitGroupId ? part.splitTotal : null,
   });
+    createdRows.push(created);
+  }
+
+  // 이후 처리(콜마너 접수·자동승격·응답)는 첫 건을 기준으로 이어간다. 나뉜 나머지 건은
+  // 아래에서 따로 콜마너에 올린다.
+  const created = createdRows[0];
   const newId = created.orderId;
   const oid = created.oid;
 
@@ -973,6 +1015,10 @@ router.post('/', asyncHandler(async (req, res) => {
   // 성공한다. 이후 상태를 접수/대기로 바꾸면(POST /:id/status) 실패했던 등록이 재시도된다
   // (registerOrderWithCallmaner는 conf_slip이 이미 있으면 조용히 건너뛰어 중복 등록하지 않음).
   await registerOrderWithCallmaner(newId, finalBranch);
+  // 나뉜 나머지 건도 같은 규칙으로 올린다 — 하나만 올리면 나머지가 배차되지 않는다.
+  for (const extra of createdRows.slice(1)) {
+    await registerOrderWithCallmaner(extra.orderId, finalBranch);
+  }
 
   // §7-2 자동 승격 판정 — premium 오더 접수 후 실제 소요시간이 8시간 이상이면 daily_driver로 전환
   // fire-and-forget: 경로탐색 실패/지연은 오더 등록 자체를 막지 않는다.
@@ -1088,7 +1134,17 @@ router.post('/', asyncHandler(async (req, res) => {
   }
 
   broadcastOrderListChangedAsync();
-  if (wantsJson) return res.json({ orderId: newId, oid });
+  // 나뉘어 여러 건이 만들어졌으면 호출부(웹 챗봇)가 그 사실을 알아야 한다 — 접수번호가 하나만
+  // 안내되면 고객은 나머지 건을 모른 채 넘어간다.
+  if (wantsJson) {
+    return res.json({
+      orderId: newId,
+      oid,
+      ...(createdRows.length > 1
+        ? { split: { reason: splitPlan.reason, total: createdRows.length, orders: createdRows.map((c) => ({ orderId: c.orderId, oid: c.oid })) } }
+        : {}),
+    });
+  }
   res.redirect('/orders/' + newId);
 }));
 
@@ -1290,6 +1346,10 @@ router.post('/:id', asyncHandler(async (req, res) => {
   // 값과 실제 저장값이 어긋나지 않도록 함께 저장한다(콜마너 viaList 연동은 여전히 범위 밖).
   const waypointLats = [].concat(req.body.waypoint_lats || []);
   const waypointLons = [].concat(req.body.waypoint_lons || []);
+  // 경유지에서 "다른 날" 다시 출발하는 경우에만 채워 보낸다 — 그때 오더가 구간별로 나뉜다
+  // (lib/orderSplit.js). 같은 날 이어서 도는 평범한 경유는 비어 있다.
+  const waypointReservedDates = [].concat(req.body.waypoint_reserved_dates || []);
+  const waypointReservedTimes = [].concat(req.body.waypoint_reserved_times || []);
   const finalWaypoints = waypoints
     .map((w, i) => ({
       address: combineAddress(w, waypointDetails[i]),
@@ -1298,6 +1358,8 @@ router.post('/:id', asyncHandler(async (req, res) => {
       vehicleNumber: waypointVehicleNumbers[i] || null,
       lat: toNumOrNullShared(waypointLats[i]),
       lon: toNumOrNullShared(waypointLons[i]),
+      reservedDate: String(waypointReservedDates[i] || '').trim() || null,
+      reservedTime: String(waypointReservedTimes[i] || '').trim() || null,
     }))
     .filter((w) => w.address);
 
