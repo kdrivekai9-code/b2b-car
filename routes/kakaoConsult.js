@@ -34,6 +34,19 @@ const { logIntegrationErrorAsync } = require('../lib/integrationLog');
 
 const router = express.Router();
 
+// resolveIntakeContext는 매번 최대 4번의 순차 DB 조회를 한다(findIntakeAccount 최대 2개 +
+// findAccountByPhone 최대 2개). 그런데 한 턴 안에서 값이 절대 바뀌지 않는데도, 운영시간→
+// 요금→접수 같은 여러 확인 단계를 거치면서 매 단계가 다시 계산하고 있었다(실측: 최대 5곳에서
+// 중복 호출). session 객체는 이 파일에서 한 턴 동안 그대로 넘겨지므로, 그 인스턴스에 프라미스를
+// 붙여 같은 턴 안에서는 한 번만 계산하고 재사용한다. session이 요청마다 새로 로드되는 값이라
+// (findOrCreateKakaoSession) 턴을 넘어 캐시가 새는 일은 없다.
+function resolveIntakeContextCached(session) {
+  if (!session.__intakeContextPromise) {
+    session.__intakeContextPromise = resolveIntakeContext(session);
+  }
+  return session.__intakeContextPromise;
+}
+
 // 계획서 8.4: "seen_info 미구현으로 404를 반환해 카카오 측 재시도를 유발했음" — 어떤 이벤트든
 // 200을 먼저 돌려주고 무거운 처리(Gemini 분류·지식검색·카카오 발신)는 응답 뒤로 미룬다.
 // Vercel 서버리스는 응답을 보낸 뒤 인스턴스를 얼려버릴 수 있어서, 그냥 fire-and-forget으로 두면
@@ -236,7 +249,7 @@ async function findOrCreateKakaoSession(keys) {
 async function createAgentSuggestion(session, text) {
   try {
     // 요금 초안은 지사 요금표로 계산한다 — 매핑이 없으면 기본 요금표 지사로 폴백한다.
-    const account = await resolveIntakeContext(session).catch(() => null);
+    const account = await resolveIntakeContextCached(session).catch(() => null);
     const suggestion = await buildSuggestion(text, { branchId: account && account.branch_id });
     if (!suggestion) return;
 
@@ -385,7 +398,7 @@ async function sendAndLog(session, text, label) {
 // 거리마다 답이 달라 등록해 둘 수 있는 항목이 아니다. 그래서 FAQ보다 먼저 실제 요금표로
 // 계산해 답한다. 구간이 없는 "요금조회 되나요?" 같은 안내성 질문은 그대로 FAQ가 받는다.
 async function tryAnswerFare(session, text, extracted) {
-  const account = await resolveIntakeContext(session).catch(() => null);
+  const account = await resolveIntakeContextCached(session).catch(() => null);
   const draft = await buildFareSuggestion(text, { branchId: account && account.branch_id, extracted })
     .catch((e) => { console.error('카카오 요금 안내 실패:', e.message); return null; });
   if (!draft) return false;
@@ -397,7 +410,7 @@ async function tryAnswerFare(session, text, extracted) {
 // 이유다. KB에 문구를 넣어두면 지사가 시간을 바꿔도 조용히 낡는데, 오더 등록은 이미 이 테이블로
 // 접수를 막고 있어서 안내와 실제 동작이 어긋나면 그게 더 나쁘다.
 async function tryAnswerOperatingHours(session, text) {
-  const account = await resolveIntakeContext(session).catch(() => null);
+  const account = await resolveIntakeContextCached(session).catch(() => null);
   const draft = await buildHoursSuggestion(text, { branchId: account && account.branch_id })
     .catch((e) => { console.error('카카오 운영시간 안내 실패:', e.message); return null; });
   if (!draft) return false;
@@ -405,10 +418,12 @@ async function tryAnswerOperatingHours(session, text) {
   return true;
 }
 
-async function tryAnswerFaq(session, text) {
+// knowledgeSearchPromise를 넘기면(processBotTurn이 분류와 동시에 미리 시작해둔 것) 그걸
+// 그대로 기다리고, 없으면(다른 호출부용 대비) 여기서 새로 시작한다.
+async function tryAnswerFaq(session, text, knowledgeSearchPromise) {
   // 문턱은 웹 위젯(routes/orders.js)과 같은 0.7로 맞춘다 — 0.6일 때 "안녕하세요"에
   // "공지사항 메뉴는…" 같은 무관한 항목이 매칭돼 실제로 잘못된 답이 발송됐다.
-  const matches = await searchKnowledgeBase(text, { limit: 1, threshold: 0.7 }).catch((e) => {
+  const matches = await (knowledgeSearchPromise || searchKnowledgeBase(text, { limit: 1, threshold: 0.7 })).catch((e) => {
     console.error('카카오 상담톡 FAQ 검색 실패:', e.message);
     return [];
   });
@@ -696,18 +711,35 @@ async function savePendingAddressChoice(session, state) {
 // 왜 묻는가: 예전에는 서버가 첫 검색 결과를 조용히 확정했다. "사당역"처럼 짧게 말하면 엉뚱한
 // 지점으로 등록돼도 기사가 출발한 뒤에야 드러나는데, 그 비용이 한 번 더 묻는 것보다 훨씬 크다.
 // 웹 접수 화면은 원래 이렇게 후보를 보여주고 고르게 하고 있었다 — 같은 규칙을 카카오에도 쓴다.
-async function askAddressChoiceIfNeeded(session, parsed, mergedRaw) {
+// cache(선택): geocodeAddress/createOrdersFromIntake와 같은 Map을 넘기면, 여기서 확인한 주소를
+// 뒤이어 completeIntake가 다시 지오코딩할 때 네트워크 호출 없이 재사용한다(한 턴 안에서 같은
+// 주소를 두 번 조회하던 중복 제거).
+async function askAddressChoiceIfNeeded(session, parsed, mergedRaw, cache) {
   const sides = [
     { key: 'origin', label: '출발지', query: parsed.origin && parsed.origin.address },
     { key: 'destination', label: '도착지', query: parsed.destination && parsed.destination.address },
   ];
 
-  for (const side of sides) {
+  // 출발지가 애매하면 도착지는 보지도 않고 그것부터 묻는다(우선순위는 그대로 유지) — 다만
+  // 두 검색 자체는 서로 독립적이라, 판정에 쓰기 전에 미리 동시에 시작해둔다. 순서대로
+  // 기다렸다가 시작하면 도착지 검색이 필요 없을 때도 있는데 왜 미리 시작하냐고 생각할 수
+  // 있지만, 실측상 출발지만 애매한 경우보다 둘 다 확정까지 가는 경우(=둘 다 필요)가 더 흔해
+  // 손해가 크지 않고, 애매한 쪽만 검색하는 순차 처리보다 최악의 경우(둘 다 확정) 응답이
+  // 확실히 빠르다.
+  const searches = sides.map((side) => (
+    side.query
+      ? searchAddressCandidates(side.query, { cache }).catch((e) => {
+          console.error('주소 후보 검색 실패(자동 확정으로 진행):', e.message);
+          return [];
+        })
+      : Promise.resolve([])
+  ));
+  const results = await Promise.all(searches);
+
+  for (let i = 0; i < sides.length; i += 1) {
+    const side = sides[i];
     if (!side.query) continue;
-    const candidates = await searchAddressCandidates(side.query).catch((e) => {
-      console.error('주소 후보 검색 실패(자동 확정으로 진행):', e.message);
-      return [];
-    });
+    const candidates = results[i];
     if (!needsDisambiguation(side.query, candidates)) continue;
 
     await savePendingAddressChoice(session, {
@@ -771,9 +803,11 @@ async function handleAddressChoiceReply(session, pending, text) {
     await botSay(session, buildMissingQuestion(parsed.missing, parsed, addressPreview), '접수 되묻기');
     return true;
   }
+  // 이 턴에서 지오코딩한 결과를 남은 확인 단계들이 공유한다(중복 조회 제거).
+  const geoCache = new Map();
   // 남은 쪽(도착지)도 애매하면 이어서 묻는다.
-  if (await askAddressChoiceIfNeeded(session, parsed, replacedRaw)) return true;
-  return completeIntake(session, parsed, replacedRaw);
+  if (await askAddressChoiceIfNeeded(session, parsed, replacedRaw, geoCache)) return true;
+  return completeIntake(session, parsed, replacedRaw, geoCache);
 }
 
 // 접수 폼 처리 — 처리했으면 true, 폼이 아니면 false를 돌려준다(호출부가 다음 경로로 넘긴다).
@@ -800,11 +834,15 @@ async function tryHandleIntake(session, text) {
     return true;
   }
 
+  // 이 턴에서 지오코딩한 결과를 아래 확인 단계들이 공유한다 — 주소 후보 확인·도선 판정·
+  // 실제 접수 등록이 같은 주소를 각자 다시 조회하던 중복을 없앤다.
+  const geoCache = new Map();
+
   // 필수 항목이 다 있어도 주소가 애매하면 먼저 확정한다 — 등록 후에 고치는 비용이 더 크다.
-  if (await askAddressChoiceIfNeeded(session, parsed, mergedRaw)) return true;
+  if (await askAddressChoiceIfNeeded(session, parsed, mergedRaw, geoCache)) return true;
 
   // 접수는 반드시 동의가 있어야 한다(사용자 확정 규칙) — 동의가 오면 저장해둔 내용으로 이어간다.
-  return completeIntake(session, parsed, mergedRaw);
+  return completeIntake(session, parsed, mergedRaw, geoCache);
 }
 
 // 파싱이 끝난 접수를 실제로 등록한다 — 블록 폼(parseKakaoIntake)과 자유 문장(Gemini 추출)이
@@ -824,10 +862,10 @@ async function tryHandleIntake(session, text) {
 // 등록된 도선 노선이 전부 제주 왕래(완도–제주, 삼천포–제주)이므로, 한쪽만 제주면 배를 타야 한다.
 const FERRY_SIDO = '제주';
 
-async function needsFerry(originAddress, destinationAddress) {
+async function needsFerry(originAddress, destinationAddress, cache) {
   const [from, to] = await Promise.all([
-    geocodeAddress(originAddress).catch(() => null),
-    geocodeAddress(destinationAddress).catch(() => null),
+    geocodeAddress(originAddress, cache).catch(() => null),
+    geocodeAddress(destinationAddress, cache).catch(() => null),
   ]);
   // 어느 한쪽이라도 좌표를 못 찾으면 판단하지 않는다 — 확실하지 않은 이유로 접수를 세우면
   // 멀쩡한 요청이 통째로 막힌다.
@@ -838,7 +876,7 @@ async function needsFerry(originAddress, destinationAddress) {
   return fromJeju !== toJeju;
 }
 
-async function requireVehicleTypeForFerry(session, parsed, rawText) {
+async function requireVehicleTypeForFerry(session, parsed, rawText, cache) {
   const hasVehicleType = (parsed.vehicles || []).some((v) => v && String(v.type || '').trim());
   if (hasVehicleType) return false;
 
@@ -846,7 +884,7 @@ async function requireVehicleTypeForFerry(session, parsed, rawText) {
   const destination = parsed.destination && parsed.destination.address;
   if (!origin || !destination) return false;
 
-  const ferry = await needsFerry(origin, destination).catch((e) => {
+  const ferry = await needsFerry(origin, destination, cache).catch((e) => {
     console.error('도선 구간 확인 실패(접수는 계속 진행):', e.message);
     return false;
   });
@@ -861,13 +899,16 @@ async function requireVehicleTypeForFerry(session, parsed, rawText) {
   return true;
 }
 
-async function completeIntake(session, parsed, rawText) {
+// cache(선택): askAddressChoiceIfNeeded가 이 턴에서 이미 지오코딩한 결과가 있으면 여기서
+// 다시 네트워크를 타지 않고 재사용한다. 안 넘기면(다른 호출부) createOrdersFromIntake가
+// 내부적으로 새 Map을 만들어 최소한의 재사용(분리 접수 루프 안에서만)은 그대로 유지한다.
+async function completeIntake(session, parsed, rawText, cache) {
   if (!await ensurePersonalConsent(session, 'intake', rawText)) return true;
 
-  if (await requireVehicleTypeForFerry(session, parsed, rawText)) return true;
+  if (await requireVehicleTypeForFerry(session, parsed, rawText, cache)) return true;
 
   // 번호(개인정보 동의로 받은 것) → 채널 매핑 순으로 접수 주체를 찾는다.
-  const account = await resolveIntakeContext(session);
+  const account = await resolveIntakeContextCached(session);
 
   if (!account || !account.auto_register) {
     // 매핑이 없거나 자동 등록을 켜지 않은 채널 — 파싱만 하고 상담원에게 넘긴다.
@@ -881,7 +922,7 @@ async function completeIntake(session, parsed, rawText) {
 
   let result;
   try {
-    result = await createOrdersFromIntake({ session, account, parsed });
+    result = await createOrdersFromIntake({ session, account, parsed, cache });
   } catch (e) {
     console.error('카카오 상담톡 자동 접수 실패:', e.message);
     result = { ok: false, reason: 'exception', detail: e.message };
@@ -936,7 +977,7 @@ const ESCALATION_RE = /(사고|파손|스크래치|기스|찍힘|긁힘|클레�
 // 매핑으로 오더를 만들고 있으므로(lib/kakaoIntakeService.js) 조회 권한도 같은 기준을 따른다.
 // 매핑이 없으면(익명 채널) 예전처럼 상담원에게 넘긴다.
 async function tryDispatchAgent(session, text) {
-  const account = await resolveIntakeContext(session).catch(() => null);
+  const account = await resolveIntakeContextCached(session).catch(() => null);
   if (!account || !account.user_id) return false;
 
   const user = await db.get('SELECT id, name, phone, role, branch_id, group_id FROM users WHERE id = ?', [account.user_id])
@@ -1027,6 +1068,13 @@ async function processBotTurn(session, text) {
     if (continued) return;
   }
 
+  // 지식검색(임베딩 API 호출)은 원문 텍스트만 있으면 시작할 수 있어, 의도분류(Gemini) 결과를
+  // 기다리지 않고 미리 같이 시작해둔다 — 웹 위젯(routes/orders.js)에 이미 있는 패턴과 같다.
+  // faq가 아닌 의도로 판정되면 버리지만, 임베딩 호출 자체는 가벼워서 그 낭비보다 FAQ 응답
+  // 지연이 줄어드는 이득이 크다(웹 쪽 실측: 순차 대비 응답 지연 절반 가까이 감소).
+  const knowledgeSearchPromise = searchKnowledgeBase(text, { limit: 1, threshold: 0.7 })
+    .catch((e) => { console.error('카카오 상담톡 FAQ 사전 검색 실패:', e.message); return []; });
+
   let classified;
   try {
     classified = await classifyAndExtract(intakeText, null, null);
@@ -1050,7 +1098,7 @@ async function processBotTurn(session, text) {
     // 요금문의·지식검색은 동의 없이 응답한다. 답을 못 찾아 상담원으로 넘길 때만 동의를 요구한다.
     // 구간이 있는 요금 문의는 지식검색보다 먼저 실제 요금표로 계산한다.
     if (await tryAnswerFare(session, text, classified)) return;
-    const answered = await tryAnswerFaq(session, text);
+    const answered = await tryAnswerFaq(session, text, knowledgeSearchPromise);
     if (answered) return;
     if (!await ensurePersonalConsent(session, 'agent', text)) return;
     await handleUnsupported(session, text, null);
@@ -1082,10 +1130,12 @@ async function processBotTurn(session, text) {
     // 필수 항목이 다 찼을 때도 이번 답변으로 채워진 값은 되읽어준다 — 여기서 확인을 건너뛰면
     // 차량번호를 보낸 고객이 아무 응답 없이 주소 후보 질문만 받는다.
     await announceFilledFields(session, pendingIntake, parsed);
+    // 이 턴에서 지오코딩한 결과를 아래 두 단계가 공유한다 — 같은 주소를 각자 다시 조회하지 않는다.
+    const geoCache = new Map();
     // 자유 문장도 주소가 애매하면 먼저 확정한다 — 폼 경로와 같은 규칙이다. 여기가 빠져 있으면
     // "판교역에서 사당역까지"처럼 지명만 말한 접수가 첫 검색 결과로 조용히 등록된다.
-    if (await askAddressChoiceIfNeeded(session, parsed, intakeText)) return;
-    await completeIntake(session, parsed, intakeText);
+    if (await askAddressChoiceIfNeeded(session, parsed, intakeText, geoCache)) return;
+    await completeIntake(session, parsed, intakeText, geoCache);
     return;
   }
 
