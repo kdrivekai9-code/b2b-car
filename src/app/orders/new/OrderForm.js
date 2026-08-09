@@ -75,6 +75,7 @@ function initialFieldState(order, defaultBranch, mode) {
       // index로 만들면 항상 결정적이다.
       id: 'prefill-' + i,
       address: w.address || '', detail: w.detail || '', contact: w.contact || '', vehicleNumber: w.vehicleNumber || '',
+      reservedDate: w.reservedDate || '', reservedTime: w.reservedTime || '',
       lat: toCoordNumber(w.lat), lon: toCoordNumber(w.lon),
     }))
     : [];
@@ -137,7 +138,7 @@ function reducer(state, action) {
     case 'ADD_WAYPOINT':
       return {
         ...state,
-        waypoints: [...state.waypoints, { id: action.id, address: '', detail: '', contact: '', vehicleNumber: '', lat: null, lon: null }],
+        waypoints: [...state.waypoints, { id: action.id, address: '', detail: '', contact: '', vehicleNumber: '', reservedDate: '', reservedTime: '', lat: null, lon: null }],
       };
     case 'REMOVE_WAYPOINT':
       return { ...state, waypoints: state.waypoints.filter((w) => w.id !== action.id) };
@@ -562,6 +563,8 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
       params.append('waypoint_details[]', w.detail);
       params.append('waypoint_contacts[]', w.contact);
       params.append('waypoint_vehicle_numbers[]', w.vehicleNumber);
+      params.append('waypoint_reserved_dates[]', w.reservedDate || '');
+      params.append('waypoint_reserved_times[]', w.reservedTime || '');
     });
 
     // 레거시 AI intake와 동일하게 등록 직전에 서버 precheck를 먼저 실행한다.
@@ -691,6 +694,20 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
                   <div className="field"><label>경유지 차량번호 (선택)</label>
                     <input type="text" placeholder="예: 12가3456"
                       value={w.vehicleNumber} onChange={(e) => dispatch({ type: 'SET_WAYPOINT_FIELD', id: w.id, field: 'vehicleNumber', value: e.target.value })} />
+                  </div>
+                </div>
+                {/* 이 경유지에서 "다른 날" 다시 출발하는 경우에만 채운다. 값이 있고 출발일과
+                    다르면 서버가 오더를 구간별로 나눠 접수한다(lib/orderSplit.js) — 같은 날
+                    이어서 도는 평범한 경유는 비워두면 지금처럼 한 건으로 등록된다.
+                    public/js/order-form.js에도 같은 입력이 있다. */}
+                <div className="row waypoint-schedule" style={{ marginTop: 8 }}>
+                  <div className="field"><label>경유지 출발일 (다른 날일 때만)</label>
+                    <input type="date"
+                      value={w.reservedDate || ''} onChange={(e) => dispatch({ type: 'SET_WAYPOINT_FIELD', id: w.id, field: 'reservedDate', value: e.target.value })} />
+                  </div>
+                  <div className="field"><label>경유지 출발시각</label>
+                    <input type="time" step="600"
+                      value={w.reservedTime || ''} onChange={(e) => dispatch({ type: 'SET_WAYPOINT_FIELD', id: w.id, field: 'reservedTime', value: e.target.value })} />
                   </div>
                 </div>
                 <button type="button" className="btn small secondary" onClick={() => dispatch({ type: 'REMOVE_WAYPOINT', id: w.id })}>삭제</button>

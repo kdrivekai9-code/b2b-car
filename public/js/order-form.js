@@ -245,6 +245,17 @@
         '<div class="field"><label>경유지 차량번호 (선택)</label><input type="text" id="' + id + '_vehicle_number" name="waypoint_vehicle_numbers[]" placeholder="예: 12가3456"></div>' +
         '</div>'
       : '';
+    // 이 경유지에서 "다른 날" 다시 출발하는 경우에만 채운다. 값이 있고 출발일과 다르면 서버가
+    // 오더를 구간별로 나눠 접수한다(lib/orderSplit.js) — 같은 날 이어서 도는 평범한 경유는
+    // 비워두면 지금처럼 한 건으로 등록된다. 두 화면(오더등록·AI 챗봇) 모두 필요해서 확장
+    // 필드와 달리 항상 보여준다.
+    var scheduleFields =
+      '<div class="row waypoint-schedule" style="margin-top:8px;">' +
+      '<div class="field"><label>경유지 출발일 (다른 날일 때만)</label>' +
+      '<input type="date" id="' + id + '_reserved_date" name="waypoint_reserved_dates[]"></div>' +
+      '<div class="field"><label>경유지 출발시각</label>' +
+      '<input type="time" id="' + id + '_reserved_time" name="waypoint_reserved_times[]" step="600"></div>' +
+      '</div>';
     // 지도보기를 어떻게 배치할지는 화면마다 다르다 — #destLegendRow(경로 미리보기의 출발/도착
     // 목록)가 있는 화면(예: 오더 등록)은 기존처럼 그 목록에 경유 행을 추가하고, 없는 화면(AI
     // 챗봇 — 목록을 없애고 각 입력칸 옆에 지도보기 버튼을 바로 붙이기로 바꿨다)은 주소 입력줄에
@@ -264,7 +275,7 @@
       '</div>' +
       '<div id="' + id + '_address_results" class="addr-results"></div>' +
       '<input type="text" class="addr-detail-input" id="' + id + '_detail_address" name="waypoint_details[]" placeholder="상세주소 입력 (건물명, 동/호수)" disabled>' +
-      extendedFields;
+      extendedFields + scheduleFields;
     row.dataset.slot = id;
     waypointsWrap.appendChild(row);
     row.querySelectorAll('.phone-input').forEach(wirePhoneInput);
