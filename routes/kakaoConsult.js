@@ -16,6 +16,8 @@ const { searchKnowledgeBase } = require('../lib/knowledgeSearch');
 const { parseKakaoIntake, buildParsedFromClassified, buildMissingQuestion, normalizePhone, normalizePlate } = require('../lib/kakaoIntakeParser');
 const { findIntakeAccount, resolveIntakeContext, findAccountByPhone, linkUserKeyToAccount, createOrdersFromIntake } = require('../lib/kakaoIntakeService');
 const { previewIntakeAddresses } = require('../lib/intakeAddressPreview');
+// 도선(배편) 구간 판정에 쓴다 — 주소의 시도를 봐야 해서 좌표 변환이 필요하다.
+const { geocodeAddress } = require('../lib/geocode');
 const { runKakaoOrderNotifications } = require('../lib/kakaoOrderNotify');
 const kakaoOrderPhotos = require('../lib/kakaoOrderPhotos');
 const { sendOrderPhotos, isPhotoRequest, isOdometerRequest, answerOdometer, countNoPhotoAnswers } = kakaoOrderPhotos;
@@ -611,11 +613,11 @@ async function savePendingConsentPurpose(session, purpose, raw) {
 
 // missing을 함께 남긴다 — 다음 메시지에서 "이번 답변으로 무엇이 채워졌는지"를 알아야
 // 그 값을 되읽어줄 수 있다(고객은 자기가 보낸 차량번호가 제대로 들어갔는지 알 방법이 없다).
-async function savePendingIntake(session, raw, missing) {
+async function savePendingIntake(session, raw, missing, extra) {
   await db.run(
     `UPDATE chat_sessions SET intake_slots_json = ?,
      intake_updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') WHERE id = ?`,
-    [JSON.stringify({ raw, missing: missing || [], savedAt: Date.now() }), session.id]
+    [JSON.stringify({ raw, missing: missing || [], savedAt: Date.now(), ...(extra || {}) }), session.id]
   ).catch((e) => console.error('접수 슬롯 저장 실패:', e.message));
 }
 
@@ -779,8 +781,61 @@ async function tryHandleIntake(session, text) {
 // 파싱이 끝난 접수를 실제로 등록한다 — 블록 폼(parseKakaoIntake)과 자유 문장(Gemini 추출)이
 // 같은 경로를 쓰도록 분리했다. 등록 여부·인계 사유 판단이 두 갈래로 갈리면 한쪽만 고쳐지는
 // 일이 생긴다.
+// 도선(배편) 구간이 있으면 차종은 필수다.
+//
+// 도선료는 차종에 따라 달라져서(lib/ferryFare.js의 요금표가 차종별이다) 차종 없이 접수하면
+// 도선료가 빠진 오더가 만들어진다. 웹 화면은 요금 안내 단계에서 이미 되묻고 있는데
+// (public/js/order-form.js, ai-intake.js) 카카오에는 그 관문이 없었다.
+//
+// 도착지가 주소 후보 선택으로 나중에 확정되는 경우까지 잡으려면 접수 직전에 봐야 한다 —
+// 그래서 completeIntake 안, 실제 등록 바로 앞에 둔다(사용자 확정 규칙).
+//
+// 판정은 시도(市道)로 한다. 카카오 길찾기 응답으로 도선 구간을 알아낼 수 있을 것 같지만
+// 실제로는 안 된다 — 서울→제주를 물어도 도로명에 페리 표시가 없고 육로 거리만 돌아온다(실측).
+// 등록된 도선 노선이 전부 제주 왕래(완도–제주, 삼천포–제주)이므로, 한쪽만 제주면 배를 타야 한다.
+const FERRY_SIDO = '제주';
+
+async function needsFerry(originAddress, destinationAddress) {
+  const [from, to] = await Promise.all([
+    geocodeAddress(originAddress).catch(() => null),
+    geocodeAddress(destinationAddress).catch(() => null),
+  ]);
+  // 어느 한쪽이라도 좌표를 못 찾으면 판단하지 않는다 — 확실하지 않은 이유로 접수를 세우면
+  // 멀쩡한 요청이 통째로 막힌다.
+  if (!from || !to) return false;
+  const fromJeju = String(from.sido || '').includes(FERRY_SIDO);
+  const toJeju = String(to.sido || '').includes(FERRY_SIDO);
+  // 제주 안에서만 움직이는 건(제주→제주) 배를 타지 않는다.
+  return fromJeju !== toJeju;
+}
+
+async function requireVehicleTypeForFerry(session, parsed, rawText) {
+  const hasVehicleType = (parsed.vehicles || []).some((v) => v && String(v.type || '').trim());
+  if (hasVehicleType) return false;
+
+  const origin = parsed.origin && parsed.origin.address;
+  const destination = parsed.destination && parsed.destination.address;
+  if (!origin || !destination) return false;
+
+  const ferry = await needsFerry(origin, destination).catch((e) => {
+    console.error('도선 구간 확인 실패(접수는 계속 진행):', e.message);
+    return false;
+  });
+  if (!ferry) return false;
+
+  await savePendingIntake(session, rawText, parsed.missing, { awaiting: 'vehicle_type' });
+  await botSay(
+    session,
+    '도선(배편) 구간이 포함된 경로입니다. 도선료가 차종에 따라 달라져 차종을 알려주셔야 접수할 수 있습니다.\n(예: 그랜저)',
+    '도선 차종 필수 안내'
+  );
+  return true;
+}
+
 async function completeIntake(session, parsed, rawText) {
   if (!await ensurePersonalConsent(session, 'intake', rawText)) return true;
+
+  if (await requireVehicleTypeForFerry(session, parsed, rawText)) return true;
 
   // 번호(개인정보 동의로 받은 것) → 채널 매핑 순으로 접수 주체를 찾는다.
   const account = await resolveIntakeContext(session);
