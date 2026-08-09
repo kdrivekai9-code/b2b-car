@@ -419,6 +419,33 @@ async function tryAnswerFaq(session, text) {
   return false;
 }
 
+// 배차 도우미 대화가 이어지는 중인지.
+//
+// 도우미가 "언제로 접수해 드릴까요?"라고 물으면 고객은 "네 8월 25일 오후 3시로 접수해주세요"처럼
+// 답한다. 그 문장만 보면 새 접수 요청이라 dispatch_order로 분류되고, 도우미가 방금 물어본 맥락이
+// 통째로 사라진다(실측: 출발지·도착지를 처음부터 다시 물었다). 직전 턴이 도우미였으면 이어지는
+// 답도 그 대화로 돌린다.
+//
+// 창을 짧게 둔다 — 오래 두면 한참 뒤의 새 접수까지 도우미로 흘러간다.
+const MCP_FOLLOWUP_WINDOW_MS = 10 * 60 * 1000;
+
+async function markMcpTurn(session) {
+  await db.run(
+    `UPDATE chat_sessions SET mcp_last_turn_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') WHERE id = ?`,
+    [session.id]
+  ).catch((e) => {
+    // 마이그레이션(20260809070000) 전이면 컬럼이 없다 — 이어붙이기만 안 될 뿐 응답은 정상이다.
+    if (!e || e.code !== '42703') console.error('배차 도우미 턴 기록 실패:', e.message);
+  });
+}
+
+function isMcpFollowUp(session) {
+  const at = session && session.mcp_last_turn_at;
+  if (!at) return false;
+  const ts = Date.parse(String(at).replace(' ', 'T') + '+09:00');
+  return Number.isFinite(ts) && Date.now() - ts < MCP_FOLLOWUP_WINDOW_MS;
+}
+
 // 사진 요청("사진 좀 보내주세요", "인수증 사진") — 로그 분석에서 상담원 발화의 61.6%가 여기
 // 걸려 있었다. 기사가 우리 업로드 페이지로 올린 사진을 상담원이 받아 고객에게 다시 전달하는
 // 일이 대부분이었다. 그 전달을 봇이 한다.
@@ -941,6 +968,8 @@ async function tryDispatchAgent(session, text) {
   if (!result || !result.handled || !result.message) return false;
 
   await botSay(session, result.message, '배차 도우미 응답');
+  // 이 대화가 도우미와 이어지고 있다는 표시. 다음 메시지를 접수 요청으로 오해하지 않기 위해서다.
+  await markMcpTurn(session);
   return true;
 }
 
@@ -987,6 +1016,16 @@ async function processBotTurn(session, text) {
   const intakeText = pendingIntake && pendingIntake.raw && pendingIntake.purpose !== 'agent'
     ? pendingIntake.raw + '\n' + text
     : text;
+
+  // 도우미와 대화 중이면 분류보다 먼저 그쪽으로 돌린다 — 이어지는 답이 새 접수로 읽히면
+  // 방금 물어본 맥락이 사라진다.
+  if (isMcpFollowUp(session)) {
+    const continued = await tryDispatchAgent(session, text).catch((e) => {
+      console.error('카카오 배차 도우미 이어가기 실패:', e.message);
+      return false;
+    });
+    if (continued) return;
+  }
 
   let classified;
   try {
