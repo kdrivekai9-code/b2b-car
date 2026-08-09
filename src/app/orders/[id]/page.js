@@ -74,6 +74,12 @@ export default async function OrderDetailPage({ params }) {
           </h1>
           <p className="page-sub">
             <span className={`badge ${STATUS_COLORS[order.status] || 'gray'}`}>{order.status}</span>
+            {/* 나눠 접수한 건이면 몇 건 중 몇 번째인지 밝힌다 — 나누고 나면 두 건이 서로 남남이라,
+                이 표시가 없으면 한쪽만 보고 "이게 전부"라고 판단하게 된다.
+                views/orders/detail.ejs에도 같은 배지가 있다. */}
+            {order.split_group_id && order.split_total > 1 && (
+              <span className="badge purple">분리접수 {order.split_seq}/{order.split_total}건</span>
+            )}
             &nbsp; {order.branch_name} · {order.group_name || '-'} · 등록일시 {order.created_at}
           </p>
         </div>

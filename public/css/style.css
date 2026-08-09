@@ -689,6 +689,8 @@ textarea.single-line-textarea{min-height:36px;height:36px;padding:8px 10px;resiz
 .upload-order-oid{text-align:center;color:var(--muted);font-size:13px;margin:0 0 16px;}
 .upload-guide-image{width:100%;border-radius:8px;margin-bottom:12px;}
 .upload-guide-text{background:var(--bg);border-radius:8px;padding:12px 14px;font-size:13px;color:var(--text);margin-bottom:18px;white-space:pre-wrap;}
+/* 나눠 접수한 건 표시. 목록은 정보가 빽빽해서 배지 대신 작은 글씨로만 붙인다. */
+.split-mark{margin-left:4px;padding:1px 4px;border-radius:3px;background:rgba(124,58,237,.12);color:#7c3aed;font-size:11px;font-weight:600;}
 /* 구간 릴레이: 구간마다 다른 기사에게 줄 링크라 어느 구간인지 라벨을 붙인다. */
 .leg-photo-link{display:flex;align-items:center;gap:8px;margin-bottom:6px;}
 .leg-photo-link-label{flex:0 0 auto;font-size:12px;color:var(--muted,#6b7280);min-width:96px;}

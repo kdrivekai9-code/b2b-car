@@ -361,7 +361,16 @@ export default function OrderListTable({ orders, filters, statusSummary }) {
                 onClick={(e) => handleRowClick(e, o.id)}>
                 {activeColumns.map((key) => {
                   const value = cellValue(o, key);
-                  if (key === 'oid') return <td key={key} data-column={key}><a href={`/orders/${o.id}`}>{value}</a></td>;
+                  {/* 나눠 접수한 건은 OID 옆에 "1/2"를 붙인다 — 없으면 같은 요청에서 나온 두 줄이
+                      서로 무관해 보인다. views/orders/list.ejs에도 같은 표시가 있다. */}
+                  if (key === 'oid') return (
+                    <td key={key} data-column={key}>
+                      <a href={`/orders/${o.id}`}>{value}</a>
+                      {o.split_group_id && Number(o.split_total) > 1 && (
+                        <span className="split-mark" title={`분리접수 ${o.split_seq}/${o.split_total}건`}>{o.split_seq}/{o.split_total}</span>
+                      )}
+                    </td>
+                  );
                   if (key === 'status') return <td key={key} data-column={key}><span className={`badge ${STATUS_COLORS[o.status] || 'gray'}`}>{o.status}</span></td>;
                   return <td key={key} data-column={key} title={typeof value === 'string' ? value : undefined}>{value}</td>;
                 })}

@@ -104,7 +104,11 @@
             : (o.driver_name ? (o.driver_name + (o.driver_phone ? ' (' + o.driver_phone + ')' : '')) : '미배정');
         %>
         <tr onclick="location.href='/orders/<%= o.id %>'" style="cursor:pointer;">
-          <td data-column="oid" data-label="OID"><a href="/orders/<%= o.id %>"><%= o.oid %></a></td>
+          <%# 나눠 접수한 건은 OID 옆에 "1/2"를 붙인다. 목록은 정보가 빽빽해서 배지 대신 작은 글씨로만 —
+              없으면 같은 요청에서 나온 두 줄이 서로 무관해 보인다. %>
+          <td data-column="oid" data-label="OID">
+            <a href="/orders/<%= o.id %>"><%= o.oid %></a><% if (o.split_group_id && Number(o.split_total) > 1) { %><span class="split-mark" title="분리접수 <%= o.split_seq %>/<%= o.split_total %>건"><%= o.split_seq %>/<%= o.split_total %></span><% } %>
+          </td>
           <td data-column="branch" data-label="지사" title="<%= o.branch_name %>"><%= o.branch_name %></td>
           <td data-column="group" data-label="요청 법인" title="<%= o.group_name || '-' %>"><%= o.group_name || '-' %></td>
           <td data-column="group_phone" data-label="대표번호" title="<%= o.group_phone || '-' %>"><%= o.group_phone || '-' %></td>
