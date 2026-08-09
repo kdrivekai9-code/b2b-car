@@ -18,6 +18,8 @@ const { findIntakeAccount, resolveIntakeContext, findAccountByPhone, linkUserKey
 const { previewIntakeAddresses } = require('../lib/intakeAddressPreview');
 // 도선(배편) 구간 판정에 쓴다 — 주소의 시도를 봐야 해서 좌표 변환이 필요하다.
 const { geocodeAddress } = require('../lib/geocode');
+// 나뉜 건의 출발 시각을 물을 때 쓰는 문구.
+const { buildScheduleQuestion } = require('../lib/orderSplit');
 const { runKakaoOrderNotifications } = require('../lib/kakaoOrderNotify');
 const kakaoOrderPhotos = require('../lib/kakaoOrderPhotos');
 const { sendOrderPhotos, isPhotoRequest, isOdometerRequest, answerOdometer, countNoPhotoAnswers } = kakaoOrderPhotos;
@@ -860,6 +862,18 @@ async function completeIntake(session, parsed, rawText) {
 
   await clearPendingIntake(session);
 
+  // 나뉜 건 중 출발 시각을 모르는 것이 있으면 고객에게 묻는다 — 임의로 앞 건과 같은 시각을
+  // 넣으면 잘못된 시각으로 접수된다. 날짜는 이미 알고 나뉜 것이라(그게 분리 조건이다) 시각만 묻는다.
+  if (!result.ok && result.reason === 'split_schedule_missing') {
+    const detail = result.detail || {};
+    const target = (detail.parts || []).find((p) => (detail.missingSchedule || []).includes(p.splitSeq));
+    if (target) {
+      await savePendingIntake(session, rawText, parsed.missing, { awaiting: 'split_schedule' });
+      await botSay(session, buildScheduleQuestion(target), '분리 접수 시각 확인');
+      return true;
+    }
+  }
+
   if (!result.ok) {
     // 등록을 못 한 이유는 고객에게 그대로 노출하지 않는다(내부 사정) — 상담원 인계 사유로만 남긴다.
     const labels = {
@@ -868,6 +882,8 @@ async function completeIntake(session, parsed, rawText) {
       incomplete_form: '필수 항목 누락',
       auto_register_off: '자동 등록 꺼짐',
       no_account: '채널 매핑 없음',
+      waypoint_unsupported: '경유지 포함(같은 날 경유는 자동 접수 불가)',
+      split_schedule_missing: '분리 접수 시각 미확인',
       exception: '자동 접수 오류',
     };
     await handoffWithParsedSlots(session, parsed, rawText, labels[result.reason] || result.reason);
