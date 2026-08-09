@@ -339,6 +339,9 @@ function consentPending(session) {
 
 async function requestPersonalInfo(session) {
   if (consentAlreadyRequested(session)) return { ok: false, error: 'already_requested' };
+  // 동의 버튼(/send/rich)은 X-Event-Key가 없으면 중계서버가 거부한다. 키가 없는 세션에서
+  // 그대로 시도하면 요청마다 실패 왕복이 반복된다 — 미리 걸러 그 낭비를 없앤다.
+  if (!session.kakao_event_key) return { ok: false, error: 'event_key_missing' };
   const result = await kakaoConsult.sendPersonalInfoRequest(session);
   if (result.ok) {
     await db.run(
@@ -348,7 +351,7 @@ async function requestPersonalInfo(session) {
     ).catch((e) => console.error('개인정보 동의 요청 시각 저장 실패:', e.message));
     session.personal_info_requested_at = 'now';
   }
-  if (!result.ok && result.error !== 'already_requested') {
+  if (!result.ok && result.error !== 'already_requested' && result.error !== 'event_key_missing') {
     console.error('카카오 상담톡 개인정보 동의 요청 실패:', result.error);
     logIntegrationErrorAsync({
       source: 'kakao', operation: 'send_personal', refType: 'chat_session', refId: session.id,
@@ -571,8 +574,8 @@ async function ensurePersonalConsent(session, purpose, rawText) {
     await savePendingConsentPurpose(session, purpose, rawText);
     const asked = await requestPersonalInfo(session);
     if (asked.ok) {
-      const notice = purpose === 'agent'
-        ? '상담원 연결을 위해 성함과 연락처가 필요합니다. 위 동의 버튼을 눌러주시면 바로 연결해드릴게요.'
+      const notice = purpose === 'lookup'
+        ? '주문 조회를 위해 성함과 연락처가 필요합니다. 위 동의 버튼을 눌러주시면 바로 조회해드릴게요.'
         : '접수를 위해 성함과 연락처가 필요합니다. 위 동의 버튼을 눌러주시면 바로 접수해드릴게요.';
       await botSay(session, notice, '개인정보 동의 요청 안내');
       return false;
@@ -581,11 +584,15 @@ async function ensurePersonalConsent(session, purpose, rawText) {
     return true;
   }
 
+  // 이미 버튼을 보냈으면 다시 재촉하지 않는다.
+  //
+  // 예전에는 동의를 받을 때까지 매 메시지마다 "앞서 보내드린 동의 버튼을 눌러주시면…"을 보냈다.
+  // 동의 버튼은 세션당 1회뿐이라 재발송도 못 하면서 문구만 반복됐고, 고객은 무엇을 물어도 같은
+  // 말만 듣게 됐다(실사용 지적). 버튼은 이미 대화에 남아 있으니 누르면 이어진다 — 그때까지는
+  // 막지 말고 진행시킨다. 접수는 거래처를 확인하지 못해 상담원에게 넘어가고, 사람이 이어받는다.
   if (consentPending(session)) {
     await savePendingConsentPurpose(session, purpose, rawText);
-    const notice = '앞서 보내드린 개인정보 제공 동의 버튼을 눌러주시면 이어서 도와드리겠습니다.';
-    await botSay(session, notice, '개인정보 동의 재안내');
-    return false;
+    return true;
   }
 
   // 동의 절차가 만료됨(3일 초과) — 재발송이 불가하므로 막지 않고 진행시킨다.
@@ -1025,7 +1032,8 @@ async function processBotTurn(session, text) {
   }
 
   if (ESCALATION_RE.test(text)) {
-    if (!await ensurePersonalConsent(session, 'agent', text)) return;
+    // 상담원 연결 앞에서는 동의를 요구하지 않는다 — 사람이 붙어서 직접 물어보면 된다.
+    // 동의 버튼은 조회·접수 시점에만 쓴다(사용자 확정 규칙).
     return handleUnsupported(session, text, '사고·클레임 문의');
   }
 
@@ -1091,7 +1099,10 @@ async function processBotTurn(session, text) {
       return false;
     });
     if (handledByAgent) return;
-    if (!await ensurePersonalConsent(session, 'agent', text)) return;
+    // 조회를 못 한 이유가 "누구인지 몰라서"일 수 있다 — 동의로 번호를 받으면 거래처가 매칭돼
+    // 그다음부터는 조회가 된다(linkUserKeyToAccount). 그래서 조회 실패 자리에서는 동의를 청한다.
+    // 이미 버튼을 보냈으면 재촉하지 않고 그대로 상담원에게 넘어간다.
+    if (!await ensurePersonalConsent(session, 'lookup', text)) return;
     return handleUnsupported(session, text, classified.requestedFeature);
   }
   if (classified.intent === 'faq') {
@@ -1100,7 +1111,7 @@ async function processBotTurn(session, text) {
     if (await tryAnswerFare(session, text, classified)) return;
     const answered = await tryAnswerFaq(session, text, knowledgeSearchPromise);
     if (answered) return;
-    if (!await ensurePersonalConsent(session, 'agent', text)) return;
+    // 답을 못 찾아 사람에게 넘길 뿐이다 — 여기서 동의를 받을 이유가 없다.
     await handleUnsupported(session, text, null);
     return;
   }
@@ -1139,7 +1150,8 @@ async function processBotTurn(session, text) {
     return;
   }
 
-  if (!await ensurePersonalConsent(session, 'intake', text)) return;
+  // 이 경로는 접수 자동화가 다루지 못하는 형태(경유지 미지원 등)라 결국 상담원에게 간다.
+  // 동의는 실제로 등록하는 자리(completeIntake)에서만 받는다.
   return handleOrderIntake(session, text, classified.requestedFeature);
 }
 
@@ -1393,6 +1405,19 @@ router.post('/receive/personal_info', asyncHandler(async (req, res) => {
         await botSay(resumeSession, notice, '동의 후 상담원 연결');
         await markNeedsAgent(resumeSession, raw,
           isNewCustomer ? '상담원 연결(미등록 고객 — 계정 등록 필요)' : '상담원 연결(동의 완료)');
+        return;
+      }
+      if (purpose === 'lookup') {
+        // 조회를 못 해서 동의를 청했던 경우 — 번호를 받았으니 다시 시도한다. 방금 저장한
+        // external_phone이 반영된 세션을 써야 거래처가 매칭된다(resumeSession은 저장 전 값이다).
+        const fresh = await db.get('SELECT * FROM chat_sessions WHERE id = ?', [resumeSession.id]).catch(() => null);
+        const looked = await tryDispatchAgent(fresh || resumeSession, raw).catch((e) => {
+          console.error('동의 후 조회 재시도 실패:', e.message);
+          return false;
+        });
+        if (looked) return;
+        await markNeedsAgent(resumeSession, raw,
+          isNewCustomer ? '주문 조회(미등록 고객 — 계정 등록 필요)' : '주문 조회(동의 후 거래처 확인 필요)');
         return;
       }
       const handled = await tryHandleIntake(resumeSession, raw);
