@@ -71,7 +71,24 @@ async function isResentEvent(serialNumber) {
 // ⚠ 이건 재전송이라는 증거가 아니다. 고객이 "네", "확인부탁드립니다"를 연달아 두 번 치는 일은
 // 흔하다(로그상 단순 응대가 접수 외 메시지의 13.6%). 그래서 이 판정으로는 **메시지를 버리지
 // 않는다** — 저장과 상담원 노출은 그대로 하고 봇의 중복 응답만 막는다.
+// 반복 판정을 아예 적용하면 안 되는 짧은 답인지.
+//
+// 판정이 payload_json LIKE '%텍스트%'라서, 텍스트가 짧을수록 아무 과거 이벤트에나 걸린다.
+// 고객이 주소 후보를 "1"로 고르면 후보 목록을 담은 직전 이벤트의 JSON에 "1."이 들어 있어서
+// 반드시 매칭됐고, 그 결과 봇이 침묵했다 — 주소 확정 기능이 통째로 멈추는 셈이었다
+// (실측: "판교역 → 사당역" 접수에서 1번을 고르자 아무 응답도 나가지 않았다).
+//
+// 원래 막으려던 것은 "네", "확인부탁드립니다" 같은 문장을 연달아 보내는 경우다. 짧은 답을
+// 빼도 그 목적은 그대로 달성된다.
+function isTooShortForRepeatCheck(text) {
+  const body = String(text == null ? '' : text).trim();
+  if (!body) return true;
+  return body.length <= 4 || /^\d{1,2}[.)]?$/.test(body);
+}
+
 async function looksRepeated(userKey, text) {
+  if (isTooShortForRepeatCheck(text)) return false;
+
   try {
     const row = await db.get(
       `SELECT id FROM kakao_consult_events
@@ -645,6 +662,27 @@ async function askAddressChoiceIfNeeded(session, parsed, mergedRaw) {
   return false;
 }
 
+// 주소를 고른 뒤 원문을 다시 읽는다.
+//
+// 접수 원문은 두 갈래로 들어온다 — 붙여넣은 블록 폼과 자유 문장이다. 폼 파서(parseKakaoIntake)는
+// 블록 폼 전용이라 자유 문장은 읽지 못한다. 예전에는 여기서 폼 파서만 돌려서, 자유 문장으로
+// 접수한 고객이 주소 번호를 고르면 곧바로 "접수 내용을 다시 알려주시겠어요?"로 되돌아갔다
+// (실측: "판교역 → 사당역" 접수에서 1번을 골랐는데 처음부터 다시 물음). 처음 이 대화를 읽었던
+// 경로가 LLM 분류였으므로, 폼 파서가 실패하면 같은 경로로 한 번 더 읽는다.
+async function reparseAfterAddressChoice(replacedRaw) {
+  const formParsed = parseKakaoIntake(replacedRaw);
+  if (formParsed.matched) return formParsed;
+
+  const classified = await classifyAndExtract(replacedRaw, null, null).catch((e) => {
+    console.error('주소 선택 후 재분류 실패:', e.message);
+    return null;
+  });
+  if (!classified || classified.intent !== 'dispatch_order') return formParsed;
+  // 경유지가 있으면 자유 문장 경로도 상담원에게 넘긴다(접수 서비스가 경유지를 지원하지 않는다) —
+  // 그 판단은 호출부에 이미 있으므로 여기서는 파싱 결과만 돌려준다.
+  return buildParsedFromClassified(classified, replacedRaw);
+}
+
 // 고객이 번호로 답했을 때 — 고른 주소를 원문에 반영해 접수를 이어간다.
 // 못 알아들으면 한 번 더 안내한다(웹의 getDisambiguationClarifyText와 같은 역할).
 async function handleAddressChoiceReply(session, pending, text) {
@@ -657,7 +695,7 @@ async function handleAddressChoiceReply(session, pending, text) {
   // 고른 주소로 원문의 해당 주소를 바꿔 다시 파싱한다 — 슬롯을 따로 들고 다니지 않고 원문을
   // 고치는 이유는, 이후 경로(폼 파서 → 접수)가 전부 원문 기준으로 동작하기 때문이다.
   const replacedRaw = String(pending.raw || '').replace(pending.query, chosen.address);
-  const parsed = parseKakaoIntake(replacedRaw);
+  const parsed = await reparseAfterAddressChoice(replacedRaw);
   if (!parsed.matched) {
     await clearPendingIntake(session);
     await botSay(session, '접수 내용을 다시 알려주시겠어요?', '주소 선택 후 재파싱 실패');
@@ -1179,3 +1217,6 @@ module.exports = router;
 // 상담원 무응답으로 봇에게 응대를 넘길 때(routes/chat.js), 고객이 이미 한 발화를 그대로
 // 봇 경로에 태우기 위해 노출한다.
 module.exports.processBotTurn = processBotTurn;
+// 반복 판정에서 빼야 하는 짧은 답인지 — 이 판정이 헐거우면 고객이 번호로 고른 답에 봇이
+// 침묵한다. DB 없이 확인할 수 있게 노출한다(scripts/check-kakao-repeat-guard.js).
+module.exports.isTooShortForRepeatCheck = isTooShortForRepeatCheck;
