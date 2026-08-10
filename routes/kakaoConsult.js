@@ -13,8 +13,14 @@ const asyncHandler = require('../middleware/asyncHandler');
 const kakaoConsult = require('../lib/kakaoConsult');
 const { classifyAndExtract } = require('../lib/hybridChat');
 const { searchKnowledgeBase } = require('../lib/knowledgeSearch');
-const { parseKakaoIntake, buildParsedFromClassified, buildMissingQuestion, normalizePhone, normalizePlate } = require('../lib/kakaoIntakeParser');
+const {
+  parseKakaoIntake, buildParsedFromClassified, buildMissingQuestion, normalizePhone, normalizePlate,
+  PREMIUM_DECLINE_RE, PREMIUM_DECLINABLE_FIELD_IDS, premiumOrderTypeToIntentHint, parseTripTypeBareReply,
+  buildPremiumParsedFromClassified,
+} = require('../lib/kakaoIntakeParser');
 const { findIntakeAccount, resolveIntakeContext, findAccountByPhone, linkUserKeyToAccount, createOrdersFromIntake } = require('../lib/kakaoIntakeService');
+const { createPremiumOrderFromIntake } = require('../lib/webPremiumIntakeService');
+const { getDailyDriverFields } = require('../lib/intakeFields');
 const { previewIntakeAddresses } = require('../lib/intakeAddressPreview');
 // 도선(배편) 구간 판정에 쓴다 — 주소의 시도를 봐야 해서 좌표 변환이 필요하다.
 const { geocodeAddress } = require('../lib/geocode');
@@ -772,7 +778,9 @@ async function savePendingAddressChoice(session, state) {
 // cache(선택): geocodeAddress/createOrdersFromIntake와 같은 Map을 넘기면, 여기서 확인한 주소를
 // 뒤이어 completeIntake가 다시 지오코딩할 때 네트워크 호출 없이 재사용한다(한 턴 안에서 같은
 // 주소를 두 번 조회하던 중복 제거).
-async function askAddressChoiceIfNeeded(session, parsed, mergedRaw, cache) {
+// extra(선택): 프리미엄/일일기사 흐름이 category/orderType/tripType/declined를 실어 보내면,
+// 주소를 고른 뒤(handleAddressChoiceReply)에도 그 문맥이 이어진다(웹의 같은 패턴).
+async function askAddressChoiceIfNeeded(session, parsed, mergedRaw, cache, extra) {
   const sides = [
     { key: 'origin', label: '출발지', query: parsed.origin && parsed.origin.address },
     { key: 'destination', label: '도착지', query: parsed.destination && parsed.destination.address },
@@ -807,6 +815,7 @@ async function askAddressChoiceIfNeeded(session, parsed, mergedRaw, cache) {
       sideLabel: side.label,
       query: side.query,
       candidates,
+      ...(extra || {}),
     });
     await botSay(session, buildCandidateListText(side.label, candidates), '주소 후보 확인');
     return true;
@@ -847,6 +856,34 @@ async function handleAddressChoiceReply(session, pending, text) {
   // 고른 주소로 원문의 해당 주소를 바꿔 다시 파싱한다 — 슬롯을 따로 들고 다니지 않고 원문을
   // 고치는 이유는, 이후 경로(폼 파서 → 접수)가 전부 원문 기준으로 동작하기 때문이다.
   const replacedRaw = String(pending.raw || '').replace(pending.query, chosen.address);
+
+  // 프리미엄/일일기사 대화 중 주소를 고른 경우 — 탁송용 재분류(reparseAfterAddressChoice)가
+  // 아니라 같은 카테고리로 재분류해야 한다(intent 힌트를 유지해야 요약형 전달사항 지시문이
+  // 그대로 적용된다).
+  if (pending.category === 'premium_daily') {
+    let classified;
+    try {
+      classified = await classifyAndExtract(replacedRaw, null, premiumOrderTypeToIntentHint(pending.orderType));
+    } catch (e) {
+      console.error('카카오 프리미엄/일일기사 주소 선택 후 재분류 실패:', e.message);
+      await clearPendingIntake(session);
+      await botSay(session, '접수 내용을 다시 알려주시겠어요?', '주소 선택 후 재파싱 실패');
+      return true;
+    }
+    const premiumParsed = buildPremiumParsedFromClassified(classified, replacedRaw, {
+      tripType: pending.tripType || null, declined: pending.declined || [],
+    });
+    premiumParsed.orderType = pending.orderType;
+    if (premiumParsed.waypointAddress) {
+      await clearPendingIntake(session);
+      await handoffWithParsedSlots(session, premiumParsed, replacedRaw, '경유지 포함(자동 접수 불가)');
+      return true;
+    }
+    await botSay(session, `${pending.sideLabel}를 "${chosen.label}"로 확인했습니다.`, '주소 확정 안내');
+    await advancePremiumIntakeKakao(session, premiumParsed, replacedRaw);
+    return true;
+  }
+
   const parsed = await reparseAfterAddressChoice(replacedRaw);
   if (!parsed.matched) {
     await clearPendingIntake(session);
@@ -899,6 +936,9 @@ async function tryHandleIntake(session, text) {
     if (pending.awaiting === 'origin_contact' || pending.awaiting === 'destination_contact') {
       return handleContactReply(session, pending, text);
     }
+    // 프리미엄/일일기사 대화가 이미 진행 중이면 전용 흐름으로 이어간다 — 탁송 파서를 태우면
+    // "1"/"없어" 같은 짧은 답이 엉뚱하게(또는 아예 못) 해석된다.
+    if (pending.category === 'premium_daily') return continuePremiumIntakeKakao(session, pending, text);
     mergedRaw = pending.raw + '\n' + text;
     parsed = parseKakaoIntake(mergedRaw);
     if (!parsed.matched) return false;
@@ -1085,6 +1125,125 @@ async function handleContactReply(session, pending, text) {
 
   // 남은 연락처가 있으면 completeIntake가 이어서 물어보고, 다 찼으면 등록으로 넘어간다.
   return completeIntake(session, parsed, pending.raw, new Map());
+}
+
+// ---- 프리미엄(대리운전)·일일기사 — 카카오 자유문장 자동접수 ----
+// 탁송(dispatch_order)만 자동접수하던 것을 프리미엄/일일기사로 넓힌다. 파싱(buildPremiumParsedFromClassified)과
+// 등록 실행(createPremiumOrderFromIntake)은 웹 AI 접수(lib/webIntakeTurn.js)가 이미 실사용
+// 검증한 것을 그대로 쓴다 — 채널마다 다른 로직이면 같은 문장이 채널에 따라 다른 오더가 된다.
+// 다만 확인 절차는 다르다: 웹은 로그인한 사내 직원이라 "네" 확인을 받고 등록하지만, 카카오는
+// 외부 고객이고 대화 상대가 실시간으로 화면을 보고 있지 않다 — 탁송과 같은 방식대로 필수
+// 항목이 다 차면 곧바로 등록하고 사후에 확인시킨다("잘못된 내용이 있으면 알려주세요").
+// 경유지·연락처 처리도 탁송과 같은 원칙을 따른다: 경유지는 이 흐름이 다루지 못해 상담원에게
+// 넘기고, 연락처는 getDailyDriverFields의 origin_contact가 이미 필수 항목이라(도착지 연락처는
+// 애초에 이 카테고리에 없다) 탁송의 requireContacts 같은 별도 관문이 필요 없다.
+
+async function completePremiumIntake(session, parsed, rawText, cache) {
+  const account = await resolveIntakeContextCached(session);
+
+  // 탁송의 completeIntake와 같은 동의 게이트 — 매핑된 계정이 없을 때만 동의를 청한다(사용자
+  // 확정 규칙: 동의는 미매핑 채널의 신원 확인 수단). 실제로 동의 버튼을 보내는 호출은 이
+  // 한 줄뿐이다 — 아래 handoff는 "왜 못 넣었는지" 사유만 알릴 뿐, 그것만으로는 고객에게
+  // 동의 버튼이 나가지 않는다(탁송 접수에서 실제로 이 구분이 빠져 있어 사고가 났었다).
+  if (!account) {
+    if (!await ensurePersonalConsent(session, 'intake', rawText)) return; // 방금 버튼 발송
+    if (!hasPersonalConsent(session)) {
+      await handoffWithParsedSlots(session, parsed, rawText, '개인정보 미동의 — 상담원 확정 필요(동의 시 자동 접수)');
+      return;
+    }
+    // 동의로 번호를 받았지만 그 번호로도 거래처를 못 찾았다 → 아래 handoff(거래처 확인 불가).
+  }
+
+  if (!account || !account.auto_register) {
+    await clearPendingIntake(session);
+    const reason = !account
+      ? (consentPending(session) ? '개인정보 동의 대기' : '거래처 확인 불가')
+      : '자동 등록 꺼짐';
+    await handoffWithParsedSlots(session, parsed, rawText, reason);
+    return;
+  }
+
+  let result;
+  try {
+    result = await createPremiumOrderFromIntake({ session, account, parsed, orderType: parsed.orderType, sourceChannel: 'kakao' });
+  } catch (e) {
+    console.error('카카오 상담톡 프리미엄/일일기사 자동 접수 실패:', e.message);
+    result = { ok: false, reason: 'exception', detail: e.message };
+  }
+
+  await clearPendingIntake(session);
+  if (result.ok) {
+    await db.run('UPDATE chat_sessions SET draft_json = NULL WHERE id = ?', [session.id])
+      .catch((e) => console.error('접수 완료 후 폼 프리필 정리 실패:', e.message));
+    await botSay(session, result.message, '접수 확인(프리미엄/일일기사)');
+    broadcastSessionListChangedAsync({ event: 'order_created', sessionId: session.id });
+    return;
+  }
+
+  const labels = {
+    origin_geocode_failed: '출발지 주소 좌표 확인 실패',
+    operating_hours: '운영시간 밖 요청',
+    exception: '자동 접수 오류',
+  };
+  await handoffWithParsedSlots(session, parsed, rawText, labels[result.reason] || result.reason || '자동 접수 실패');
+}
+
+// 다 채워졌는지 보고 되묻거나(카테고리 전용 필드 목록으로) 주소 확인 후 등록으로 넘어간다 —
+// 탁송의 되묻기/askAddressChoiceIfNeeded/completeIntake 흐름과 같은 자리.
+async function advancePremiumIntakeKakao(session, parsed, rawText, cache) {
+  if (!parsed.complete) {
+    await savePendingIntake(session, rawText, parsed.missing, {
+      category: 'premium_daily', orderType: parsed.orderType, tripType: parsed.tripType, declined: parsed.declined,
+    });
+    await saveIntakeDraft(session, parsed);
+    const fields = getDailyDriverFields(parsed.tripType);
+    const question = buildMissingQuestion(parsed.missing, parsed, null, fields);
+    await botSay(session, question, '접수 되묻기(프리미엄/일일기사)');
+    return;
+  }
+  await saveIntakeDraft(session, parsed);
+  const geoCache = cache || new Map();
+  const extra = { category: 'premium_daily', orderType: parsed.orderType, tripType: parsed.tripType, declined: parsed.declined };
+  if (await askAddressChoiceIfNeeded(session, parsed, rawText, geoCache, extra)) return;
+  await completePremiumIntake(session, parsed, rawText, geoCache);
+}
+
+// 프리미엄/일일기사 대화가 이미 진행 중일 때의 다음 턴(tryHandleIntake가 pending.category로
+// 판별해 이리로 돌린다) — 웹의 continuePremiumIntake와 같은 판단이다. trip_type이 남아 있으면
+// 번호 답("1"/"2")을 먼저 시도하고, declinable 항목(도착지 대기·전달사항·차량번호)이 정확히
+// 하나 남았을 때만 "없어" 지름길을 쓴다(missing이 둘 이상이면 어느 답인지 특정할 수 없다).
+async function continuePremiumIntakeKakao(session, pending, text) {
+  const mergedRaw = `${pending.raw}\n${text}`;
+  const missing = pending.missing || [];
+  const overrides = { tripType: pending.tripType || null, declined: pending.declined || [] };
+
+  if (missing.includes('trip_type')) {
+    const t = parseTripTypeBareReply(text);
+    if (t) overrides.tripType = t;
+  }
+  const declinableMissing = missing.find((id) => PREMIUM_DECLINABLE_FIELD_IDS.has(id));
+  if (declinableMissing && PREMIUM_DECLINE_RE.test(text.trim())) {
+    overrides.declined = Array.from(new Set([...overrides.declined, declinableMissing]));
+  }
+
+  let classified;
+  try {
+    classified = await classifyAndExtract(mergedRaw, null, premiumOrderTypeToIntentHint(pending.orderType));
+  } catch (e) {
+    console.error('카카오 프리미엄/일일기사 재분류 실패:', e.message);
+    await botSay(session, '요청을 이해하지 못했습니다. 접수 내용을 다시 말씀해주세요.', '재분류 실패');
+    return true;
+  }
+
+  const parsed = buildPremiumParsedFromClassified(classified, mergedRaw, overrides);
+  parsed.orderType = pending.orderType;
+  if (parsed.waypointAddress) {
+    await clearPendingIntake(session);
+    await handoffWithParsedSlots(session, parsed, mergedRaw, '경유지 포함(자동 접수 불가)');
+    return true;
+  }
+  await advancePremiumIntakeKakao(session, parsed, mergedRaw);
+  return true;
 }
 
 // cache(선택): askAddressChoiceIfNeeded가 이 턴에서 이미 지오코딩한 결과가 있으면 여기서
@@ -1327,8 +1486,7 @@ async function processBotTurn(session, text) {
     return;
   }
   // dispatch_order / proxy_order / daily_driver_order — 폼 파서가 못 잡은 자유 문장 접수다.
-  // Gemini가 뽑은 필드를 폼과 같은 모양으로 바꿔 같은 등록 경로를 태운다. 탁송(dispatch_order)만
-  // 대상이다 — 프리미엄/일일기사는 오더 컬럼과 요금 체계가 달라 이번 범위 밖이다.
+  // Gemini가 뽑은 필드를 폼과 같은 모양으로 바꿔 같은 등록 경로를 태운다.
   // 경유지가 있어도 여기서 막지 않는다. 수행일이 갈리면 구간마다 별도 오더로 나뉘어(lib/orderSplit.js)
   // 각 건이 A→B가 되므로 경유지가 사라질 일이 없다. 나뉘지 않는 경우(같은 날 경유)는
   // createOrdersFromIntake가 waypoint_unsupported로 되돌려 상담원에게 넘긴다 — 판단을 한 곳에
@@ -1359,6 +1517,21 @@ async function processBotTurn(session, text) {
     // "판교역에서 사당역까지"처럼 지명만 말한 접수가 첫 검색 결과로 조용히 등록된다.
     if (await askAddressChoiceIfNeeded(session, parsed, intakeText, geoCache)) return;
     await completeIntake(session, parsed, intakeText, geoCache);
+    return;
+  }
+  // 프리미엄(대리운전)·일일기사 — 웹 AI 접수(lib/webIntakeTurn.js)가 이미 검증한 파싱·등록
+  // 로직을 그대로 쓴다(completePremiumIntake 주석 참고). 경유지가 있으면 이 흐름이 다루지
+  // 못해(다른 채널과 같은 원칙) 상담원에게 넘긴다.
+  if (classified.intent === 'proxy_order' || classified.intent === 'daily_driver_order') {
+    const orderType = classified.intent === 'daily_driver_order' ? 'daily_driver' : 'premium';
+    const parsed = buildPremiumParsedFromClassified(classified, intakeText, {});
+    parsed.orderType = orderType;
+    if (parsed.waypointAddress) {
+      if (!await ensurePersonalConsent(session, 'intake', text)) return;
+      await handoffWithParsedSlots(session, parsed, intakeText, '경유지 포함(자동 접수 불가)');
+      return;
+    }
+    await advancePremiumIntakeKakao(session, parsed, intakeText);
     return;
   }
 
