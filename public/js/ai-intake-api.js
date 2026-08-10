@@ -126,10 +126,12 @@
         .catch(function () { return { action: 'unclear' }; });
     },
 
-    parseText: function (text, pendingField) {
+    parseText: function (text, pendingField, classified) {
       return postJson('/orders/ai-intake/parse', {
         text: text,
         pendingField: pendingField,
+        // 접수 턴 엔진이 방금 분류한 결과가 있으면 함께 보내 서버가 재분류를 건너뛰게 한다.
+        classified: classified || null,
       }).then(function (res) {
         return res.json().catch(function () {
           return { error: '서버 응답을 읽는 중 문제가 발생했습니다. (상태 코드: ' + res.status + ')' };

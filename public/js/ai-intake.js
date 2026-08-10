@@ -3868,8 +3868,9 @@
               return null; // 아래 .then(data)는 !data 가드로 그대로 통과한다.
             }
             // fallthrough — 서버가 다루지 않은 요청(faq/unsupported/proxy_order/daily_driver_order
-            // 등)이니 지금까지와 동일한 경로로 넘긴다.
-            return api.parseText(text, hintField);
+            // 등)이니 지금까지와 동일한 경로로 넘긴다. 턴 엔진이 이미 분류한 결과가 있으면 함께
+            // 넘겨 parse가 Gemini를 다시 태우지 않게 한다(응답 지연 절반).
+            return api.parseText(text, hintField, turnResult && turnResult.classified);
           });
         }
         return api.parseText(text, hintField);

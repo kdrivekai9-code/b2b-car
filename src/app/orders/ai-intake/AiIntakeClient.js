@@ -663,6 +663,7 @@ export default function AiIntakeClient({
     // 이 분기는 아예 실행되지 않고 지금까지와 완전히 동일하게 동작한다. 이 파일에는 프리미엄/
     // 일일기사 카테고리 자체가 없어(orderCategory 개념이 없다) EJS 위젯과 달리 별도 제외
     // 조건이 필요 없다 — handleCollectingPhase에 들어오는 모든 대화가 대상이다.
+    let reuseClassified = null;
     if (serverTurnEnabled) {
       const turnResult = await fetchJson('/chat/' + sid + '/intake-turn', {
         method: 'POST',
@@ -680,12 +681,14 @@ export default function AiIntakeClient({
         return;
       }
       // fallthrough — 서버가 다루지 않은 요청(faq/unsupported 등)이니 기존 경로로 넘긴다.
+      // 턴 엔진이 이미 분류한 결과가 있으면 parse에 넘겨 Gemini 재분류를 아낀다(응답 지연 절반).
+      reuseClassified = (turnResult && turnResult.classified) || null;
     }
 
     const parseData = await fetchJson('/orders/ai-intake/parse', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, pendingField: pendingField || null }),
+      body: JSON.stringify({ text, pendingField: pendingField || null, classified: reuseClassified }),
     });
 
     if (isAgentRequest(text) || parseData.intent === 'unsupported') {

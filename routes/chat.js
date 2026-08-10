@@ -452,7 +452,9 @@ router.post('/:sessionId/intake-turn', asyncHandler(async (req, res) => {
   }
 
   if (result.fallthrough || !result.replyText) {
-    return res.json({ ok: true, fallthrough: true });
+    // 턴 엔진이 이미 분류를 돌렸으면(faq/unsupported 등) 그 결과를 함께 넘긴다 — 클라이언트가
+    // 뒤이어 부르는 /ai-intake/parse가 같은 문장에 Gemini를 다시 태우지 않게 한다(응답 지연 절반).
+    return res.json({ ok: true, fallthrough: true, classified: result.classified || null });
   }
 
   const inserted = await db.get(

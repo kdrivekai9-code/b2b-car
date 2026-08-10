@@ -628,11 +628,20 @@ router.post('/ai-intake/parse', asyncHandler(async (req, res) => {
   const knowledgeSearchPromise = searchKnowledgeBase(text, { limit: 1, threshold: 0.7 })
     .catch((e) => { console.error('지식베이스 사전 검색 실패:', e.message); return []; });
 
-  let geminiResult = null;
-  try {
-    geminiResult = await classifyAndExtract(text, pendingField);
-  } catch (e) {
-    console.error('Gemini 의도분류/추출 실패, 규칙 기반 파서로 대체:', e.message);
+  // 접수 턴 엔진(/chat/:id/intake-turn)이 방금 같은 문장을 분류하고 fallthrough하면서 그 결과를
+  // 함께 넘겨주면, 여기서 Gemini를 다시 태우지 않고 재사용한다 — 같은 발화에 분류 LLM이 두 번
+  // 도는 것을 없애 응답 지연을 절반으로 줄인다(서버 접수턴이 켜진 경우에만 해당). 형태가 어긋난
+  // 값이 오면 무시하고 정상 경로로 분류한다.
+  const reuseClassified = (req.body && req.body.classified && typeof req.body.classified === 'object' && req.body.classified.intent)
+    ? req.body.classified
+    : null;
+  let geminiResult = reuseClassified;
+  if (!geminiResult) {
+    try {
+      geminiResult = await classifyAndExtract(text, pendingField);
+    } catch (e) {
+      console.error('Gemini 의도분류/추출 실패, 규칙 기반 파서로 대체:', e.message);
+    }
   }
 
   // 화남/답답함 신호는 의도(intent)와 무관하게 감지될 수 있어 응답 분기와 상관없이 항상 함께 내려준다.
