@@ -64,6 +64,7 @@ export default async function AiIntakePage({ searchParams }) {
         initialSession={session}
         initialMessages={messages}
         initialDraft={draft}
+        serverTurnEnabled={!!data.aiIntakeServerTurnEnabled}
       />
 
       <div className="card" style={{ marginBottom: 16 }}>

@@ -296,6 +296,7 @@ export default function AiIntakeClient({
   initialDraft,
   defaultGreeting,
   onOrderPrefill,
+  serverTurnEnabled,
 }) {
   const initialDraftState = initialDraft && typeof initialDraft === 'object' ? initialDraft : null;
   const initialDraftFields = (initialDraftState && initialDraftState.fields && typeof initialDraftState.fields === 'object')
@@ -656,6 +657,29 @@ export default function AiIntakeClient({
         }),
       });
       return;
+    }
+
+    // 접수 대화 판단을 서버로 옮긴 경로(Stage A, 탁송만) — 기능 플래그가 꺼져 있으면(기본값)
+    // 이 분기는 아예 실행되지 않고 지금까지와 완전히 동일하게 동작한다. 이 파일에는 프리미엄/
+    // 일일기사 카테고리 자체가 없어(orderCategory 개념이 없다) EJS 위젯과 달리 별도 제외
+    // 조건이 필요 없다 — handleCollectingPhase에 들어오는 모든 대화가 대상이다.
+    if (serverTurnEnabled) {
+      const turnResult = await fetchJson('/chat/' + sid + '/intake-turn', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      }).catch(() => ({ ok: false, fallthrough: true }));
+
+      if (turnResult && turnResult.fallthrough === false) {
+        // 서버가 이미 chat_messages에 답을 저장하고 SSE로 중계했다 — catchUpMessages가
+        // dedupe(seenIdsRef)로 안전하게 그 메시지를 화면에 반영한다. phase는 그대로
+        // 'collecting'에 둔다 — 확인/주소선택 상태는 이 파일의 phase가 아니라 서버의
+        // intake_slots_json이 들고 있다.
+        if (turnResult.status) setStatus(turnResult.status);
+        await catchUpMessages(sid);
+        return;
+      }
+      // fallthrough — 서버가 다루지 않은 요청(faq/unsupported 등)이니 기존 경로로 넘긴다.
     }
 
     const parseData = await fetchJson('/orders/ai-intake/parse', {

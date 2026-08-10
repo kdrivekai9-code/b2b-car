@@ -279,6 +279,9 @@ async function buildAiIntakeInitData(scope, userId) {
   return {
     ...data,
     kakaoJsKey: process.env.KAKAO_JS_KEY || '',
+    // 접수 대화 판단을 서버로 옮긴 Stage A(탁송만, lib/webIntakeTurn.js) — 기본 OFF.
+    // EJS(GET /ai-intake)와 Next(GET /ai-intake/data.json)가 이 함수를 공유하므로 값도 같이 간다.
+    aiIntakeServerTurnEnabled: process.env.AI_INTAKE_SERVER_TURN_ENABLED === '1',
   };
 }
 
@@ -428,14 +431,10 @@ router.get('/ai-intake', asyncHandler(async (req, res) => {
 
   res.render('orders/ai_intake', {
     title: 'AI 챗봇',
-    ...initData,
+    ...initData, // aiIntakeServerTurnEnabled 포함 — Next(GET /ai-intake/data.json)와 같은 값
     ...restoreData,
     mode: 'create',
     error: null,
-    // 접수 대화 판단을 서버로 옮긴 Stage A(탁송만, lib/webIntakeTurn.js) — 기본 OFF.
-    // 배포만으로는 동작이 바뀌지 않고, 이 값이 true일 때만 클라이언트가 새 엔드포인트
-    // (/chat/:id/intake-turn)를 탄다.
-    aiIntakeServerTurnEnabled: process.env.AI_INTAKE_SERVER_TURN_ENABLED === '1',
   });
 }));
 

@@ -28,6 +28,7 @@ export default function AiIntakeWorkspace({
   initialSession,
   initialMessages,
   initialDraft,
+  serverTurnEnabled,
 }) {
   const initialPrefill = useMemo(() => toDraftPrefill(initialDraft), [initialDraft]);
   const [prefill, setPrefill] = useState(initialPrefill);
@@ -40,6 +41,7 @@ export default function AiIntakeWorkspace({
         initialDraft={initialDraft}
         defaultGreeting="오더접수 내용을 붙여넣거나, 궁금하신 점을 질문해주세요."
         onOrderPrefill={(parsed) => setPrefill(parsed || null)}
+        serverTurnEnabled={serverTurnEnabled}
       />
 
       <div style={{ marginTop: 16 }}>
