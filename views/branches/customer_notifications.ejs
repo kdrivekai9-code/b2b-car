@@ -23,6 +23,25 @@
       <code>{origin}</code> <code>{destination}</code> <code>{reserved_at}</code> 를 쓸 수 있고, 값이 없으면 그 자리는 지워집니다.
     </p>
 
+    <div class="notify-event-block">
+      <div class="row">
+        <div class="field">
+          <label>봇 응대 복귀 시간</label>
+          <div class="delay-minutes-input">
+            <span>상담원 대화가</span>
+            <input type="number" name="agent_idle_release_minutes" value="<%= agentIdleReleaseMinutes %>" min="0" max="1440" step="1" required>
+            <span>분 동안 없으면 봇으로</span>
+          </div>
+          <p class="page-sub">
+            고객이 상담원 연결을 요청한 뒤 대화가 끊기면 세션이 계속 상담원 상태로 남습니다.
+            이 시간이 지나면 봇 응대로 되돌려, 고객이 다시 말을 걸었을 때 봇이 답할 수 있게 합니다.
+            방금 상담원이 답한 대화는 대상이 아닙니다. <strong>0</strong>으로 두면 자동 복귀를 하지 않습니다
+            (기본 <%= defaultAgentIdleReleaseMinutes %>분).
+          </p>
+        </div>
+      </div>
+    </div>
+
     <% events.forEach(function (e) { %>
       <div class="notify-event-block">
         <div class="row">

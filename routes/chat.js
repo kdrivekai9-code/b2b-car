@@ -1152,7 +1152,8 @@ router.post('/sessions/:id/suggestions/:sid/approve', requireRole('admin'), asyn
 //     발송 취소가 안 되므로 이 판단은 되돌릴 수 없다.
 const AUTO_SEND_DELAY_SECONDS = 30;
 
-// 상담원 상태로 붙잡혀 있는 세션을 봇으로 되돌리기까지의 유휴 시간.
+// 상담원 상태로 붙잡혀 있는 세션을 봇으로 되돌리기까지의 기본 유휴 시간(분).
+// 지사가 branches.agent_idle_release_minutes로 따로 정하면 그 값이 우선한다.
 //
 // 고객이 상담원 연결을 한 번 요청하면 그 뒤로 세션이 계속 needs_agent/agent_active로 남았다.
 // 자동 개입(autoSendPendingSuggestions)은 "초안이 대기 중일 때"만 도는데, 고객이 말을 멈추면
@@ -1166,26 +1167,68 @@ const AGENT_IDLE_RELEASE_MINUTES = 30;
 // 답한 세션을 빼앗으면 응대 중인 대화가 끊긴다. 담당자 배정도 함께 비운다(다음에 다시
 // 연결되면 그때 배정된다).
 //
+// 유휴 시간은 지사마다 다르게 둘 수 있다(branches.agent_idle_release_minutes). 상담원이
+// 상주하는 지사는 길게, 야간에 사람이 없는 지사는 짧게 두고 싶어 한다. 값이 없으면 코드
+// 기본값을 쓰고, 0이면 그 지사는 자동 복귀를 하지 않는다.
+//
+// 세션에는 지사가 없어서(chat_sessions에 branch_id가 없다) 되짚어 찾는다 — 그 세션에서 만든
+// 오더 → 고객 계정 → 카카오 채널 매핑 → 배정된 상담원 순이다. 어디서도 못 찾으면 기본값을 쓴다.
+//
 // 고객에게 따로 알리지 않는다. 이미 대화가 끊긴 지 오래라 그 시점에 말을 걸면 뜬금없고,
 // 다음 메시지에 봇이 자연스럽게 답하는 것으로 충분하다. 대신 상담원이 나중에 이력을 볼 때
 // 왜 봇으로 돌아갔는지 알 수 있도록 시스템 메시지를 남긴다.
-async function releaseIdleAgentSessions() {
-  const cutoff = `to_char((now() at time zone 'Asia/Seoul') - interval '${AGENT_IDLE_RELEASE_MINUTES} minutes', 'YYYY-MM-DD HH24:MI:SS')`;
-  let rows = [];
+const SESSION_BRANCH_SQL = `COALESCE(
+  (SELECT o.branch_id FROM orders o WHERE o.chat_session_id = cs.id ORDER BY o.id DESC LIMIT 1),
+  (SELECT cu.branch_id FROM users cu WHERE cu.id = cs.user_id),
+  (SELECT a.branch_id FROM kakao_consult_accounts a
+     WHERE a.enabled = true
+       AND (a.external_user_key = cs.external_user_key
+            OR (a.external_user_key IS NULL AND a.service_key = cs.kakao_service_key))
+     ORDER BY (a.external_user_key IS NOT NULL) DESC, a.id DESC LIMIT 1),
+  (SELECT ag.branch_id FROM users ag WHERE ag.id = cs.assigned_agent_id)
+)`;
+
+async function loadIdleReleaseTargets() {
+  // 지사별 값이 없으면 기본값으로 판정한다. 0이면 그 지사는 아예 제외한다.
+  const sql = `
+    SELECT cs.id,
+           COALESCE(b.agent_idle_release_minutes, ${AGENT_IDLE_RELEASE_MINUTES}) AS idle_minutes
+      FROM chat_sessions cs
+      LEFT JOIN branches b ON b.id = ${SESSION_BRANCH_SQL}
+     WHERE cs.status IN ('needs_agent', 'agent_active')
+       AND COALESCE(b.agent_idle_release_minutes, ${AGENT_IDLE_RELEASE_MINUTES}) > 0
+       AND COALESCE(
+             (SELECT max(m.created_at) FROM chat_messages m WHERE m.session_id = cs.id),
+             cs.updated_at,
+             cs.created_at
+           ) <= to_char(
+             (now() at time zone 'Asia/Seoul')
+               - (COALESCE(b.agent_idle_release_minutes, ${AGENT_IDLE_RELEASE_MINUTES}) || ' minutes')::interval,
+             'YYYY-MM-DD HH24:MI:SS')`;
   try {
-    rows = await db.all(`
-      SELECT cs.id
+    return await db.all(sql);
+  } catch (e) {
+    // agent_idle_release_minutes는 마이그레이션(20260810010000)으로 추가된다 — 적용 전 DB에서도
+    // 자동 복귀 자체는 돌아야 하므로 기본값만 쓰는 형태로 한 번 더 시도한다.
+    if (!e || e.code !== '42703') {
+      console.error('유휴 상담 세션 조회 실패:', e.message);
+      return [];
+    }
+    return db.all(`
+      SELECT cs.id, ${AGENT_IDLE_RELEASE_MINUTES} AS idle_minutes
         FROM chat_sessions cs
        WHERE cs.status IN ('needs_agent', 'agent_active')
          AND COALESCE(
                (SELECT max(m.created_at) FROM chat_messages m WHERE m.session_id = cs.id),
                cs.updated_at,
                cs.created_at
-             ) <= ${cutoff}`);
-  } catch (e) {
-    console.error('유휴 상담 세션 조회 실패:', e.message);
-    return [];
+             ) <= to_char((now() at time zone 'Asia/Seoul') - interval '${AGENT_IDLE_RELEASE_MINUTES} minutes', 'YYYY-MM-DD HH24:MI:SS')`)
+      .catch((err) => { console.error('유휴 상담 세션 조회 실패:', err.message); return []; });
   }
+}
+
+async function releaseIdleAgentSessions() {
+  const rows = await loadIdleReleaseTargets();
 
   const released = [];
   for (const row of rows) {
@@ -1198,7 +1241,7 @@ async function releaseIdleAgentSessions() {
       );
       await db.run(
         `INSERT INTO chat_messages (session_id, sender, message) VALUES (?, 'system', ?)`,
-        [row.id, `${AGENT_IDLE_RELEASE_MINUTES}분 동안 대화가 없어 봇 응대로 돌아갔습니다.`]
+        [row.id, `${row.idle_minutes}분 동안 대화가 없어 봇 응대로 돌아갔습니다.`]
       );
       released.push(row.id);
     } catch (e) {
@@ -1208,47 +1251,7 @@ async function releaseIdleAgentSessions() {
   if (released.length) broadcastSessionListChangedAsync({ event: 'idle_released' });
   return released;
 }
-const AUTO_SEND_NOTICE = '상담원이 30초동안 응답이 없어 AI가 응답을 먼저 생성하였습니다. 상담원이 접속하면 다시 확인해 드리겠습니다.';
-// 접수(intake) 초안은 답변을 대신 보내는 것으로 끝나지 않는다 — "접수하겠습니다"라고 약속만
-// 나가고 오더는 아무도 만들지 않는 상태가 된다. 그래서 문구를 대신 보내는 대신 봇에게 응대를
-// 넘겨, 이후 고객 메시지를 봇이 접수 경로로 처리하게 한다(사용자 확정 규칙).
-const BOT_HANDOVER_NOTICE = '상담원 응답이 30초동안 없어서 주문접수를 제가 도와드리겠습니다.';
 
-// 상담원이 입력창에 타이핑하는 중이라는 신호. 화면에서 짧은 주기로 던진다.
-router.post('/sessions/:id/typing', requireRole('admin'), asyncHandler(async (req, res) => {
-  await db.run(
-    `UPDATE chat_sessions SET agent_typing_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS')
-     WHERE id = ?`,
-    [req.params.id]
-  ).catch((e) => console.error('상담원 타이핑 신호 기록 실패:', e.message));
-  res.json({ ok: true });
-}));
-
-// 봇 명의로 고객에게 보낸다. 상담원 답장(deliverAgentReply)과 달리 sender가 'bot'이고
-// 담당 상담원을 세우지 않는다 — 봇이 응대를 이어받는 상황이기 때문이다.
-async function deliverBotMessage(session, text) {
-  const inserted = await db.get(
-    `INSERT INTO chat_messages (session_id, sender, message) VALUES (?, 'bot', ?) RETURNING *`,
-    [session.id, text]
-  );
-  await db.run(
-    `UPDATE chat_sessions SET updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS')
-     WHERE id = ?`,
-    [session.id]
-  );
-  broadcastMessageAsync(session.id, inserted);
-  if (session.channel === 'kakao') {
-    const sendResult = await kakaoConsult.sendMessage(session, text);
-    if (!sendResult.ok) {
-      logIntegrationErrorAsync({ source: 'kakao', operation: 'send', refType: 'chat_session', refId: Number(session.id),
-        message: sendResult.error, context: { label: '봇 인계 안내', textHead: String(text).slice(0, 60) } });
-    }
-  }
-  return inserted;
-}
-
-// 자동 발송 대상 조회 — 마이그레이션(20260808020000) 전에는 agent_typing_at이 없어 쿼리가
-// 통째로 실패한다. 그 경우 조용히 빈 목록으로 떨어뜨려 크론이 죽지 않게 한다.
 async function loadAutoSendTargets() {
   const sql = `
     SELECT g.id AS suggestion_id, g.session_id, g.suggested_text, g.kind, g.created_at,

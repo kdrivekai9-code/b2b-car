@@ -592,6 +592,10 @@ async function loadCustomerNotificationPage(branchId) {
   return { branch, branches, events };
 }
 
+// 상담원 상태로 붙잡힌 세션을 봇으로 되돌리기까지의 유휴 시간. 비워두면 기본값(30분)을 쓰고,
+// 0이면 그 지사는 자동 복귀를 하지 않는다(상담원이 직접 종료할 때까지 붙잡아 두는 운영).
+const DEFAULT_AGENT_IDLE_RELEASE_MINUTES = 30;
+
 router.get('/:id/customer-notifications', asyncHandler(async (req, res) => {
   const { branch, branches, events } = await loadCustomerNotificationPage(req.params.id);
   if (!branch) return res.status(404).send('지사를 찾을 수 없습니다.');
@@ -600,6 +604,11 @@ router.get('/:id/customer-notifications', asyncHandler(async (req, res) => {
     branch,
     branches,
     events,
+    // 마이그레이션(20260810010000) 적용 전이면 컬럼이 없다 — 그때는 기본값을 보여준다.
+    agentIdleReleaseMinutes: branch.agent_idle_release_minutes == null
+      ? DEFAULT_AGENT_IDLE_RELEASE_MINUTES
+      : Number(branch.agent_idle_release_minutes),
+    defaultAgentIdleReleaseMinutes: DEFAULT_AGENT_IDLE_RELEASE_MINUTES,
     error: req.query.error || null,
     notice: req.query.notice || null,
   });
@@ -628,6 +637,18 @@ router.post('/:id/customer-notifications', asyncHandler(async (req, res) => {
     }
     rows.push({ key, enabled: !!req.body['enabled_' + key], delayMinutes, template });
   }
+
+  // 유휴 복귀 시간도 이 화면에서 함께 저장한다 — 같은 상담 흐름 설정이라 화면을 나눌 이유가 없다.
+  const idleMinutes = Number(req.body.agent_idle_release_minutes);
+  if (!Number.isInteger(idleMinutes) || idleMinutes < 0 || idleMinutes > 1440) {
+    return res.redirect(base + '?error=' + encodeURIComponent('봇 응대 복귀 시간은 0~1440분 사이로 입력해주세요.'));
+  }
+  await db.run('UPDATE branches SET agent_idle_release_minutes = ? WHERE id = ?', [idleMinutes, req.params.id])
+    .catch((e) => {
+      // 컬럼이 없는 DB(마이그레이션 전)에서는 통보 설정 저장까지 막지 않는다.
+      if (!e || e.code !== '42703') throw e;
+      console.error('봇 응대 복귀 시간 저장 실패(마이그레이션 미적용):', e.message);
+    });
 
   for (const row of rows) {
     await db.run(`
