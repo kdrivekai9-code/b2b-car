@@ -26,7 +26,7 @@ const { sendOrderPhotos, isPhotoRequest, isOdometerRequest, answerOdometer, coun
 // 주소 후보 검색·선택은 웹 접수 화면과 같은 규칙을 쓴다(lib/addressCandidates.js).
 const { searchAddressCandidates, needsDisambiguation, buildCandidateListText, matchCandidateChoice, getClarifyText } = require('../lib/addressCandidates');
 const { getSmalltalkMessage } = require('../lib/smallTalk');
-const { buildSuggestion, buildFareSuggestion, buildHoursSuggestion } = require('../lib/agentAssist');
+const { buildSuggestion, buildFareSuggestion, buildHoursSuggestion, isHoursQuestion } = require('../lib/agentAssist');
 const { runDispatchAgent } = require('../lib/mcpDispatchAgent');
 const { notify } = require('../lib/push');
 const { broadcastMessage, broadcastSessionListChanged } = require('../lib/realtimeChat');
@@ -417,6 +417,9 @@ async function tryAnswerFare(session, text, extracted) {
 // 이유다. KB에 문구를 넣어두면 지사가 시간을 바꿔도 조용히 낡는데, 오더 등록은 이미 이 테이블로
 // 접수를 막고 있어서 안내와 실제 동작이 어긋나면 그게 더 나쁘다.
 async function tryAnswerOperatingHours(session, text) {
+  // 값싼 키워드 관문을 먼저 통과시킨다 — 운영시간 질문이 아니면(대다수) 여기서 바로 빠져,
+  // 거래처 확정(resolveIntakeContext, 첫 호출 시 DB 다회)이 분류 전 순차 지연으로 붙지 않게 한다.
+  if (!isHoursQuestion(text)) return false;
   const account = await resolveIntakeContextCached(session).catch(() => null);
   const draft = await buildHoursSuggestion(text, { branchId: account && account.branch_id })
     .catch((e) => { console.error('카카오 운영시간 안내 실패:', e.message); return null; });
@@ -1208,6 +1211,11 @@ async function processBotTurn(session, text) {
     });
     if (continued) return;
   }
+
+  // 분류(Gemini)가 도는 동안 접수 주체(거래처)도 미리 확정해둔다 — 조회(unsupported)·접수
+  // (dispatch_order) 분기에서 곧 필요하다. 세션에 캐시되므로 그 분기에서 다시 부르면 이미
+  // 끝나 있어, ~1초 걸리는 분류와 DB 조회가 겹쳐 순차 지연이 사라진다. (fire-and-forget)
+  resolveIntakeContextCached(session).catch(() => null);
 
   // 지식검색(임베딩 API 호출)은 원문 텍스트만 있으면 시작할 수 있어, 의도분류(Gemini) 결과를
   // 기다리지 않고 미리 같이 시작해둔다 — 웹 위젯(routes/orders.js)에 이미 있는 패턴과 같다.
