@@ -18,6 +18,7 @@ const callmaner = require('../lib/callmaner');
 // 콜마너 오더접수는 카카오 상담톡 자동 접수(lib/kakaoIntakeService.js)도 같은 함수를 타야 해서
 // lib/callmanerRegister.js로 옮겼다 — 여기서는 그대로 가져다 쓴다.
 const { registerOrderWithCallmaner, tryUpdateWithErrorCodeColumn } = require('../lib/callmanerRegister');
+const { maybeUpgradePremiumToDaily } = require('../lib/premiumUpgrade');
 // 오더 저장은 세 경로(웹·문의전환·카카오)가 같은 구현을 쓴다.
 const { createOrder } = require('../lib/orderCreate');
 // 수행일이 갈리면 구간마다 별도 오더로 나눈다 — 카카오 자동접수와 같은 규칙.
@@ -1023,98 +1024,17 @@ router.post('/', asyncHandler(async (req, res) => {
     await registerOrderWithCallmaner(extra.orderId, finalBranch);
   }
 
-  // §7-2 자동 승격 판정 — premium 오더 접수 후 실제 소요시간이 8시간 이상이면 daily_driver로 전환
-  // fire-and-forget: 경로탐색 실패/지연은 오더 등록 자체를 막지 않는다.
+  // §7-2 자동 승격 판정 — premium 오더 접수 후 실제 소요시간이 8시간 이상이면 daily_driver로
+  // 전환한다. fire-and-forget: 경로탐색 실패/지연은 오더 등록 자체를 막지 않는다. 웹 AI 접수
+  // (lib/webPremiumIntakeService.js)도 같은 판정을 거쳐야 해서 lib/premiumUpgrade.js로 뺐다 —
+  // 동작은 그대로다.
   if (finalOrderType === 'premium') {
-    (async () => {
-      try {
-        const UPGRADE_THRESHOLD_SECONDS = 8 * 3600;
-        const originCoord = await db.get('SELECT origin_lat AS lat, origin_lon AS lon FROM orders WHERE id = ?', [newId])
-          .catch(() => null);
-
-        // 좌표 미확보 시 1순위(계산값) 불가 → 2순위(사용자 답변 시간구간) 판정
-        if (!originCoord || !originCoord.lat) {
-          if (reservation_hours_bracket === 'over_8h') {
-            await db.run('UPDATE orders SET order_type = ? WHERE id = ?', ['daily_driver', newId]);
-            await db.run(
-              `INSERT INTO order_status_history (order_id, actor_user_id, old_status, new_status, note) VALUES (?, ?, NULL, NULL, ?)`,
-              [newId, u.id, '오더 타입 자동 승격: daily_driver (시간구간 over_8h 기준)']
-            );
-          }
-          return;
-        }
-
-        // 좌표 있으면 Kakao Mobility로 실제 소요시간 계산
-        const kakaoKey = process.env.KAKAO_REST_API_KEY;
-        if (!kakaoKey) return;
-
-        const originLatLon = await db.get(
-          'SELECT origin_lat AS lat, origin_lon AS lon FROM orders WHERE id = ?', [newId]
-        );
-        const destLatLon = await db.get(
-          'SELECT destination_lat AS lat, destination_lon AS lon FROM orders WHERE id = ?', [newId]
-        );
-        if (!originLatLon || !originLatLon.lat || !destLatLon || !destLatLon.lat) return;
-
-        const waypointCoords = await db.all(
-          'SELECT lat, lon FROM order_waypoints WHERE order_id = ? ORDER BY seq', [newId]
-        );
-
-        const toCoordStr = (r) => `${r.lon},${r.lat}`;
-        let routeDuration = 0;
-
-        if (!waypointCoords.length) {
-          const qs = new URLSearchParams({
-            origin: toCoordStr(originLatLon),
-            destination: toCoordStr(destLatLon),
-            priority: 'RECOMMEND',
-          });
-          const r = await fetch('https://apis-navi.kakaomobility.com/v1/future/directions?' + qs.toString(), {
-            headers: { Authorization: 'KakaoAK ' + kakaoKey },
-          });
-          if (r.ok) {
-            const d = await r.json();
-            const route = d.routes && d.routes[0];
-            if (route && route.result_code === 0) routeDuration = route.summary.duration || 0;
-          }
-        } else {
-          const body = {
-            origin: { x: originLatLon.lon, y: originLatLon.lat },
-            destination: { x: destLatLon.lon, y: destLatLon.lat },
-            waypoints: waypointCoords.map((w) => ({ x: w.lon, y: w.lat })),
-            priority: 'RECOMMEND',
-          };
-          const r = await fetch('https://apis-navi.kakaomobility.com/v1/waypoints/directions', {
-            method: 'POST',
-            headers: { Authorization: 'KakaoAK ' + kakaoKey, 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-          });
-          if (r.ok) {
-            const d = await r.json();
-            const route = d.routes && d.routes[0];
-            if (route && route.result_code === 0) routeDuration = route.summary.duration || 0;
-          }
-        }
-
-        // 대기시간 합산 (경유지 대기 + 도착지 대기)
-        const waypointWait = await db.all(
-          'SELECT COALESCE(wait_minutes, 0) AS wait_minutes FROM order_waypoints WHERE order_id = ?', [newId]
-        );
-        const totalWaitSeconds = waypointWait.reduce((s, w) => s + Number(w.wait_minutes || 0) * 60, 0)
-          + (destination_wait_minutes ? Number(destination_wait_minutes) * 60 : 0);
-
-        const totalSeconds = routeDuration + totalWaitSeconds;
-        if (totalSeconds >= UPGRADE_THRESHOLD_SECONDS) {
-          await db.run('UPDATE orders SET order_type = ? WHERE id = ?', ['daily_driver', newId]);
-          await db.run(
-            `INSERT INTO order_status_history (order_id, actor_user_id, old_status, new_status, note) VALUES (?, ?, NULL, NULL, ?)`,
-            [newId, u.id, `오더 타입 자동 승격: daily_driver (${Math.round(totalSeconds / 3600)}시간 초과)`]
-          );
-        }
-      } catch (e) {
-        console.error('자동 승격 판정 실패(무시하고 진행):', e.message);
-      }
-    })();
+    maybeUpgradePremiumToDaily({
+      orderId: newId,
+      actorUserId: u.id,
+      reservationHoursBracket: reservation_hours_bracket,
+      destinationWaitMinutes: destination_wait_minutes,
+    });
   }
 
   try {
