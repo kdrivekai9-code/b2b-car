@@ -623,6 +623,29 @@ async function handleOrderIntake(session, text, requestedFeature) {
   await markNeedsAgent(session, text, requestedFeature || '신규 오더 접수');
 }
 
+// 파싱된 접수 내용을 상담관리 카드의 "접수 마무리" 폼이 프리필하도록 draft_json.fields에 저장한다.
+// 폼이 읽는 소스는 draft_json.fields → chat_suggestions.intake_json 뿐이라(routes/chat.js의
+// /sessions/:id/intake-order), 카카오는 이걸 채우지 않으면 폼이 빈 채로 뜬다.
+//
+// 인계(상담원 연결) 때만이 아니라 대화 도중(봇이 아직 되묻는 중)에도 부른다 — 상담원이 그 세션
+// 카드를 열면 지금까지 파악된 값이 이미 채워져 있게 하기 위해서다(웹 위젯이 대화 중 draft_json을
+// 갱신하는 것과 같은 취지). 거래처(지사·법인·결제수단)는 세션에 로그인 사용자가 없어(user_id
+// NULL) 매핑된 계정에서 채운다.
+async function saveIntakeDraft(session, parsed) {
+  try {
+    const fields = toIntakeFields(parsed);
+    const account = await resolveIntakeContextCached(session).catch(() => null);
+    if (account) {
+      if (account.branch_id) fields.branch_id = String(account.branch_id);
+      if (account.requester_group_id) fields.requester_group_id = String(account.requester_group_id);
+      if (account.payment_method_id) fields.payment_method_id = String(account.payment_method_id);
+    }
+    await db.run('UPDATE chat_sessions SET draft_json = ? WHERE id = ?', [JSON.stringify({ fields }), session.id]);
+  } catch (e) {
+    console.error('카카오 접수 폼 프리필 저장 실패(대화는 계속):', e.message);
+  }
+}
+
 // 파싱된 폼을 상담원이 다시 타이핑하지 않도록, 구조화 결과를 대화에 남긴 뒤 인계한다.
 // (고객에게는 보내지 않는다 — 상담원 화면에서만 보이는 인계 메모다.)
 async function handoffWithParsedSlots(session, parsed, text, reasonLabel) {
@@ -636,23 +659,7 @@ async function handoffWithParsedSlots(session, parsed, text, reasonLabel) {
   ].filter(Boolean).join('\n');
   await insertMessage(session.id, 'bot', summary);
 
-  // 상담관리 카드의 "접수 마무리" 폼이 프리필하도록 파싱 결과를 draft_json.fields에 저장한다.
-  // 예전엔 위 텍스트 요약만 남겨서, 상담원이 카드에서 폼을 열면 빈 채로 떴다(카카오 접수 미파싱).
-  // 폼이 읽는 소스는 draft_json.fields → chat_suggestions.intake_json 순인데(routes/chat.js의
-  // /sessions/:id/intake-order), 카카오는 둘 다 안 채워졌던 것이다. 거래처(지사·법인·결제수단)는
-  // 세션에 로그인 사용자가 없어(user_id NULL) 매핑된 계정에서 채운다.
-  try {
-    const fields = toIntakeFields(parsed);
-    const account = await resolveIntakeContextCached(session).catch(() => null);
-    if (account) {
-      if (account.branch_id) fields.branch_id = String(account.branch_id);
-      if (account.requester_group_id) fields.requester_group_id = String(account.requester_group_id);
-      if (account.payment_method_id) fields.payment_method_id = String(account.payment_method_id);
-    }
-    await db.run('UPDATE chat_sessions SET draft_json = ? WHERE id = ?', [JSON.stringify({ fields }), session.id]);
-  } catch (e) {
-    console.error('카카오 접수 폼 프리필 저장 실패(인계는 계속):', e.message);
-  }
+  await saveIntakeDraft(session, parsed);
 
   const notice = '접수 내용 확인했습니다. 상담원이 바로 확정해드릴게요.';
   await sendAndLog(session, notice, '접수 인계 안내');
@@ -864,11 +871,13 @@ async function tryHandleIntake(session, text) {
 
   if (!parsed.complete) {
     await savePendingIntake(session, mergedRaw, parsed.missing);
+    await saveIntakeDraft(session, parsed); // 대화 도중에도 카드 폼에 지금까지 값 반영
     const addressPreview = await previewIntakeAddresses(parsed);
     const question = buildMissingQuestion(parsed.missing, parsed, addressPreview);
     await botSay(session, question, '접수 되묻기');
     return true;
   }
+  await saveIntakeDraft(session, parsed); // 필수 항목이 다 찬 시점의 값도 반영
 
   // 이 턴에서 지오코딩한 결과를 아래 확인 단계들이 공유한다 — 주소 후보 확인·도선 판정·
   // 실제 접수 등록이 같은 주소를 각자 다시 조회하던 중복을 없앤다.
@@ -1036,6 +1045,7 @@ async function handleContactReply(session, pending, text) {
 
   if (isOrigin) parsed.origin = { ...parsed.origin, contact: phone };
   else parsed.destination = { ...parsed.destination, contact: phone };
+  await saveIntakeDraft(session, parsed); // 방금 받은 연락처까지 카드 폼에 반영
   await botSay(session, `${isOrigin ? '출발지' : '도착지'} 연락처를 ${phone}(으)로 확인했습니다.`, '연락처 확인');
 
   // 남은 연락처가 있으면 completeIntake가 이어서 물어보고, 다 찼으면 등록으로 넘어간다.
@@ -1090,6 +1100,13 @@ async function completeIntake(session, parsed, rawText, cache) {
   }
 
   await clearPendingIntake(session);
+
+  // 자동 등록에 성공했으면 카드 폼 프리필(draft_json)을 비운다 — 이미 오더가 만들어졌는데
+  // 폼이 채워진 채로 남으면 상담원이 같은 건을 한 번 더 등록할 수 있다.
+  if (result.ok) {
+    await db.run('UPDATE chat_sessions SET draft_json = NULL WHERE id = ?', [session.id])
+      .catch((e) => console.error('접수 완료 후 폼 프리필 정리 실패:', e.message));
+  }
 
   // 나뉜 건 중 출발 시각을 모르는 것이 있으면 고객에게 묻는다 — 임의로 앞 건과 같은 시각을
   // 넣으면 잘못된 시각으로 접수된다. 날짜는 이미 알고 나뉜 것이라(그게 분리 조건이다) 시각만 묻는다.
@@ -1292,6 +1309,7 @@ async function processBotTurn(session, text) {
       // 이번 답변으로 채워진 항목이 있으면 먼저 되읽어준다 — 그 뒤에 남은 항목을 묻는다.
       await announceFilledFields(session, pendingIntake, parsed);
       await savePendingIntake(session, intakeText, parsed.missing);
+      await saveIntakeDraft(session, parsed); // 대화 도중에도 카드 폼에 지금까지 값 반영
       const addressPreview = await previewIntakeAddresses(parsed);
       const question = buildMissingQuestion(parsed.missing, parsed, addressPreview);
       await botSay(session, question, '접수 되묻기(자유문장)');
