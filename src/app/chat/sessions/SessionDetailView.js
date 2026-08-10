@@ -5,6 +5,16 @@ import SessionViewer, { STATUS_LABEL, fetchJson } from './SessionViewer';
 
 const STATUS_BADGE = { bot: 'gray', needs_agent: 'red', agent_active: 'blue', closed: 'dark' };
 
+// 담당자명이 거래처명으로 시작하면(예: "서울모터스 채정식") 괄호 앞 회사명과 겹치므로 뗀다.
+function personOnly(group, user) {
+  if (!user) return user;
+  if (group && user.indexOf(group) === 0) {
+    const rest = user.slice(group.length).replace(/^[\s·\-]+/, '').trim();
+    return rest || user;
+  }
+  return user;
+}
+
 // session_detail.ejs 이식. 메시지/SSE/답장/담당지정(self)/삭제는 SessionViewer가 담당하고,
 // 이 화면 고유 기능 3개(다른 상담원 지정 드롭다운/종료/봇복귀)만 여기서 구현한다 — 카드뷰엔
 // 없는 기능들이다(조사 결과, session_detail.ejs L51-96 참고). "내가 담당하기"는
@@ -71,7 +81,7 @@ export default function SessionDetailView({ initialSession, mappedAccount, agent
                 매핑된 거래처가 있으면 이름줄을 "거래처명(담당자)"로 보여준다. */}
             고객: {(session.channel === 'kakao' && mappedAccount && (mappedAccount.groupName || mappedAccount.userName))
               ? (mappedAccount.groupName && mappedAccount.userName
-                ? `${mappedAccount.groupName}(${mappedAccount.userName})`
+                ? `${mappedAccount.groupName}(${personOnly(mappedAccount.groupName, mappedAccount.userName)})`
                 : (mappedAccount.groupName || mappedAccount.userName))
               : (session.user_name || '-')}{session.channel === 'kakao' ? '' : ` (${session.user_role || '-'})`}{session.user_phone ? ` · ${session.user_phone}` : ''}
             {/* 여기서 보내는 답장이 카카오 상담톡으로 나간다는 걸 입력 전에 알 수 있어야 한다. */}

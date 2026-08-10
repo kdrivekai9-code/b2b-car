@@ -2,9 +2,19 @@
 <%
   // 카카오 세션의 표시 이름 — 매핑된 거래처가 있으면 "거래처명(담당자)"로, 없으면 기본 이름
   // (동의 전이면 "카카오 상담톡 고객 (UserKey)")으로 보여준다.
+  // 담당자명(users.name)이 이미 거래처명으로 시작하면(예: "서울모터스 채정식") 회사명이
+  // 괄호 앞에서 이미 나오므로, 괄호 안에서는 그 접두어를 떼어 담당자명만 남긴다.
+  function personOnly(group, user) {
+    if (!user) return user;
+    if (group && user.indexOf(group) === 0) {
+      var rest = user.slice(group.length).replace(/^[\s·\-]+/, '').trim();
+      return rest || user;
+    }
+    return user;
+  }
   function sessionDisplayName(s) {
     if (s.channel === 'kakao' && (s.mapped_group_name || s.mapped_user_name)) {
-      if (s.mapped_group_name && s.mapped_user_name) return s.mapped_group_name + '(' + s.mapped_user_name + ')';
+      if (s.mapped_group_name && s.mapped_user_name) return s.mapped_group_name + '(' + personOnly(s.mapped_group_name, s.mapped_user_name) + ')';
       return s.mapped_group_name || s.mapped_user_name;
     }
     return s.user_name || '-';
