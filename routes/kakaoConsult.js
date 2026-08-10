@@ -26,7 +26,7 @@ const { sendOrderPhotos, isPhotoRequest, isOdometerRequest, answerOdometer, coun
 // 주소 후보 검색·선택은 웹 접수 화면과 같은 규칙을 쓴다(lib/addressCandidates.js).
 const { searchAddressCandidates, needsDisambiguation, buildCandidateListText, matchCandidateChoice, getClarifyText } = require('../lib/addressCandidates');
 const { getSmalltalkMessage } = require('../lib/smallTalk');
-const { buildSuggestion, buildFareSuggestion, buildHoursSuggestion, isHoursQuestion } = require('../lib/agentAssist');
+const { buildSuggestion, buildFareSuggestion, buildHoursSuggestion, isHoursQuestion, toIntakeFields } = require('../lib/agentAssist');
 const { runDispatchAgent } = require('../lib/mcpDispatchAgent');
 const { notify } = require('../lib/push');
 const { broadcastMessage, broadcastSessionListChanged } = require('../lib/realtimeChat');
@@ -635,6 +635,24 @@ async function handoffWithParsedSlots(session, parsed, text, reasonLabel) {
     parsed.memo ? `메모 ${parsed.memo}` : null,
   ].filter(Boolean).join('\n');
   await insertMessage(session.id, 'bot', summary);
+
+  // 상담관리 카드의 "접수 마무리" 폼이 프리필하도록 파싱 결과를 draft_json.fields에 저장한다.
+  // 예전엔 위 텍스트 요약만 남겨서, 상담원이 카드에서 폼을 열면 빈 채로 떴다(카카오 접수 미파싱).
+  // 폼이 읽는 소스는 draft_json.fields → chat_suggestions.intake_json 순인데(routes/chat.js의
+  // /sessions/:id/intake-order), 카카오는 둘 다 안 채워졌던 것이다. 거래처(지사·법인·결제수단)는
+  // 세션에 로그인 사용자가 없어(user_id NULL) 매핑된 계정에서 채운다.
+  try {
+    const fields = toIntakeFields(parsed);
+    const account = await resolveIntakeContextCached(session).catch(() => null);
+    if (account) {
+      if (account.branch_id) fields.branch_id = String(account.branch_id);
+      if (account.requester_group_id) fields.requester_group_id = String(account.requester_group_id);
+      if (account.payment_method_id) fields.payment_method_id = String(account.payment_method_id);
+    }
+    await db.run('UPDATE chat_sessions SET draft_json = ? WHERE id = ?', [JSON.stringify({ fields }), session.id]);
+  } catch (e) {
+    console.error('카카오 접수 폼 프리필 저장 실패(인계는 계속):', e.message);
+  }
 
   const notice = '접수 내용 확인했습니다. 상담원이 바로 확정해드릴게요.';
   await sendAndLog(session, notice, '접수 인계 안내');
