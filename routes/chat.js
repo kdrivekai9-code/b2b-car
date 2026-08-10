@@ -37,7 +37,9 @@ function checkCronAuth(req, res, next) {
 const cronRouter = express.Router();
 cronRouter.get('/cron/auto-send-suggestions', checkCronAuth, asyncHandler(async (req, res) => {
   const sent = await autoSendPendingSuggestions();
-  res.json({ ok: true, sent: sent.length, details: sent });
+  // 같은 크론에서 유휴 세션도 정리한다 — 둘 다 "상담원이 이어받지 않은 대화"를 다루는 일이다.
+  const released = await releaseIdleAgentSessions();
+  res.json({ ok: true, sent: sent.length, details: sent, released });
 }));
 
 router.use(requireAuth);
@@ -1149,6 +1151,63 @@ router.post('/sessions/:id/suggestions/:sid/approve', requireRole('admin'), asyn
 //   · 상담원이 타이핑을 시작하면 발송하지 않는다 — 답이 두 번 나가는 걸 막는다. 카카오는
 //     발송 취소가 안 되므로 이 판단은 되돌릴 수 없다.
 const AUTO_SEND_DELAY_SECONDS = 30;
+
+// 상담원 상태로 붙잡혀 있는 세션을 봇으로 되돌리기까지의 유휴 시간.
+//
+// 고객이 상담원 연결을 한 번 요청하면 그 뒤로 세션이 계속 needs_agent/agent_active로 남았다.
+// 자동 개입(autoSendPendingSuggestions)은 "초안이 대기 중일 때"만 도는데, 고객이 말을 멈추면
+// 초안도 안 생기니 아무것도 세션을 되돌리지 않는다(실사용 지적 — 하루 넘게 상담원 상태로 남은
+// 세션이 있었다). 그러면 한참 뒤 고객이 다시 말을 걸어도 봇이 답하지 않고 계속 사람을 기다린다.
+const AGENT_IDLE_RELEASE_MINUTES = 30;
+
+// 오래 조용한 상담 세션을 봇 응대로 되돌린다.
+//
+// 마지막 대화(고객·상담원 어느 쪽이든)로부터 유휴 시간이 지난 세션만 대상이다 — 방금 상담원이
+// 답한 세션을 빼앗으면 응대 중인 대화가 끊긴다. 담당자 배정도 함께 비운다(다음에 다시
+// 연결되면 그때 배정된다).
+//
+// 고객에게 따로 알리지 않는다. 이미 대화가 끊긴 지 오래라 그 시점에 말을 걸면 뜬금없고,
+// 다음 메시지에 봇이 자연스럽게 답하는 것으로 충분하다. 대신 상담원이 나중에 이력을 볼 때
+// 왜 봇으로 돌아갔는지 알 수 있도록 시스템 메시지를 남긴다.
+async function releaseIdleAgentSessions() {
+  const cutoff = `to_char((now() at time zone 'Asia/Seoul') - interval '${AGENT_IDLE_RELEASE_MINUTES} minutes', 'YYYY-MM-DD HH24:MI:SS')`;
+  let rows = [];
+  try {
+    rows = await db.all(`
+      SELECT cs.id
+        FROM chat_sessions cs
+       WHERE cs.status IN ('needs_agent', 'agent_active')
+         AND COALESCE(
+               (SELECT max(m.created_at) FROM chat_messages m WHERE m.session_id = cs.id),
+               cs.updated_at,
+               cs.created_at
+             ) <= ${cutoff}`);
+  } catch (e) {
+    console.error('유휴 상담 세션 조회 실패:', e.message);
+    return [];
+  }
+
+  const released = [];
+  for (const row of rows) {
+    try {
+      await db.run(
+        `UPDATE chat_sessions SET status = 'bot', assigned_agent_id = NULL,
+         updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS')
+         WHERE id = ? AND status IN ('needs_agent', 'agent_active')`,
+        [row.id]
+      );
+      await db.run(
+        `INSERT INTO chat_messages (session_id, sender, message) VALUES (?, 'system', ?)`,
+        [row.id, `${AGENT_IDLE_RELEASE_MINUTES}분 동안 대화가 없어 봇 응대로 돌아갔습니다.`]
+      );
+      released.push(row.id);
+    } catch (e) {
+      console.error(`유휴 상담 세션 해제 실패 (session=${row.id}):`, e.message);
+    }
+  }
+  if (released.length) broadcastSessionListChangedAsync({ event: 'idle_released' });
+  return released;
+}
 const AUTO_SEND_NOTICE = '상담원이 30초동안 응답이 없어 AI가 응답을 먼저 생성하였습니다. 상담원이 접속하면 다시 확인해 드리겠습니다.';
 // 접수(intake) 초안은 답변을 대신 보내는 것으로 끝나지 않는다 — "접수하겠습니다"라고 약속만
 // 나가고 오더는 아무도 만들지 않는 상태가 된다. 그래서 문구를 대신 보내는 대신 봇에게 응대를
