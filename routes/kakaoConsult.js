@@ -374,20 +374,22 @@ function withBotLabel(text) {
   return `${BOT_LABEL}\n${body}`;
 }
 
-// 봇이 고객에게 말하는 단 하나의 통로 — 대화 이력 저장과 카카오 발신을 같은 문구로 함께 한다.
-// 예전에는 호출부마다 insertMessage + sendAndLog를 나란히 불렀는데, 그러면 인계 표시 같은
-// 가공을 한쪽에만 적용해 저장된 내용과 실제 발송 내용이 갈라지기 쉽다.
+// 봇이 고객에게 말하는 단 하나의 통로 — 대화 이력 저장과 카카오 발신을 같은 원문으로 함께
+// 한다. 라벨은 저장하지 않고 발신(sendAndLog)에서만 붙인다 — 관리자 화면(세션 상세·카드
+// 목록)은 채널과 무관하게 모든 봇 메시지 위에 이미 "AI" 배지를 붙이므로, 저장 텍스트에도
+// "AI 응답"을 박아두면 카카오 세션에서 배지와 텍스트가 겹쳐 보인다(실사용 지적). 상담원
+// 답장(routes/chat.js deliverAgentReply)도 같은 방식이다 — chat_messages에는 원문만 남기고,
+// 카카오로 나가는 텍스트에만 "상담원 : 이름"을 붙인다.
 async function botSay(session, text, label) {
-  const marked = withBotLabel(text);
-  await insertMessage(session.id, 'bot', marked);
-  return sendAndLog(session, marked, label);
+  await insertMessage(session.id, 'bot', text);
+  return sendAndLog(session, text, label);
 }
 
 // 발신 실패는 고객에게는 보이지 않으니(카카오로 안 나간 채 우리 쪽 로그만 남는 상태) 반드시
 // 로그를 남겨야 운영 중 "봇이 답장을 안 한다"는 문의가 왔을 때 원인을 바로 알 수 있다.
 async function sendAndLog(session, text, label) {
-  // botSay를 거치지 않고 직접 부르는 호출부(인계 안내 등)도 같은 라벨을 달도록 여기서 보정한다.
-  // withBotLabel은 멱등이라 botSay가 이미 붙인 경우엔 그대로 둔다.
+  // 발신 직전에만 라벨을 붙인다 — botSay든 이 함수를 직접 부르는 호출부(인계 안내 등)든
+  // 저장 텍스트는 항상 원문 그대로이므로, 여기서 한 번만 붙이면 모든 경로가 같은 라벨을 단다.
   const result = await kakaoConsult.sendMessage(session, withBotLabel(text));
   if (!result.ok) {
     // 발신 실패는 고객 화면에만 안 보일 뿐 우리 대화창에는 봇 답변이 남아 정상처럼 보인다 —
