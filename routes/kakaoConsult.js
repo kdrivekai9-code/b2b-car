@@ -16,10 +16,14 @@ const { searchKnowledgeBase } = require('../lib/knowledgeSearch');
 const {
   parseKakaoIntake, buildParsedFromClassified, buildMissingQuestion, normalizePhone, normalizePlate,
   PREMIUM_DECLINE_RE, PREMIUM_DECLINABLE_FIELD_IDS, premiumOrderTypeToIntentHint, parseTripTypeBareReply,
-  buildPremiumParsedFromClassified,
+  buildPremiumParsedFromClassified, isAffirmative, isNegative, FAILURE_MESSAGES,
 } = require('../lib/kakaoIntakeParser');
+const {
+  loadPendingIntake, savePendingIntake, savePendingState, clearPendingIntake, wasPendingIntakeExpired,
+  INTAKE_EXPIRED_NOTICE,
+} = require('../lib/intakeSlotState');
 const { findIntakeAccount, resolveIntakeContext, findAccountByPhone, linkUserKeyToAccount, createOrdersFromIntake } = require('../lib/kakaoIntakeService');
-const { createPremiumOrderFromIntake } = require('../lib/webPremiumIntakeService');
+const { createPremiumOrderFromIntake, buildPremiumPreviewMessage } = require('../lib/webPremiumIntakeService');
 const { getDailyDriverFields } = require('../lib/intakeFields');
 const { previewIntakeAddresses } = require('../lib/intakeAddressPreview');
 // 도선(배편) 구간 판정에 쓴다 — 주소의 시도를 봐야 해서 좌표 변환이 필요하다.
@@ -32,7 +36,7 @@ const { sendOrderPhotos, isPhotoRequest, isOdometerRequest, answerOdometer, coun
 // 주소 후보 검색·선택은 웹 접수 화면과 같은 규칙을 쓴다(lib/addressCandidates.js).
 const { searchAddressCandidates, needsDisambiguation, buildCandidateListText, matchCandidateChoice, getClarifyText } = require('../lib/addressCandidates');
 const { getSmalltalkMessage } = require('../lib/smallTalk');
-const { buildSuggestion, buildFareSuggestion, buildHoursSuggestion, isHoursQuestion, toIntakeFields } = require('../lib/agentAssist');
+const { buildSuggestion, buildFareSuggestion, buildHoursSuggestion, isHoursQuestion, toIntakeFields, buildIntakeReply } = require('../lib/agentAssist');
 const { runDispatchAgent } = require('../lib/mcpDispatchAgent');
 const { notify } = require('../lib/push');
 const { broadcastMessage, broadcastSessionListChanged } = require('../lib/realtimeChat');
@@ -677,56 +681,13 @@ async function handoffWithParsedSlots(session, parsed, text, reasonLabel) {
 // 되묻기 상태 — 필수 필드가 빠진 폼은 부족한 항목만 물어보고 원문을 세션에 보관한다.
 // 고객이 보충 정보를 보내면 원문에 이어붙여 다시 파싱한다(로그의 "정보 보충" 패턴 —
 // "대전광역시 동구 용전동 176-13 입니다" 같은 한 줄이 실제로 이렇게 들어온다).
-const INTAKE_SLOT_TTL_MINUTES = 30;
-
-async function loadPendingIntake(session) {
-  if (!session.intake_slots_json) return null;
-  try {
-    const saved = JSON.parse(session.intake_slots_json);
-    if (!saved || !saved.savedAt) return null;
-    if (!saved.raw && saved.purpose !== 'agent') return null;
-    if (Date.now() - saved.savedAt > INTAKE_SLOT_TTL_MINUTES * 60000) return null;
-    return saved;
-  } catch (e) {
-    return null;
-  }
-}
-
-// "진행 중인 되묻기가 없다"와 "있었는데 시간이 지나 사라졌다"는 고객 입장에서 다르다. 후자를
-// 조용히 넘기면, 맥락 없이 짧게 이어 보낸 답(예: "판교역")이 새 메시지로 재분류된다 — 실측
-// 사고: 도착지를 물어본 지 78분 뒤(TTL 30분 초과) "판교역"만 보냈더니 대리운전 요청으로
-// 오분류돼 "신규 접수는 상담원 연결을…"이 나갔다(사용자 입장에선 도착지 답변인데 엉뚱한 안내).
-// 만료를 감지하면 tryHandleIntake가 이걸로 명시적 안내를 보내고 처음부터 다시 받는다.
-function wasPendingIntakeExpired(session) {
-  if (!session.intake_slots_json) return false;
-  try {
-    const saved = JSON.parse(session.intake_slots_json);
-    if (!saved || !saved.savedAt) return false;
-    if (!saved.raw && saved.purpose !== 'agent') return false;
-    return Date.now() - saved.savedAt > INTAKE_SLOT_TTL_MINUTES * 60000;
-  } catch (e) {
-    return false;
-  }
-}
+// 저장·조회·만료 판정은 웹 AI 접수(lib/webIntakeTurn.js)와 공유한다(lib/intakeSlotState.js) —
+// 위에서 이미 require했다.
 
 // 동의를 기다리는 동안 "무엇을 하려던 것인지"까지 함께 들고 있는다 — 동의가 도착하면
 // 접수는 접수대로, 상담원 연결은 상담원 연결대로 이어가야 한다.
 async function savePendingConsentPurpose(session, purpose, raw) {
-  await db.run(
-    `UPDATE chat_sessions SET intake_slots_json = ?,
-     intake_updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') WHERE id = ?`,
-    [JSON.stringify({ raw: raw || '', savedAt: Date.now(), purpose }), session.id]
-  ).catch((e) => console.error('동의 대기 상태 저장 실패:', e.message));
-}
-
-// missing을 함께 남긴다 — 다음 메시지에서 "이번 답변으로 무엇이 채워졌는지"를 알아야
-// 그 값을 되읽어줄 수 있다(고객은 자기가 보낸 차량번호가 제대로 들어갔는지 알 방법이 없다).
-async function savePendingIntake(session, raw, missing, extra) {
-  await db.run(
-    `UPDATE chat_sessions SET intake_slots_json = ?,
-     intake_updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') WHERE id = ?`,
-    [JSON.stringify({ raw, missing: missing || [], savedAt: Date.now(), ...(extra || {}) }), session.id]
-  ).catch((e) => console.error('접수 슬롯 저장 실패:', e.message));
+  await savePendingState(session, { raw: raw || '', purpose });
 }
 
 // 되묻기 답변으로 채워진 항목을 그대로 되읽어준다.
@@ -755,19 +716,10 @@ async function announceFilledFields(session, pendingIntake, parsed) {
   await botSay(session, lines.join('\n'), '되묻기 답변 확인');
 }
 
-async function clearPendingIntake(session) {
-  await db.run('UPDATE chat_sessions SET intake_slots_json = NULL WHERE id = ?', [session.id])
-    .catch((e) => console.error('접수 슬롯 정리 실패:', e.message));
-}
-
 // 주소 후보를 고르는 중인 상태를 저장한다 — 웹 접수 화면의 choose_address_candidate 단계와
 // 같은 역할이다. 카카오는 화면이 없어 번호로 받는다.
 async function savePendingAddressChoice(session, state) {
-  await db.run(
-    `UPDATE chat_sessions SET intake_slots_json = ?,
-     intake_updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') WHERE id = ?`,
-    [JSON.stringify({ ...state, savedAt: Date.now() }), session.id]
-  ).catch((e) => console.error('주소 선택 대기 저장 실패:', e.message));
+  return savePendingState(session, state);
 }
 
 // 접수 진행 전에 주소가 여러 곳으로 검색되면 물어본다. 물어봤으면 true를 돌려준다.
@@ -905,6 +857,76 @@ async function handleAddressChoiceReply(session, pending, text) {
   return completeIntake(session, parsed, replacedRaw, geoCache);
 }
 
+// 등록 전 "네" 확인에 대한 답 — 웹의 confirm 처리(isAffirmative/isNegative)와 같은 판정을 쓴다
+// (lib/kakaoIntakeParser.js에서 공유). "네"면 저장해둔 parsed로 실제 등록을 진행하고, "아니오"면
+// 취소, 그 외는 "수정"으로 보고 원문에 이어붙여 다시 판단한다.
+async function handleConfirmReply(session, pending, text) {
+  if (isAffirmative(text)) {
+    const parsed = pending.parsed;
+    if (!parsed) {
+      await clearPendingIntake(session);
+      await botSay(session, '접수 내용을 다시 확인할 수 없습니다. 처음부터 다시 알려주세요.', '확인 상태 유실');
+      return true;
+    }
+    if (pending.category === 'premium_daily') {
+      await registerPremiumOrder(session, parsed, pending.raw);
+    } else {
+      await registerDispatchOrder(session, parsed, pending.raw, new Map());
+    }
+    return true;
+  }
+  if (isNegative(text)) {
+    await clearPendingIntake(session);
+    await botSay(session, '접수를 취소했습니다. 다시 접수하시려면 내용을 입력해주세요.', '접수 취소');
+    return true;
+  }
+
+  // 그 외 답변은 "수정"으로 본다 — 원문에 이어붙여 다시 판단한다(웹과 같은 규칙). 확인 상태는
+  // 지운다 — 재판단 결과가 다시 처음부터(되묻기든 확인이든) 알맞은 상태를 새로 저장한다.
+  await clearPendingIntake(session);
+  const mergedRaw = `${pending.raw}\n${text}`;
+
+  if (pending.category === 'premium_daily') {
+    const overrides = { tripType: pending.parsed && pending.parsed.tripType, declined: (pending.parsed && pending.parsed.declined) || [] };
+    let classified;
+    try {
+      classified = await classifyAndExtract(mergedRaw, null, premiumOrderTypeToIntentHint(pending.orderType));
+    } catch (e) {
+      console.error('카카오 프리미엄/일일기사 수정 재분류 실패:', e.message);
+      await botSay(session, '요청을 이해하지 못했습니다. 접수 내용을 다시 말씀해주세요.', '수정 재분류 실패');
+      return true;
+    }
+    const parsed = buildPremiumParsedFromClassified(classified, mergedRaw, overrides);
+    parsed.orderType = pending.orderType;
+    if (parsed.waypointAddress) {
+      await handoffWithParsedSlots(session, parsed, mergedRaw, '경유지 포함(자동 접수 불가)');
+      return true;
+    }
+    await advancePremiumIntakeKakao(session, parsed, mergedRaw);
+    return true;
+  }
+
+  // 탁송 수정 — 폼 파서 먼저, 실패하면 자유문장 분류로(reparseAfterAddressChoice가 이미 같은
+  // 순서를 구현해두었다 — 이름은 "주소 선택 후"지만 로직 자체는 "폼 실패시 LLM 폴백"이라
+  // 여기서도 그대로 재사용한다).
+  const parsed = await reparseAfterAddressChoice(mergedRaw);
+  if (!parsed.matched) {
+    await botSay(session, '접수 내용을 다시 알려주시겠어요?', '수정 요청 파싱 실패');
+    return true;
+  }
+  if (!parsed.complete) {
+    await savePendingIntake(session, mergedRaw, parsed.missing);
+    await saveIntakeDraft(session, parsed);
+    const addressPreview = await previewIntakeAddresses(parsed);
+    await botSay(session, buildMissingQuestion(parsed.missing, parsed, addressPreview), '접수 되묻기(수정)');
+    return true;
+  }
+  const geoCache = new Map();
+  if (await askAddressChoiceIfNeeded(session, parsed, mergedRaw, geoCache)) return true;
+  await completeIntake(session, parsed, mergedRaw, geoCache);
+  return true;
+}
+
 // 접수 폼 처리 — 처리했으면 true, 폼이 아니면 false를 돌려준다(호출부가 다음 경로로 넘긴다).
 async function tryHandleIntake(session, text) {
   let parsed = parseKakaoIntake(text);
@@ -921,17 +943,17 @@ async function tryHandleIntake(session, text) {
       // 만료 사실을 알려 처음부터 다시 받는다 — 사용자 지적대로 "끊겼으면 끊겼다"고 답해야 한다.
       if (wasPendingIntakeExpired(session)) {
         await clearPendingIntake(session);
-        await botSay(
-          session,
-          '이전에 진행하시던 접수 내용이 시간이 많이 지나 초기화되었습니다. 번거로우시겠지만 출발지·도착지·차량번호·탁송 일시를 다시 한 번에 알려주시겠어요?\n(예: 서울 강남구 OO빌딩 → 인천 중구 OO공항, 그랜저 12가3456, 내일 오후 2시)',
-          '접수 시간초과 안내'
-        );
+        await botSay(session, INTAKE_EXPIRED_NOTICE, '접수 시간초과 안내');
         return true;
       }
       return false;
     }
     // 주소 후보를 고르는 중이면 이 답변은 보충 정보가 아니라 "번호 선택"이다.
     if (pending.awaiting === 'address_choice') return handleAddressChoiceReply(session, pending, text);
+    // 등록 전 "네" 확인 대기 — processBotTurn 맨 앞에서 이미 가로채지만(SMALL_TALK_RE보다
+    // 먼저 처리해야 하는 이유는 그쪽 주석 참고), 다른 경로로 tryHandleIntake가 불릴 때도
+    // 안전하게 같은 곳으로 보낸다.
+    if (pending.awaiting === 'confirm') return handleConfirmReply(session, pending, text);
     // 연락처를 묻는 중이면 "1"/"2"(보기 선택) 또는 직접 입력한 번호다.
     if (pending.awaiting === 'origin_contact' || pending.awaiting === 'destination_contact') {
       return handleContactReply(session, pending, text);
@@ -1063,16 +1085,11 @@ function buildDestContactQuestion(originContact, requesterPhone) {
 
 // 연락처 수집 대기 상태 — 파싱 결과 전체를 함께 들고 있다가, 번호를 받으면 이어서 등록한다.
 async function savePendingContact(session, parsed, rawText, awaiting, ctx) {
-  await db.run(
-    `UPDATE chat_sessions SET intake_slots_json = ?,
-     intake_updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') WHERE id = ?`,
-    [JSON.stringify({
-      raw: rawText, awaiting, parsedDraft: parsed,
-      requesterPhone: (ctx && ctx.requesterPhone) || null,
-      originContact: (ctx && ctx.originContact) || null,
-      savedAt: Date.now(),
-    }), session.id]
-  ).catch((e) => console.error('연락처 대기 상태 저장 실패:', e.message));
+  return savePendingState(session, {
+    raw: rawText, awaiting, parsedDraft: parsed,
+    requesterPhone: (ctx && ctx.requesterPhone) || null,
+    originContact: (ctx && ctx.originContact) || null,
+  });
 }
 
 // 출발지 → 도착지 순으로, 빠진 연락처를 하나씩 묻는다. 물어봤으면 true(여기서 멈춤), 다 있으면 false.
@@ -1163,6 +1180,14 @@ async function completePremiumIntake(session, parsed, rawText, cache) {
     return;
   }
 
+  // 등록 전 "네" 확인 — 웹 AI 접수와 같은 방식(위 completeIntake와 같은 이유).
+  await savePendingState(session, { raw: rawText, awaiting: 'confirm', category: 'premium_daily', orderType: parsed.orderType, parsed });
+  await botSay(session, `${buildPremiumPreviewMessage(parsed)}\n\n맞으면 "네", 다시 입력하시려면 내용을 고쳐서 다시 보내주세요.`, '접수 확인 대기(프리미엄/일일기사)');
+}
+
+// "네" 확인 후 실제 등록.
+async function registerPremiumOrder(session, parsed, rawText) {
+  const account = await resolveIntakeContextCached(session);
   let result;
   try {
     result = await createPremiumOrderFromIntake({ session, account, parsed, orderType: parsed.orderType, sourceChannel: 'kakao' });
@@ -1180,12 +1205,15 @@ async function completePremiumIntake(session, parsed, rawText, cache) {
     return;
   }
 
-  const labels = {
-    origin_geocode_failed: '출발지 주소 좌표 확인 실패',
-    operating_hours: '운영시간 밖 요청',
-    exception: '자동 접수 오류',
-  };
-  await handoffWithParsedSlots(session, parsed, rawText, labels[result.reason] || result.reason || '자동 접수 실패');
+  // 실패 사유 안내 — 탁송의 registerDispatchOrder와 같은 원칙(웹과 같은 문구, 고객이 스스로
+  // 못 고치는 사유만 상담원에게 인계). 프리미엄/일일기사는 waypoint_unsupported가 이미 더
+  // 앞단(parsed.waypointAddress)에서 걸러지므로 여기 도달하지 않는다.
+  const message = FAILURE_MESSAGES[result.reason];
+  if (message) {
+    await botSay(session, message, '접수 실패 안내(프리미엄/일일기사)');
+    return;
+  }
+  await handoffWithParsedSlots(session, parsed, rawText, result.reason || '자동 접수 오류');
 }
 
 // 다 채워졌는지 보고 되묻거나(카테고리 전용 필드 목록으로) 주소 확인 후 등록으로 넘어간다 —
@@ -1282,9 +1310,21 @@ async function completeIntake(session, parsed, rawText, cache) {
   }
 
   // 탁송 자동 접수는 출발지·도착지 연락처가 필수 — 빠졌으면 등록하지 않고 물어본다(번호 선택지
-  // 제공). 다 채워졌으면 false를 돌려주고 그대로 등록으로 넘어간다.
+  // 제공). 다 채워졌으면 false를 돌려주고 그대로 확인 단계로 넘어간다.
   if (await requireContacts(session, parsed, rawText, account)) return true;
 
+  // 등록 전 "네" 확인 — 웹 AI 접수(lib/webIntakeTurn.js finishParsed)와 같은 방식이다(사용자
+  // 확정 규칙 변경: 예전에는 필드가 차는 즉시 등록하고 사후에 "잘못됐으면 알려주세요"로
+  // 확인했다). 실제 등록은 registerDispatchOrder가 "네" 답을 받은 뒤에 한다.
+  await savePendingState(session, { raw: rawText, awaiting: 'confirm', category: 'dispatch', parsed });
+  await botSay(session, `${buildIntakeReply(parsed)}\n\n맞으면 "네", 다시 입력하시려면 내용을 고쳐서 다시 보내주세요.`, '접수 확인 대기');
+  return true;
+}
+
+// "네" 확인 후 실제 등록 — 예전 completeIntake의 등록 로직을 그대로 옮겼다. 확인 단계를
+// 하나 끼워 넣었을 뿐, 등록 자체(콜마너 연동·분리 접수 판단)는 바뀌지 않았다.
+async function registerDispatchOrder(session, parsed, rawText, cache) {
+  const account = await resolveIntakeContextCached(session);
   let result;
   try {
     result = await createOrdersFromIntake({ session, account, parsed, cache });
@@ -1293,46 +1333,47 @@ async function completeIntake(session, parsed, rawText, cache) {
     result = { ok: false, reason: 'exception', detail: e.message };
   }
 
-  await clearPendingIntake(session);
-
-  // 자동 등록에 성공했으면 카드 폼 프리필(draft_json)을 비운다 — 이미 오더가 만들어졌는데
-  // 폼이 채워진 채로 남으면 상담원이 같은 건을 한 번 더 등록할 수 있다.
-  if (result.ok) {
-    await db.run('UPDATE chat_sessions SET draft_json = NULL WHERE id = ?', [session.id])
-      .catch((e) => console.error('접수 완료 후 폼 프리필 정리 실패:', e.message));
-  }
-
   // 나뉜 건 중 출발 시각을 모르는 것이 있으면 고객에게 묻는다 — 임의로 앞 건과 같은 시각을
-  // 넣으면 잘못된 시각으로 접수된다. 날짜는 이미 알고 나뉜 것이라(그게 분리 조건이다) 시각만 묻는다.
+  // 넣으면 잘못된 시각으로 접수된다. 날짜는 이미 알고 나뉜 것이라(그게 분리 조건이다) 시각만
+  // 묻는다. "네"를 한 번 더 받을 이유는 없다 — 부족한 조각 하나만 채우면 그대로 등록된다.
   if (!result.ok && result.reason === 'split_schedule_missing') {
     const detail = result.detail || {};
     const target = (detail.parts || []).find((p) => (detail.missingSchedule || []).includes(p.splitSeq));
     if (target) {
       await savePendingIntake(session, rawText, parsed.missing, { awaiting: 'split_schedule' });
       await botSay(session, buildScheduleQuestion(target), '분리 접수 시각 확인');
-      return true;
+      return;
     }
   }
 
-  if (!result.ok) {
-    // 등록을 못 한 이유는 고객에게 그대로 노출하지 않는다(내부 사정) — 상담원 인계 사유로만 남긴다.
-    const labels = {
-      origin_geocode_failed: '출발지 주소 좌표 확인 실패',
-      operating_hours: '운영시간 밖 요청',
-      incomplete_form: '필수 항목 누락',
-      auto_register_off: '자동 등록 꺼짐',
-      no_account: '채널 매핑 없음',
-      waypoint_unsupported: '경유지 포함(같은 날 경유는 자동 접수 불가)',
-      split_schedule_missing: '분리 접수 시각 미확인',
-      exception: '자동 접수 오류',
-    };
-    await handoffWithParsedSlots(session, parsed, rawText, labels[result.reason] || result.reason);
-    return true;
+  await clearPendingIntake(session);
+
+  if (result.ok) {
+    // 자동 등록에 성공했으면 카드 폼 프리필(draft_json)을 비운다 — 이미 오더가 만들어졌는데
+    // 폼이 채워진 채로 남으면 상담원이 같은 건을 한 번 더 등록할 수 있다.
+    await db.run('UPDATE chat_sessions SET draft_json = NULL WHERE id = ?', [session.id])
+      .catch((e) => console.error('접수 완료 후 폼 프리필 정리 실패:', e.message));
+    await botSay(session, result.message, '접수 확인');
+    broadcastSessionListChangedAsync({ event: 'order_created', sessionId: session.id });
+    return;
   }
 
-  await botSay(session, result.message, '접수 확인');
-  broadcastSessionListChangedAsync({ event: 'order_created', sessionId: session.id });
-  return true;
+  // 실패 사유 안내 — 웹(lib/webIntakeTurn.js FAILURE_MESSAGES)과 같은 문구를 그대로 보여준다.
+  // origin_geocode_failed/operating_hours/exception은 고객이 다시 시도해서 스스로 고칠 수
+  // 있는 사유라 그 문구만으로 끝난다. waypoint_unsupported(경유지 있는데 같은 날 접수라
+  // 나눌 수 없는 경우)는 고객이 스스로 해결할 방법이 없어, 사유를 알린 뒤에도 상담원에게
+  // 인계한다 — 웹은 이 경우 "오더 등록 화면"으로 안내하지만 카카오 고객에게는 그 화면이
+  // 없으므로, 같은 원칙("이 흐름이 못 다루면 사람에게")을 상담원 인계로 구현한다.
+  const message = FAILURE_MESSAGES[result.reason];
+  if (message) {
+    await botSay(session, message, '접수 실패 안내');
+    if (result.reason === 'waypoint_unsupported') {
+      await handoffWithParsedSlots(session, parsed, rawText, '경유지 포함(같은 날 경유는 자동 접수 불가)');
+    }
+    return;
+  }
+  // 위 목록에 없는 사유(예상 밖 오류)는 안전하게 상담원에게 넘긴다.
+  await handoffWithParsedSlots(session, parsed, rawText, result.reason || '자동 접수 오류');
 }
 
 // "네", "감사합니다" 한 마디에 봇이 또 답하면 대화가 무한히 길어진다. 로그에서 상담원 발화의
@@ -1387,6 +1428,23 @@ async function tryDispatchAgent(session, text) {
 }
 
 async function processBotTurn(session, text) {
+  // 사고·클레임은 어떤 상태에서도 최우선이다 — "네" 확인 대기 중이라도 마찬가지다(아래
+  // 확인 대기 체크보다 반드시 먼저 와야 한다).
+  if (ESCALATION_RE.test(text)) {
+    // 상담원 연결 앞에서는 동의를 요구하지 않는다 — 사람이 붙어서 직접 물어보면 된다.
+    // 동의 버튼은 조회·접수 시점에만 쓴다(사용자 확정 규칙).
+    return handleUnsupported(session, text, '사고·클레임 문의');
+  }
+
+  // 등록 전 "네" 확인을 기다리는 중이면 스몰토크 필터보다 먼저 처리한다 — SMALL_TALK_RE가
+  // "네"/"넵"/"예" 등을 정보량 0인 되받기로 보고 응답 없이 넘기는데, 바로 그 표현이 지금은
+  // "맞으면 네" 질문에 대한 실제 답이다. 순서를 바꾸지 않으면 고객이 정확히 요청받은 대로
+  // "네"라고 답해도 봇이 조용히 무시하게 된다.
+  const confirmPending = await loadPendingIntake(session);
+  if (confirmPending && confirmPending.awaiting === 'confirm') {
+    return handleConfirmReply(session, confirmPending, text);
+  }
+
   if (SMALL_TALK_RE.test(text)) return;
 
   // 인사·자기소개는 지식검색으로 보내지 않는다 — 웹 위젯과 같은 규칙(lib/smallTalk.js).
@@ -1394,12 +1452,6 @@ async function processBotTurn(session, text) {
   if (smallTalk) {
     await botSay(session, smallTalk, '스몰토크 응답');
     return;
-  }
-
-  if (ESCALATION_RE.test(text)) {
-    // 상담원 연결 앞에서는 동의를 요구하지 않는다 — 사람이 붙어서 직접 물어보면 된다.
-    // 동의 버튼은 조회·접수 시점에만 쓴다(사용자 확정 규칙).
-    return handleUnsupported(session, text, '사고·클레임 문의');
   }
 
   // 정형 접수 폼이 이 채널 트래픽의 절반이라 LLM 분류보다 먼저 태운다.
