@@ -830,6 +830,10 @@ async function tryHandleIntake(session, text) {
     if (!pending) return false;
     // 주소 후보를 고르는 중이면 이 답변은 보충 정보가 아니라 "번호 선택"이다.
     if (pending.awaiting === 'address_choice') return handleAddressChoiceReply(session, pending, text);
+    // 연락처를 묻는 중이면 "1"/"2"(보기 선택) 또는 직접 입력한 번호다.
+    if (pending.awaiting === 'origin_contact' || pending.awaiting === 'destination_contact') {
+      return handleContactReply(session, pending, text);
+    }
     mergedRaw = pending.raw + '\n' + text;
     parsed = parseKakaoIntake(mergedRaw);
     if (!parsed.matched) return false;
@@ -908,31 +912,140 @@ async function requireVehicleTypeForFerry(session, parsed, rawText, cache) {
   return true;
 }
 
+// ── 연락처(출발지·도착지) 필수 확인 ──────────────────────────────────────────
+// 탁송은 기사가 차를 인계·인수할 때 연락할 번호가 있어야 한다 — 출발지·도착지 연락처가 없으면
+// 등록하지 않고 물어본다. 매핑된 계정이면 "주문자 연락처"(계정 담당자/동의 번호)를 1번 보기로,
+// 도착지에는 "출발지 연락처"도 보기로 제시해 한 글자로 답할 수 있게 한다.
+
+// 표시·저장용 전화번호. 10~11자리면 하이픈 포맷, 아니면 null(유효하지 않은 입력).
+function asPhone(raw) {
+  const digits = String(raw || '').replace(/\D/g, '');
+  if (digits.length !== 10 && digits.length !== 11) return null;
+  return normalizePhone(digits);
+}
+
+// "주문자 연락처" — 동의로 받은 번호(external_phone)를 우선, 없으면 매핑된 계정 담당자의 번호.
+async function loadRequesterPhone(session, account) {
+  const consent = asPhone(session && session.external_phone);
+  if (consent) return consent;
+  if (account && account.user_id) {
+    const u = await db.get('SELECT phone FROM users WHERE id = ?', [account.user_id]).catch(() => null);
+    return asPhone(u && u.phone);
+  }
+  return null;
+}
+
+function buildOriginContactQuestion(requesterPhone) {
+  const lines = ['출발지 담당자 연락처를 알려주세요.'];
+  if (requesterPhone) {
+    lines.push(`1. 주문자 연락처 ${requesterPhone} 사용이면 1번을 입력하시고`);
+    lines.push('다르면 직접 입력해주세요');
+  }
+  lines.push('(예 : 010-1234-5678)');
+  return lines.join('\n');
+}
+
+function buildDestContactQuestion(originContact, requesterPhone) {
+  const lines = ['도착지(받는분) 연락처를 알려주세요.'];
+  lines.push(`1. 출발지 연락처 ${originContact} 사용이면 1번`);
+  if (requesterPhone) lines.push(`2. 주문자 연락처 ${requesterPhone} 사용이면 2번`);
+  lines.push('다르면 직접 입력해주세요');
+  lines.push('(예 : 010-1234-5678)');
+  return lines.join('\n');
+}
+
+// 연락처 수집 대기 상태 — 파싱 결과 전체를 함께 들고 있다가, 번호를 받으면 이어서 등록한다.
+async function savePendingContact(session, parsed, rawText, awaiting, ctx) {
+  await db.run(
+    `UPDATE chat_sessions SET intake_slots_json = ?,
+     intake_updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') WHERE id = ?`,
+    [JSON.stringify({
+      raw: rawText, awaiting, parsedDraft: parsed,
+      requesterPhone: (ctx && ctx.requesterPhone) || null,
+      originContact: (ctx && ctx.originContact) || null,
+      savedAt: Date.now(),
+    }), session.id]
+  ).catch((e) => console.error('연락처 대기 상태 저장 실패:', e.message));
+}
+
+// 출발지 → 도착지 순으로, 빠진 연락처를 하나씩 묻는다. 물어봤으면 true(여기서 멈춤), 다 있으면 false.
+async function requireContacts(session, parsed, rawText, account) {
+  const requesterPhone = await loadRequesterPhone(session, account);
+  if (!parsed.origin || !parsed.origin.contact) {
+    await savePendingContact(session, parsed, rawText, 'origin_contact', { requesterPhone });
+    await botSay(session, buildOriginContactQuestion(requesterPhone), '출발지 연락처 요청');
+    return true;
+  }
+  const originContact = asPhone(parsed.origin.contact) || parsed.origin.contact;
+  if (!parsed.destination || !parsed.destination.contact) {
+    await savePendingContact(session, parsed, rawText, 'destination_contact', { requesterPhone, originContact });
+    await botSay(session, buildDestContactQuestion(originContact, requesterPhone), '도착지 연락처 요청');
+    return true;
+  }
+  return false;
+}
+
+// 연락처 되묻기 답변 처리 — "1"/"2"는 보기 선택, 그 외는 직접 입력한 번호로 본다.
+async function handleContactReply(session, pending, text) {
+  const parsed = pending.parsedDraft;
+  if (!parsed || !parsed.origin || !parsed.destination) {
+    await clearPendingIntake(session);
+    return false; // 안전장치 — 드래프트가 없으면 일반 경로로 되돌린다.
+  }
+  const trimmed = String(text || '').trim();
+  const isOrigin = pending.awaiting === 'origin_contact';
+
+  let phone = null;
+  if (isOrigin) {
+    if (trimmed === '1' && pending.requesterPhone) phone = pending.requesterPhone;
+    else phone = asPhone(trimmed);
+  } else if (trimmed === '1' && pending.originContact) phone = pending.originContact;
+  else if (trimmed === '2' && pending.requesterPhone) phone = pending.requesterPhone;
+  else phone = asPhone(trimmed);
+
+  if (!phone) {
+    const reAsk = isOrigin
+      ? buildOriginContactQuestion(pending.requesterPhone)
+      : buildDestContactQuestion(pending.originContact, pending.requesterPhone);
+    await botSay(session, `연락처를 알아듣지 못했습니다.\n${reAsk}`, '연락처 재안내');
+    return true;
+  }
+
+  if (isOrigin) parsed.origin = { ...parsed.origin, contact: phone };
+  else parsed.destination = { ...parsed.destination, contact: phone };
+  await botSay(session, `${isOrigin ? '출발지' : '도착지'} 연락처를 ${phone}(으)로 확인했습니다.`, '연락처 확인');
+
+  // 남은 연락처가 있으면 completeIntake가 이어서 물어보고, 다 찼으면 등록으로 넘어간다.
+  return completeIntake(session, parsed, pending.raw, new Map());
+}
+
 // cache(선택): askAddressChoiceIfNeeded가 이 턴에서 이미 지오코딩한 결과가 있으면 여기서
 // 다시 네트워크를 타지 않고 재사용한다. 안 넘기면(다른 호출부) createOrdersFromIntake가
 // 내부적으로 새 Map을 만들어 최소한의 재사용(분리 접수 루프 안에서만)은 그대로 유지한다.
 async function completeIntake(session, parsed, rawText, cache) {
+  // 접수 주체(거래처)를 먼저 확인한다 — 동의를 청할지 여부가 여기에 달려 있다.
+  const account = await resolveIntakeContextCached(session);
+
   // ── 개인정보 동의 게이트 ────────────────────────────────────────────────
-  // false면 "방금 동의 버튼을 보냈다"는 뜻 — 여기서 멈춘다.
-  if (!await ensurePersonalConsent(session, 'intake', rawText)) return true;
-  // true라고 동의가 된 건 아니다. 이미 버튼을 보낸 뒤(동의 대기/거부)에는 ensurePersonalConsent가
-  // "상담원 인계는 그대로 진행하라"는 의미로 true를 준다 — 그런데 접수는 실제 동의(연락처 수신)가
-  // 없으면 안 된다. 예전엔 이 구분이 없어, 채널에 매핑된 계정만 있으면 "동의 안 하고 알려주면
-  // 안돼?"라고 거부한 고객의 오더까지 자동 등록됐다(OID1209 사례). 동의 전이면 등록하지 않고
-  // 상담원에게 넘긴다 — 동의 버튼은 대화에 남아 있어, 눌러주면 /receive/personal_info의
-  // 이어처리(resume_after_consent)가 그때 자동 접수한다. 그래서 pending은 지우지 않는다.
-  if (!hasPersonalConsent(session)) {
-    await handoffWithParsedSlots(session, parsed, rawText, '개인정보 미동의 — 상담원 확정 필요(동의 시 자동 접수)');
-    return true;
+  // 매핑된 계정(채널 매핑 또는 동의 번호로 찾은 거래처)이 있으면 접수 주체가 이미 확정된
+  // 것이므로 동의 버튼을 띄우지 않는다. 매핑이 없을 때만, 누구의 요청인지 확인하기 위해
+  // 동의(성함+연락처)를 받는다. (동의는 미매핑 채널의 신원 확인 수단이지, 매핑 고객에게까지
+  // 매번 받아야 하는 절차가 아니다 — 사용자 확정 규칙.)
+  if (!account) {
+    if (!await ensurePersonalConsent(session, 'intake', rawText)) return true; // 방금 버튼 발송
+    if (!hasPersonalConsent(session)) {
+      // 버튼은 보냈지만 동의 전(또는 거부) — 등록하지 않고 상담원에게 넘긴다. 버튼은 대화에
+      // 남아 있어, 눌러주면 resume_after_consent가 그때 자동 접수한다(그래서 pending 유지).
+      await handoffWithParsedSlots(session, parsed, rawText, '개인정보 미동의 — 상담원 확정 필요(동의 시 자동 접수)');
+      return true;
+    }
+    // 동의로 번호를 받았지만 그 번호로도 거래처를 못 찾았다 → 아래 handoff(거래처 확인 불가).
   }
 
   if (await requireVehicleTypeForFerry(session, parsed, rawText, cache)) return true;
 
-  // 번호(개인정보 동의로 받은 것) → 채널 매핑 순으로 접수 주체를 찾는다.
-  const account = await resolveIntakeContextCached(session);
-
   if (!account || !account.auto_register) {
-    // 매핑이 없거나 자동 등록을 켜지 않은 채널 — 파싱만 하고 상담원에게 넘긴다.
+    // 매핑이 없거나 자동 등록을 켜지 않은 채널 — 파싱만 하고 상담원에게 넘긴다(연락처는 상담원이 확인).
     await clearPendingIntake(session);
     const reason = !account
       ? (consentPending(session) ? '개인정보 동의 대기' : '거래처 확인 불가')
@@ -940,6 +1053,10 @@ async function completeIntake(session, parsed, rawText, cache) {
     await handoffWithParsedSlots(session, parsed, rawText, reason);
     return true;
   }
+
+  // 탁송 자동 접수는 출발지·도착지 연락처가 필수 — 빠졌으면 등록하지 않고 물어본다(번호 선택지
+  // 제공). 다 채워졌으면 false를 돌려주고 그대로 등록으로 넘어간다.
+  if (await requireContacts(session, parsed, rawText, account)) return true;
 
   let result;
   try {

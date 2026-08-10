@@ -48,7 +48,7 @@ export default async function ChatSessionDetailPage({ params }) {
 
   return (
     <AppShell currentUser={data.currentUser} activePath="/chat/sessions" topNav>
-      <SessionDetailView initialSession={data.session} agents={data.agents} currentUser={data.currentUser} />
+      <SessionDetailView initialSession={data.session} mappedAccount={data.mappedAccount} agents={data.agents} currentUser={data.currentUser} />
     </AppShell>
   );
 }

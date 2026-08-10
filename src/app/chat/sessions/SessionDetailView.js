@@ -11,7 +11,7 @@ const STATUS_BADGE = { bot: 'gray', needs_agent: 'red', agent_active: 'blue', cl
 // SessionViewer의 액션바에 이미 있어 중복 렌더링하지 않고, 이 화면 상단엔 "다른 상담원
 // 지정" 드롭다운만 별도로 둔다(legacy는 두 폼이 나란히 있었지만, 액션이 겹치는 걸 피하려고
 // 위치만 재배치 — 기능 자체는 동일).
-export default function SessionDetailView({ initialSession, agents, currentUser }) {
+export default function SessionDetailView({ initialSession, mappedAccount, agents, currentUser }) {
   const [session, setSession] = useState(initialSession);
   const [assignAgentId, setAssignAgentId] = useState('');
   const [isAssigning, setIsAssigning] = useState(false);
@@ -72,6 +72,16 @@ export default function SessionDetailView({ initialSession, agents, currentUser 
             {/* 여기서 보내는 답장이 카카오 상담톡으로 나간다는 걸 입력 전에 알 수 있어야 한다. */}
             {session.channel === 'kakao' && <span className="badge amber">카카오 상담톡</span>}
           </p>
+          {/* 매핑된 거래처 — 카카오 세션이 어떤 계정/지사/거래처로 이어지는지 상단에 밝힌다. */}
+          {mappedAccount && (
+            <p className="page-sub mapped-account">
+              <span className="badge green">매핑 거래처</span>
+              {' '}{mappedAccount.groupName || mappedAccount.userName || '-'}
+              {mappedAccount.branchName ? ` · ${mappedAccount.branchName}` : ''}
+              {mappedAccount.userName ? ` · 담당 ${mappedAccount.userName}` : ''}
+              {mappedAccount.autoRegister && <span className="badge blue">자동접수</span>}
+            </p>
+          )}
         </div>
         <div className="page-head-actions">
           <a className="btn secondary" href="/chat/sessions">← 목록으로</a>

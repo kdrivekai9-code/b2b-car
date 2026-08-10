@@ -14,6 +14,7 @@ const { runDispatchAgent, checkDispatchDelay } = require('../lib/mcpDispatchAgen
 const { buildSuggestion } = require('../lib/agentAssist');
 const { runWebIntakeTurn } = require('../lib/webIntakeTurn');
 const kakaoConsult = require('../lib/kakaoConsult');
+const { describeMappedAccount } = require('../lib/kakaoIntakeService');
 const { logIntegrationErrorAsync } = require('../lib/integrationLog');
 const {
   broadcastMessage, broadcastReadReceipt, broadcastSessionListChanged, openSessionStream, openSessionListStream, closeChannel,
@@ -855,6 +856,8 @@ router.get('/sessions/:id', requireRole('admin'), asyncHandler(async (req, res) 
     WHERE cs.id = ?
   `, [req.params.id]);
   if (!session) return res.status(404).send('세션을 찾을 수 없습니다.');
+  // 카카오 세션이면 어떤 거래처로 이어지는지 카드 상단에 띄운다(매핑 없으면 null).
+  const mappedAccount = await describeMappedAccount(session).catch(() => null);
   const messages = await db.all('SELECT * FROM chat_messages WHERE session_id = ? ORDER BY id', [req.params.id]);
   const [agents, branches, groups, paymentMethods] = await Promise.all([
     db.all("SELECT id, name FROM users WHERE role = 'admin' AND status = 'active' ORDER BY name"),
@@ -898,6 +901,7 @@ router.get('/sessions/:id', requireRole('admin'), asyncHandler(async (req, res) 
     title: '상담 · #' + session.id,
     layoutMode: 'top-nav',
     session,
+    mappedAccount,
     messages,
     agents,
     branches,
@@ -916,6 +920,7 @@ router.get('/sessions/:id', requireRole('admin'), asyncHandler(async (req, res) 
 router.get('/sessions/:id/data.json', requireRole('admin'), asyncHandler(async (req, res) => {
   const session = await db.get(`
     SELECT cs.id, cs.status, cs.assigned_agent_id, cs.requested_feature, cs.created_at, cs.updated_at, cs.channel,
+      cs.external_user_key, cs.kakao_user_key, cs.kakao_service_key, cs.external_phone,
       ${CUSTOMER_NAME_SQL} AS user_name, ${CUSTOMER_ROLE_SQL} AS user_role, ${CUSTOMER_PHONE_SQL} AS user_phone,
       a.name AS assigned_agent_name
     FROM chat_sessions cs
@@ -924,8 +929,9 @@ router.get('/sessions/:id/data.json', requireRole('admin'), asyncHandler(async (
     WHERE cs.id = ?
   `, [req.params.id]);
   if (!session) return res.status(404).json({ error: '세션을 찾을 수 없습니다.' });
+  const mappedAccount = await describeMappedAccount(session).catch(() => null);
   const agents = await db.all("SELECT id, name FROM users WHERE role = 'admin' AND status = 'active' ORDER BY name");
-  res.json({ session, agents, currentUser: req.session.user });
+  res.json({ session, mappedAccount, agents, currentUser: req.session.user });
 }));
 
 router.post('/sessions/:id/assign-self', requireRole('admin'), asyncHandler(async (req, res) => {

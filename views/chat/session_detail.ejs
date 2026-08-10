@@ -39,6 +39,13 @@ function isQuestionBubble(msg) {
       <%# 여기서 보내는 답장이 카카오 상담톡으로 나간다는 걸 입력 전에 알 수 있어야 한다. %>
       <% if (session.channel === 'kakao') { %><span class="badge amber">카카오 상담톡</span><% } %>
     </p>
+    <%# 매핑된 거래처 — 카카오 세션이 어떤 계정/지사/거래처로 이어지는지 상단에 밝힌다. %>
+    <% if (typeof mappedAccount !== 'undefined' && mappedAccount) { %>
+      <p class="page-sub mapped-account">
+        <span class="badge green">매핑 거래처</span>
+        <%= mappedAccount.groupName || mappedAccount.userName || '-' %><% if (mappedAccount.branchName) { %> · <%= mappedAccount.branchName %><% } %><% if (mappedAccount.userName) { %> · 담당 <%= mappedAccount.userName %><% } %><% if (mappedAccount.autoRegister) { %> <span class="badge blue">자동접수</span><% } %>
+      </p>
+    <% } %>
   </div>
   <div class="page-head-actions">
     <a class="btn secondary" href="/chat/sessions">← 목록으로</a>
