@@ -71,8 +71,9 @@
                 <span class="badge <%= statusBadge[s.status] || 'gray' %>"><%= statusLabel[s.status] || s.status %></span>
               </span>
             </div>
-            <%# 카드 위쪽에 카카오 배지가 이미 있어 역할을 또 적지 않는다. %>
-            <div class="session-card-sub"><%= s.channel === 'kakao' ? (s.user_phone || '연락처 미확인') : ((s.user_role || '-') + (s.user_phone ? ' · ' + s.user_phone : '')) %></div>
+            <%# 카드 위쪽에 카카오 배지가 이미 있어 역할을 또 적지 않는다. 카카오는 UserKey만으론
+                누구인지 몰라, 매핑된 거래처(그룹·담당자)가 있으면 그걸 먼저 보여준다. %>
+            <div class="session-card-sub"><% if (s.channel === 'kakao') { %><% if (s.mapped_group_name || s.mapped_user_name) { %><%= s.mapped_group_name || s.mapped_user_name %><% if (s.mapped_user_name && s.mapped_group_name) { %> · 담당 <%= s.mapped_user_name %><% } %><%= s.user_phone ? ' · ' + s.user_phone : '' %><% } else { %><%= s.user_phone || '연락처 미확인' %><% } %><% } else { %><%= (s.user_role || '-') + (s.user_phone ? ' · ' + s.user_phone : '') %><% } %></div>
             <div class="session-card-msg" title="<%= s.last_message || '' %>"><%= s.last_message || '최근 메시지 없음' %></div>
             <div class="session-card-meta">메시지 <%= s.message_count %>개 · 업데이트 <%= s.updated_at %></div>
             <div class="session-card-meta">담당: <%= s.assigned_agent_name || '미지정' %></div>
@@ -321,6 +322,7 @@
                   "카카오 상담톡 고객 (…) (카카오) 카카오"처럼 같은 말이 세 번 나온다. %>
               <%= s.user_name || '-' %><% if (s.channel !== 'kakao') { %> <span style="color:var(--muted);">(<%= s.user_role || '-' %>)</span><% } %>
               <% if (s.channel === 'kakao') { %><span class="badge amber">카카오</span><% } %>
+              <% if (s.channel === 'kakao' && (s.mapped_group_name || s.mapped_user_name)) { %><div style="color:var(--muted);font-size:.85em;">↳ <%= s.mapped_group_name || s.mapped_user_name %><% if (s.mapped_user_name && s.mapped_group_name) { %> · 담당 <%= s.mapped_user_name %><% } %></div><% } %>
             </td>
             <td><span class="badge <%= statusBadge[s.status] || 'gray' %>"><%= statusLabel[s.status] || s.status %></span></td>
             <td><%= s.assigned_agent_name || '미지정' %></td>

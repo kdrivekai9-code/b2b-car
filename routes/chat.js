@@ -660,14 +660,35 @@ router.get('/sessions/needs-agent-summary', requireRole('admin'), asyncHandler(a
 // 읽기 전용 테이블만 대상)는 이 데이터만 있으면 되고, 카드뷰 전용 데이터(onlineAgents,
 // branches 등 — 실시간 채팅/오더등록폼에서만 쓰임)는 필요 없다.
 async function buildSessionListSessions() {
+  // 카카오 세션은 UserKey만으로는 누구인지 알 수 없다 — 매핑된 거래처(계정→지사→그룹)를 함께
+  // 붙여 카드에 띄운다. findIntakeAccount와 같은 규칙: 고객 단위 매핑(external_user_key)을
+  // 먼저, 없으면 채널 전체 매핑(service_key). 계정 테이블이 작아 세션당 LATERAL 조회가 가볍다.
   return db.all(`
     SELECT cs.*, ${CUSTOMER_NAME_SQL} AS user_name, ${CUSTOMER_ROLE_SQL} AS user_role, ${CUSTOMER_PHONE_SQL} AS user_phone,
       a.name AS assigned_agent_name,
+      macct.mapped_user_name, macct.mapped_branch_name, macct.mapped_group_name, macct.mapped_auto_register,
       (SELECT message FROM chat_messages WHERE session_id = cs.id ORDER BY id DESC LIMIT 1) AS last_message,
       (SELECT COUNT(*) FROM chat_messages WHERE session_id = cs.id) AS message_count
     FROM chat_sessions cs
     LEFT JOIN users u ON u.id = cs.user_id
     LEFT JOIN users a ON a.id = cs.assigned_agent_id
+    LEFT JOIN LATERAL (
+      SELECT u2.name AS mapped_user_name, b2.name AS mapped_branch_name,
+             g2.name AS mapped_group_name, ka.auto_register AS mapped_auto_register
+      FROM kakao_consult_accounts ka
+      LEFT JOIN users u2 ON u2.id = ka.user_id
+      LEFT JOIN branches b2 ON b2.id = ka.branch_id
+      LEFT JOIN groups_tbl g2 ON g2.id = ka.requester_group_id
+      WHERE ka.enabled = true
+        AND (
+          (ka.external_user_key IS NOT NULL
+            AND ka.external_user_key = COALESCE(cs.external_user_key, cs.kakao_user_key)
+            AND (ka.service_key IS NULL OR ka.service_key = cs.kakao_service_key))
+          OR (ka.external_user_key IS NULL AND ka.service_key = cs.kakao_service_key)
+        )
+      ORDER BY (ka.external_user_key IS NOT NULL) DESC, ka.id DESC
+      LIMIT 1
+    ) macct ON cs.channel = 'kakao'
     ORDER BY (cs.status = 'needs_agent') DESC, cs.updated_at DESC
   `);
 }

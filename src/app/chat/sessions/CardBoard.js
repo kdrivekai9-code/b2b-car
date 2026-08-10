@@ -204,8 +204,13 @@ export default function CardBoard({ initialSessions, initialOnlineAgents, curren
                     <span className={`badge ${STATUS_BADGE[s.status] || 'gray'}`}>{STATUS_LABEL[s.status] || s.status}</span>
                   </span>
                 </div>
-                {/* 카드 위쪽에 카카오 배지가 이미 있어 역할을 또 적지 않는다. */}
-                <div className="session-card-sub">{s.channel === 'kakao' ? (s.user_phone || '연락처 미확인') : `${s.user_role || '-'}${s.user_phone ? ` · ${s.user_phone}` : ''}`}</div>
+                {/* 카드 위쪽에 카카오 배지가 이미 있어 역할을 또 적지 않는다. 카카오는 UserKey만으론
+                    누구인지 몰라, 매핑된 거래처(그룹·담당자)가 있으면 그걸 먼저 보여준다. */}
+                <div className="session-card-sub">{s.channel === 'kakao'
+                  ? ((s.mapped_group_name || s.mapped_user_name)
+                    ? `${s.mapped_group_name || s.mapped_user_name}${s.mapped_user_name && s.mapped_group_name ? ` · 담당 ${s.mapped_user_name}` : ''}${s.user_phone ? ` · ${s.user_phone}` : ''}`
+                    : (s.user_phone || '연락처 미확인'))
+                  : `${s.user_role || '-'}${s.user_phone ? ` · ${s.user_phone}` : ''}`}</div>
                 <div className="session-card-msg" title={s.last_message || ''}>{s.last_message || '최근 메시지 없음'}</div>
                 <div className="session-card-meta">메시지 {s.message_count}개 · 업데이트 {s.updated_at}</div>
                 <div className="session-card-meta">담당: {s.assigned_agent_name || '미지정'}</div>
