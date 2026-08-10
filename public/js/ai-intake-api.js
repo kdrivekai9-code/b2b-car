@@ -174,6 +174,19 @@
         .catch(function () { return { handled: false, reason: 'network' }; });
     },
 
+    // 접수 대화 판단(서버 이전, Stage A — 탁송만). fallthrough:true면 이 요청은 다루지
+    // 않은 것이니 호출부가 기존 로컬 판단(api.parseText)으로 넘어가야 한다.
+    intakeTurn: function (sessionId, text) {
+      return postJson('/chat/' + sessionId + '/intake-turn', { text: text }, { headers: { 'Content-Type': 'application/json' } })
+        .then(function (res) {
+          return jsonOrEmpty(res).then(function (data) {
+            if (!res.ok) return { ok: false, fallthrough: true, reason: 'http_' + res.status };
+            return data || { ok: false, fallthrough: true };
+          });
+        })
+        .catch(function () { return { ok: false, fallthrough: true, reason: 'network' }; });
+    },
+
     // 배차 지연 확인 — 기사 미배정으로 5분 이상 지난 주문이 있으면 요금 인상 질문을 돌려준다.
     checkDispatchDelay: function (sessionId) {
       return postJson('/chat/' + sessionId + '/dispatch-delay-check', {}, { headers: { 'Content-Type': 'application/json' } })

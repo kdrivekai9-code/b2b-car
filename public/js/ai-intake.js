@@ -3848,6 +3848,30 @@
         // 못 정해진 경우) 힌트 없이 보내는 대신, 지금 실제로 비어있는 다음 필수 항목을 힌트로 대신
         // 채워 보낸다 — 라벨 없는 단답(지명 하나, 전화번호 하나 등)이 엉뚱한 의도로 분류되는 걸 줄인다.
         var hintField = pendingField || (getNextMissingField() || {}).id || null;
+
+        // 접수 대화 판단을 서버로 옮긴 경로(Stage A, 탁송만) — 기능 플래그가 꺼져 있으면(기본값)
+        // 이 분기는 아예 실행되지 않고 지금까지와 완전히 동일하게 동작한다. 위에서 이미 프리미엄/
+        // 일일기사 전용 인터셉트, 요금문의, 배차 도우미 등 이번 범위 밖인 경우는 모두 걸러지고
+        // 여기까지 떨어진 것이라 프리미엄/일일기사만 다시 확인하면 된다.
+        if (window.__aiIntakeServerTurnEnabled && orderCategory !== 'premium' && orderCategory !== 'daily_driver') {
+          return api.intakeTurn(sessionId, text).then(function (turnResult) {
+            if (turnResult && turnResult.fallthrough === false) {
+              // 서버가 이미 답을 만들어 저장·중계까지 끝냈다 — 화면에만 붙이고 끝낸다.
+              hideThinkingBubble();
+              delete sendBtn.dataset.processing;
+              updateSendButton();
+              if (turnResult.message) addBubble(turnResult.message, 'bot', null, !!turnResult.awaitingConfirmation);
+              if (turnResult.closeSession) {
+                sessionStatus = 'closed';
+                syncStatePatch({ sessionStatus: sessionStatus });
+              }
+              return null; // 아래 .then(data)는 !data 가드로 그대로 통과한다.
+            }
+            // fallthrough — 서버가 다루지 않은 요청(faq/unsupported/proxy_order/daily_driver_order
+            // 등)이니 지금까지와 동일한 경로로 넘긴다.
+            return api.parseText(text, hintField);
+          });
+        }
         return api.parseText(text, hintField);
       })
       .then(function (data) {

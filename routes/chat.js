@@ -12,6 +12,7 @@ const { kstNow } = require('../lib/period');
 const { getEffectivePaymentMethods } = require('../lib/branchPolicy');
 const { runDispatchAgent, checkDispatchDelay } = require('../lib/mcpDispatchAgent');
 const { buildSuggestion } = require('../lib/agentAssist');
+const { runWebIntakeTurn } = require('../lib/webIntakeTurn');
 const kakaoConsult = require('../lib/kakaoConsult');
 const { logIntegrationErrorAsync } = require('../lib/integrationLog');
 const {
@@ -417,6 +418,54 @@ router.post('/:sessionId/user-message', asyncHandler(async (req, res) => {
   }
 
   res.json({ status: session.status });
+}));
+
+// ---------------- 고객측: AI 접수 대화 판단(서버 이전, Stage A — 탁송만) ----------------
+// 카카오 상담톡 채널이 이미 서버에서 하고 있는 판단(다음 질문 결정·요금/운영시간 응답·확인
+// 요약)을 웹 로그인 사용자용으로도 제공한다. fallthrough:true로 오면 이 요청은 다루지 않은
+// 것이니(탁송이 아니거나 프리미엄/일일기사 등) 클라이언트는 기존 로컬 판단 경로를 그대로
+// 탄다 — dispatch-agent와 같은 안전장치.
+router.post('/:sessionId/intake-turn', asyncHandler(async (req, res) => {
+  const session = await loadOwnedSession(req, res);
+  if (!session) return;
+  const text = (req.body.text || '').trim();
+  if (!text) return res.status(400).json({ ok: false, fallthrough: true, reason: 'empty_text' });
+
+  // 상담원이 붙은 세션은 봇이 끼어들지 않는다(기존 규칙과 동일).
+  if (session.status !== 'bot') return res.json({ ok: false, fallthrough: true, reason: 'not_bot_status' });
+
+  let result;
+  try {
+    result = await runWebIntakeTurn({ user: req.session.user, session, text });
+  } catch (e) {
+    console.error('웹 AI 접수 턴 처리 실패:', e.message);
+    logIntegrationErrorAsync({ source: 'web_intake', operation: 'intake_turn', refType: 'chat_session', refId: session.id, message: e.message });
+    return res.json({ ok: false, fallthrough: true, reason: 'exception' });
+  }
+
+  if (result.fallthrough || !result.replyText) {
+    return res.json({ ok: true, fallthrough: true });
+  }
+
+  const inserted = await db.get(
+    `INSERT INTO chat_messages (session_id, sender, message) VALUES (?, 'bot', ?) RETURNING *`,
+    [session.id, result.replyText]
+  );
+  broadcastMessageAsync(session.id, inserted);
+
+  if (result.closeSession) {
+    await db.run(`UPDATE chat_sessions SET status = 'closed' WHERE id = ?`, [session.id]);
+    broadcastSessionListChangedAsync();
+  }
+
+  res.json({
+    ok: result.ok,
+    fallthrough: false,
+    message: result.replyText,
+    awaitingConfirmation: !!result.awaitingConfirmation,
+    closeSession: !!result.closeSession,
+    status: result.closeSession ? 'closed' : session.status,
+  });
 }));
 
 // ---------------- 고객측: 배차 주문 도우미(콜마너 MCP 도구 호출) ----------------

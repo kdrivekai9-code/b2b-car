@@ -302,6 +302,7 @@
   window.__favorites = <%- toScriptJson(favorites || []) %>;
   window.__waypointExtended = true;
   window.__aiIntakeExistingSession = <%- toScriptJson(existingSession ? { id: existingSession.id, status: existingSession.status, messages: existingMessages, draft: existingDraft } : null) %>;
+  window.__aiIntakeServerTurnEnabled = <%- toScriptJson(!!aiIntakeServerTurnEnabled) %>;
 </script>
 <script src="//dapi.kakao.com/v2/maps/sdk.js?appkey=<%= kakaoJsKey %>"></script>
 <script src="/js/order-form.js"></script>
