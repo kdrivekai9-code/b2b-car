@@ -67,18 +67,21 @@ export default function SessionDetailView({ initialSession, mappedAccount, agent
             상담 #{session.id} <span className={`badge ${STATUS_BADGE[session.status] || 'gray'}`}>{STATUS_LABEL[session.status] || session.status}</span>
           </h1>
           <p className="page-sub">
-            {/* 카카오 세션은 아래 배지가 채널을 말해준다 — 역할까지 적으면 중복이다. */}
-            고객: {session.user_name || '-'}{session.channel === 'kakao' ? '' : ` (${session.user_role || '-'})`}{session.user_phone ? ` · ${session.user_phone}` : ''}
+            {/* 카카오 세션은 아래 배지가 채널을 말해준다 — 역할까지 적으면 중복이다.
+                매핑된 거래처가 있으면 이름줄을 "거래처명(담당자)"로 보여준다. */}
+            고객: {(session.channel === 'kakao' && mappedAccount && (mappedAccount.groupName || mappedAccount.userName))
+              ? (mappedAccount.groupName && mappedAccount.userName
+                ? `${mappedAccount.groupName}(${mappedAccount.userName})`
+                : (mappedAccount.groupName || mappedAccount.userName))
+              : (session.user_name || '-')}{session.channel === 'kakao' ? '' : ` (${session.user_role || '-'})`}{session.user_phone ? ` · ${session.user_phone}` : ''}
             {/* 여기서 보내는 답장이 카카오 상담톡으로 나간다는 걸 입력 전에 알 수 있어야 한다. */}
             {session.channel === 'kakao' && <span className="badge amber">카카오 상담톡</span>}
           </p>
-          {/* 매핑된 거래처 — 카카오 세션이 어떤 계정/지사/거래처로 이어지는지 상단에 밝힌다. */}
+          {/* 거래처·담당자는 위 이름줄에 이미 있으므로, 여기선 지사·자동접수만 보조로 밝힌다. */}
           {mappedAccount && (
             <p className="page-sub mapped-account">
-              <span className="badge green">매핑 거래처</span>
-              {' '}{mappedAccount.groupName || mappedAccount.userName || '-'}
-              {mappedAccount.branchName ? ` · ${mappedAccount.branchName}` : ''}
-              {mappedAccount.userName ? ` · 담당 ${mappedAccount.userName}` : ''}
+              <span className="badge green">매핑</span>
+              {mappedAccount.branchName ? ` ${mappedAccount.branchName}` : ''}
               {mappedAccount.autoRegister && <span className="badge blue">자동접수</span>}
             </p>
           )}

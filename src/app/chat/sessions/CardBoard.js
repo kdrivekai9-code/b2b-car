@@ -29,6 +29,16 @@ import IntakeMiniForm from './IntakeMiniForm';
 
 const STATUS_BADGE = { bot: 'gray', needs_agent: 'red', agent_active: 'blue', closed: 'dark' };
 
+// 카카오 세션의 표시 이름 — 매핑된 거래처가 있으면 "거래처명(담당자)"로, 없으면 기본 이름
+// (동의 전이면 "카카오 상담톡 고객 (UserKey)")으로 보여준다.
+function sessionDisplayName(s) {
+  if (s.channel === 'kakao' && (s.mapped_group_name || s.mapped_user_name)) {
+    if (s.mapped_group_name && s.mapped_user_name) return `${s.mapped_group_name}(${s.mapped_user_name})`;
+    return s.mapped_group_name || s.mapped_user_name;
+  }
+  return s.user_name || '-';
+}
+
 export default function CardBoard({ initialSessions, initialOnlineAgents, currentUser, intakeEnabled }) {
   const [sessions, setSessions] = useState(initialSessions || []);
   const [onlineAgents, setOnlineAgents] = useState(initialOnlineAgents || []);
@@ -86,7 +96,7 @@ export default function CardBoard({ initialSessions, initialOnlineAgents, curren
       status: s.status,
       assignedAgentId: s.assigned_agent_id ? String(s.assigned_agent_id) : '',
       assignedAgentName: s.assigned_agent_name || '',
-      userName: s.user_name || '-',
+      userName: sessionDisplayName(s),
       userRole: s.user_role || '-',
       userPhone: s.user_phone || '',
       requestedFeature: s.requested_feature || '-',
@@ -197,20 +207,16 @@ export default function CardBoard({ initialSessions, initialOnlineAgents, curren
                 onClick={() => selectSession(s)}
               >
                 <div className="session-card-head">
-                  <strong>#{s.id} · {s.user_name || '-'}</strong>
+                  <strong>#{s.id} · {sessionDisplayName(s)}</strong>
                   <span>
                     {/* 답장이 카카오로 나가는 세션인지 상담원이 바로 알아야 한다(응대 톤·속도가 다르다). */}
                     {s.channel === 'kakao' && <span className="badge amber">카카오</span>}
                     <span className={`badge ${STATUS_BADGE[s.status] || 'gray'}`}>{STATUS_LABEL[s.status] || s.status}</span>
                   </span>
                 </div>
-                {/* 카드 위쪽에 카카오 배지가 이미 있어 역할을 또 적지 않는다. 카카오는 UserKey만으론
-                    누구인지 몰라, 매핑된 거래처(그룹·담당자)가 있으면 그걸 먼저 보여준다. */}
-                <div className="session-card-sub">{s.channel === 'kakao'
-                  ? ((s.mapped_group_name || s.mapped_user_name)
-                    ? `${s.mapped_group_name || s.mapped_user_name}${s.mapped_user_name && s.mapped_group_name ? ` · 담당 ${s.mapped_user_name}` : ''}${s.user_phone ? ` · ${s.user_phone}` : ''}`
-                    : (s.user_phone || '연락처 미확인'))
-                  : `${s.user_role || '-'}${s.user_phone ? ` · ${s.user_phone}` : ''}`}</div>
+                {/* 카드 위쪽에 카카오 배지가 이미 있어 역할을 또 적지 않는다. 거래처는 이름줄에서
+                    이미 보여주므로 여기선 연락처만 둔다. */}
+                <div className="session-card-sub">{s.channel === 'kakao' ? (s.user_phone || '연락처 미확인') : `${s.user_role || '-'}${s.user_phone ? ` · ${s.user_phone}` : ''}`}</div>
                 <div className="session-card-msg" title={s.last_message || ''}>{s.last_message || '최근 메시지 없음'}</div>
                 <div className="session-card-meta">메시지 {s.message_count}개 · 업데이트 {s.updated_at}</div>
                 <div className="session-card-meta">담당: {s.assigned_agent_name || '미지정'}</div>
