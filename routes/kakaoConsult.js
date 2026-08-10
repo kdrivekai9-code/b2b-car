@@ -686,6 +686,23 @@ async function loadPendingIntake(session) {
   }
 }
 
+// "진행 중인 되묻기가 없다"와 "있었는데 시간이 지나 사라졌다"는 고객 입장에서 다르다. 후자를
+// 조용히 넘기면, 맥락 없이 짧게 이어 보낸 답(예: "판교역")이 새 메시지로 재분류된다 — 실측
+// 사고: 도착지를 물어본 지 78분 뒤(TTL 30분 초과) "판교역"만 보냈더니 대리운전 요청으로
+// 오분류돼 "신규 접수는 상담원 연결을…"이 나갔다(사용자 입장에선 도착지 답변인데 엉뚱한 안내).
+// 만료를 감지하면 tryHandleIntake가 이걸로 명시적 안내를 보내고 처음부터 다시 받는다.
+function wasPendingIntakeExpired(session) {
+  if (!session.intake_slots_json) return false;
+  try {
+    const saved = JSON.parse(session.intake_slots_json);
+    if (!saved || !saved.savedAt) return false;
+    if (!saved.raw && saved.purpose !== 'agent') return false;
+    return Date.now() - saved.savedAt > INTAKE_SLOT_TTL_MINUTES * 60000;
+  } catch (e) {
+    return false;
+  }
+}
+
 // 동의를 기다리는 동안 "무엇을 하려던 것인지"까지 함께 들고 있는다 — 동의가 도착하면
 // 접수는 접수대로, 상담원 연결은 상담원 연결대로 이어가야 한다.
 async function savePendingConsentPurpose(session, purpose, raw) {
@@ -859,7 +876,23 @@ async function tryHandleIntake(session, text) {
   if (!parsed.matched) {
     // 폼이 아니면, 진행 중인 접수의 보충 정보일 수 있다 — 있으면 원문에 이어붙여 재파싱한다.
     const pending = await loadPendingIntake(session);
-    if (!pending) return false;
+    if (!pending) {
+      // 진행 중이던 되묻기가 시간이 지나 사라진 상태(TTL 30분 초과)였다면, 그 사실을 모른 채
+      // 짧게 이어 보낸 답(예: "판교역")이 맥락 없이 완전히 새 메시지로 재분류된다 — 실측 사고:
+      // 도착지를 물어본 지 78분 뒤 "판교역"만 보냈더니 대리운전 요청으로 오분류돼 "신규 접수는
+      // 상담원 연결을…"이 나갔다(고객 입장에선 도착지 답변인데 엉뚱한 안내). 조용히 넘기지 않고
+      // 만료 사실을 알려 처음부터 다시 받는다 — 사용자 지적대로 "끊겼으면 끊겼다"고 답해야 한다.
+      if (wasPendingIntakeExpired(session)) {
+        await clearPendingIntake(session);
+        await botSay(
+          session,
+          '이전에 진행하시던 접수 내용이 시간이 많이 지나 초기화되었습니다. 번거로우시겠지만 출발지·도착지·차량번호·탁송 일시를 다시 한 번에 알려주시겠어요?\n(예: 서울 강남구 OO빌딩 → 인천 중구 OO공항, 그랜저 12가3456, 내일 오후 2시)',
+          '접수 시간초과 안내'
+        );
+        return true;
+      }
+      return false;
+    }
     // 주소 후보를 고르는 중이면 이 답변은 보충 정보가 아니라 "번호 선택"이다.
     if (pending.awaiting === 'address_choice') return handleAddressChoiceReply(session, pending, text);
     // 연락처를 묻는 중이면 "1"/"2"(보기 선택) 또는 직접 입력한 번호다.
