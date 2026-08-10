@@ -1150,8 +1150,12 @@ async function processBotTurn(session, text) {
     return;
   }
 
-  // 이 경로는 접수 자동화가 다루지 못하는 형태(경유지 미지원 등)라 결국 상담원에게 간다.
-  // 동의는 실제로 등록하는 자리(completeIntake)에서만 받는다.
+  // 접수 자동화가 다루지 못하는 형태(경유지 미지원 등)라 상담원에게 넘긴다. 다만 이것도 접수다 —
+  // 누구의 요청인지 모른 채 오더를 만들 수는 없으므로 여기서는 동의를 청한다(사용자 확정 규칙:
+  // 동의 버튼은 조회와 접수 자리에서 나온다). 사고·클레임이나 FAQ 실패처럼 "그냥 사람에게
+  // 넘기는" 경우와는 다르다.
+  // 이미 버튼을 보냈으면 재촉하지 않고 그대로 상담원에게 넘어간다(ensurePersonalConsent).
+  if (!await ensurePersonalConsent(session, 'intake', text)) return;
   return handleOrderIntake(session, text, classified.requestedFeature);
 }
 
