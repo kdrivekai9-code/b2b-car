@@ -236,11 +236,16 @@ async function shouldSendAgentReadNotice(sessionId) {
 
 async function notifyKakaoAgentRead(sessionId) {
   const session = await db.get(
-    `SELECT id, channel, kakao_service_key, kakao_user_key, kakao_event_key
+    `SELECT id, channel, status, kakao_service_key, kakao_user_key, kakao_event_key
      FROM chat_sessions WHERE id = ?`,
     [sessionId]
   );
   if (!session || session.channel !== 'kakao') return;
+  // "상담원이 확인했습니다"는 고객이 상담원 연결을 요청한 세션에서만 보낸다. 봇이 응대 중인
+  // 세션(status='bot')을 상담원이 목록에서 카드만 열어봐도 이 안내가 나가면, 고객은 부르지도
+  // 않은 상담원이 붙은 줄 알게 된다(실사용 지적). needs_agent(요청 후 진입)·agent_active(이미
+  // 응대 중)에서만 보낸다.
+  if (session.status !== 'needs_agent' && session.status !== 'agent_active') return;
   if (!await shouldSendAgentReadNotice(sessionId)) return;
 
   const result = await kakaoConsult.sendMessage(session, AGENT_READ_NOTICE);
@@ -1023,8 +1028,8 @@ async function deliverAgentReply(session, agentUser, text) {
     `INSERT INTO chat_messages (session_id, sender, message) VALUES (?, 'agent', ?) RETURNING *`,
     [session.id, text]
   );
-  // 상담원이 답하면 봇 인계 표시를 지운다 — 사람이 돌아왔으므로 이후 봇 응답에 "(AI 자동응답)"이
-  // 붙으면 안 된다. 컬럼이 아직 없는 DB(마이그레이션 전)에서도 답장 자체는 되어야 하므로 폴백을 둔다.
+  // 상담원이 답하면 봇 인계 기록(bot_handover_at)을 지운다 — 사람이 다시 응대를 맡았다는 뜻이다.
+  // 컬럼이 아직 없는 DB(마이그레이션 전)에서도 답장 자체는 되어야 하므로 폴백을 둔다.
   await db.run(
     `UPDATE chat_sessions SET status = 'agent_active', assigned_agent_id = ?, bot_handover_at = NULL,
      updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') WHERE id = ?`,
@@ -1040,7 +1045,11 @@ async function deliverAgentReply(session, agentUser, text) {
   // 카카오 출신 세션(routes/kakaoConsult.js)이면 상담원 답장을 중계서버로도 내보낸다
   // (계획서 5.5 — 지금까지는 웹 위젯에만 반영되고 끝났다).
   if (session.channel === 'kakao') {
-    const sendResult = await kakaoConsult.sendMessage(session, text);
+    // 카카오는 봇·상담원 메시지가 한 스트림으로 섞여 도착한다 — 누가 보낸 말인지 첫 줄에 밝힌다
+    // (봇은 "AI 응답", 상담원은 "상담원 : 이름"). 저장(chat_messages)은 sender='agent'로 이미
+    // 구분되므로 원문만 남기고, 카카오로 나가는 텍스트에만 라벨을 붙인다.
+    const labeled = `상담원 : ${(agentUser && agentUser.name) || '상담원'}\n${text}`;
+    const sendResult = await kakaoConsult.sendMessage(session, labeled);
     if (!sendResult.ok) {
       logIntegrationErrorAsync({ source: 'kakao', operation: 'send', refType: 'chat_session', refId: Number(session.id),
         message: sendResult.error, context: { label: '상담원 답장', textHead: String(text).slice(0, 60) } });
@@ -1300,9 +1309,9 @@ async function autoSendPendingSuggestions() {
         // 접수 건은 봇에게 응대를 넘긴다. 초안 문구("접수하겠습니다…")를 대신 보내면 약속만
         // 나가고 오더는 만들어지지 않는다 — 봇이 이어받아 실제 접수 경로를 태우게 한다.
         await deliverBotMessage(session, BOT_HANDOVER_NOTICE);
-        // bot_handover_at을 함께 세운다 — 이 값이 있는 동안 봇 응답에 "(AI 자동응답)" 표시가
-        // 붙는다(routes/kakaoConsult.js withHandoverMark). status='bot'만으로는 처음부터 봇이
-        // 응대한 세션과 구분할 수 없어, 고객이 응답 주체가 바뀐 것을 모른 채 대화하게 된다.
+        // bot_handover_at을 함께 세운다 — "언제 상담원에서 봇으로 넘어왔는지"의 기록이다.
+        // (카카오 봇 응답은 항상 첫 줄에 "AI 응답" 라벨이 붙으므로 응답 주체 구분은 그 라벨이
+        // 담당한다. 예전의 "(AI 자동응답)" 꼬리표는 그 상시 라벨로 대체됐다.)
         await db.run(
           `UPDATE chat_sessions SET status = 'bot',
            bot_handover_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS'),

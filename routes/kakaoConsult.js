@@ -361,24 +361,24 @@ async function requestPersonalInfo(session) {
   return result;
 }
 
-// 상담원 무응답으로 봇이 응대를 이어받은 구간(chat_sessions.bot_handover_at)에서는 봇 응답에
-// 표시를 붙인다. 고객은 방금까지 사람과 이야기하고 있었기 때문에, 표시가 없으면 답하는 주체가
-// 바뀐 것을 모른 채 계속 대화하게 된다 — 사람에게 하려던 부탁을 봇에게 하게 되는 상황이 나쁘다.
-// 처음부터 봇 세션이었던 경우(bot_handover_at 없음)에는 붙이지 않는다.
-const HANDOVER_MARK = '(AI 자동응답)';
+// 카카오 상담톡은 봇·상담원 메시지가 한 줄 텍스트 스트림으로 섞여 도착한다(웹 위젯과 달리
+// 발신 주체를 UI 말풍선으로 구분해줄 수 없다). 그래서 응답 첫 줄에 발신 주체를 항상 명시한다 —
+// 봇은 "AI 응답", 상담원은 "상담원 : {이름}"(상담원 라벨은 상담원 답장 경로 routes/chat.js에서 붙인다).
+// 예전에는 상담원→봇 인계 구간에만 꼬리표 "(AI 자동응답)"을 붙였는데, 이 상시 라벨이 그 역할까지
+// 대신하므로(항상 봇임이 첫 줄에 드러난다) 꼬리표는 없앴다 — 중복 표기 방지.
+const BOT_LABEL = 'AI 응답';
 
-function withHandoverMark(session, text) {
-  if (!session || !session.bot_handover_at) return text;
+function withBotLabel(text) {
   const body = String(text || '');
-  if (!body.trim() || body.includes(HANDOVER_MARK)) return body;
-  return `${body}\n${HANDOVER_MARK}`;
+  if (!body.trim() || body.startsWith(BOT_LABEL)) return body;
+  return `${BOT_LABEL}\n${body}`;
 }
 
 // 봇이 고객에게 말하는 단 하나의 통로 — 대화 이력 저장과 카카오 발신을 같은 문구로 함께 한다.
 // 예전에는 호출부마다 insertMessage + sendAndLog를 나란히 불렀는데, 그러면 인계 표시 같은
 // 가공을 한쪽에만 적용해 저장된 내용과 실제 발송 내용이 갈라지기 쉽다.
 async function botSay(session, text, label) {
-  const marked = withHandoverMark(session, text);
+  const marked = withBotLabel(text);
   await insertMessage(session.id, 'bot', marked);
   return sendAndLog(session, marked, label);
 }
@@ -386,7 +386,9 @@ async function botSay(session, text, label) {
 // 발신 실패는 고객에게는 보이지 않으니(카카오로 안 나간 채 우리 쪽 로그만 남는 상태) 반드시
 // 로그를 남겨야 운영 중 "봇이 답장을 안 한다"는 문의가 왔을 때 원인을 바로 알 수 있다.
 async function sendAndLog(session, text, label) {
-  const result = await kakaoConsult.sendMessage(session, text);
+  // botSay를 거치지 않고 직접 부르는 호출부(인계 안내 등)도 같은 라벨을 달도록 여기서 보정한다.
+  // withBotLabel은 멱등이라 botSay가 이미 붙인 경우엔 그대로 둔다.
+  const result = await kakaoConsult.sendMessage(session, withBotLabel(text));
   if (!result.ok) {
     // 발신 실패는 고객 화면에만 안 보일 뿐 우리 대화창에는 봇 답변이 남아 정상처럼 보인다 —
     // 반드시 기록해야 "봇이 답을 안 한다"는 문의가 왔을 때 원인을 바로 찾을 수 있다.
@@ -910,7 +912,19 @@ async function requireVehicleTypeForFerry(session, parsed, rawText, cache) {
 // 다시 네트워크를 타지 않고 재사용한다. 안 넘기면(다른 호출부) createOrdersFromIntake가
 // 내부적으로 새 Map을 만들어 최소한의 재사용(분리 접수 루프 안에서만)은 그대로 유지한다.
 async function completeIntake(session, parsed, rawText, cache) {
+  // ── 개인정보 동의 게이트 ────────────────────────────────────────────────
+  // false면 "방금 동의 버튼을 보냈다"는 뜻 — 여기서 멈춘다.
   if (!await ensurePersonalConsent(session, 'intake', rawText)) return true;
+  // true라고 동의가 된 건 아니다. 이미 버튼을 보낸 뒤(동의 대기/거부)에는 ensurePersonalConsent가
+  // "상담원 인계는 그대로 진행하라"는 의미로 true를 준다 — 그런데 접수는 실제 동의(연락처 수신)가
+  // 없으면 안 된다. 예전엔 이 구분이 없어, 채널에 매핑된 계정만 있으면 "동의 안 하고 알려주면
+  // 안돼?"라고 거부한 고객의 오더까지 자동 등록됐다(OID1209 사례). 동의 전이면 등록하지 않고
+  // 상담원에게 넘긴다 — 동의 버튼은 대화에 남아 있어, 눌러주면 /receive/personal_info의
+  // 이어처리(resume_after_consent)가 그때 자동 접수한다. 그래서 pending은 지우지 않는다.
+  if (!hasPersonalConsent(session)) {
+    await handoffWithParsedSlots(session, parsed, rawText, '개인정보 미동의 — 상담원 확정 필요(동의 시 자동 접수)');
+    return true;
+  }
 
   if (await requireVehicleTypeForFerry(session, parsed, rawText, cache)) return true;
 
