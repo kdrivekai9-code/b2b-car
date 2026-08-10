@@ -1075,7 +1075,7 @@ async function deliverAgentReply(session, agentUser, text) {
   // (계획서 5.5 — 지금까지는 웹 위젯에만 반영되고 끝났다).
   if (session.channel === 'kakao') {
     // 카카오는 봇·상담원 메시지가 한 스트림으로 섞여 도착한다 — 누가 보낸 말인지 첫 줄에 밝힌다
-    // (봇은 "AI", 상담원은 "상담원 : 이름"). 저장(chat_messages)은 sender='agent'로 이미
+    // (봇은 "AI 상담사", 상담원은 "상담원 : 이름"). 저장(chat_messages)은 sender='agent'로 이미
     // 구분되므로 원문만 남기고, 카카오로 나가는 텍스트에만 라벨을 붙인다.
     const labeled = `상담원 : ${(agentUser && agentUser.name) || '상담원'}\n${text}`;
     const sendResult = await kakaoConsult.sendMessage(session, labeled);
@@ -1339,8 +1339,8 @@ async function autoSendPendingSuggestions() {
         // 나가고 오더는 만들어지지 않는다 — 봇이 이어받아 실제 접수 경로를 태우게 한다.
         await deliverBotMessage(session, BOT_HANDOVER_NOTICE);
         // bot_handover_at을 함께 세운다 — "언제 상담원에서 봇으로 넘어왔는지"의 기록이다.
-        // (카카오 봇 응답은 항상 첫 줄에 "AI" 라벨이 붙으므로 응답 주체 구분은 그 라벨이
-        // 담당한다. 예전의 "(AI 자동응답)" 꼬리표는 그 상시 라벨로 대체됐다.)
+        // (카카오 봇 응답은 항상 첫 줄에 "AI 상담사" 라벨이 붙으므로 응답 주체 구분은 그
+        // 라벨이 담당한다. 예전의 "(AI 자동응답)" 꼬리표는 그 상시 라벨로 대체됐다.)
         await db.run(
           `UPDATE chat_sessions SET status = 'bot',
            bot_handover_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS'),

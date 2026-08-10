@@ -373,15 +373,13 @@ async function requestPersonalInfo(session) {
 
 // 카카오 상담톡은 봇·상담원 메시지가 한 줄 텍스트 스트림으로 섞여 도착한다(웹 위젯과 달리
 // 발신 주체를 UI 말풍선으로 구분해줄 수 없다). 그래서 응답 첫 줄에 발신 주체를 항상 명시한다 —
-// 봇은 "AI", 상담원은 "상담원 : {이름}"(상담원 라벨은 상담원 답장 경로 routes/chat.js에서 붙인다).
-// 예전에는 상담원→봇 인계 구간에만 꼬리표 "(AI 자동응답)"을 붙였는데, 이 상시 라벨이 그 역할까지
-// 대신하므로(항상 봇임이 첫 줄에 드러난다) 꼬리표는 없앴다 — 중복 표기 방지.
-const BOT_LABEL = 'AI';
+// 봇은 "AI 상담사", 상담원은 "상담원 : {이름}"(상담원 라벨은 상담원 답장 경로 routes/chat.js에서
+// 붙인다). 예전에는 상담원→봇 인계 구간에만 꼬리표 "(AI 자동응답)"을 붙였는데, 이 상시 라벨이
+// 그 역할까지 대신하므로(항상 봇임이 첫 줄에 드러난다) 꼬리표는 없앴다 — 중복 표기 방지.
+const BOT_LABEL = 'AI 상담사';
 
 function withBotLabel(text) {
   const body = String(text || '');
-  // 라벨이 짧아(BOT_LABEL='AI') 본문이 우연히 "AI"로 시작하면(예: "AI로 접수했습니다") 오탐할 수
-  // 있다 — 정확히 "AI\n"로 시작할 때만 이미 라벨이 붙은 것으로 본다.
   if (!body.trim() || body.startsWith(`${BOT_LABEL}\n`)) return body;
   return `${BOT_LABEL}\n${body}`;
 }
@@ -389,7 +387,7 @@ function withBotLabel(text) {
 // 봇이 고객에게 말하는 단 하나의 통로 — 대화 이력 저장과 카카오 발신을 같은 원문으로 함께
 // 한다. 라벨은 저장하지 않고 발신(sendAndLog)에서만 붙인다 — 관리자 화면(세션 상세·카드
 // 목록)은 채널과 무관하게 모든 봇 메시지 위에 이미 "AI" 배지를 붙이므로, 저장 텍스트에도
-// "AI"를 박아두면 카카오 세션에서 배지와 텍스트가 겹쳐 보인다(실사용 지적). 상담원
+// 라벨을 박아두면 카카오 세션에서 배지와 텍스트가 겹쳐 보인다(실사용 지적). 상담원
 // 답장(routes/chat.js deliverAgentReply)도 같은 방식이다 — chat_messages에는 원문만 남기고,
 // 카카오로 나가는 텍스트에만 "상담원 : 이름"을 붙인다.
 async function botSay(session, text, label) {
