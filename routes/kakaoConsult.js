@@ -731,9 +731,13 @@ async function savePendingAddressChoice(session, state) {
 // extra(선택): 프리미엄/일일기사 흐름이 category/orderType/tripType/declined를 실어 보내면,
 // 주소를 고른 뒤(handleAddressChoiceReply)에도 그 문맥이 이어진다(웹의 같은 패턴).
 async function askAddressChoiceIfNeeded(session, parsed, mergedRaw, cache, extra) {
+  // 경유지도 출발/도착과 같은 원칙으로 확인한다 — 애매한 채로 조용히 확정하면 기사가 엉뚱한
+  // 곳으로 갈 위험은 경유지도 다르지 않다. 현재는 한 번에 경유지 하나만 다룬다(첫 항목).
+  const waypoint = (parsed.waypoints || [])[0];
   const sides = [
     { key: 'origin', label: '출발지', query: parsed.origin && parsed.origin.address },
     { key: 'destination', label: '도착지', query: parsed.destination && parsed.destination.address },
+    { key: 'waypoint', label: '경유지', query: waypoint && waypoint.address },
   ];
 
   // 출발지가 애매하면 도착지는 보지도 않고 그것부터 묻는다(우선순위는 그대로 유지) — 다만
@@ -824,11 +828,6 @@ async function handleAddressChoiceReply(session, pending, text) {
       tripType: pending.tripType || null, declined: pending.declined || [],
     });
     premiumParsed.orderType = pending.orderType;
-    if (premiumParsed.waypointAddress) {
-      await clearPendingIntake(session);
-      await handoffWithParsedSlots(session, premiumParsed, replacedRaw, '경유지 포함(자동 접수 불가)');
-      return true;
-    }
     await botSay(session, `${pending.sideLabel}를 "${chosen.label}"로 확인했습니다.`, '주소 확정 안내');
     await advancePremiumIntakeKakao(session, premiumParsed, replacedRaw);
     return true;
@@ -896,10 +895,6 @@ async function handleConfirmReply(session, pending, text) {
     }
     const parsed = buildPremiumParsedFromClassified(classified, mergedRaw, overrides);
     parsed.orderType = pending.orderType;
-    if (parsed.waypointAddress) {
-      await handoffWithParsedSlots(session, parsed, mergedRaw, '경유지 포함(자동 접수 불가)');
-      return true;
-    }
     await advancePremiumIntakeKakao(session, parsed, mergedRaw);
     return true;
   }
@@ -1204,8 +1199,7 @@ async function registerPremiumOrder(session, parsed, rawText) {
   }
 
   // 실패 사유 안내 — 탁송의 registerDispatchOrder와 같은 원칙(웹과 같은 문구, 고객이 스스로
-  // 못 고치는 사유만 상담원에게 인계). 프리미엄/일일기사는 waypoint_unsupported가 이미 더
-  // 앞단(parsed.waypointAddress)에서 걸러지므로 여기 도달하지 않는다.
+  // 못 고치는 사유만 상담원에게 인계).
   const message = FAILURE_MESSAGES[result.reason];
   if (message) {
     await botSay(session, message, '접수 실패 안내(프리미엄/일일기사)');
@@ -1263,11 +1257,6 @@ async function continuePremiumIntakeKakao(session, pending, text) {
 
   const parsed = buildPremiumParsedFromClassified(classified, mergedRaw, overrides);
   parsed.orderType = pending.orderType;
-  if (parsed.waypointAddress) {
-    await clearPendingIntake(session);
-    await handoffWithParsedSlots(session, parsed, mergedRaw, '경유지 포함(자동 접수 불가)');
-    return true;
-  }
   await advancePremiumIntakeKakao(session, parsed, mergedRaw);
   return true;
 }
@@ -1570,17 +1559,12 @@ async function processBotTurn(session, text) {
     return;
   }
   // 프리미엄(대리운전)·일일기사 — 웹 AI 접수(lib/webIntakeTurn.js)가 이미 검증한 파싱·등록
-  // 로직을 그대로 쓴다(completePremiumIntake 주석 참고). 경유지가 있으면 이 흐름이 다루지
-  // 못해(다른 채널과 같은 원칙) 상담원에게 넘긴다.
+  // 로직을 그대로 쓴다(completePremiumIntake 주석 참고). 경유지는 탁송과 달리 항상 물어보는
+  // 필드라(getDailyDriverFields) advancePremiumIntakeKakao의 되묻기 루프가 다룬다.
   if (classified.intent === 'proxy_order' || classified.intent === 'daily_driver_order') {
     const orderType = classified.intent === 'daily_driver_order' ? 'daily_driver' : 'premium';
     const parsed = buildPremiumParsedFromClassified(classified, intakeText, {});
     parsed.orderType = orderType;
-    if (parsed.waypointAddress) {
-      if (!await ensurePersonalConsent(session, 'intake', text)) return;
-      await handoffWithParsedSlots(session, parsed, intakeText, '경유지 포함(자동 접수 불가)');
-      return;
-    }
     await advancePremiumIntakeKakao(session, parsed, intakeText);
     return;
   }
