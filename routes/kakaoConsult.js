@@ -1386,6 +1386,23 @@ async function tryDispatchAgent(session, text) {
   // 매핑에 지사가 지정돼 있으면 그쪽을 우선한다(계정의 소속 지사와 다를 수 있다).
   if (account.branch_id) user.branch_id = account.branch_id;
 
+  // 조회 범위를 누구 기준으로 잡을지 — 카카오는 로그인 사용자가 없어 매핑 계정 자격으로
+  // 조회하는데, 그 계정이 여러 이용고객을 대신 접수했으면 계정 자격으로는 전부 보인다.
+  //
+  //  · 접수자 본인(고객 단위 매핑으로 이어졌거나, 동의 번호가 계정 번호와 일치)
+  //    → 자기가 접수한 건 전부(이용고객이 여럿이어도) 볼 수 있다. 현행 유지.
+  //  · 이용고객(출발지 연락처로 신원이 확인된 사람, matched_by='order_contact')
+  //    → 본인 건만 볼 수 있다. 남의 건이 섞이면 안 된다(사용자 확정 규칙).
+  //  · 채널 전체 매핑(external_user_key 없이 service_key만)으로 이어진 익명 고객
+  //    → 누구든 붙을 수 있는 통로라 계정 자격을 그대로 주면 안 된다. 동의로 확인된 본인
+  //      번호로만 좁히고, 그마저 없으면 조회를 넘기지 않는다(상담원 인계).
+  const viewerPhone = String(session.external_phone || '').trim() || null;
+  const isSharedChannelMapping = !account.external_user_key && account.matched_by !== 'user_phone';
+  const scopeToViewer = account.matched_by === 'order_contact'
+    || (isSharedChannelMapping && account.matched_by !== 'user_phone');
+  if (scopeToViewer && !viewerPhone) return false; // 신원 미확인 — 조회하지 않고 상담원으로
+  const viewerCid = scopeToViewer ? viewerPhone : null;
+
   const history = await db.all(
     `SELECT sender, message FROM chat_messages
      WHERE session_id = ? AND sender IN ('user','bot') AND message IS NOT NULL
@@ -1405,7 +1422,7 @@ async function tryDispatchAgent(session, text) {
   // 남고 결과가 새 말풍선으로 온다. 웹 위젯처럼 점이 깜빡이는 표시를 쓸 방법은 없다.
   await botSay(session, '요청하신 내용을 확인하고 있습니다. 잠시만 기다려주세요.', '조회 대기 안내');
 
-  const result = await runDispatchAgent({ user, sessionId: session.id, text, history });
+  const result = await runDispatchAgent({ user, sessionId: session.id, text, history, viewerCid });
   if (!result || !result.handled || !result.message) return false;
 
   await botSay(session, result.message, '배차 도우미 응답');
