@@ -36,25 +36,31 @@
         <select id="sessionKeyPicker">
           <option value="">직접 입력</option>
           <% recentSessions.forEach(function (s) { %>
-            <option value="<%= s.kakao_service_key %>|<%= s.external_user_key || '' %>">
-              #<%= s.id %> · <%= s.created_at %> · service=<%= String(s.kakao_service_key).slice(0, 12) %>… user=<%= s.external_user_key || '-' %>
+            <option value="<%= s.kakao_service_key %>|<%= s.external_user_key || '' %>"
+                    data-name="<%= s.external_name || '' %>" data-phone="<%= s.external_phone || '' %>">
+              <%= s.external_name ? s.external_name + ' · ' : '' %>#<%= s.id %> · <%= s.created_at %> · service=<%= String(s.kakao_service_key).slice(0, 12) %>… user=<%= s.external_user_key || '-' %>
             </option>
           <% }) %>
         </select>
-        <p class="page-sub">고르면 위 두 칸이 자동으로 채워집니다.</p>
+        <p class="page-sub">고르면 위 두 칸이 자동으로 채워집니다. 이미 채널 매핑이 된 고객은 이 목록에서 빠집니다.</p>
       </div>
     <% } %>
 
     <div class="row">
       <div class="field">
         <label>담당 계정 <span class="req">*</span></label>
-        <select name="user_id" required>
+        <select name="user_id" id="userIdSelect" required>
           <option value="">계정을 선택하세요</option>
+          <option value="__unregistered__">미등록계정 — 새 사용자로 등록</option>
           <% users.forEach(function (u) { %>
             <option value="<%= u.id %>"><%= u.name %> (<%= u.login_id %>)</option>
           <% }) %>
         </select>
-        <p class="page-sub">이 계정 이름으로 오더가 등록되고, 주문 조회 권한도 이 계정 기준입니다.</p>
+        <p class="page-sub">
+          이 계정 이름으로 오더가 등록되고, 주문 조회 권한도 이 계정 기준입니다.
+          아직 b2b-car 계정이 없는 고객이면 <strong>미등록계정</strong>을 고르세요 —
+          등록을 누르면 이름·연락처를 채운 사용자 등록 화면으로 이동합니다.
+        </p>
       </div>
       <div class="field">
         <label>지사 <span class="req">*</span></label>
@@ -153,7 +159,16 @@
 </div>
 
 <script>
-  // 최근 세션에서 키 자동 채우기
+  <% if (error) { %>
+    // 등록 실패는 배너로도 보이지만(위 .error-msg), 특히 "이미 등록된 사용자입니다" 같은
+    // 실수 방지 안내는 놓치기 쉬워 팝업으로도 띄운다(사용자 확정 요청).
+    alert(<%- JSON.stringify(error) %>);
+  <% } %>
+
+  // 최근 세션에서 키 자동 채우기 — 이름·연락처는 "미등록계정" 등록 시 사용자 등록 화면으로
+  // 넘길 값으로 함께 기억해둔다(pickedName/pickedPhone).
+  var pickedName = '';
+  var pickedPhone = '';
   (function () {
     var picker = document.getElementById('sessionKeyPicker');
     if (!picker) return;
@@ -162,6 +177,26 @@
       var form = document.getElementById('kakaoAccountForm');
       form.service_key.value = parts[0] || '';
       form.external_user_key.value = parts[1] || '';
+      var opt = this.options[this.selectedIndex];
+      pickedName = (opt && opt.dataset.name) || '';
+      pickedPhone = (opt && opt.dataset.phone) || '';
+    });
+  })();
+
+  // "미등록계정"을 고르고 등록을 누르면 저장을 시도하지 않고(담당 계정이 없어 서버가 막는다)
+  // 사용자 등록 화면으로 이름·연락처·지사를 채워 보낸다. 새 계정을 만든 뒤에는 이 화면으로
+  // 돌아와(return_to) 방금 만든 계정을 담당 계정으로 고르면 된다.
+  (function () {
+    var form = document.getElementById('kakaoAccountForm');
+    form.addEventListener('submit', function (e) {
+      if (form.user_id.value !== '__unregistered__') return;
+      e.preventDefault();
+      var params = new URLSearchParams();
+      if (pickedName) params.set('name', pickedName);
+      if (pickedPhone) params.set('phone', pickedPhone);
+      if (form.branch_id.value) params.set('branch_id', form.branch_id.value);
+      params.set('return_to', '/kakao-accounts');
+      window.location.href = '/users/new?' + params.toString();
     });
   })();
 

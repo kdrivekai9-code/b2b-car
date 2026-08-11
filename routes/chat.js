@@ -63,8 +63,18 @@ const SESSION_CREATE_WINDOW_SQL = `to_char(now() at time zone 'Asia/Seoul' - int
 // 동의 전에는 이름이 없어 모든 고객이 "카카오 상담톡 고객"으로 똑같이 보인다 — 목록에 여러
 // 세션이 나란히 있으면 누가 누구인지 구분할 수가 없다. 그 경우 UserKey를 함께 보여준다.
 // UserKey는 채널별로 고정이라(명세서 용어집) 같은 고객의 재방문을 알아보는 데도 쓸 수 있다.
+//
+// 동의 후(external_name이 채워진 뒤)에도 UserKey는 계속 보여준다(실사용 지적) — 카카오 채널
+// 매핑(kakao_consult_accounts)을 이 UserKey로 등록해야 하는데, 동의하는 순간 이름만 보이고
+// UserKey가 사라지면 관리자가 그 값을 어디서도 다시 볼 수 없다. 이미 매핑된 세션은 화면(카드/
+// 목록)이 이 값 대신 mapped_group_name(법인명)을 우선 보여주므로(sessionDisplayName,
+// CardBoard.js·session_list.ejs) 실제로는 "매핑 전"에만 이 UserKey 병기가 눈에 띈다.
 const CUSTOMER_NAME_SQL = `COALESCE(
   u.name,
+  CASE WHEN cs.channel = 'kakao' AND cs.external_name IS NOT NULL THEN
+    cs.external_name ||
+    COALESCE(' (' || NULLIF(COALESCE(cs.external_user_key, cs.kakao_user_key), '') || ')', '')
+  END,
   cs.external_name,
   CASE WHEN cs.channel = 'kakao' THEN
     '카카오 상담톡 고객' ||

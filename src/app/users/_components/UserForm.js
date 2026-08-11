@@ -8,18 +8,19 @@ const ROLE_OPTIONS = [
   { value: 'client', label: '클라이언트(고객사)' },
 ];
 
-export default function UserForm({ mode, user, branches, groups }) {
+export default function UserForm({ mode, user, branches, groups, returnTo }) {
   const [role, setRole] = useState(user.role || 'admin');
   const action = mode === 'create' ? '/users' : `/users/${user.id}`;
 
   return (
     <form id="userForm" method="POST" action={action}>
+      {returnTo && <input type="hidden" name="return_to" value={returnTo} />}
       <div className="section-title">🧑‍💼 계정 정보</div>
       <div className="row">
         <div className="field">
-          <label>아이디 {mode === 'create' ? '*' : ''}</label>
+          <label>아이디</label>
           {mode === 'create' ? (
-            <input type="text" name="login_id" required />
+            <input type="text" name="login_id" placeholder="비워두면 자동으로 만들어집니다" />
           ) : (
             <input type="text" defaultValue={user.login_id} disabled />
           )}
@@ -29,12 +30,11 @@ export default function UserForm({ mode, user, branches, groups }) {
       <div className="row">
         <div className="field"><label>연락처</label><input type="text" name="phone" defaultValue={user.phone || ''} /></div>
         <div className="field">
-          <label>비밀번호 {mode === 'create' ? '*' : '(변경 시에만 입력)'}</label>
+          <label>비밀번호</label>
           <input
             type="password"
             name="password"
-            required={mode === 'create'}
-            placeholder={mode === 'edit' ? '변경하지 않으려면 비워두세요' : ''}
+            placeholder={mode === 'edit' ? '변경하지 않으려면 비워두세요' : '비워두면 임시 비밀번호(1234)로 설정됩니다'}
           />
         </div>
       </div>

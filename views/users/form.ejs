@@ -11,12 +11,15 @@
 </div>
 <div class="card">
   <form id="userForm" method="POST" action="<%= mode === 'create' ? '/users' : '/users/' + user.id %>">
+    <% if (typeof returnTo !== 'undefined' && returnTo) { %>
+      <input type="hidden" name="return_to" value="<%= returnTo %>">
+    <% } %>
     <div class="section-title">🧑‍💼 계정 정보</div>
     <div class="row">
       <div class="field">
-        <label>아이디 <%= mode === 'create' ? '*' : '' %></label>
+        <label>아이디</label>
         <% if (mode === 'create') { %>
-          <input type="text" name="login_id" required>
+          <input type="text" name="login_id" placeholder="비워두면 자동으로 만들어집니다">
         <% } else { %>
           <input type="text" value="<%= user.login_id %>" disabled>
         <% } %>
@@ -26,8 +29,8 @@
     <div class="row">
       <div class="field"><label>연락처</label><input type="text" name="phone" value="<%= user.phone || '' %>"></div>
       <div class="field">
-        <label>비밀번호 <%= mode === 'create' ? '*' : '(변경 시에만 입력)' %></label>
-        <input type="password" name="password" <%= mode === 'create' ? 'required' : '' %> placeholder="<%= mode === 'edit' ? '변경하지 않으려면 비워두세요' : '' %>">
+        <label>비밀번호</label>
+        <input type="password" name="password" placeholder="<%= mode === 'edit' ? '변경하지 않으려면 비워두세요' : '비워두면 임시 비밀번호(1234)로 설정됩니다' %>">
       </div>
     </div>
     <div class="section-title">🔑 권한 정보</div>

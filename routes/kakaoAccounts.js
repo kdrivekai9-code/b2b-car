@@ -32,12 +32,20 @@ async function loadPageData() {
     db.all("SELECT id, name, login_id, branch_id FROM users WHERE status = 'active' AND role IN ('client','branch_manager','admin') ORDER BY name"),
     db.all('SELECT id, name FROM payment_methods WHERE is_active = 1 ORDER BY id'),
     // 최근 카카오 세션의 키를 보여줘야 관리자가 service_key를 손으로 옮겨적지 않는다.
+    // 이름·연락처(개인정보 동의로 받은 값)도 함께 가져온다 — 목록에서 누구인지 알아볼 수 있게,
+    // 그리고 "미등록계정"으로 사용자 등록 화면에 넘길 때 프리필할 값으로도 쓴다.
+    // 이미 개별 매핑(external_user_key)이 있는 세션은 뺀다 — 실사용 지적: 이미 등록된 고객이
+    // 목록에 계속 남아 있어 실수로 중복 등록되기 쉬웠다.
     db.all(`
-      SELECT DISTINCT ON (kakao_service_key, external_user_key)
-        id, kakao_service_key, external_user_key, created_at
-      FROM chat_sessions
-      WHERE channel = 'kakao' AND kakao_service_key IS NOT NULL
-      ORDER BY kakao_service_key, external_user_key, id DESC
+      SELECT DISTINCT ON (cs.kakao_service_key, cs.external_user_key)
+        cs.id, cs.kakao_service_key, cs.external_user_key, cs.external_name, cs.external_phone, cs.created_at
+      FROM chat_sessions cs
+      WHERE cs.channel = 'kakao' AND cs.kakao_service_key IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM kakao_consult_accounts ka
+          WHERE ka.external_user_key IS NOT NULL AND ka.external_user_key = cs.external_user_key
+        )
+      ORDER BY cs.kakao_service_key, cs.external_user_key, cs.id DESC
       LIMIT 20
     `).catch(() => []),
   ]);
@@ -84,6 +92,15 @@ router.post('/', asyncHandler(async (req, res) => {
   // 그 지사 소속 법인인지 확인한다 — 폼 조작으로 다른 지사 법인이 들어오는 것 방지.
   const group = await db.get('SELECT id FROM groups_tbl WHERE id = ? AND branch_id = ?', [groupId, branchId]);
   if (!group) return res.redirect(base + '?error=' + encodeURIComponent('선택한 지사에 속한 법인이 아닙니다.'));
+
+  // 같은 고객(external_user_key)으로 이미 매핑이 있으면 막는다 — DB에 UNIQUE 제약이 없어서
+  // (kakao_consult_accounts 마이그레이션 참고) 사전 검사 없이는 조용히 중복 INSERT됐다.
+  // 중복이 쌓이면 findIntakeAccount가 "가장 최근 행"만 쓰므로 당장 오작동하진 않지만, 관리
+  // 화면에 같은 고객이 여러 줄로 보여 실수를 유발한다(실사용 지적).
+  if (externalUserKey) {
+    const dup = await db.get('SELECT id FROM kakao_consult_accounts WHERE external_user_key = ?', [externalUserKey]);
+    if (dup) return res.redirect(base + '?error=' + encodeURIComponent('기존에 등록된 사용자입니다.'));
+  }
 
   try {
     await db.run(
