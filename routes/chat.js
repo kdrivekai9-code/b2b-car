@@ -11,7 +11,7 @@ const { notify } = require('../lib/push');
 const { kstNow } = require('../lib/period');
 const { getEffectivePaymentMethods } = require('../lib/branchPolicy');
 const { runDispatchAgent, checkDispatchDelay } = require('../lib/mcpDispatchAgent');
-const { buildSuggestion } = require('../lib/agentAssist');
+const { buildSuggestion, toIntakeFields } = require('../lib/agentAssist');
 const { runWebIntakeTurn } = require('../lib/webIntakeTurn');
 const kakaoConsult = require('../lib/kakaoConsult');
 const { describeMappedAccount } = require('../lib/kakaoIntakeService');
@@ -475,6 +475,9 @@ router.post('/:sessionId/intake-turn', asyncHandler(async (req, res) => {
     awaitingConfirmation: !!result.awaitingConfirmation,
     closeSession: !!result.closeSession,
     status: result.closeSession ? 'closed' : session.status,
+    // 화면 우측 "AI 파싱 결과 자동 반영 폼"이 쓴다(AiIntakeClient.js onOrderPrefill) — 서버가
+    // 이번 턴에 필수 항목을 다 채운 경우에만 있다(runWebIntakeTurn이 parsed를 실어준다).
+    intake: result.parsed ? toIntakeFields(result.parsed) : null,
   });
 }));
 

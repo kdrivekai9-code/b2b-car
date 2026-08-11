@@ -677,6 +677,11 @@ export default function AiIntakeClient({
         // 'collecting'에 둔다 — 확인/주소선택 상태는 이 파일의 phase가 아니라 서버의
         // intake_slots_json이 들고 있다.
         if (turnResult.status) setStatus(turnResult.status);
+        // 서버가 이번 턴에 필수 항목을 다 채웠으면(주소 확인 대기 포함) 우측 폼도 반영한다.
+        // 이게 빠져 있으면 판단이 서버로 넘어간 뒤로 이 폼이 챗봇 파악 내용을 전혀 못
+        // 보여줬다(실사용 지적, 2026-08-11) — 클라이언트 자체 파싱 경로(아래 collectedFields
+        // 기반 분기들)만 onOrderPrefill을 부르고 있었다.
+        if (turnResult.intake && typeof onOrderPrefill === 'function') onOrderPrefill(turnResult.intake);
         await catchUpMessages(sid);
         return;
       }
