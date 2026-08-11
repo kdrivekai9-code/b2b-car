@@ -1422,7 +1422,12 @@ async function tryDispatchAgent(session, text) {
   // 남고 결과가 새 말풍선으로 온다. 웹 위젯처럼 점이 깜빡이는 표시를 쓸 방법은 없다.
   await botSay(session, '요청하신 내용을 확인하고 있습니다. 잠시만 기다려주세요.', '조회 대기 안내');
 
-  const result = await runDispatchAgent({ user, sessionId: session.id, text, history, viewerCid });
+  // 담당 계정을 여러 법인 매핑이 함께 쓸 수 있어(카카오 채널 매핑에서 실제로 가능하다), 법인이
+  // 확정된 매핑이면 조회도 그 법인 오더로 좁힌다 — created_by만으로는 법인 경계가 없었다.
+  const result = await runDispatchAgent({
+    user, sessionId: session.id, text, history, viewerCid,
+    requesterGroupId: account.requester_group_id || null,
+  });
   if (!result || !result.handled || !result.message) return false;
 
   await botSay(session, result.message, '배차 도우미 응답');

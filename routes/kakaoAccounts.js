@@ -75,11 +75,15 @@ router.post('/', asyncHandler(async (req, res) => {
   if (!Number.isInteger(branchId) || branchId <= 0) {
     return res.redirect(base + '?error=' + encodeURIComponent('지사를 선택해주세요.'));
   }
-  // 고객사(법인)를 골랐다면 그 지사 소속인지 확인한다 — 폼 조작으로 다른 지사 법인이 들어오는 것 방지.
-  if (groupId) {
-    const group = await db.get('SELECT id FROM groups_tbl WHERE id = ? AND branch_id = ?', [groupId, branchId]);
-    if (!group) return res.redirect(base + '?error=' + encodeURIComponent('선택한 지사에 속한 법인이 아닙니다.'));
+  // 요청 법인은 필수다 — 청구·귀속 정확도뿐 아니라, 담당 계정을 여러 법인 매핑이 함께 쓸 때
+  // 조회 범위를 법인으로 가르는 유일한 값이라서다(lib/mcpDispatchAccess.js loadUsageCids).
+  // 법인 없이 만들면 그 매핑의 고객이 같은 계정의 다른 법인 접수 건까지 볼 수 있다.
+  if (!Number.isInteger(groupId) || groupId <= 0) {
+    return res.redirect(base + '?error=' + encodeURIComponent('요청 법인을 선택해주세요.'));
   }
+  // 그 지사 소속 법인인지 확인한다 — 폼 조작으로 다른 지사 법인이 들어오는 것 방지.
+  const group = await db.get('SELECT id FROM groups_tbl WHERE id = ? AND branch_id = ?', [groupId, branchId]);
+  if (!group) return res.redirect(base + '?error=' + encodeURIComponent('선택한 지사에 속한 법인이 아닙니다.'));
 
   try {
     await db.run(
