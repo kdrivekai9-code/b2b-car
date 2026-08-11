@@ -16,7 +16,7 @@ const { searchKnowledgeBase } = require('../lib/knowledgeSearch');
 const {
   parseKakaoIntake, buildParsedFromClassified, buildMissingQuestion, normalizePhone, normalizePlate,
   PREMIUM_DECLINE_RE, PREMIUM_DECLINABLE_FIELD_IDS, premiumOrderTypeToIntentHint, parseTripTypeBareReply,
-  buildPremiumParsedFromClassified, isAffirmative, isNegative, FAILURE_MESSAGES,
+  buildPremiumParsedFromClassified, isAffirmative, isNegative, FAILURE_MESSAGES, fullAddress,
 } = require('../lib/kakaoIntakeParser');
 const {
   loadPendingIntake, savePendingIntake, savePendingState, clearPendingIntake, wasPendingIntakeExpired,
@@ -661,8 +661,8 @@ async function saveIntakeDraft(session, parsed) {
 async function handoffWithParsedSlots(session, parsed, text, reasonLabel) {
   const summary = [
     '[자동 파싱] ' + reasonLabel,
-    `출발 ${parsed.origin.address || '-'} ${parsed.origin.contact || ''}`.trim(),
-    `도착 ${parsed.destination.address || '-'} ${parsed.destination.contact || ''}`.trim(),
+    `출발 ${fullAddress(parsed.origin) || '-'} ${parsed.origin.contact || ''}`.trim(),
+    `도착 ${fullAddress(parsed.destination) || '-'} ${parsed.destination.contact || ''}`.trim(),
     `차량 ${parsed.vehicles.map((v) => [v.type, v.plate].filter(Boolean).join(' ')).join(', ') || '-'}`,
     `일시 ${parsed.when && parsed.when.raw ? parsed.when.raw : '-'}`,
     parsed.memo ? `메모 ${parsed.memo}` : null,
@@ -1175,7 +1175,7 @@ async function completePremiumIntake(session, parsed, rawText, cache) {
 
   // 등록 전 "네" 확인 — 웹 AI 접수와 같은 방식(위 completeIntake와 같은 이유).
   await savePendingState(session, { raw: rawText, awaiting: 'confirm', category: 'premium_daily', orderType: parsed.orderType, parsed });
-  await botSay(session, `${buildPremiumPreviewMessage(parsed)}\n\n맞으면 "네", 다시 입력하시려면 내용을 고쳐서 다시 보내주세요.`, '접수 확인 대기(프리미엄/일일기사)');
+  await botSay(session, `${buildPremiumPreviewMessage(parsed)}\n\n맞으면 "네" 수정하시려면 수정할 항목만 고쳐서 다시 보내주세요`, '접수 확인 대기(프리미엄/일일기사)');
 }
 
 // "네" 확인 후 실제 등록.
@@ -1304,7 +1304,7 @@ async function completeIntake(session, parsed, rawText, cache) {
   // 확정 규칙 변경: 예전에는 필드가 차는 즉시 등록하고 사후에 "잘못됐으면 알려주세요"로
   // 확인했다). 실제 등록은 registerDispatchOrder가 "네" 답을 받은 뒤에 한다.
   await savePendingState(session, { raw: rawText, awaiting: 'confirm', category: 'dispatch', parsed });
-  await botSay(session, `${buildIntakeReply(parsed)}\n\n맞으면 "네", 다시 입력하시려면 내용을 고쳐서 다시 보내주세요.`, '접수 확인 대기');
+  await botSay(session, `${buildIntakeReply(parsed)}\n\n맞으면 "네" 수정하시려면 수정할 항목만 고쳐서 다시 보내주세요`, '접수 확인 대기');
   return true;
 }
 
