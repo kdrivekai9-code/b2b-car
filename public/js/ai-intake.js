@@ -2248,6 +2248,26 @@
     // 당일/오전 판정으로 들어간다. 나머지 단계(출발지→연락처→도착지→경유지…)는 아래
     // premium_* pendingField 조기 반환 분기와 extractAndProcess의 로컬 파싱 인터셉트가 담당.
     if (newOrderType && orderCategory !== 'dispatch') {
+      // 이 대화에서 앞서 다른 목적(탁송 요금문의 등)으로 이미 채워져 있던 출발지/도착지/연락처/
+      // 차량번호가 방금 막 시작한 새 오더(일일기사/프리미엄)로 그대로 새어 들어가는 사고를
+      // 막는다. 실사용 사고: "서울역→서귀포항" 탁송 요금문의로 채워진 도착지 주소가 전혀
+      // 다른 나중 일일기사 예약(창업로17→코리아cc)까지 남아 있다가, findNextDailyDriverField의
+      // 백그라운드 재검증이 뒤늦게 끝나면서 "도착지 주소는 '제주특별자치도 서귀포시
+      // 서귀동'(으)로 확인했습니다"로 불쑥 튀어나왔다. 탁송(dispatch)은 이 분기를 타지 않아
+      // 요금문의→그대로 접수 이어가기(의도된 동작)는 영향받지 않는다 — 이번 트리거 메시지가
+      // 같은 필드를 다시 채워주면(바로 아래 data.* 반영) 그 값으로 곧장 덮어써진다.
+      ['origin_address', 'origin_detail_address', 'origin_contact', 'destination_address',
+        'destination_detail_address', 'destination_contact', 'vehicle_number', 'vehicle_type',
+        'final_destination_address', 'memo_customer'].forEach(function (staleId) {
+        var staleEl = document.getElementById(staleId);
+        if (staleEl) staleEl.value = '';
+      });
+      document.querySelectorAll('#waypointsWrap .waypoint-row').forEach(function (row) { row.remove(); });
+      waypointsList = [];
+      currentWaypointAddrIdx = 0;
+      vehicleNumberResolved = false;
+      destinationWaitResolved = false;
+
       var greetMsg = orderCategory === 'daily_driver'
         ? '안녕하세요. 일일기사 예약을 도와드리겠습니다.\n이용 형태를 선택해 주세요.\n1. 왕복  2. 편도'
         : '안녕하세요. 프리미엄 서비스 예약을 도와드리겠습니다.';

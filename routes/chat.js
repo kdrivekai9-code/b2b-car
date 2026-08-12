@@ -597,11 +597,23 @@ router.post('/:sessionId/bot-message', asyncHandler(async (req, res) => {
   }
 
   if (finalMessage) {
-    const inserted = await db.get(
+    // 클라이언트(public/js/ai-intake.js retryBotMessageSave)는 응답을 못 받으면(네트워크 유실 등)
+    // 최대 2회 재시도한다 — 문제는 서버가 이미 INSERT까지 마친 뒤에 응답만 유실된 경우도 구분 없이
+    // 재시도되어 같은 봇 메시지가 그대로 두 번 저장된다는 점이다. 실사용 사고: 일일기사 인사말/
+    // "연락처를 다시 말씀해주세요?"/"최종 목적지 주소를 다시 알려주세요." 등이 매번 정확히 두 번씩
+    // 찍혔다. 마이그레이션 없이 막기 위해, 같은 세션의 direct 직전 봇 메시지가 짧은 시간 안에 같은
+    // 텍스트면 재시도로 보고 새로 넣지 않고 그 메시지를 그대로 재사용한다.
+    const recentDuplicate = await db.get(
+      `SELECT * FROM chat_messages WHERE session_id = ? AND sender = 'bot' AND message = ?
+       AND created_at >= to_char((now() at time zone 'Asia/Seoul') - interval '10 seconds', 'YYYY-MM-DD HH24:MI:SS')
+       ORDER BY id DESC LIMIT 1`,
+      [session.id, finalMessage]
+    ).catch(() => null);
+    const inserted = recentDuplicate || await db.get(
       `INSERT INTO chat_messages (session_id, sender, message) VALUES (?, 'bot', ?) RETURNING *`,
       [session.id, finalMessage]
     );
-    broadcastMessageAsync(session.id, inserted);
+    if (!recentDuplicate) broadcastMessageAsync(session.id, inserted);
   }
 
   // 오더 등록이 완료된 세션은 닫는다 — 안 그러면 다음 방문 시 세션 복원 기능이 방금 끝난
