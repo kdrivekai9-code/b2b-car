@@ -84,7 +84,10 @@
   ];
 
   // 차량번호 질문에서 "출발지 도착 후 알려주겠다"는 취지의 답변은 차량번호 없이 넘어간다.
-  var VEHICLE_NUMBER_SKIP_RE = /^(다음|없어요?|없습니다|없음|모르겠어요?|모름|몰라요?|아직\s*몰라요?|출발지에서\s*(확인|알려\S*|말씀\S*)|현장에서\s*(확인|알려\S*)|나중에\s*(확인|알려\S*)|미정|스킵|skip|패스|pass)[.!~\s]*$/i;
+  // "나중에" 단독 답변도 스킵으로 봐야 한다 — 예전엔 "나중에 확인/알려줄게"처럼 뒤에 동사가
+  // 붙어야만 매칭돼서, 고객이 그냥 "나중에"라고만 답하면 스킵으로 인식되지 못하고 Gemini
+  // 분류(→ FAQ 검색 폴백)로 새어 "관련된 답변을 찾지 못했습니다"가 나갔다.
+  var VEHICLE_NUMBER_SKIP_RE = /^(다음|없어요?|없습니다|없음|모르겠어요?|모름|몰라요?|아직\s*몰라요?|출발지에서\s*(확인|알려\S*|말씀\S*)|현장에서\s*(확인|알려\S*)|나중에(\s*(확인|알려\S*))?|미정|스킵|skip|패스|pass)[.!~\s]*$/i;
 
   // 출발지/도착지 연락처 질문에서 "동일해" 같은 참조 표현 — updateQuickReplies()가 버튼으로
   // 제안하는 것과 같은 값(도착지는 출발지 연락처, 출발지는 요청자 본인 연락처)을 텍스트로도
@@ -2429,9 +2432,44 @@
       return { logText: retryWpQ, needsAgent: false, requestedFeature: null };
     }
 
-    // 최종 목적지 답변(왕복 일일기사)
+    // 도착지 대기시간 답변(일일기사) — 예전에는 이 필드만 전용 처리가 없어서, "없어"든
+    // "4시간"이든 무슨 답을 하든 Gemini 응답(data)에 대기시간을 담을 자리 자체가 없어 값이
+    // 그대로 버려지고(noteTrouble만 조용히 1회 누적) 곧장 다음 질문으로 넘어갔다. 실사용
+    // 사고: "대기시간은 4시간 목적지는 코리아cc"라고 답했는데 4시간이 어디에도 기록되지 않고
+    // 바로 최종 목적지 질문으로 새 버림. parseWaitMinutes/parseWaitYesNo(로컬, Gemini 안 거침)
+    // 로 직접 해석한다 — 대기시간은 order intake 스키마에 없는 필드라 Gemini가 못 뽑는다.
+    if (orderCategory === 'daily_driver' && pendingField === 'destination_wait') {
+      var dwSourceText = String(sourceText || '').trim();
+      var dwMinutes = flowApi.parseWaitMinutes(dwSourceText);
+      var dwExplicitNone = flowApi.parseWaitYesNo(dwSourceText) === false;
+      if (dwMinutes === null && !dwExplicitNone) {
+        var retryDwQ = '도착지 대기 시간을 알려주세요. 없으면 "없어", 있으면 시간을 알려주세요. (예: 없어, 4시간)';
+        sayBot(retryDwQ);
+        return { logText: retryDwQ, needsAgent: false, requestedFeature: null };
+      }
+      // 숫자 추출(dwMinutes)이 있으면 그걸 우선한다 — parseWaitYesNo는 "30분"처럼 실제 대기
+      // 시간 안에 "0분"이 부분 문자열로 들어간 경우도 "없음"으로 오판하는 결함이 있다.
+      var dwEl = document.getElementById('destination_wait_minutes');
+      if (dwMinutes !== null && dwMinutes > 0) {
+        if (dwEl) dwEl.value = String(dwMinutes);
+        sayBot('도착지 대기시간을 ' + dwMinutes + '분으로 확인했습니다.');
+      } else if (dwMinutes === -1) {
+        if (dwEl) dwEl.value = '';
+        sayBot('도착지 대기시간은 추후 확인해서 안내드리겠습니다.');
+      } else {
+        if (dwEl) dwEl.value = '';
+        sayBot('도착지 대기 없음으로 확인했습니다.');
+      }
+      destinationWaitResolved = true;
+      return { logText: proceedAfterCollecting(), needsAgent: false, requestedFeature: null };
+    }
+
+    // 최종 목적지 답변(왕복 일일기사) — data는 서버 normalizeGeminiOrderFields()가 만든
+    // 스네이크케이스 응답이라 destination_address/waypoints[0].address로 읽어야 한다.
+    // 예전에는 존재하지 않는 카멜케이스 키(destinationAddress/waypointAddress)를 읽어서
+    // 무엇을 답하든 항상 null이 되어 "최종 목적지 주소를 다시 알려주세요."만 반복됐다.
     if (orderCategory === 'daily_driver' && pendingField === 'final_destination_address') {
-      var finalAddr = data.destinationAddress || data.waypointAddress || null;
+      var finalAddr = data.destination_address || (data.waypoints && data.waypoints[0] && data.waypoints[0].address) || null;
       if (!finalAddr) {
         var retryFdQ = '최종 목적지 주소를 다시 알려주세요.';
         sayBot(retryFdQ);
