@@ -3543,7 +3543,7 @@
       if (!m || m.id <= lastPolledId) return;
       lastPolledId = m.id;
       if (m.sender === 'agent') addBubble(m.message, 'agent');
-      else if (m.sender === 'system') addBubble(m.message, 'bot');
+      else if (m.sender === 'system') addBubble(m.message, 'system');
     });
   }
 
@@ -3588,9 +3588,10 @@
       if (m.sender === 'user') resetTurnBotRow();
       if (m.sender === 'agent') addBubble(m.message, 'agent', m.created_at);
       else if (m.sender === 'user') addBubble(m.message, 'user', m.created_at);
+      else if (m.sender === 'system') addBubble(m.message, 'system', m.created_at);
       // DB에는 "질문 말풍선" 플래그가 없어, 질문 문구는 항상 "?"로 끝난다는 관례를 휴리스틱으로
       // 써서 복원 시에도 파란 질문 배경이 유지되게 한다(그렇지 않으면 새로고침할 때마다 사라짐).
-      else addBubble(m.message, 'bot', m.created_at, /\?\s*$/.test(String(m.message || '').trim())); // 'bot' | 'system'
+      else addBubble(m.message, 'bot', m.created_at, /\?\s*$/.test(String(m.message || '').trim()));
     });
     syncStatePatch({ lastPolledId: lastPolledId });
     restoreDraftState(existing.draft);

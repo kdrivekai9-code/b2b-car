@@ -1632,7 +1632,7 @@ router.get('/team-feed', asyncHandler(async (req, res) => {
   const enabled = !!(group && group.share_activity_feed);
   const activities = enabled ? await listGroupActivity(groupId, 50) : [];
   res.render('orders/team_feed', {
-    title: '우리 회사 소식', groupName: group ? group.name : null, enabled, activities,
+    title: '팀 접수 현황 안내', groupName: group ? group.name : null, enabled, activities,
     kindLabels: ACTIVITY_KIND_LABELS,
   });
 }));

@@ -128,7 +128,7 @@
 
     function addBubble(text, who, createdAt, isQuestion) {
       var div = document.createElement('div');
-      div.className = 'ai-chat-bubble ' + (who === 'user' ? 'ai-user' : (who === 'agent' ? 'ai-agent' : 'ai-bot'));
+      div.className = 'ai-chat-bubble ' + (who === 'user' ? 'ai-user' : (who === 'agent' ? 'ai-agent' : (who === 'system' ? 'ai-system' : 'ai-bot')));
       if (who === 'bot' && isQuestion) div.className += ' ai-bot-question';
       var timeText = formatBubbleTime(createdAt);
 
@@ -140,6 +140,12 @@
         var agentBody = document.createElement('div');
         agentBody.textContent = text;
         div.appendChild(agentBody);
+      } else if (who === 'system') {
+        // 법인 공유 피드 알림 등 — 봇 답변 특유의 타이핑 애니메이션 없이 바로 보여준다(내 질문에
+        // 대한 실시간 응답이 아니라는 걸 속도로도 구분).
+        var systemBody = document.createElement('div');
+        appendTextWithAutoBold(systemBody, String(text == null ? '' : text));
+        div.appendChild(systemBody);
       } else if (who === 'bot') {
         var botBody = document.createElement('div');
         var rawText = String(text == null ? '' : text);

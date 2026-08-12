@@ -34,7 +34,7 @@
       <a href="/push/settings" class="<%= path.startsWith('/push') ? 'active' : '' %>" title="오더 알림 설정"><span class="nav-icon">🔔</span><span class="nav-label">오더 알림 설정</span></a>
       <a href="/faq" class="<%= path.startsWith('/faq') ? 'active' : '' %>" title="FAQ 문의"><span class="nav-icon">💬</span><span class="nav-label">FAQ 문의</span></a>
       <% if (currentUser && currentUser.role === 'client') { %>
-        <a href="/orders/team-feed" class="<%= path.startsWith('/orders/team-feed') ? 'active' : '' %>" title="우리 회사 소식"><span class="nav-icon">🏷️</span><span class="nav-label">우리 회사 소식</span></a>
+        <a href="/orders/team-feed" class="<%= path.startsWith('/orders/team-feed') ? 'active' : '' %>" title="팀 접수 현황 안내"><span class="nav-icon">🏷️</span><span class="nav-label">팀 접수 현황 안내</span></a>
       <% } %>
       <% if (currentUser && (currentUser.role === 'admin' || currentUser.role === 'branch_manager')) { %>
         <a href="/inquiries" class="<%= path.startsWith('/inquiries') ? 'active' : '' %>" title="문의 관리"><span class="nav-icon">📝</span><span class="nav-label">문의 관리</span></a>
