@@ -126,12 +126,14 @@
         .catch(function () { return { action: 'unclear' }; });
     },
 
-    parseText: function (text, pendingField, classified) {
+    parseText: function (text, pendingField, classified, sessionId) {
       return postJson('/orders/ai-intake/parse', {
         text: text,
         pendingField: pendingField,
         // 접수 턴 엔진이 방금 분류한 결과가 있으면 함께 보내 서버가 재분류를 건너뛰게 한다.
         classified: classified || null,
+        // FAQ 검색 문맥 보강(직전 사용자 질문 참고)에만 쓴다 — lib/knowledgeSearch.js.
+        sessionId: sessionId || null,
       }).then(function (res) {
         return res.json().catch(function () {
           return { error: '서버 응답을 읽는 중 문제가 발생했습니다. (상태 코드: ' + res.status + ')' };

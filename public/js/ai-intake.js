@@ -3205,7 +3205,7 @@
     // 찾으면 바로 적용하고, 못 찾을 때만(예: "출발지" 한 마디만 온 경우) 재입력을 요청한다.
     if (field.type === 'address' || field.type === 'vehicle' || field.type === 'datetime') {
       showThinkingBubble();
-      return api.parseText(text, field.id)
+      return api.parseText(text, field.id, null, sessionId)
         .then(function (data) {
           hideThinkingBubble();
           var hasOrderIntent = data && isOrderIntent(data.intent);
@@ -3839,7 +3839,7 @@
             if (handledByAgent) return null;
             showThinkingBubble();
             var fallbackHint = pendingField || (getNextMissingField() || {}).id || null;
-            return api.parseText(text, fallbackHint);
+            return api.parseText(text, fallbackHint, null, sessionId);
           });
         }
 
@@ -3870,10 +3870,10 @@
             // fallthrough — 서버가 다루지 않은 요청(faq/unsupported/proxy_order/daily_driver_order
             // 등)이니 지금까지와 동일한 경로로 넘긴다. 턴 엔진이 이미 분류한 결과가 있으면 함께
             // 넘겨 parse가 Gemini를 다시 태우지 않게 한다(응답 지연 절반).
-            return api.parseText(text, hintField, turnResult && turnResult.classified);
+            return api.parseText(text, hintField, turnResult && turnResult.classified, sessionId);
           });
         }
-        return api.parseText(text, hintField);
+        return api.parseText(text, hintField, null, sessionId);
       })
       .then(function (data) {
         hideThinkingBubble();

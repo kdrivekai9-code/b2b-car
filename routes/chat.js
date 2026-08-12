@@ -93,7 +93,7 @@ function createSuggestionAsync(session, text, userMessageId) {
     const owner = session.user_id
       ? await db.get('SELECT branch_id FROM users WHERE id = ?', [session.user_id]).catch(() => null)
       : null;
-    const suggestion = await buildSuggestion(text, { branchId: owner && owner.branch_id });
+    const suggestion = await buildSuggestion(text, { branchId: owner && owner.branch_id, sessionId: session.id });
     if (!suggestion) return; // 확신이 없으면 제안하지 않는다(소음 방지)
 
     // 같은 세션에 쌓인 이전 대기 제안은 닫는다 — 고객이 새 메시지를 보냈으면 직전 초안은 낡았다.

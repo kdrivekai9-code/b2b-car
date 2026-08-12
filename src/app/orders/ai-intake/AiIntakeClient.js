@@ -693,7 +693,8 @@ export default function AiIntakeClient({
     const parseData = await fetchJson('/orders/ai-intake/parse', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, pendingField: pendingField || null, classified: reuseClassified }),
+      // sessionId는 FAQ 검색 문맥 보강(직전 사용자 질문 참고)에만 쓰인다(lib/knowledgeSearch.js).
+      body: JSON.stringify({ text, pendingField: pendingField || null, classified: reuseClassified, sessionId }),
     });
 
     if (isAgentRequest(text) || parseData.intent === 'unsupported') {

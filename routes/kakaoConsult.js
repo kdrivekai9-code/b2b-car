@@ -260,7 +260,7 @@ async function createAgentSuggestion(session, text) {
   try {
     // 요금 초안은 지사 요금표로 계산한다 — 매핑이 없으면 기본 요금표 지사로 폴백한다.
     const account = await resolveIntakeContextCached(session).catch(() => null);
-    const suggestion = await buildSuggestion(text, { branchId: account && account.branch_id });
+    const suggestion = await buildSuggestion(text, { branchId: account && account.branch_id, sessionId: session.id });
     if (!suggestion) return;
 
     const lastUserMessage = await db.get(
@@ -443,7 +443,7 @@ async function tryAnswerOperatingHours(session, text) {
 async function tryAnswerFaq(session, text, knowledgeSearchPromise) {
   // 문턱은 웹 위젯(routes/orders.js)과 같은 0.7로 맞춘다 — 0.6일 때 "안녕하세요"에
   // "공지사항 메뉴는…" 같은 무관한 항목이 매칭돼 실제로 잘못된 답이 발송됐다.
-  const matches = await (knowledgeSearchPromise || searchKnowledgeBase(text, { limit: 1, threshold: 0.7 })).catch((e) => {
+  const matches = await (knowledgeSearchPromise || searchKnowledgeBase(text, { limit: 1, threshold: 0.7, sessionId: session.id })).catch((e) => {
     console.error('카카오 상담톡 FAQ 검색 실패:', e.message);
     return [];
   });
@@ -1517,7 +1517,7 @@ async function processBotTurn(session, text) {
   // 기다리지 않고 미리 같이 시작해둔다 — 웹 위젯(routes/orders.js)에 이미 있는 패턴과 같다.
   // faq가 아닌 의도로 판정되면 버리지만, 임베딩 호출 자체는 가벼워서 그 낭비보다 FAQ 응답
   // 지연이 줄어드는 이득이 크다(웹 쪽 실측: 순차 대비 응답 지연 절반 가까이 감소).
-  const knowledgeSearchPromise = searchKnowledgeBase(text, { limit: 1, threshold: 0.7 })
+  const knowledgeSearchPromise = searchKnowledgeBase(text, { limit: 1, threshold: 0.7, sessionId: session.id })
     .catch((e) => { console.error('카카오 상담톡 FAQ 사전 검색 실패:', e.message); return []; });
 
   let classified;

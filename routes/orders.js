@@ -607,6 +607,10 @@ function classifyOrderIntentByRule(text, fields) {
 router.post('/ai-intake/parse', asyncHandler(async (req, res) => {
   const text = (req.body.text || '').trim();
   const pendingField = req.body.pendingField || null;
+  // FAQ 검색 문맥 보강에만 쓴다(lib/knowledgeSearch.js) — 이 세션의 chat_messages를 조회할
+  // 뿐이라, 남의 세션 id를 보내도 그 세션 소유 여부는 확인하지 않는다(읽는 값이 "지식베이스
+  // 검색 정확도 힌트"뿐이라 권한 문제가 아니다 — 접수/조회처럼 개인정보를 반환하지 않는다).
+  const chatSessionId = Number(req.body.sessionId) || null;
   if (!text) return res.status(400).json({ error: '접수 내용을 입력해주세요.' });
   const ORDER_INTENTS = new Set(['dispatch_order', 'proxy_order', 'daily_driver_order']);
 
@@ -626,7 +630,7 @@ router.post('/ai-intake/parse', asyncHandler(async (req, res) => {
   // 기다리지 않고 미리 같이 시작해둔다 — FAQ로 판정될 때만 그 결과를 기다리면 두 외부 API 호출이
   // 순차가 아니라 병렬로 진행되어 FAQ 응답 지연이 절반 가까이 줄어든다. FAQ가 아니면 결과는 버려진다
   // (임베딩 호출 자체는 가벼워서, 다른 의도일 때 낭비되는 비용보다 FAQ 응답 지연 감소가 더 크다).
-  const knowledgeSearchPromise = searchKnowledgeBase(text, { limit: 1, threshold: 0.7 })
+  const knowledgeSearchPromise = searchKnowledgeBase(text, { limit: 1, threshold: 0.7, sessionId: chatSessionId })
     .catch((e) => { console.error('지식베이스 사전 검색 실패:', e.message); return []; });
 
   // 접수 턴 엔진(/chat/:id/intake-turn)이 방금 같은 문장을 분류하고 fallthrough하면서 그 결과를
