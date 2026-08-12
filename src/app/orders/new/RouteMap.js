@@ -6,9 +6,14 @@ import { createPortal } from 'react-dom';
 
 // Kakao Maps 렌더링 + 실제 경로(directions) 조회. order-form.js의 refreshMapView/
 // fetchRealDirections/fetchSplitSamcheonpoDirections를 React로 이식했다.
-// 범위 축소(공개적으로 문서화): 경로탐색 우선순위 선택(추천/최단시간/최단거리/무료도로)과
-// 구간별 상세 거리 리스트 UI는 이번 슬라이스에서는 생략 — 총 거리/시간/톨비 + 페리 여부만
-// 표시한다. 요금계산(useFarePreview)과 예약기준 역산은 이 값들만 있으면 충분하다.
+// 경로탐색 우선순위(추천/최단시간/최단거리/무료도로)는 priority/onPriorityChange로 부모
+// (OrderForm.js)가 제어한다 — 오더구분(탁송/일일기사/프리미엄대리)에 따라 기본값이 갈리므로
+// (사용자 요청) 상태를 이 컴포넌트 안에 가두지 않았다. 구간별 상세 거리 리스트 UI는 여전히
+// 생략 — 총 거리/시간/톨비 + 페리 여부만 표시한다. 요금계산(useFarePreview)과 예약기준
+// 역산은 이 값들만 있으면 충분하다.
+// 삼천포-제주 강제 도선 구간(forceSamcheonpo)은 priority와 무관하게 항상 RECOMMEND다
+// (public/js/order-form.js의 fetchSplitSamcheonpoDirections와 동일 — 고정 경유 항로라
+// 우선순위를 바꿔도 달라질 게 없다).
 const SAMCHEONPO_REGION_RE = /(강원|경상남도|경남|경상북도|경북|부산|울산)/;
 const SAMCHEONPO_PORT = { lat: 34.9269695307662, lng: 128.088376812689 };
 const JEJU_PORT = { lat: 33.519591050522465, lng: 126.53500143704899 };
@@ -31,7 +36,7 @@ function formatDuration(seconds) {
   return h > 0 ? `${h}시간 ${m}분` : `${m}분`;
 }
 
-export default function RouteMap({ points, originAddress, destinationAddress, onRouteUpdate }) {
+export default function RouteMap({ points, originAddress, destinationAddress, onRouteUpdate, priority, onPriorityChange }) {
   const [sdkReady, setSdkReady] = useState(false);
   const mapDivRef = useRef(null);
   const mapRef = useRef(null);
@@ -199,7 +204,12 @@ export default function RouteMap({ points, originAddress, destinationAddress, on
       return;
     }
 
-    const params = new URLSearchParams({ origin: coord(resolvedPoints[0]), destination: coord(resolvedPoints[resolvedPoints.length - 1]), priority: 'RECOMMEND' });
+    // "무료도로"는 카카오모빌리티 API에 없는 우선순위라 order-form.js와 동일하게 RECOMMEND +
+    // avoid=toll 조합으로 흉내낸다.
+    const isFreeRoute = priority === 'FREE';
+    const apiPriority = isFreeRoute ? 'RECOMMEND' : (priority || 'RECOMMEND');
+    const params = new URLSearchParams({ origin: coord(resolvedPoints[0]), destination: coord(resolvedPoints[resolvedPoints.length - 1]), priority: apiPriority });
+    if (isFreeRoute) params.set('avoid', 'toll');
     if (resolvedPoints.length > 2) params.set('waypoints', resolvedPoints.slice(1, -1).map(coord).join('|'));
     fetch('/kakao/directions?' + params.toString())
       .then((r) => (r.ok ? r.json() : null))
@@ -212,13 +222,18 @@ export default function RouteMap({ points, originAddress, destinationAddress, on
     // portalTarget: #orderMap이 도킹 슬롯으로 포탈된 직후 map 인스턴스가 막 생겼을 수 있으니
     // (위 map-생성 effect 주석 참고) 이 effect도 그 시점에 한 번 더 재시도되어야 한다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sdkReady, portalTarget, JSON.stringify(points), originAddress, destinationAddress]);
+  }, [sdkReady, portalTarget, JSON.stringify(points), originAddress, destinationAddress, priority]);
 
   return (
     <aside className="card map-card order-map-panel">
-      <div className="panel-title compact">
-        <div className="panel-icon">03</div>
-        <div><h2>경로 미리보기</h2><p>입력한 주소를 바탕으로 경로를 확인합니다.</p></div>
+      <div className="route-search-header">
+        <div className="section-title small" style={{ margin: 0 }}>🧭 경로탐색</div>
+        <select className="route-priority-select" value={priority} onChange={(e) => onPriorityChange(e.target.value)}>
+          <option value="RECOMMEND">추천</option>
+          <option value="TIME">최단시간</option>
+          <option value="DISTANCE">최단거리</option>
+          <option value="FREE">무료도로</option>
+        </select>
       </div>
       {summary.km != null && (
         <div className="map-distance-info">

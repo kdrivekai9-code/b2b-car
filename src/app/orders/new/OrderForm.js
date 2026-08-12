@@ -114,6 +114,17 @@ function initialFieldState(order, defaultBranch, mode) {
     // 모드는 이 필드에 대응하는 상담 접수 데이터가 없어 항상 빈 값 — 기존 동작 유지).
     memo_billing: mode === 'edit' ? (order.memo_billing || '') : '',
     order_type: order.order_type || 'dispatch',
+    // 경로탐색 기본값 — 탁송은 무료도로, 프리미엄/일일기사는 추천(사용자 지정). DB에 저장되는
+    // 값이 아니라(주문 필드가 아님) order_type만 보고 매번 다시 계산한다. 사용자가 드롭다운을
+    // 직접 바꾸면(route_priority_touched) 그 뒤로 오더구분이 바뀌어도 되돌리지 않는다.
+    route_priority: (order.order_type === 'premium' || order.order_type === 'daily_driver') ? 'RECOMMEND' : 'FREE',
+    route_priority_touched: false,
+    // 예약기준 기본값도 오더구분을 따라간다 — 탁송/일일기사는 픽업시간 기준, 프리미엄대리는
+    // 즉시. reservation_basis 자체는 저장된 값이 있으면(edit·재진입) 그대로 존중해야 해서
+    // 위에서 이미 order.reservation_basis 기준으로 정해뒀다 — 여기 touched 플래그는 "오더구분을
+    // 바꿀 때" 이 기본값을 다시 밀어줄지 판단하는 데만 쓴다(사용자가 예약기준 라디오를 직접
+    // 만지면 더는 자동으로 안 건드림).
+    reservation_basis_touched: false,
     trip_type: order.trip_type || '',
     final_destination_address: order.final_destination_address || '',
     final_destination_address_detail: order.final_destination_address_detail || '',
@@ -126,8 +137,24 @@ function initialFieldState(order, defaultBranch, mode) {
 
 function reducer(state, action) {
   switch (action.type) {
-    case 'SET_FIELD':
-      return { ...state, [action.name]: action.value };
+    case 'SET_FIELD': {
+      const next = { ...state, [action.name]: action.value };
+      if (action.name === 'reservation_basis') next.reservation_basis_touched = true;
+      if (action.name === 'route_priority') next.route_priority_touched = true;
+      return next;
+    }
+    // 오더구분(탁송/일일기사/프리미엄대리) 라디오 전용 — order_type만 바꾸는 SET_FIELD와
+    // 달리, 사용자가 아직 손대지 않은 예약기준/경로탐색 기본값도 함께 다시 맞춘다.
+    case 'SET_ORDER_TYPE': {
+      const next = { ...state, order_type: action.value };
+      if (!state.reservation_basis_touched) {
+        next.reservation_basis = action.value === 'premium' ? 'immediate' : 'pickup';
+      }
+      if (!state.route_priority_touched) {
+        next.route_priority = (action.value === 'premium' || action.value === 'daily_driver') ? 'RECOMMEND' : 'FREE';
+      }
+      return next;
+    }
     case 'SET_RESERVED_DATE_PART': {
       const next = { ...state, [action.name]: action.value };
       const lastDay = getLastDayOfMonth(next.reservedDateYear, next.reservedDateMonth);
@@ -666,10 +693,25 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
             막도록 하려면 form="order-edit-form"으로 명시적 연결이 필요하다. */}
         <form id="order-edit-form" className="order-form-fields" onSubmit={handleSubmit} style={{ display: 'contents' }}>
         <section className="card order-panel route-panel">
-          <div className="panel-title">
-            <div className="panel-icon">01</div>
-            <div><h2>이동 경로</h2><p>출발지와 도착지의 주소 및 연락처를 입력하세요.</p></div>
-          </div>
+          {/* edit 모드는 오더구분을 우측 OrderSidePanel에서 이미 다룬다 — 여기(01번 자리)에는
+              create 모드에서만 오더구분 라디오를 둔다(사용자 요청, 섹션 타이틀은 없앤다). */}
+          {!isEdit && (
+            <div className="order-type-radio-group inline-duo" style={{ marginBottom: 16, alignItems: 'center' }}>
+              <span style={{ fontWeight: 700, marginRight: 4 }}>오더구분</span>
+              <label className="checkline">
+                <input type="radio" name="order_type_radio" checked={(state.order_type || 'dispatch') === 'dispatch'}
+                  onChange={() => dispatch({ type: 'SET_ORDER_TYPE', value: 'dispatch' })} /> 탁송
+              </label>
+              <label className="checkline">
+                <input type="radio" name="order_type_radio" checked={state.order_type === 'daily_driver'}
+                  onChange={() => dispatch({ type: 'SET_ORDER_TYPE', value: 'daily_driver' })} /> 일일기사
+              </label>
+              <label className="checkline">
+                <input type="radio" name="order_type_radio" checked={state.order_type === 'premium'}
+                  onChange={() => dispatch({ type: 'SET_ORDER_TYPE', value: 'premium' })} /> 프리미엄대리
+              </label>
+            </div>
+          )}
 
           <div className="route-stop origin-stop">
             <div className="route-stop-title"><span className="route-marker">출발</span></div>
@@ -768,11 +810,6 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
         </section>
 
         <section className="card order-panel">
-          <div className="panel-title">
-            <div className="panel-icon">02</div>
-            <div><h2>운행 및 요청 정보</h2><p>예약 일정, 귀속 정보, 요금 및 요청 메모를 확인하세요.</p></div>
-          </div>
-
           <div className="route-stop order-schedule-stop">
           <div className="route-stop-title"><span className="route-marker">운행일정</span></div>
           <div className="field full">
@@ -914,25 +951,20 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
                 ) : null}
               </div>
 
-              <div className="section-title small">오더 타입</div>
-              <div className="row">
-                <div className="field">
-                  <label>오더 타입</label>
-                  <select value={state.order_type || 'dispatch'} onChange={(e) => setField('order_type', e.target.value)}>
-                    <option value="dispatch">탁송</option>
-                    <option value="premium">프리미엄</option>
-                    <option value="daily_driver">일일기사</option>
-                  </select>
+              {/* 오더 타입 자체는 01번 자리의 오더구분 라디오로 옮겼다 — 여기는 그 라디오가
+                  daily_driver일 때만 의미 있는 왕복/편도만 남긴다. */}
+              {state.order_type === 'daily_driver' && (
+                <div className="row">
+                  <div className="field">
+                    <label>이용 형태 (일일기사)</label>
+                    <select value={state.trip_type || ''} onChange={(e) => setField('trip_type', e.target.value)}>
+                      <option value="">해당 없음</option>
+                      <option value="round_trip">왕복</option>
+                      <option value="one_way">편도</option>
+                    </select>
+                  </div>
                 </div>
-                <div className="field">
-                  <label>이용 형태 (일일기사)</label>
-                  <select value={state.trip_type || ''} onChange={(e) => setField('trip_type', e.target.value)}>
-                    <option value="">해당 없음</option>
-                    <option value="round_trip">왕복</option>
-                    <option value="one_way">편도</option>
-                  </select>
-                </div>
-              </div>
+              )}
             </>
           )}
           {state.trip_type === 'round_trip' && (
@@ -1013,6 +1045,8 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
             originAddress={state.origin_address}
             destinationAddress={state.destination_address}
             onRouteUpdate={setRouteInfo}
+            priority={state.route_priority}
+            onPriorityChange={(v) => setField('route_priority', v)}
           />
         )}
       </div>

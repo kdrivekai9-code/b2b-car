@@ -24,7 +24,9 @@ function haversineKm(a, b) {
   return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
 }
 
-export default function RouteCalculator({ points, originAddress, destinationAddress, onRouteUpdate }) {
+// priority: 'RECOMMEND' | 'TIME' | 'DISTANCE' | 'FREE'(무료도로, avoid=toll로 흉내). 안 넘기면
+// (오더 상세/수정 화면처럼 선택 UI가 없는 호출부) 기존 동작 그대로 RECOMMEND를 쓴다.
+export default function RouteCalculator({ points, originAddress, destinationAddress, onRouteUpdate, priority }) {
   const requestIdRef = useRef(0);
 
   useEffect(() => {
@@ -77,7 +79,10 @@ export default function RouteCalculator({ points, originAddress, destinationAddr
       return;
     }
 
-    const params = new URLSearchParams({ origin: coord(resolvedPoints[0]), destination: coord(resolvedPoints[resolvedPoints.length - 1]), priority: 'RECOMMEND' });
+    const isFreeRoute = priority === 'FREE';
+    const apiPriority = isFreeRoute ? 'RECOMMEND' : (priority || 'RECOMMEND');
+    const params = new URLSearchParams({ origin: coord(resolvedPoints[0]), destination: coord(resolvedPoints[resolvedPoints.length - 1]), priority: apiPriority });
+    if (isFreeRoute) params.set('avoid', 'toll');
     if (resolvedPoints.length > 2) params.set('waypoints', resolvedPoints.slice(1, -1).map(coord).join('|'));
     fetch('/kakao/directions?' + params.toString())
       .then((r) => (r.ok ? r.json() : null))
@@ -87,7 +92,7 @@ export default function RouteCalculator({ points, originAddress, destinationAddr
       })
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(points), originAddress, destinationAddress]);
+  }, [JSON.stringify(points), originAddress, destinationAddress, priority]);
 
   return null;
 }

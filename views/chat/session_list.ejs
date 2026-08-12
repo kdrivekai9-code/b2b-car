@@ -173,6 +173,16 @@
               <label class="checkline"><input type="radio" name="reservation_basis" id="card_reservation_basis_delivery" value="delivery"> 도착지 인도시간 기준</label>
             </div>
 
+            <div class="route-search-header">
+              <div class="section-title small" style="margin:0;">🧭 경로탐색</div>
+              <select id="card_route_priority_select" class="route-priority-select">
+                <option value="RECOMMEND">추천</option>
+                <option value="TIME">최단시간</option>
+                <option value="DISTANCE">최단거리</option>
+                <option value="FREE" selected>무료도로</option>
+              </select>
+            </div>
+
             <div class="row">
               <div class="field">
                 <label id="card_reservation_datetime_label">예약일시 <span class="required-mark" aria-hidden="true">*</span></label>

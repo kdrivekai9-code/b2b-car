@@ -151,6 +151,9 @@ function initialState(order) {
     branch_id: order.branch_id || '',
     requester_group_id: order.requester_group_id || '',
     reservation_basis: (order.reservation_basis === 'delivery' || order.reservation_basis === 'immediate') ? order.reservation_basis : 'pickup',
+    // 이 미니폼은 탁송 접수만 다룬다(오더구분 선택 자체가 없음) — 그래서 경로탐색 기본값도
+    // 탁송 기준(무료도로)으로 고정한다. 사용자가 드롭다운에서 직접 바꾸면 그 값을 그대로 쓴다.
+    route_priority: 'FREE',
     reservedDateYear: m ? m[1] : String(now.getFullYear()),
     reservedDateMonth: m ? m[2] : pad2(now.getMonth() + 1),
     reservedDateDay: m ? m[3] : pad2(now.getDate()),
@@ -434,7 +437,17 @@ export default function IntakeMiniForm({ chatSessionId, branches, groups, paymen
 
   return (
     <form className="chat-order-form chat-admin-order-form" onSubmit={handleSubmit}>
-      <RouteCalculator points={routePoints} originAddress={state.origin_address} destinationAddress={state.destination_address} onRouteUpdate={setRouteInfo} />
+      <RouteCalculator points={routePoints} originAddress={state.origin_address} destinationAddress={state.destination_address} onRouteUpdate={setRouteInfo} priority={state.route_priority} />
+
+      <div className="route-search-header">
+        <div className="section-title small" style={{ margin: 0 }}>🧭 경로탐색</div>
+        <select className="route-priority-select" value={state.route_priority} onChange={(e) => setField('route_priority', e.target.value)}>
+          <option value="RECOMMEND">추천</option>
+          <option value="TIME">최단시간</option>
+          <option value="DISTANCE">최단거리</option>
+          <option value="FREE">무료도로</option>
+        </select>
+      </div>
 
       <div className="row">
         <div className="field">

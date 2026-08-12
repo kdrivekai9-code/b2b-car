@@ -26,6 +26,9 @@
   var orderReservationBasisImmediate = document.getElementById('card_reservation_basis_immediate');
   var orderReservationBasisPickup = document.getElementById('card_reservation_basis_pickup');
   var orderReservationBasisDelivery = document.getElementById('card_reservation_basis_delivery');
+  // 이 카드 폼은 탁송 접수만 다룬다(오더구분 선택 자체가 없음) — 경로탐색 기본값을 무료도로로
+  // 둔다(HTML의 FREE 옵션에 selected). 사용자가 드롭다운에서 직접 바꾸면 그 값을 그대로 쓴다.
+  var cardRoutePrioritySelect = document.getElementById('card_route_priority_select');
   var orderPickupReservedDate = document.getElementById('card_pickup_reserved_date');
   var orderPickupReservedTime = document.getElementById('card_pickup_reserved_time');
   var orderReservationDateTimeLabel = document.getElementById('card_reservation_datetime_label');
@@ -600,10 +603,13 @@
           });
         }
 
+        var routePriority = (cardRoutePrioritySelect && cardRoutePrioritySelect.value) || 'FREE';
+        var isFreeRoute = routePriority === 'FREE';
         var params = new URLSearchParams();
         params.set('origin', origin);
         params.set('destination', destination);
-        params.set('priority', 'RECOMMEND');
+        params.set('priority', isFreeRoute ? 'RECOMMEND' : routePriority);
+        if (isFreeRoute) params.set('avoid', 'toll');
         if (waypointInputs.length) {
           var coords = waypointInputs.map(coordStringFromInput).filter(Boolean);
           if (coords.length) params.set('waypoints', coords.join('|'));
@@ -1060,6 +1066,9 @@
     });
     if (orderReservedDate) {
       orderReservedDate.addEventListener('change', refreshCardRouteEstimate);
+    }
+    if (cardRoutePrioritySelect) {
+      cardRoutePrioritySelect.addEventListener('change', refreshCardRouteEstimate);
     }
     if (orderReservationBasisImmediate) orderReservationBasisImmediate.addEventListener('change', syncCardReservationPreview);
     if (orderReservationBasisPickup) orderReservationBasisPickup.addEventListener('change', syncCardReservationPreview);
