@@ -150,7 +150,7 @@ function initialState(order) {
   return {
     branch_id: order.branch_id || '',
     requester_group_id: order.requester_group_id || '',
-    reservation_basis: order.reservation_basis === 'delivery' ? 'delivery' : 'pickup',
+    reservation_basis: (order.reservation_basis === 'delivery' || order.reservation_basis === 'immediate') ? order.reservation_basis : 'pickup',
     reservedDateYear: m ? m[1] : String(now.getFullYear()),
     reservedDateMonth: m ? m[2] : pad2(now.getMonth() + 1),
     reservedDateDay: m ? m[3] : pad2(now.getDate()),
@@ -226,6 +226,23 @@ export default function IntakeMiniForm({ chatSessionId, branches, groups, paymen
   // 자동 삽입은 하지 않는다(레이스 없이 명확한 편이 낫다는 판단 — legacy만큼의 자동화가
   // 필요하면 후속으로 추가 가능).
   useEffect(() => {
+    if (state.reservation_basis === 'immediate') {
+      // 즉시 선택 시 예약 날짜/시간을 현재 시각(10분 단위 반올림)으로 맞춘다.
+      const now = roundDateToNearestTenMinutes(new Date());
+      const y = String(now.getFullYear());
+      const mo = pad2(now.getMonth() + 1);
+      const d = pad2(now.getDate());
+      const h = pad2(now.getHours());
+      const mi = pad2(now.getMinutes());
+      if (state.reservedDateYear !== y) setField('reservedDateYear', y);
+      if (state.reservedDateMonth !== mo) setField('reservedDateMonth', mo);
+      if (state.reservedDateDay !== d) setField('reservedDateDay', d);
+      if (state.reservedTimeHour !== h) setField('reservedTimeHour', h);
+      if (state.reservedTimeMinute !== mi) setField('reservedTimeMinute', mi);
+      if (state.pickup_reserved_date !== `${y}-${mo}-${d}`) setField('pickup_reserved_date', `${y}-${mo}-${d}`);
+      if (state.pickup_reserved_time !== `${h}:${mi}`) setField('pickup_reserved_time', `${h}:${mi}`);
+      return;
+    }
     if (state.reservation_basis !== 'delivery') {
       const nextDate = `${state.reservedDateYear}-${state.reservedDateMonth}-${state.reservedDateDay}`;
       const nextTime = `${state.reservedTimeHour}:${state.reservedTimeMinute}`;
@@ -438,6 +455,9 @@ export default function IntakeMiniForm({ chatSessionId, branches, groups, paymen
 
       <div className="inline-duo" style={{ marginBottom: 8, alignItems: 'center' }}>
         <label className="checkline">
+          <input type="radio" name="reservation_basis" checked={state.reservation_basis === 'immediate'} onChange={() => setField('reservation_basis', 'immediate')} /> 즉시
+        </label>
+        <label className="checkline">
           <input type="radio" name="reservation_basis" checked={state.reservation_basis === 'pickup'} onChange={() => setField('reservation_basis', 'pickup')} /> 출발지 픽업시간 기준
         </label>
         <label className="checkline">
@@ -449,15 +469,15 @@ export default function IntakeMiniForm({ chatSessionId, branches, groups, paymen
         <div className="field">
           <label>예약일시 <span className="required-mark" aria-hidden="true">*</span></label>
           <div className="inline-duo reservation-date-row">
-            <select className="date-select" aria-label="예약 연도" value={state.reservedDateYear}
+            <select className="date-select" aria-label="예약 연도" value={state.reservedDateYear} disabled={state.reservation_basis === 'immediate'}
               onChange={(e) => dispatch({ type: 'SET_RESERVED_DATE_PART', name: 'reservedDateYear', value: e.target.value })}>
               {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 1 + i).map((y) => <option key={y} value={String(y)}>{y}년</option>)}
             </select>
-            <select className="date-select" aria-label="예약 월" value={state.reservedDateMonth}
+            <select className="date-select" aria-label="예약 월" value={state.reservedDateMonth} disabled={state.reservation_basis === 'immediate'}
               onChange={(e) => dispatch({ type: 'SET_RESERVED_DATE_PART', name: 'reservedDateMonth', value: e.target.value })}>
               {Array.from({ length: 12 }, (_, i) => pad2(i + 1)).map((mm) => <option key={mm} value={mm}>{mm}월</option>)}
             </select>
-            <select className="date-select" aria-label="예약 일" value={state.reservedDateDay}
+            <select className="date-select" aria-label="예약 일" value={state.reservedDateDay} disabled={state.reservation_basis === 'immediate'}
               onChange={(e) => dispatch({ type: 'SET_RESERVED_DATE_PART', name: 'reservedDateDay', value: e.target.value })}>
               {Array.from({ length: getLastDayOfMonth(state.reservedDateYear, state.reservedDateMonth) }, (_, i) => pad2(i + 1)).map((dd) => <option key={dd} value={dd}>{dd}일</option>)}
             </select>
@@ -467,12 +487,12 @@ export default function IntakeMiniForm({ chatSessionId, branches, groups, paymen
           <label>예약 시간 <span className="required-mark" aria-hidden="true">*</span></label>
           <div className="time-inline-row">
             <div className="time-inline-cell">
-              <select aria-label="예약 시간 시" value={state.reservedTimeHour} onChange={(e) => setField('reservedTimeHour', e.target.value)}>
+              <select aria-label="예약 시간 시" value={state.reservedTimeHour} disabled={state.reservation_basis === 'immediate'} onChange={(e) => setField('reservedTimeHour', e.target.value)}>
                 {Array.from({ length: 24 }, (_, h) => pad2(h)).map((hh) => <option key={hh} value={hh}>{hh}시</option>)}
               </select>
             </div>
             <div className="time-inline-cell">
-              <select aria-label="예약 시간 분" value={state.reservedTimeMinute} onChange={(e) => setField('reservedTimeMinute', e.target.value)}>
+              <select aria-label="예약 시간 분" value={state.reservedTimeMinute} disabled={state.reservation_basis === 'immediate'} onChange={(e) => setField('reservedTimeMinute', e.target.value)}>
                 {Array.from({ length: 60 }, (_, m) => pad2(m)).map((mm) => <option key={mm} value={mm}>{mm}분</option>)}
               </select>
             </div>

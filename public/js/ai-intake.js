@@ -131,6 +131,13 @@
   // ---- 일일기사/프리미엄 전용 FSM 상태 ----
   // orderCategory: 'dispatch' | 'premium' | 'daily_driver' — confirmedOrderType에서 파생
   var orderCategory = 'dispatch';
+  // order-form.js(같은 페이지에 로드됨)에 경로탐색 기본값을 다시 맞추라고 알린다 — 탁송은
+  // 무료도로, 프리미엄/일일기사는 추천이 기본이다. 대화 도중 orderCategory가 바뀌는 모든
+  // 지점(아래 setOrderCategory 호출부)에서 이 갱신이 같이 일어나야 한다.
+  function setOrderCategory(next) {
+    orderCategory = next;
+    if (window.__applyRoutePriorityDefaultForOrderType) window.__applyRoutePriorityDefaultForOrderType(orderCategory);
+  }
   var tripType = null; // 'round_trip' | 'one_way'
   var waypointsList = []; // { address, addressDetail, contact, waitMinutes } 배열 — 대화로 누적
   var currentWaypointAddrIdx = 0; // 지금 몇 번째 경유지를 수집 중인지
@@ -651,6 +658,17 @@
   function isDeliveryReservationBasis() {
     var deliveryRadio = document.getElementById('reservation_basis_delivery');
     return !!(deliveryRadio && deliveryRadio.checked);
+  }
+
+  // 서버가 "즉시" 계열 표현(즉시/최대한빨리/현재/지금바로, 또는 예약시간 되물었는데 없다는
+  // 응답)을 감지해 data.reservation_immediate를 내려주면, 오더 접수 카드의 "즉시" 라디오를
+  // 체크해 예약 날짜/시간이 현재 시각으로 채워지고 편집이 잠기도록 한다(public/js/order-form.js
+  // syncReservationBasisPreview가 change 이벤트를 받아 처리).
+  function applyImmediateReservationBasis() {
+    var immediateRadio = document.getElementById('reservation_basis_immediate');
+    if (!immediateRadio) return;
+    immediateRadio.checked = true;
+    immediateRadio.dispatchEvent(new Event('change', { bubbles: true }));
   }
 
   function applyReservationBasisByText(text) {
@@ -1789,7 +1807,7 @@
       // 라디오 버튼(reservation_basis_pickup/delivery)은 단일 id로 값을 읽을 수 없어
       // DRAFT_FIELD_IDS와 별개로 저장한다 — 이게 없으면 상담관리 카드뷰에서 이 세션을 열었을 때
       // 도착지 인도시간 기준으로 판별했던 결과가 이어지지 않고 기본값(픽업 기준)으로 되돌아간다.
-      reservationBasis: isDeliveryReservationBasis() ? 'delivery' : 'pickup',
+      reservationBasis: isImmediateReservationBasisChecked() ? 'immediate' : (isDeliveryReservationBasis() ? 'delivery' : 'pickup'),
       // 배차 주문 도우미가 확인을 기다리는 중이면 새로고침/재진입 후에도 그 답("네")을 도우미가
       // 받아야 한다 — 확인 대기 자체는 서버(chat_sessions.mcp_pending_json)에 있고, 이 플래그는
       // 클라이언트가 그 답을 어디로 보낼지 판단하는 용도다.
@@ -1807,7 +1825,9 @@
     if (window.__updateVehicleTypeRequirement) window.__updateVehicleTypeRequirement();
     syncReservedTimeSelectsFromHidden();
     syncReservedDateSelectsFromHidden();
-    if (draft.reservationBasis === 'delivery') {
+    if (draft.reservationBasis === 'immediate') {
+      applyImmediateReservationBasis();
+    } else if (draft.reservationBasis === 'delivery') {
       var deliveryRadio = document.getElementById('reservation_basis_delivery');
       if (deliveryRadio) { deliveryRadio.checked = true; deliveryRadio.dispatchEvent(new Event('change', { bubbles: true })); }
     }
@@ -1890,6 +1910,7 @@
       waypoints: waypoints,
       memo_customer: val('memo_customer'),
       memo_billing: val('memo_billing'),
+      reservation_immediate: isImmediateReservationBasisChecked(),
     };
   }
 
@@ -1913,9 +1934,14 @@
 
   // 서버 요약의 폴백. scripts/check-intake-summary.js가 이 함수와 서버 모듈을 같은 값으로
   // 돌려 문구가 갈라지지 않았는지 대조한다.
+  function isImmediateReservationBasisChecked() {
+    var immediateRadio = document.getElementById('reservation_basis_immediate');
+    return !!(immediateRadio && immediateRadio.checked);
+  }
+
   function buildSummaryTextLocal() {
     var lines = [];
-    lines.push('▪ 예약: ' + val('reserved_date') + ' ' + val('reserved_time'));
+    lines.push('▪ 예약: ' + (isImmediateReservationBasisChecked() ? '즉시' : (val('reserved_date') + ' ' + val('reserved_time'))));
     lines.push('▪ 출발지: ' + val('origin_address') + (val('origin_detail_address') ? ' ' + val('origin_detail_address') : '') + ' (' + val('origin_contact') + ')');
     if (val('vehicle_number')) lines.push('▪ 차량번호: ' + val('vehicle_number'));
     if (val('vehicle_type')) lines.push('▪ 차종: ' + val('vehicle_type'));
@@ -2099,7 +2125,9 @@
     var isMorning = Number.isFinite(reservedHour) && reservedHour < 12;
 
     var formattedDateTime = formatReservedDateTime(reservedDate, val('reserved_time'));
-    var dtMsg = formattedDateTime ? (formattedDateTime + '으로 예약을 확인했습니다.') : null;
+    var dtMsg = data.reservation_immediate
+      ? '즉시로 예약을 확인했습니다.'
+      : (formattedDateTime ? (formattedDateTime + '으로 예약을 확인했습니다.') : null);
 
     if (!isSameDay || isMorning) {
       setPendingField('premium_trip_type');
@@ -2328,8 +2356,12 @@
         return { logText: ddDtRetryQ, needsAgent: false, requestedFeature: null };
       }
       reservedDateTimeConfirmed = true;
-      var ddDtMsg = formatReservedDateTime(val('reserved_date'), val('reserved_time'));
-      if (ddDtMsg) sayBot(ddDtMsg + '으로 예약을 확인했습니다.');
+      if (data.reservation_immediate) {
+        sayBot('즉시로 예약을 확인했습니다.');
+      } else {
+        var ddDtMsg = formatReservedDateTime(val('reserved_date'), val('reserved_time'));
+        if (ddDtMsg) sayBot(ddDtMsg + '으로 예약을 확인했습니다.');
+      }
       // proceedAfterCollecting()이 orderCategory==='daily_driver'일 때 pendingField(현재
       // 'reserved_date')를 기준으로 다음 빈 항목을 찾아 진행한다 — 트리거 메시지에 출발지/
       // 연락처 등이 이미 함께 왔었다면(findNextDailyDriverField 주석 참고) 그 항목들은 건너뛴다.
@@ -2589,7 +2621,15 @@
 
     if (dateTimeChanged) {
       reservedDateTimeConfirmed = true;
+      var isImmediateReservation = !!data.reservation_immediate;
       tasks.push(function () {
+        if (isImmediateReservation) {
+          applyImmediateReservationBasis();
+          var immMsg = '즉시(출발지 픽업)로 예약되었습니다.';
+          if (newOrderType) immMsg += '\n"' + ORDER_INTENT_LABELS[newOrderType] + '"로 확인되었습니다.';
+          sayBot(immMsg);
+          return null;
+        }
         var formattedDateTime = formatReservedDateTime(val('reserved_date'), val('reserved_time'));
         if (formattedDateTime) {
           // "도착" 문구는 예약 기준이 실제로 도착지 인도시간 기준(delivery)일 때만 쓴다 —

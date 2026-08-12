@@ -23,6 +23,7 @@
   var orderReservedTime = document.getElementById('card_reserved_time');
   var orderReservedTimeHour = document.getElementById('card_reserved_time_hour');
   var orderReservedTimeMinute = document.getElementById('card_reserved_time_minute');
+  var orderReservationBasisImmediate = document.getElementById('card_reservation_basis_immediate');
   var orderReservationBasisPickup = document.getElementById('card_reservation_basis_pickup');
   var orderReservationBasisDelivery = document.getElementById('card_reservation_basis_delivery');
   var orderPickupReservedDate = document.getElementById('card_pickup_reserved_date');
@@ -164,6 +165,27 @@
     return !!(orderReservationBasisDelivery && orderReservationBasisDelivery.checked);
   }
 
+  function isImmediateBasis() {
+    return !!(orderReservationBasisImmediate && orderReservationBasisImmediate.checked);
+  }
+
+  // "즉시" 기준 선택 시 예약 날짜/시간을 현재 시각(10분 단위 반올림)으로 맞추고 편집을 막는다 —
+  // public/js/order-form.js의 같은 이름 로직과 동일한 규칙(오더 등록·AI 챗봇 화면과 일관성 유지).
+  function applyNowToCardReservedDateTimeSelects() {
+    if (!hasOrderPane) return null;
+    var now = roundDateToNearestTenMinutes(new Date());
+    setReservedDateSelectors(now.getFullYear() + '-' + pad2(now.getMonth() + 1) + '-' + pad2(now.getDate()));
+    setReservedTimeSelectors(pad2(now.getHours()) + ':' + pad2(now.getMinutes()));
+    syncReservedDateField();
+    syncReservedTimeField();
+    return now;
+  }
+
+  function setCardReservedDateTimeSelectsDisabled(disabled) {
+    [orderReservedDateYear, orderReservedDateMonth, orderReservedDateDay, orderReservedTimeHour, orderReservedTimeMinute]
+      .forEach(function (el) { if (el) el.disabled = disabled; });
+  }
+
   function setCardPickupHidden(dt) {
     if (!orderPickupReservedDate || !orderPickupReservedTime) return;
     if (!dt || isNaN(dt.getTime())) {
@@ -177,6 +199,16 @@
 
   function syncCardReservationPreview() {
     if (!hasOrderPane) return;
+    var immediateBasis = isImmediateBasis();
+    setCardReservedDateTimeSelectsDisabled(immediateBasis);
+    if (immediateBasis) {
+      var nowDt = applyNowToCardReservedDateTimeSelects();
+      if (orderPickupPreviewBlock) orderPickupPreviewBlock.style.display = 'none';
+      setCardPickupHidden(nowDt);
+      if (orderDeliveryRouteFormula) orderDeliveryRouteFormula.textContent = '(경로탐색 : -)';
+      syncCardDeliveryReservationMemo();
+      return;
+    }
     var deliveryBasis = isDeliveryBasis();
     if (!deliveryBasis) {
       if (orderPickupPreviewBlock) orderPickupPreviewBlock.style.display = 'none';
@@ -621,11 +653,13 @@
     orderTransition.value = 'agent_active';
 
     if (orderReservationBasisPickup && orderReservationBasisDelivery) {
+      var isImmediate = order.reservation_basis === 'immediate';
       var isDelivery = order.reservation_basis === 'delivery';
-      orderReservationBasisPickup.checked = !isDelivery;
+      if (orderReservationBasisImmediate) orderReservationBasisImmediate.checked = isImmediate;
+      orderReservationBasisPickup.checked = !isImmediate && !isDelivery;
       orderReservationBasisDelivery.checked = isDelivery;
-      (isDelivery ? orderReservationBasisDelivery : orderReservationBasisPickup)
-        .dispatchEvent(new Event('change', { bubbles: true }));
+      var checkedBasisRadio = isImmediate ? orderReservationBasisImmediate : (isDelivery ? orderReservationBasisDelivery : orderReservationBasisPickup);
+      if (checkedBasisRadio) checkedBasisRadio.dispatchEvent(new Event('change', { bubbles: true }));
     }
 
     clearWaypoints();
@@ -1027,6 +1061,7 @@
     if (orderReservedDate) {
       orderReservedDate.addEventListener('change', refreshCardRouteEstimate);
     }
+    if (orderReservationBasisImmediate) orderReservationBasisImmediate.addEventListener('change', syncCardReservationPreview);
     if (orderReservationBasisPickup) orderReservationBasisPickup.addEventListener('change', syncCardReservationPreview);
     if (orderReservationBasisDelivery) orderReservationBasisDelivery.addEventListener('change', syncCardReservationPreview);
     setReservedDateSelectors(orderReservedDate.value);

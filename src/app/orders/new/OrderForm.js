@@ -90,7 +90,7 @@ function initialFieldState(order, defaultBranch, mode) {
     destination_lat: toCoordNumber(order.destination_lat), destination_lon: toCoordNumber(order.destination_lon),
     destination_sido: order.destination_sido || '', destination_sigugun: order.destination_sigugun || '', destination_dong: order.destination_dong || '',
     waypoints: prefillWaypoints,
-    reservation_basis: order.reservation_basis === 'delivery' ? 'delivery' : 'pickup',
+    reservation_basis: (order.reservation_basis === 'delivery' || order.reservation_basis === 'immediate') ? order.reservation_basis : 'pickup',
     // 아직 실제 역산 계산이 안 붙어 있어(경로/지도 레이어 이후 추가 예정) 항상 빈 값으로
     // 시작한다 — "배송기준" 제출을 의도적으로 막는 역할도 겸한다(위 handleSubmit 참고).
     pickup_reserved_date: '',
@@ -299,6 +299,25 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
       Number(state.reservedTimeHour), Number(state.reservedTimeMinute), 0, 0
     );
     const isDelivery = state.reservation_basis === 'delivery';
+
+    if (state.reservation_basis === 'immediate') {
+      // 즉시 선택 시 예약 날짜/시간을 현재 시각(10분 단위 반올림)으로 맞춘다 — 이미 같은 값이면
+      // dispatch를 건너뛰어 이 effect가 자기 자신을 계속 재실행하는 걸 막는다.
+      const now = roundDateToNearestTenMinutes(new Date());
+      const y = String(now.getFullYear());
+      const mo = pad2(now.getMonth() + 1);
+      const d = pad2(now.getDate());
+      const h = pad2(now.getHours());
+      const mi = pad2(now.getMinutes());
+      if (state.reservedDateYear !== y) dispatch({ type: 'SET_FIELD', name: 'reservedDateYear', value: y });
+      if (state.reservedDateMonth !== mo) dispatch({ type: 'SET_FIELD', name: 'reservedDateMonth', value: mo });
+      if (state.reservedDateDay !== d) dispatch({ type: 'SET_FIELD', name: 'reservedDateDay', value: d });
+      if (state.reservedTimeHour !== h) dispatch({ type: 'SET_FIELD', name: 'reservedTimeHour', value: h });
+      if (state.reservedTimeMinute !== mi) dispatch({ type: 'SET_FIELD', name: 'reservedTimeMinute', value: mi });
+      if (state.pickup_reserved_date !== `${y}-${mo}-${d}`) dispatch({ type: 'SET_FIELD', name: 'pickup_reserved_date', value: `${y}-${mo}-${d}` });
+      if (state.pickup_reserved_time !== `${h}:${mi}`) dispatch({ type: 'SET_FIELD', name: 'pickup_reserved_time', value: `${h}:${mi}` });
+      return;
+    }
 
     if (!isDelivery) {
       dispatch({ type: 'SET_FIELD', name: 'pickup_reserved_date', value: `${state.reservedDateYear}-${state.reservedDateMonth}-${state.reservedDateDay}` });
@@ -760,6 +779,10 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
             <label>예약일시 <span className="required-mark" aria-hidden="true">*</span></label>
             <div className="inline-duo" style={{ marginBottom: 8, alignItems: 'center' }}>
               <label className="checkline">
+                <input type="radio" name="reservation_basis" checked={state.reservation_basis === 'immediate'}
+                  onChange={() => setField('reservation_basis', 'immediate')} /> 즉시
+              </label>
+              <label className="checkline">
                 <input type="radio" name="reservation_basis" checked={state.reservation_basis === 'pickup'}
                   onChange={() => setField('reservation_basis', 'pickup')} /> 출발지 픽업시간 기준
               </label>
@@ -770,31 +793,31 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
             </div>
             <div className="inline-duo reservation-datetime-row">
               <div className="inline-duo reservation-date-row">
-                <select className="date-select" aria-label="예약 연도" value={state.reservedDateYear}
+                <select className="date-select" aria-label="예약 연도" value={state.reservedDateYear} disabled={state.reservation_basis === 'immediate'}
                   onChange={(e) => dispatch({ type: 'SET_RESERVED_DATE_PART', name: 'reservedDateYear', value: e.target.value })}>
                   {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 1 + i).map((y) => (
                     <option key={y} value={String(y)}>{y}년</option>
                   ))}
                 </select>
-                <select className="date-select" aria-label="예약 월" value={state.reservedDateMonth}
+                <select className="date-select" aria-label="예약 월" value={state.reservedDateMonth} disabled={state.reservation_basis === 'immediate'}
                   onChange={(e) => dispatch({ type: 'SET_RESERVED_DATE_PART', name: 'reservedDateMonth', value: e.target.value })}>
                   {Array.from({ length: 12 }, (_, i) => pad2(i + 1)).map((mm) => (
                     <option key={mm} value={mm}>{mm}월</option>
                   ))}
                 </select>
-                <select className="date-select" aria-label="예약 일" value={state.reservedDateDay}
+                <select className="date-select" aria-label="예약 일" value={state.reservedDateDay} disabled={state.reservation_basis === 'immediate'}
                   onChange={(e) => dispatch({ type: 'SET_RESERVED_DATE_PART', name: 'reservedDateDay', value: e.target.value })}>
                   {Array.from({ length: getLastDayOfMonth(state.reservedDateYear, state.reservedDateMonth) }, (_, i) => pad2(i + 1)).map((dd) => (
                     <option key={dd} value={dd}>{dd}일</option>
                   ))}
                 </select>
               </div>
-              <select className="time-select" value={state.reservedTimeHour} onChange={(e) => setField('reservedTimeHour', e.target.value)}>
+              <select className="time-select" value={state.reservedTimeHour} disabled={state.reservation_basis === 'immediate'} onChange={(e) => setField('reservedTimeHour', e.target.value)}>
                 {Array.from({ length: 24 }, (_, h) => pad2(h)).map((hh) => (
                   <option key={hh} value={hh}>{hh}시</option>
                 ))}
               </select>
-              <select className="time-select" value={state.reservedTimeMinute} onChange={(e) => setField('reservedTimeMinute', e.target.value)}>
+              <select className="time-select" value={state.reservedTimeMinute} disabled={state.reservation_basis === 'immediate'} onChange={(e) => setField('reservedTimeMinute', e.target.value)}>
                 {['00', '10', '20', '30', '40', '50'].map((mm) => (
                   <option key={mm} value={mm}>{mm}분</option>
                 ))}

@@ -60,6 +60,7 @@
 
       <div class="ai-intake-section section-schedule">
         <div class="inline-duo" style="margin-bottom:8px; align-items:center;">
+          <label class="checkline"><input type="radio" name="reservation_basis" id="reservation_basis_immediate" value="immediate"> 즉시</label>
           <label class="checkline"><input type="radio" name="reservation_basis" id="reservation_basis_pickup" value="pickup" <%= order.reservation_basis === 'delivery' ? '' : 'checked' %>> 출발지 픽업시간 기준</label>
           <label class="checkline"><input type="radio" name="reservation_basis" id="reservation_basis_delivery" value="delivery" <%= order.reservation_basis === 'delivery' ? 'checked' : '' %>> 도착지 인도시간 기준</label>
         </div>

@@ -402,6 +402,7 @@ router.post('/ai-intake/summary.json', asyncHandler(async (req, res) => {
   const text = buildSummaryText({
     reservedDate: b.reserved_date,
     reservedTime: b.reserved_time,
+    immediate: !!b.reservation_immediate,
     origin: { address: b.origin_address, detail: b.origin_detail_address, contact: b.origin_contact },
     destination: { address: b.destination_address, detail: b.destination_detail_address, contact: b.destination_contact },
     waypoints: Array.isArray(b.waypoints) ? b.waypoints : [],
@@ -626,6 +627,27 @@ router.post('/ai-intake/parse', asyncHandler(async (req, res) => {
     });
   }
 
+  // 예약시간을 되물었는데(pendingField) "없다"는 취지의 짧은 답만 오면 Gemini보다 먼저 처리한다.
+  // 실사용 사고: "몰라요"처럼 문맥 없는 한 마디를 그대로 Gemini에 태우면 order 관련 신호가 전혀
+  // 없어 faq/unsupported로 오분류돼 아래 "즉시" 채우기 코드(intent==='faq'면 그 앞에서 return
+  // 해버림)에 도달하지도 못하고 끝났다. pendingField 자체가 이미 "무엇에 대한 답인지"를 말해주고
+  // 있으므로 Gemini를 거칠 필요가 없다.
+  {
+    const RESERVED_DATE_PENDING_FIELDS_EARLY = new Set(['reserved_date', 'premium_reserved_datetime']);
+    const RESERVATION_TIME_DECLINE_RE_EARLY = /^(없음|없어요?|없습니다|모르겠어요?|모름|몰라요?|미정)[.!~\s]*$/i;
+    if (RESERVED_DATE_PENDING_FIELDS_EARLY.has(pendingField) && RESERVATION_TIME_DECLINE_RE_EARLY.test(text)) {
+      const now = kstNow();
+      const pad = (n) => String(n).padStart(2, '0');
+      return res.json({
+        intent: 'dispatch_order',
+        reserved_date: `${now.getUTCFullYear()}-${pad(now.getUTCMonth() + 1)}-${pad(now.getUTCDate())}`,
+        reserved_time: `${pad(now.getUTCHours())}:${pad(now.getUTCMinutes())}`,
+        reservation_immediate: true,
+        seemsFrustrated: false,
+      });
+    }
+  }
+
   // 지식검색(임베딩 API 호출)은 사용자 원문 텍스트만 있으면 바로 시작할 수 있어, 의도분류(Gemini) 결과를
   // 기다리지 않고 미리 같이 시작해둔다 — FAQ로 판정될 때만 그 결과를 기다리면 두 외부 API 호출이
   // 순차가 아니라 병렬로 진행되어 FAQ 응답 지연이 절반 가까이 줄어든다. FAQ가 아니면 결과는 버려진다
@@ -684,14 +706,27 @@ router.post('/ai-intake/parse', asyncHandler(async (req, res) => {
   // reservationDate/Time은 애초에 날짜·시간이 아니라서 비어 있으니(당연한 결과), 클라이언트
   // (public/js/ai-intake.js)가 "아직 확정 안 됨"으로 보고 예약시간을 계속 되물었다(실사용
   // 사고: 다른 필드를 전부 확인해준 뒤에도 "예약시간을 말씀해주세요?"가 반복됨). 그래서
-  // 명시적 "즉시"일 때만 예외로 지금 시각을 채워 내려보낸다 — 카카오 채널과 같은 좁은 판단
-  // 기준(lib/kakaoIntakeParser.js explicitImmediate)이라, "즉시 답변 부탁드려요" 같은 무관한
-  // 문맥까지 오탐할 위험은 낮다.
-  if (!fields.reserved_date && !fields.reserved_time && /즉시/.test(text)) {
+  // 명시적 "즉시" 계열 표현일 때는 예외로 지금 시각을 채워 내려보낸다. 사용자 확정 규칙
+  // (2026-08-13): "즉시" 외에 "최대한빨리"/"현재"/"지금바로"도 같은 뜻으로 본다. 예약시간을
+  // 되물었는데 "없다"는 취지로만 답한 경우는 위에서(Gemini를 태우기도 전에) 이미 처리했다 —
+  // 여기 도달했다는 건 그 짧은 거부 응답이 아니라는 뜻이라 다시 보지 않는다.
+  //
+  // reserved_date만 있고 reserved_time이 빈 경우도 즉시로 채운다 — 실사용 사고: 이 문장을
+  // Gemini에 그대로 태우면 "즉시"는 시각이 아니라서 reservationTime은 비어 있지만
+  // reservationDate에는 (근거 없이) 오늘 날짜를 채워 내려줄 때가 있었다. 예전 조건
+  // (reserved_date·reserved_time 둘 다 비어야만 채움)은 이 경우를 못 잡아 시간만 영원히
+  // 빈 채로 남았다 — date가 이미 있어도 time이 없으면 즉시 표현 시 둘 다 지금 시각으로
+  // 덮어써서 날짜·시각이 항상 짝을 맞추게 한다.
+  const IMMEDIATE_WORDING_RE = /즉시|최대한\s*빨리|지금\s*바로|현재/;
+  const isImmediateWording = IMMEDIATE_WORDING_RE.test(text);
+  if (!fields.reserved_time && isImmediateWording) {
     const now = kstNow();
     const pad = (n) => String(n).padStart(2, '0');
     fields.reserved_date = `${now.getUTCFullYear()}-${pad(now.getUTCMonth() + 1)}-${pad(now.getUTCDate())}`;
     fields.reserved_time = `${pad(now.getUTCHours())}:${pad(now.getUTCMinutes())}`;
+    // 클라이언트가 확인 문구를 "8월 12일 오후 5시"가 아니라 "즉시"로 보여주고, 오더 등록
+    // 화면의 "즉시" 라디오를 자동 체크하도록 알려준다.
+    fields.reservation_immediate = true;
   }
 
   res.json({ intent, ...fields, seemsFrustrated });

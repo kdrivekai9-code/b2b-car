@@ -66,6 +66,7 @@
     syncReservedDateField();
   })();
 
+  var reservationBasisImmediate = document.getElementById('reservation_basis_immediate');
   var reservationBasisPickup = document.getElementById('reservation_basis_pickup');
   var reservationBasisDelivery = document.getElementById('reservation_basis_delivery');
   var pickupReservedDateInput = document.getElementById('pickup_reserved_date');
@@ -81,6 +82,10 @@
 
   function isDeliveryReservationBasis() {
     return !!(reservationBasisDelivery && reservationBasisDelivery.checked);
+  }
+
+  function isImmediateReservationBasis() {
+    return !!(reservationBasisImmediate && reservationBasisImmediate.checked);
   }
 
   function pad2(value) {
@@ -147,7 +152,42 @@
     if (routeDurationFormulaHeader) routeDurationFormulaHeader.textContent = text ? ('· ' + text) : '';
   }
 
+  // "즉시" 기준 선택 시 예약 날짜/시간 드롭다운을 현재 시각(10분 단위 반올림)으로 맞추고
+  // 편집을 막는다 — 실제 제출 시각까지 최대한 가깝게 유지하려고 제출 직전(submit 핸들러)에도
+  // 다시 호출된다.
+  function applyNowToReservedDateTimeSelects() {
+    var now = roundDateToNearestTenMinutes(new Date());
+    if (reservedDateYearSelect) reservedDateYearSelect.value = String(now.getFullYear());
+    if (reservedDateMonthSelect) reservedDateMonthSelect.value = pad2(now.getMonth() + 1);
+    if (reservedDateDaySelect) reservedDateDaySelect.value = pad2(now.getDate());
+    var hourSelect = document.getElementById('reserved_time_hour');
+    var minuteSelect = document.getElementById('reserved_time_minute');
+    if (hourSelect) hourSelect.value = pad2(now.getHours());
+    if (minuteSelect) minuteSelect.value = pad2(now.getMinutes());
+    syncReservedDateField();
+    var timeHidden = document.getElementById('reserved_time');
+    if (timeHidden && hourSelect && minuteSelect) timeHidden.value = hourSelect.value + ':' + minuteSelect.value;
+    return now;
+  }
+
+  function setReservedDateTimeSelectsDisabled(disabled) {
+    [reservedDateYearSelect, reservedDateMonthSelect, reservedDateDaySelect,
+      document.getElementById('reserved_time_hour'), document.getElementById('reserved_time_minute')]
+      .forEach(function (el) { if (el) el.disabled = disabled; });
+  }
+
   function syncReservationBasisPreview() {
+    var immediateBasis = isImmediateReservationBasis();
+    setReservedDateTimeSelectsDisabled(immediateBasis);
+    if (immediateBasis) {
+      var nowDt = applyNowToReservedDateTimeSelects();
+      if (pickupPreviewBlock) pickupPreviewBlock.style.display = 'none';
+      setPickupHiddenFields(nowDt);
+      setRouteFormulaText('');
+      syncDeliveryReservationMemo();
+      return;
+    }
+
     var deliveryBasis = isDeliveryReservationBasis();
     if (!deliveryBasis) {
       if (pickupPreviewBlock) pickupPreviewBlock.style.display = 'none';
@@ -973,6 +1013,9 @@
 
   var routePriority = 'RECOMMEND';
   var routePrioritySelect = document.getElementById('routePrioritySelect');
+  // 사용자가 드롭다운을 한 번이라도 직접 바꾸면 그 뒤로는 오더타입이 바뀌어도 기본값을
+  // 강제로 덮어쓰지 않는다 — 되돌리면 "방금 무료도로로 바꿨는데 왜 다시 추천으로 바뀌지"가 된다.
+  var routePriorityTouchedByUser = false;
   var reservedDateInputForRoute = document.getElementById('reserved_date');
   var reservedTimeInputForRoute = document.querySelector('input[name="reserved_time"]');
   var reservedTimeHourSelect = document.getElementById('reserved_time_hour');
@@ -996,10 +1039,39 @@
   setAiRouteMeta({ hasFerryLeg: false, ferryLegs: [], ferrySegments: null });
   if (routePrioritySelect) {
     routePrioritySelect.addEventListener('change', function () {
+      routePriorityTouchedByUser = true;
       routePriority = routePrioritySelect.value;
       refreshMapView();
     });
   }
+
+  // 오더타입별 경로탐색 기본값 — 탁송(dispatch)은 무료도로, 프리미엄/일일기사는 추천이 기본이다
+  // (실사용 지적: 탁송은 톨비를 고객이 부담하는 경우가 많아 무료도로가 실제 운행 경로에 가깝고,
+  // 대리/일일기사는 시간이 우선이라 추천 경로가 맞다). order_type <select>가 있는 화면
+  // (form.ejs)과, 대화로 오더타입이 나중에 정해지는 화면(ai_intake.ejs, orderCategory 변경 시
+  // ai-intake.js가 window.__applyRoutePriorityDefaultForOrderType을 직접 호출) 양쪽에서 쓴다.
+  function applyRoutePriorityDefaultForOrderType(orderType) {
+    if (routePriorityTouchedByUser || !routePrioritySelect) return;
+    var next = (orderType === 'premium' || orderType === 'daily_driver') ? 'RECOMMEND' : 'FREE';
+    if (next === routePriority) return;
+    routePriority = next;
+    routePrioritySelect.value = next;
+    refreshMapView();
+  }
+  window.__applyRoutePriorityDefaultForOrderType = applyRoutePriorityDefaultForOrderType;
+
+  var orderTypeSelectEl = document.querySelector('select[name="order_type"]');
+  if (orderTypeSelectEl) {
+    applyRoutePriorityDefaultForOrderType(orderTypeSelectEl.value);
+    orderTypeSelectEl.addEventListener('change', function () {
+      applyRoutePriorityDefaultForOrderType(orderTypeSelectEl.value);
+    });
+  } else if (routePrioritySelect) {
+    // order_type <select>가 없는 화면(ai_intake.ejs)은 대화가 시작되기 전 기본 오더유형(탁송)
+    // 기준으로 먼저 맞춰둔다 — orderCategory가 확정되면 ai-intake.js가 다시 불러 갱신한다.
+    applyRoutePriorityDefaultForOrderType('dispatch');
+  }
+
   var directionsRequestId = 0;
   function fetchRealDirections(points, requestId) {
     var coord = function (p) { return p.latlng.getLng() + ',' + p.latlng.getLat(); };
@@ -1174,6 +1246,7 @@
   wireReservationTimeChange(reservedTimeInputForRoute);
   wireReservationTimeChange(reservedTimeHourSelect);
   wireReservationTimeChange(reservedTimeMinuteSelect);
+  if (reservationBasisImmediate) reservationBasisImmediate.addEventListener('change', syncReservationBasisPreview);
   if (reservationBasisPickup) reservationBasisPickup.addEventListener('change', syncReservationBasisPreview);
   if (reservationBasisDelivery) reservationBasisDelivery.addEventListener('change', syncReservationBasisPreview);
   if (form) {
