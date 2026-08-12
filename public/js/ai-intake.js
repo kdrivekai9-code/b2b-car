@@ -502,7 +502,7 @@
     phase = 'collecting';
     pendingDisambiguation = null;
     disambiguationQueue = [];
-    orderCategory = 'dispatch';
+    setOrderCategory('dispatch');
     tripType = null;
     waypointsList = [];
     currentWaypointAddrIdx = 0;
@@ -636,6 +636,10 @@
     return Number(dParts[1]) + '월 ' + Number(dParts[2]) + '일 ' + WEEKDAY_KO[dt.getDay()] + '요일 ' + ampm + ' ' + hour12 + '시 ' + pad2(minute) + '분';
   }
 
+  // "도착지"(주소 라벨)는 "도착"을 포함하지만 시간 기준과 무관하다 — 뒤에 "지"가 바로 붙는
+  // 경우만 라벨로 보고 제외한다("~시 도착"/"도착 예정"처럼 "지"가 안 붙는 진짜 시간 표현은 잡는다).
+  var DELIVERY_TIME_HINT_RE = /(도착요망|인도|도착(?!지))/;
+
   function detectReservationBasisFromText(text) {
     var raw = String(text || '');
     // 전체 텍스트에는 "[출발지]" 같은 무관한 섹션 헤더가 항상 있어 "출발"이 늘 매칭되므로,
@@ -644,14 +648,22 @@
     var timeLineMatch = raw.match(/일시[^\n]*/);
     if (timeLineMatch) {
       var line = timeLineMatch[0];
-      if (/(도착요망|도착|인도)/.test(line)) return 'delivery';
+      if (DELIVERY_TIME_HINT_RE.test(line)) return 'delivery';
       if (/픽업/.test(line)) return 'pickup';
       return null;
     }
-    var hasPickup = /(픽업|출발)/.test(raw);
-    var hasDelivery = /(도착요망|도착|인도)/.test(raw);
-    if (hasPickup) return 'pickup';
+    // "일시" 라인이 없는 자유 문장(AI 챗봇의 실사용 패턴 대부분이 이 경우다)도 같은 함정이
+    // 있다 — "출발지는 판교역이고 내일 오후 3시까지 도착요망"처럼 도착시간 기준을 말해도
+    // 문장 어딘가에 "출발지"(주소 라벨일 뿐 시간 표현이 아님)가 거의 항상 같이 나와서, 위와
+    // 똑같이 "출발" 매칭에 걸려 픽업 기준으로 오판된다. "픽업"은 시간 표현으로만 쓰이는
+    // 특이적인 단어라 그대로 두되, "출발"은 이 넓은 매칭에서 뺀다 — 못 잡아도 라디오는 기본값
+    // (픽업 기준)에 그대로 머물 뿐이라 안전하고, 잘못 잡아 도착 기준을 뭉개는 쪽이 더 나쁘다.
+    // "도착지"(목적지 주소 라벨) 역시 거의 모든 메시지에 등장하므로 DELIVERY_TIME_HINT_RE가
+    // "지"가 바로 붙은 "도착"은 라벨로 보고 걸러낸다.
+    var hasPickup = /픽업/.test(raw);
+    var hasDelivery = DELIVERY_TIME_HINT_RE.test(raw);
     if (hasDelivery) return 'delivery';
+    if (hasPickup) return 'pickup';
     return null;
   }
 
@@ -1839,7 +1851,7 @@
     vehicleNumberResolved = !!draft.vehicleNumberResolved;
     additionalRequestResolved = !!draft.additionalRequestResolved;
     confirmedOrderType = draft.confirmedOrderType || null;
-    orderCategory = draft.orderCategory || 'dispatch';
+    setOrderCategory(draft.orderCategory || 'dispatch');
     tripType = draft.tripType || null;
     dispatchAgentActive = !!draft.dispatchAgentActive;
     dispatchAgentEverUsed = !!draft.dispatchAgentEverUsed;
@@ -2263,9 +2275,9 @@
       confirmedOrderType = newOrderType;
       updateOrderTypeBadge(newOrderType);
       // orderCategory 동기화
-      if (newOrderType === 'daily_driver_order') orderCategory = 'daily_driver';
-      else if (newOrderType === 'proxy_order') orderCategory = 'premium';
-      else orderCategory = 'dispatch';
+      if (newOrderType === 'daily_driver_order') setOrderCategory('daily_driver');
+      else if (newOrderType === 'proxy_order') setOrderCategory('premium');
+      else setOrderCategory('dispatch');
     }
 
     // 일일기사/프리미엄 진입 — 오더유형이 최초로 확정되었고 탁송이 아닐 때.
@@ -3810,7 +3822,7 @@
           if (premiumTripParsed === 'round_trip') {
             // 이미 받은 예약시간을 그대로 이어받아 일일기사 흐름의 다음 질문(출발지)부터 진행한다
             // (사용자 확정 사항 — 예약일시를 다시 묻지 않음).
-            orderCategory = 'daily_driver';
+            setOrderCategory('daily_driver');
             tripType = 'round_trip';
             updateOrderTypeBadge('daily_driver_order');
             var ddFieldsFromPremium = flowApi.getDailyDriverFields(tripType);
