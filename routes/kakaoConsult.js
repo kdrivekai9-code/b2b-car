@@ -37,7 +37,7 @@ const { sendOrderPhotos, isPhotoRequest, isOdometerRequest, answerOdometer, coun
 const { searchAddressCandidates, needsDisambiguation, buildCandidateListText, matchCandidateChoice, getClarifyText } = require('../lib/addressCandidates');
 const { getSmalltalkMessage } = require('../lib/smallTalk');
 const { buildSuggestion, buildFareSuggestion, buildHoursSuggestion, isHoursQuestion, toIntakeFields, buildIntakeReply } = require('../lib/agentAssist');
-const { runDispatchAgent } = require('../lib/mcpDispatchAgent');
+const { runDispatchAgent, loadPending: loadMcpPending } = require('../lib/mcpDispatchAgent');
 const { notify } = require('../lib/push');
 const { broadcastMessage, broadcastSessionListChanged } = require('../lib/realtimeChat');
 const { logIntegrationErrorAsync } = require('../lib/integrationLog');
@@ -1454,6 +1454,22 @@ async function processBotTurn(session, text) {
     return handleConfirmReply(session, confirmPending, text);
   }
 
+  // MCP 배차 도우미(주문 등록/변경/취소)가 "네" 확인을 기다리는 중이어도 같은 이유로 스몰토크
+  // 필터보다 먼저 봐야 한다 — 실사용 사고: "아래 내용으로 배차 주문을 등록할까요?"에 고객이
+  // 정확히 "네"라고 답했는데 SMALL_TALK_RE가 그 "네"를 정보량 0으로 보고 조용히 삼켜서
+  // 챗봇이 완전히 무응답으로 멈췄다(mcp_pending_json이 그대로 남아 재현 확인). 위의 카카오
+  // 접수 확인(confirmPending)과 같은 종류의 문제라 같은 자리에서 같은 방식으로 막는다.
+  // pending이 실제로 있을 때만 본다 — 그냥 "최근에 도우미를 썼다"는 것만으로는(isMcpFollowUp)
+  // 스몰토크까지 전부 도우미로 돌릴 이유가 없다.
+  const mcpPending = await loadMcpPending(session.id).catch(() => null);
+  if (mcpPending) {
+    const handled = await tryDispatchAgent(session, text).catch((e) => {
+      console.error('카카오 배차 도우미 확인 처리 실패:', e.message);
+      return false;
+    });
+    if (handled) return;
+  }
+
   if (SMALL_TALK_RE.test(text)) return;
 
   // 인사·자기소개는 지식검색으로 보내지 않는다 — 웹 위젯과 같은 규칙(lib/smallTalk.js).
@@ -1492,16 +1508,6 @@ async function processBotTurn(session, text) {
     ? pendingIntake.raw + '\n' + text
     : text;
 
-  // 도우미와 대화 중이면 분류보다 먼저 그쪽으로 돌린다 — 이어지는 답이 새 접수로 읽히면
-  // 방금 물어본 맥락이 사라진다.
-  if (isMcpFollowUp(session)) {
-    const continued = await tryDispatchAgent(session, text).catch((e) => {
-      console.error('카카오 배차 도우미 이어가기 실패:', e.message);
-      return false;
-    });
-    if (continued) return;
-  }
-
   // 분류(Gemini)가 도는 동안 접수 주체(거래처)도 미리 확정해둔다 — 조회(unsupported)·접수
   // (dispatch_order) 분기에서 곧 필요하다. 세션에 캐시되므로 그 분기에서 다시 부르면 이미
   // 끝나 있어, ~1초 걸리는 분류와 DB 조회가 겹쳐 순차 지연이 사라진다. (fire-and-forget)
@@ -1520,6 +1526,22 @@ async function processBotTurn(session, text) {
   } catch (e) {
     console.error('카카오 상담톡 의도 분류 실패:', e.message);
     classified = { intent: 'unsupported' };
+  }
+
+  // 도우미와 대화 중이었더라도, 이번 발화가 새 접수(탁송/대리운전/일일기사)로 명확히 읽히면
+  // 전용 접수 파서로 보낸다 — MCP 배차 도우미(create_order)는 "대리운전 즉시/예약 호출" 전용
+  // 으로 만들어져 출발지 연락처 같은 탁송 전용 필드 개념이 아예 없다. 실사용 사고(2026-08-12):
+  // 직전에 MCP 조회("오늘이후 예약건은?")를 쓴 뒤 "탁송예약해줘"를 보냈더니 분류를 건너뛰고
+  // MCP로 새서, 탁송에 필요한 출발지 연락처를 안 물어보고 계정 소유자 번호로 접수를 시도했다.
+  // 새 접수가 아닌 후속 질문(조회·취소·변경, 맥락 의존 답변)만 도우미로 돌린다.
+  const isNewIntakeIntent = classified.intent === 'dispatch_order'
+    || classified.intent === 'proxy_order' || classified.intent === 'daily_driver_order';
+  if (isMcpFollowUp(session) && !isNewIntakeIntent) {
+    const continued = await tryDispatchAgent(session, text).catch((e) => {
+      console.error('카카오 배차 도우미 이어가기 실패:', e.message);
+      return false;
+    });
+    if (continued) return;
   }
 
   if (classified.intent === 'unsupported') {
