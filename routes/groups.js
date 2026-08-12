@@ -43,30 +43,52 @@ router.post('/', asyncHandler(async (req, res) => {
   } = req.body;
   const branch = await db.get('SELECT id, main_phone FROM branches WHERE id = ?', [branch_id]);
   if (!branch) return res.status(400).send('유효한 소속 지사를 선택해주세요.');
+  const shareActivityFeed = req.body.share_activity_feed === '1';
 
   const finalMainPhone = (main_phone || branch.main_phone || null);
-  await db.run(
-    `INSERT INTO groups_tbl (
-      branch_id, parent_group_id, name, main_phone,
-      business_registration_number, company_phone,
-      contact_name, contact_phone, business_address, tax_email,
-      tax_invoice_issue_day, payment_due_day, settlement_method
-    ) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      branch_id,
-      name,
-      finalMainPhone,
-      business_registration_number || null,
-      company_phone || null,
-      contact_name || null,
-      contact_phone || null,
-      business_address || null,
-      tax_email || null,
-      tax_invoice_issue_day ? Number(tax_invoice_issue_day) : null,
-      payment_due_day ? Number(payment_due_day) : null,
-      settlement_method || null,
-    ]
-  );
+  try {
+    await db.run(
+      `INSERT INTO groups_tbl (
+        branch_id, parent_group_id, name, main_phone,
+        business_registration_number, company_phone,
+        contact_name, contact_phone, business_address, tax_email,
+        tax_invoice_issue_day, payment_due_day, settlement_method, share_activity_feed
+      ) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        branch_id,
+        name,
+        finalMainPhone,
+        business_registration_number || null,
+        company_phone || null,
+        contact_name || null,
+        contact_phone || null,
+        business_address || null,
+        tax_email || null,
+        tax_invoice_issue_day ? Number(tax_invoice_issue_day) : null,
+        payment_due_day ? Number(payment_due_day) : null,
+        settlement_method || null,
+        shareActivityFeed,
+      ]
+    );
+  } catch (e) {
+    // 마이그레이션 전(share_activity_feed 컬럼 없음)이면 그 칸만 빼고 저장한다 — 법인 등록
+    // 자체가 이 기능 하나 때문에 막히면 안 된다.
+    if (!e || e.code !== '42703') throw e;
+    await db.run(
+      `INSERT INTO groups_tbl (
+        branch_id, parent_group_id, name, main_phone,
+        business_registration_number, company_phone,
+        contact_name, contact_phone, business_address, tax_email,
+        tax_invoice_issue_day, payment_due_day, settlement_method
+      ) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        branch_id, name, finalMainPhone, business_registration_number || null, company_phone || null,
+        contact_name || null, contact_phone || null, business_address || null, tax_email || null,
+        tax_invoice_issue_day ? Number(tax_invoice_issue_day) : null,
+        payment_due_day ? Number(payment_due_day) : null, settlement_method || null,
+      ]
+    );
+  }
   res.redirect('/groups');
 }));
 
@@ -97,31 +119,43 @@ router.post('/:id', asyncHandler(async (req, res) => {
 
   const branch = await db.get('SELECT id, main_phone FROM branches WHERE id = ?', [branch_id]);
   if (!branch) return res.status(400).send('유효한 소속 지사를 선택해주세요.');
+  const shareActivityFeed = req.body.share_activity_feed === '1';
 
   const finalMainPhone = (main_phone || branch.main_phone || null);
-  await db.run(
-    `UPDATE groups_tbl
-     SET branch_id=?, name=?, main_phone=?,
-         business_registration_number=?, company_phone=?,
-         contact_name=?, contact_phone=?, business_address=?, tax_email=?,
-         tax_invoice_issue_day=?, payment_due_day=?, settlement_method=?
-     WHERE id=?`,
-    [
-      branch_id,
-      name,
-      finalMainPhone,
-      business_registration_number || null,
-      company_phone || null,
-      contact_name || null,
-      contact_phone || null,
-      business_address || null,
-      tax_email || null,
-      tax_invoice_issue_day ? Number(tax_invoice_issue_day) : null,
-      payment_due_day ? Number(payment_due_day) : null,
-      settlement_method || null,
-      req.params.id,
-    ]
-  );
+  try {
+    await db.run(
+      `UPDATE groups_tbl
+       SET branch_id=?, name=?, main_phone=?,
+           business_registration_number=?, company_phone=?,
+           contact_name=?, contact_phone=?, business_address=?, tax_email=?,
+           tax_invoice_issue_day=?, payment_due_day=?, settlement_method=?, share_activity_feed=?
+       WHERE id=?`,
+      [
+        branch_id, name, finalMainPhone, business_registration_number || null, company_phone || null,
+        contact_name || null, contact_phone || null, business_address || null, tax_email || null,
+        tax_invoice_issue_day ? Number(tax_invoice_issue_day) : null,
+        payment_due_day ? Number(payment_due_day) : null, settlement_method || null,
+        shareActivityFeed, req.params.id,
+      ]
+    );
+  } catch (e) {
+    if (!e || e.code !== '42703') throw e;
+    await db.run(
+      `UPDATE groups_tbl
+       SET branch_id=?, name=?, main_phone=?,
+           business_registration_number=?, company_phone=?,
+           contact_name=?, contact_phone=?, business_address=?, tax_email=?,
+           tax_invoice_issue_day=?, payment_due_day=?, settlement_method=?
+       WHERE id=?`,
+      [
+        branch_id, name, finalMainPhone, business_registration_number || null, company_phone || null,
+        contact_name || null, contact_phone || null, business_address || null, tax_email || null,
+        tax_invoice_issue_day ? Number(tax_invoice_issue_day) : null,
+        payment_due_day ? Number(payment_due_day) : null, settlement_method || null,
+        req.params.id,
+      ]
+    );
+  }
   res.redirect('/groups');
 }));
 

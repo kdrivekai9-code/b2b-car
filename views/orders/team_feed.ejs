@@ -1,0 +1,50 @@
+<%- include('../partials/header') %>
+<div class="page-head-row">
+  <div>
+    <h1 class="page-title">우리 회사 소식</h1>
+    <p class="page-sub">
+      <% if (groupName) { %><%= groupName %> 소속 동료들의 접수·취소·변경 요청을 모아 보여줍니다.<% } %>
+      대화 내용 자체가 아니라 요청 요약만 공유되며, 본인의 대화 흐름에는 끼어들지 않습니다.
+    </p>
+  </div>
+</div>
+
+<% if (!groupName) { %>
+  <div class="card">
+    <p class="page-sub" style="margin:0">소속된 법인이 없어 이 기능을 쓸 수 없습니다. 관리자에게 문의해주세요.</p>
+  </div>
+<% } else if (!enabled) { %>
+  <div class="card">
+    <p class="page-sub" style="margin:0">
+      아직 우리 회사는 이 기능이 꺼져 있습니다. 켜고 싶으시면 담당 상담원이나 관리자에게 요청해주세요.
+    </p>
+  </div>
+<% } else { %>
+  <div class="card">
+    <% if (!activities.length) { %>
+      <p class="page-sub" style="margin:0">아직 공유된 소식이 없습니다. 동료가 접수·취소·변경을 하면 여기 나타납니다.</p>
+    <% } else { %>
+      <table class="table">
+        <thead>
+          <tr><th style="width:130px">구분</th><th>내용</th><th style="width:120px">담당자</th><th style="width:160px">시각</th></tr>
+        </thead>
+        <tbody>
+          <% activities.forEach(function (a) { %>
+            <tr>
+              <td>
+                <span class="badge <%= a.kind === 'cancelled' ? 'red' : (a.kind === 'created' ? 'green' : 'amber') %>">
+                  <%= kindLabels[a.kind] || a.kind %>
+                </span>
+                <% if (a.oid) { %><br><span class="page-sub"><%= a.oid %></span><% } %>
+              </td>
+              <td><%= a.summary %></td>
+              <td><%= a.actor_label %></td>
+              <td><%= a.created_at %></td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    <% } %>
+  </div>
+<% } %>
+<%- include('../partials/footer') %>

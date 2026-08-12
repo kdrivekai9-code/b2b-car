@@ -21,6 +21,7 @@ const { registerOrderWithCallmaner, tryUpdateWithErrorCodeColumn } = require('..
 const { maybeUpgradePremiumToDaily } = require('../lib/premiumUpgrade');
 // 오더 저장은 세 경로(웹·문의전환·카카오)가 같은 구현을 쓴다.
 const { createOrder } = require('../lib/orderCreate');
+const { recordActivity: recordGroupActivity, listRecentActivity: listGroupActivity, KIND_LABELS: ACTIVITY_KIND_LABELS } = require('../lib/groupActivityFeed');
 // 수행일이 갈리면 구간마다 별도 오더로 나눈다 — 카카오 자동접수와 같은 규칙.
 const { splitIntake } = require('../lib/orderSplit');
 // 접수 필드 정의는 카카오 상담톡과 공유한다(lib/intakeFields.js).
@@ -1425,6 +1426,14 @@ router.post('/:id', asyncHandler(async (req, res) => {
       INSERT INTO order_status_history (order_id, actor_user_id, old_status, new_status, note)
       VALUES (?, ?, ?, ?, ?)
     `, [req.params.id, u.id, order.status, order.status, diffs.join('; ')]);
+    // 법인 공유 피드 — 이 diffs 문장을 그대로 재사용한다(경로·일시·차량·요금·고객사 메모
+    // 변경이 이미 다 들어 있다 — "요청사항 추가·변경"도 memo_customer diff로 여기 포함된다).
+    // 법인 자체를 옮기는 경우는 드물지만, 옮긴 뒤 기준(finalGroup)으로 기록해야 그 법인
+    // 동료가 보게 된다.
+    recordGroupActivity({
+      groupId: finalGroup, orderId: order.id, oid: order.oid, kind: 'updated',
+      summary: diffs.join('; '), actorUserId: u.id, actorLabel: u.name,
+    });
   }
 
   const existingWaypoints = existingWaypointsFull;
@@ -1554,6 +1563,20 @@ router.post('/:id/additional-request', asyncHandler(async (req, res) => {
 
   broadcastOrderListChangedAsync();
   res.json({ ok: true });
+}));
+
+// 법인 공유 피드 — 같은 법인 소속 사용자들이 서로의 접수·취소·변경 요청을 보는 화면(사용자
+// 확정 요청). /:id보다 먼저 등록해야 한다 — 안 그러면 "team-feed"가 오더 id로 읽혀버린다.
+router.get('/team-feed', asyncHandler(async (req, res) => {
+  const u = req.session.user;
+  const groupId = u.group_id || null;
+  const group = groupId ? await db.get('SELECT id, name, share_activity_feed FROM groups_tbl WHERE id = ?', [groupId]).catch(() => null) : null;
+  const enabled = !!(group && group.share_activity_feed);
+  const activities = enabled ? await listGroupActivity(groupId, 50) : [];
+  res.render('orders/team_feed', {
+    title: '우리 회사 소식', groupName: group ? group.name : null, enabled, activities,
+    kindLabels: ACTIVITY_KIND_LABELS,
+  });
 }));
 
 router.get('/:id', asyncHandler(async (req, res) => {
@@ -1877,6 +1900,17 @@ router.post('/:id/status', asyncHandler(async (req, res) => {
     INSERT INTO order_status_history (order_id, actor_user_id, old_status, new_status, note)
     VALUES (?, ?, ?, ?, ?)
   `, [req.params.id, u.id, order.status, status, note || null]);
+
+  // 법인 공유 피드 — 취소만 담는다(그 외 상태 전이는 콜마너 폴링으로도 일어나는 운영
+  // 정보라 "동료의 요청"이 아니다). client든 admin/branch_manager가 대신 처리했든
+  // "우리 회사 오더가 취소됐다"는 사실 자체는 법인 전체가 알아야 할 정보라 실행 주체를
+  // 가리지 않는다.
+  if (status === '취소') {
+    recordGroupActivity({
+      groupId: order.requester_group_id, orderId: order.id, oid: order.oid, kind: 'cancelled',
+      summary: note ? `취소 — ${note}` : '취소', actorUserId: u.id, actorLabel: u.name,
+    });
+  }
 
   // '대기'도 '접수'와 마찬가지로 콜마너 등록을 트리거한다(사용자 확정 사항) — 로컬 status
   // 컬럼은 그대로 '대기'/'접수'로 남고, registerOrderWithCallmaner는 콜마너 쪽 상태만

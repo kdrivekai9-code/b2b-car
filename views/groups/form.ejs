@@ -58,6 +58,18 @@
         </select>
       </div>
     </div>
+
+    <div class="section-title">🔗 소속 사용자 공유</div>
+    <div class="field full">
+      <label class="checkline">
+        <input type="checkbox" name="share_activity_feed" value="1" <%= group.share_activity_feed ? 'checked' : '' %>>
+        같은 법인 소속 사용자들에게 서로의 접수·취소·변경 요청을 공유한다
+      </label>
+      <p class="page-sub">
+        켜면 이 법인 소속 사용자들이 서로의 대화 내용을 직접 보는 게 아니라,
+        접수·취소·변경이 있을 때마다 만들어지는 한 줄 요약만 "우리 회사 소식"에서 함께 봅니다.
+      </p>
+    </div>
   </form>
 </div>
 <script>
