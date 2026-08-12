@@ -667,10 +667,29 @@ router.post('/ai-intake/parse', asyncHandler(async (req, res) => {
 
   const fields = geminiResult ? normalizeGeminiOrderFields(geminiResult) : parseIntakeText(text);
   const fallbackIntent = (geminiResult && ORDER_INTENTS.has(geminiResult.intent)) ? geminiResult.intent : 'dispatch_order';
+  // intent 판정은 원래 fields(예약일시 유무)를 그대로 봐야 한다 — 아래 "즉시" 채우기보다
+  // 반드시 먼저 실행해서, 예약없는 즉시 대리 요청(proxy_order)이 예약 있는 건으로 오분류되지
+  // 않게 한다.
   const intent = classifyOrderIntentByRule(text, fields) || fallbackIntent;
-  // 예약일시가 없으면 현재 시각으로 조용히 채우지 않고 챗봇이 직접 물어보게 한다 — 이전에는
-  // "지금 바로 보내는 차량"으로 임의 가정했는데, 사용자가 실제로 정한 적 없는 값을 마치 확인한
-  // 것처럼 안내해버리는 문제가 있었다.
+
+  // 예약일시가 아예 없으면 현재 시각으로 조용히 채우지 않고 챗봇이 직접 물어보게 한다(정책
+  // 유지 — 예전에는 "지금 바로 보내는 차량"으로 임의 가정했는데, 사용자가 실제로 정한 적
+  // 없는 값을 마치 확인한 것처럼 안내해버리는 문제가 있었다).
+  //
+  // 다만 "즉시"라고 명시적으로 답한 경우는 다르다 — 이건 고객이 실제로 밝힌 의도인데도
+  // reservationDate/Time은 애초에 날짜·시간이 아니라서 비어 있으니(당연한 결과), 클라이언트
+  // (public/js/ai-intake.js)가 "아직 확정 안 됨"으로 보고 예약시간을 계속 되물었다(실사용
+  // 사고: 다른 필드를 전부 확인해준 뒤에도 "예약시간을 말씀해주세요?"가 반복됨). 그래서
+  // 명시적 "즉시"일 때만 예외로 지금 시각을 채워 내려보낸다 — 카카오 채널과 같은 좁은 판단
+  // 기준(lib/kakaoIntakeParser.js explicitImmediate)이라, "즉시 답변 부탁드려요" 같은 무관한
+  // 문맥까지 오탐할 위험은 낮다.
+  if (!fields.reserved_date && !fields.reserved_time && /즉시/.test(text)) {
+    const now = kstNow();
+    const pad = (n) => String(n).padStart(2, '0');
+    fields.reserved_date = `${now.getUTCFullYear()}-${pad(now.getUTCMonth() + 1)}-${pad(now.getUTCDate())}`;
+    fields.reserved_time = `${pad(now.getUTCHours())}:${pad(now.getUTCMinutes())}`;
+  }
+
   res.json({ intent, ...fields, seemsFrustrated });
 }));
 
