@@ -3303,6 +3303,35 @@
     return null;
   }
 
+  // ---------------- "출발지 픽업시간이 몇 시냐" 질문에 바로 답하기 ----------------
+  // 도착지 인도시간 기준(delivery) 예약은 출발지 픽업시간을 고객이 직접 정하지 않고 경로
+  // 소요시간으로 역산한다 — 그래서 "경로가 아직 확정 안 됐다"/"확정됐다" 두 경우를 실제
+  // 값으로 구분해서 답해야 한다(사용자 확정 요청). 탁송(dispatch)에만 있는 개념이라
+  // 일일기사/프리미엄에는 적용하지 않는다.
+  var PICKUP_TIME_QUESTION_RE = /(픽업\s?(시간|시각))|((출발|픽업).{0,12}(몇\s?시|언제))|((몇\s?시|언제).{0,12}(출발|픽업))/;
+  function tryAnswerPickupTimeQuestion(text) {
+    if (orderCategory !== 'dispatch' || !PICKUP_TIME_QUESTION_RE.test(text)) return false;
+    var msg;
+    if (isImmediateReservationBasisChecked()) {
+      msg = '즉시 출발(현재 시각 기준)로 접수되어 별도 픽업 대기 없이 바로 진행됩니다.';
+    } else if (isDeliveryReservationBasis()) {
+      var pickupDate = val('pickup_reserved_date');
+      var pickupTime = val('pickup_reserved_time');
+      var formatted = (pickupDate && pickupTime) ? formatReservedDateTime(pickupDate, pickupTime) : null;
+      msg = formatted
+        ? ('출발지 픽업예상시간은 ' + formatted + '입니다. (도착지 인도시간 기준으로 경로 소요시간을 역산한 값입니다)')
+        : '출발지·도착지 주소를 기반으로 경로가 아직 확정되지 않아 출발지 픽업 예상시간을 계산할 수 없습니다. 경로가 확정되면 자동으로 안내해드리겠습니다.';
+    } else {
+      var formattedPickup = formatReservedDateTime(val('reserved_date'), val('reserved_time'));
+      msg = formattedPickup
+        ? ('출발지 픽업시간은 말씀해주신 대로 ' + formattedPickup + '입니다.')
+        : '아직 예약일시가 확정되지 않았습니다.';
+    }
+    noteProgress();
+    sayBot(msg);
+    return true;
+  }
+
   var CHOOSE_FIELD_CLARIFY = flowApi.getChooseFieldClarifyText();
   // CHOOSE_FIELD_CLARIFY(탁송 전용 6항목 목록, "도착지 연락처" 포함)를 그대로 쓰면 일일기사
   // 사용자에게는 없는 항목(도착지 연락처)을 고르라고 하고, 있는 항목(이용형태/전달사항/
@@ -3703,6 +3732,14 @@
           }
           return null;
         }
+        // 확인/필드선택 단계에서 "출발지 픽업시간이 몇 시냐"를 물으면 등록·수정 여부를 묻는
+        // 상태머신(dispatchPhase)으로 보내지 않고 여기서 바로 답한다 — 그쪽으로 보내면 "수정
+        // 요청"으로 오인되거나(matchFieldKeyword 개선 이전 사고) 잘해야 "등록해 드릴까요, 아니면
+        // 수정해 드릴까요?"로 되물을 뿐 실제 질문에는 답하지 못한다.
+        if ((phase === 'confirming' || phase === 'choose_field') && tryAnswerPickupTimeQuestion(text)) {
+          return null;
+        }
+
         // 이 세 분기와 아래 "상담원 연결" 빠른 경로는 전부 비동기(Gemini 폴백 분류/서버 호출)일 수
         // 있으므로, 여기서 전송 버튼을 미리 활성화하지 않는다 — 실제로 여기서 미리 풀어줬다가
         // 아직 이 턴의 처리(예: 폴백 분류 왕복)가 안 끝난 상태에서 사용자가 다음 메시지를 보내
