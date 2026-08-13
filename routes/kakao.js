@@ -76,7 +76,7 @@ searchQueries에 정확히 1개만 넣어라(절대 여러 개 넣지 말 것).
 // 헤드리스 폴백 없이 Gemini 보정 한 단계만 추가한 축소 버전).
 async function correctSearchQueryWithGemini(query) {
   try {
-    const result = await generateJson(ADDRESS_CORRECTION_INSTRUCTION, query, ADDRESS_CORRECTION_SCHEMA);
+    const result = await generateJson(ADDRESS_CORRECTION_INSTRUCTION, query, ADDRESS_CORRECTION_SCHEMA, { op: 'address_correct' });
     const searchQueries = Array.isArray(result.searchQueries)
       ? result.searchQueries.map((v) => String(v || '').trim()).filter(Boolean).slice(0, 1)
       : [];

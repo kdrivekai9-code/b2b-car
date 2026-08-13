@@ -26,6 +26,10 @@
     {
       "path": "/kakao-consult/cron/order-notifications",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/access-logs/cron/archive",
+      "schedule": "20 18 * * *"
     }
   ]
 }

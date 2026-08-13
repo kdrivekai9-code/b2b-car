@@ -148,6 +148,8 @@ app.use('/kakao-consult', kakaoConsultRoutes);
 // 상담원 무응답 시 AI 초안 자동 발송 크론 — 같은 이유로 세션 없이 먼저 등록한다
 // (자체 CRON_SECRET 검증은 routes/chat.js의 checkCronAuth에서 한다).
 app.use('/chat', chatRoutes.cronRouter);
+// 감사 로그 보관 정책 크론도 같은 이유로 requireAuth보다 먼저 등록한다.
+app.use('/access-logs', accessLogRoutes.cronRouter);
 
 app.use('/', authRoutes);
 app.use('/', dashboardRoutes);
