@@ -117,6 +117,10 @@ check(
 check('사건 다섯 가지 모두 기본 문구가 있다', Object.keys(DEFAULT_EVENT_SETTINGS).length, 5);
 check('배차 통보는 2분 뒤에 보낸다', DEFAULT_EVENT_SETTINGS.dispatched.delayMinutes, 2);
 check('운행시작·운행완료는 즉시', [DEFAULT_EVENT_SETTINGS.started.delayMinutes, DEFAULT_EVENT_SETTINGS.completed.delayMinutes], [0, 0]);
+// 콜마너는 기사가 배차를 취소하면 잠깐 '취소'를 준 뒤 '접수'로 되돌린다(OID1237 실측:
+// 18:41:29 취소 → 18:42:30 접수). 그 순간을 잡아 통보하면 멀쩡한 오더를 취소됐다고 알린다.
+check('오더취소 통보는 기본으로 꺼져 있다', DEFAULT_EVENT_SETTINGS.cancelled.enabled, false);
+check('나머지 사건은 켜져 있다', ['dispatched', 'started', 'completed', 'dispatch_cancelled'].map((k) => DEFAULT_EVENT_SETTINGS[k].enabled), [true, true, true, true]);
 
 console.log('\n[상세주소 합치기]');
 // 웹 오더등록은 origin_address에 상세를 이미 합쳐 저장한다(combineAddress) — 그대로 또 붙이면

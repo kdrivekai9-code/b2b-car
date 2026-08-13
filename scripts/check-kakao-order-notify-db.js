@@ -25,6 +25,8 @@ function check(label, actual, expected) {
 
 async function main() {
   const created = { sessionId: null, orderId: null };
+  let savedSettings = [];
+  let savedBranchId = null;
 
   try {
     // 카카오 세션처럼 보이는 세션을 만든다 — 발신 키가 있어야 통보 대상이 된다.
@@ -46,6 +48,17 @@ async function main() {
       ]
     );
     created.orderId = order.id;
+
+    // 지사 통보 설정은 실제 운영값이다. 이 스크립트가 값을 바꾸므로 손대기 전에 통째로 떠둔다 —
+    // 예전에는 건드린 행을 DELETE로 지우고 끝내서, 돌릴 때마다 그 지사의 설정이 사라졌다.
+    savedSettings = await db.all(
+      'SELECT * FROM branch_customer_notifications WHERE branch_id = ?', [branch.id]
+    ).catch(() => []);
+    savedBranchId = branch.id;
+    // 앞 구간은 "코드 기본값"이 맞는지 보는 검사다. 지사에 저장된 행이 있으면 그 값이 이겨서
+    // 결과가 환경마다 달라진다(실제로 delay_minutes=1이 저장돼 있어 통과/실패가 갈렸다).
+    // 비워두고 검사한 뒤, 맨 아래 finally에서 스냅샷으로 통째 복원한다.
+    await db.run('DELETE FROM branch_customer_notifications WHERE branch_id = ?', [branch.id]).catch(() => {});
 
     // 커서를 지금 지점으로 맞춰두고 시작한다 — 과거 이력을 훑지 않게.
     const maxHistory = await db.get('SELECT COALESCE(MAX(id), 0) AS id FROM order_status_history');
@@ -128,9 +141,13 @@ async function main() {
       `INSERT INTO order_status_history (order_id, actor_user_id, old_status, new_status, note) VALUES (?, NULL, '완료', '취소', ?)`,
       [created.orderId, MARK]
     );
+    // 오더취소는 기본으로 꺼져 있다 — 콜마너가 재배차 직전에 잠깐 '취소'를 주기 때문에
+    // 그대로 통보하면 멀쩡한 오더를 취소됐다고 알리는 오발신이 된다(OID1237 실측).
+    const beforeCancelSent = sentTexts.length;
     const cancelled = await notify.runKakaoOrderNotifications({ send: fakeSend });
-    check('오더취소도 보낸다', cancelled.delivered.sent, 1);
-    check('문구가 오더취소 안내다', sentTexts[sentTexts.length - 1].includes('취소되었습니다'), true);
+    check('오더취소는 기본으로 보내지 않는다', cancelled.delivered.sent, 0);
+    check('취소 문구가 나가지 않았다', sentTexts.length, beforeCancelSent);
+    check('예약 자체를 만들지 않는다(꺼진 사건)', cancelled.collected.disabled >= 1, true);
 
     // 지사 설정 — 테이블이 없으면(마이그레이션 미적용) 이 구간만 건너뛴다.
     const hasSettings = await db.get(
@@ -144,9 +161,7 @@ async function main() {
       // 그대로 두면 여기서 만드는 예약이 "이미 보낸 통보"로 막힌다(그게 정상 동작이다).
       // 이 구간은 설정이 반영되는지를 보는 것이므로, 이 테스트가 만든 통보 기록만 비우고 시작한다.
       await db.run('DELETE FROM kakao_order_notifications WHERE order_id = ?', [created.orderId]);
-      const settingKeys = [];
       const putSetting = async (eventType, enabled, delayMinutes, template) => {
-        settingKeys.push(eventType);
         await db.run(`
           INSERT INTO branch_customer_notifications (branch_id, event_type, enabled, delay_minutes, message_template)
           VALUES (?, ?, ?, ?, ?)
@@ -155,7 +170,7 @@ async function main() {
         `, [branch.id, eventType, enabled, delayMinutes, template]);
       };
 
-      try {
+      {
         // 껐을 때 — 예약 자체가 만들어지지 않아야 한다.
         await putSetting('completed', false, 0, '쓰이지 않아야 하는 문구');
         await db.run('UPDATE orders SET status = ? WHERE id = ?', ['완료', created.orderId]);
@@ -181,11 +196,8 @@ async function main() {
           sentTexts[sentTexts.length - 1],
           `${MARK}-oid 지사가 정한 취소 안내입니다`
         );
-      } finally {
-        for (const key of settingKeys) {
-          await db.run('DELETE FROM branch_customer_notifications WHERE branch_id = ? AND event_type = ?', [branch.id, key]);
-        }
       }
+      // 정리는 맨 아래 finally에서 스냅샷으로 통째 복원한다.
     }
 
     console.log('\n[상담 이력]');
@@ -195,6 +207,16 @@ async function main() {
     );
     check('고객에게 나간 말이 상담 이력에도 남는다', logged.length, sentTexts.length);
   } finally {
+    // 지사 설정은 손대기 전 상태로 통째로 되돌린다.
+    if (savedBranchId) {
+      await db.run('DELETE FROM branch_customer_notifications WHERE branch_id = ?', [savedBranchId]).catch(() => {});
+      for (const row of savedSettings) {
+        await db.run(`
+          INSERT INTO branch_customer_notifications (branch_id, event_type, enabled, delay_minutes, message_template)
+          VALUES (?, ?, ?, ?, ?)
+        `, [row.branch_id, row.event_type, row.enabled, row.delay_minutes, row.message_template]).catch(() => {});
+      }
+    }
     // 만든 것만 지운다.
     if (created.orderId) {
       await db.run('DELETE FROM kakao_order_notifications WHERE order_id = ?', [created.orderId]);

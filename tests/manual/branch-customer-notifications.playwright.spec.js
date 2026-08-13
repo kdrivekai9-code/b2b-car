@@ -78,9 +78,15 @@ test.describe('지사관리 · 고객 통보', () => {
       await expect(page.locator(`input[name="enabled_${key}"]`)).toBeVisible();
     }
 
-    // 배차완료만 기본이 2분 뒤다(배차 직후 취소 때문에).
-    await expect(page.locator('input[name="delay_dispatched"]')).toHaveValue('2');
-    await expect(page.locator('input[name="delay_completed"]')).toHaveValue('0');
+    // 지연 기본값 자체(배차 2분, 나머지 0분)는 지사가 바꿀 수 있는 값이라 여기서 단언하지
+    // 않는다 — 코드 기본값은 scripts/check-kakao-order-notify.js가 본다. 여기서는 화면이
+    // 저장값과 라디오 상태를 어긋나지 않게 그리는지만 확인한다.
+    for (const key of ['dispatched', 'started', 'completed', 'dispatch_cancelled', 'cancelled']) {
+      const value = Number(await page.locator(`input[name="delay_${key}"]`).inputValue());
+      expect(Number.isInteger(value) && value >= 0 && value <= 120).toBe(true);
+      const nowChecked = await page.locator(`input[name="delay_mode_${key}"][value="now"]`).isChecked();
+      expect(nowChecked).toBe(value === 0);
+    }
   });
 
   test('변수 칩을 누르면 커서 위치에 토큰이 들어간다', async ({ page }) => {

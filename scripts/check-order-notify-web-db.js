@@ -130,8 +130,16 @@ async function main() {
 
     console.log('[접수 대화 중이면 미룬다]');
     if (supportsDefer) {
-      await db.run('UPDATE orders SET status = ? WHERE id = ?', ['운행시작', created.orderId]);
-      await transition(created.orderId, '기사배정', '운행시작');
+      // 같은 오더·같은 기사면 중복 방지(order_id, event_type, dedupe_key)가 두 번째 예약을
+      // 막는다 — 그게 정상 동작이라, 미루기를 보려면 아직 통보를 안 보낸 새 오더가 필요하다.
+      const busyOrder = await db.get(
+        `INSERT INTO orders (oid, branch_id, status, chat_session_id, order_type, memo_customer,
+                             origin_address, destination_address, reserved_date, reserved_time)
+         VALUES (?, ?, '기사배정', ?, 'dispatch', ?, ?, ?, ?, ?) RETURNING id`,
+        [`${MARK}-oid3`, branch.id, created.sessionId, MARK, '대전', '대구', '2026-08-22', '10:00']
+      );
+      created.orderId3 = busyOrder.id;
+      await transition(created.orderId3, '기사배정', '운행시작');
       await db.run(
         `UPDATE chat_sessions SET draft_json = '{"phase":"collecting","pendingField":"origin_address"}' WHERE id = ?`,
         [created.sessionId]
@@ -143,7 +151,7 @@ async function main() {
       const queued = await db.get(
         `SELECT status, defer_count FROM kakao_order_notifications
          WHERE order_id = ? AND event_type = 'started' ORDER BY id DESC LIMIT 1`,
-        [created.orderId]
+        [created.orderId3]
       );
       check('큐에 pending으로 남아 있다', queued.status, 'pending');
       check('미룬 횟수가 1', Number(queued.defer_count), 1);
@@ -153,7 +161,7 @@ async function main() {
       await db.run(
         `UPDATE kakao_order_notifications SET scheduled_at = now() - interval '1 minute'
          WHERE order_id = ? AND event_type = 'started' AND status = 'pending'`,
-        [created.orderId]
+        [created.orderId3]
       );
       out = await notify.runKakaoOrderNotifications(opts);
       check('대화가 끝나면 발송된다', out.delivered.sent, 1);
@@ -196,7 +204,7 @@ async function main() {
     }
   } finally {
     // 만든 행만 지운다.
-    for (const id of [created.orderId, created.orderId2].filter(Boolean)) {
+    for (const id of [created.orderId, created.orderId2, created.orderId3].filter(Boolean)) {
       await db.run('DELETE FROM kakao_order_notifications WHERE order_id = ?', [id]).catch(() => {});
       await db.run('DELETE FROM order_status_history WHERE order_id = ?', [id]).catch(() => {});
       await db.run('DELETE FROM orders WHERE id = ?', [id]).catch(() => {});
