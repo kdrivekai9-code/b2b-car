@@ -1223,12 +1223,16 @@
   var deferredFareGuideTimer = null;
   var deferredFareGuideNoticeShown = false;
 
-  // 법인별 on/off(groups_tbl.route_fare_search_enabled) — 서버가 ai_intake.ejs에 내려준다.
-  // 값이 아예 없으면(구버전 페이지 캐시 등) 기존 동작대로 켜짐으로 본다.
-  // 주의: 이 토글은 "접수 흐름에서 자동으로 붙는" 경로/요금 안내만 끈다. 사용자가 직접
-  // 요금을 물어본 경우(요금문의 흐름)는 답을 줘야 하므로 그대로 둔다.
-  function isRouteFareSearchEnabled() {
-    return window.__routeFareSearchEnabled !== false;
+  // 법인별 on/off(groups_tbl의 route_search_enabled/fare_search_enabled) — 서버가
+  // ai_intake.ejs에 내려준다. 값이 아예 없으면(구버전 페이지 캐시 등) 기존 동작대로 켜짐으로
+  // 본다. 주의: 이 토글은 "접수 흐름에서 자동으로 붙는" 안내만 끈다. 사용자가 직접 요금을
+  // 물어본 경우(요금문의 흐름)는 답을 줘야 하므로 그대로 둔다.
+  function isRouteSearchEnabled() {
+    return window.__routeSearchEnabled !== false;
+  }
+
+  function isFareSearchEnabled() {
+    return window.__fareSearchEnabled !== false;
   }
 
   function clearDeferredFareGuideTimer() {
@@ -1239,7 +1243,7 @@
   }
 
   function scheduleDeferredFareGuide() {
-    if (!isRouteFareSearchEnabled()) return;
+    if (!isFareSearchEnabled()) return;
     if (!val('origin_address') || !val('destination_address')) return;
     if (!deferredFareGuideNoticeShown) {
       deferredFareGuideNoticeShown = true;
@@ -1275,7 +1279,9 @@
   // 주문서 확인을 먼저 보여주고, 오래 걸리면 "경로탐색중......"만 띄운 뒤 결과가 나오는
   // 대로 안내한다.
   function startBackgroundFareGuide() {
-    if (!isRouteFareSearchEnabled()) return;
+    // 이 흐름이 만들어내는 말풍선은 요금 안내다 — 요금검색을 끈 법인에는 띄우지 않는다.
+    // (경로탐색만 끈 경우는 요금 문장에서 거리·소요시간 꼬리말만 빠진다.)
+    if (!isFareSearchEnabled()) return;
     if (!val('origin_address') || !val('destination_address')) return;
     if (backgroundFareGuideRunning) return;
     backgroundFareGuideRunning = true;
@@ -1331,10 +1337,21 @@
   }
 
   // "예상요금은 약 X원이며, (거리 Ykm, 예상소요시간 Z)" 형태의 뒷부분(거리/소요시간)을 만든다.
+  // 경로탐색 안내를 끈 법인에는 거리·소요시간을 붙이지 않고 빈 문자열을 돌려준다 — 이때는
+  // 호출부가 "…원이며," 대신 "…원입니다."로 문장을 맺는다(buildFareSentence).
   function buildFareDistanceDurationSuffix(distanceKm, vehicleText) {
+    if (!isRouteSearchEnabled()) return '';
     var durationText = parseRouteDurationText();
     if (durationText) return ' (거리 ' + distanceKm.toFixed(1) + 'km' + vehicleText + ', 예상소요시간 ' + durationText + ')';
     return ' (거리 ' + distanceKm.toFixed(1) + 'km' + vehicleText + ')';
+  }
+
+  // head는 "현재 경로 기준 예상요금은 약 90,000원" 같은 앞부분. 뒤에 붙일 거리/소요시간이
+  // 있으면 "…이며, (…)"로, 없으면 "…입니다."로 맺는다(차종 표기는 그때 뒤에 남긴다).
+  function buildFareSentence(head, distanceKm, vehicleText) {
+    var suffix = buildFareDistanceDurationSuffix(distanceKm, vehicleText);
+    if (suffix) return head + '이며,' + suffix;
+    return head + '입니다.' + (vehicleText || '');
   }
 
   function normalizeFareGuideText(text) {
@@ -1474,11 +1491,11 @@
           if (data.ferryApplied && ferryFare > 0) {
             msg = adminAreaOnly
               ? ('출발지 ' + origin + '에서 도착지 ' + destination + ' 기준으로 구간요금 ' + baseFare.toLocaleString('ko-KR') + '원 + 도선료 ' + ferryFare.toLocaleString('ko-KR') + '원 = 총 ' + amount + '원입니다.')
-              : ('현재 경로 기준 예상요금은 구간요금 ' + baseFare.toLocaleString('ko-KR') + '원 + 도선료 ' + ferryFare.toLocaleString('ko-KR') + '원 = 총 ' + amount + '원이며,' + buildFareDistanceDurationSuffix(distanceKm, vehicleText));
+              : buildFareSentence('현재 경로 기준 예상요금은 구간요금 ' + baseFare.toLocaleString('ko-KR') + '원 + 도선료 ' + ferryFare.toLocaleString('ko-KR') + '원 = 총 ' + amount + '원', distanceKm, vehicleText);
           } else {
             msg = adminAreaOnly
               ? ('출발지 ' + origin + '에서 도착지 ' + destination + ' 기준으로 요금은 ' + amount + '원입니다.')
-              : ('현재 경로 기준 예상요금은 약 ' + amount + '원이며,' + buildFareDistanceDurationSuffix(distanceKm, vehicleText));
+              : buildFareSentence('현재 경로 기준 예상요금은 약 ' + amount + '원', distanceKm, vehicleText);
           }
 
           if (data.fallbackUsed) {

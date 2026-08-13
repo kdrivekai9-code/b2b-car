@@ -41,7 +41,7 @@ const { runDispatchAgent, loadPending: loadMcpPending } = require('../lib/mcpDis
 const { notify } = require('../lib/push');
 const { broadcastMessage, broadcastSessionListChanged } = require('../lib/realtimeChat');
 const { logIntegrationErrorAsync } = require('../lib/integrationLog');
-const { isRouteFareSearchEnabled, searchRouteAndFare } = require('../lib/routeFareSearch');
+const { getRouteFareSettings, searchRouteAndFare } = require('../lib/routeFareSearch');
 
 const router = express.Router();
 
@@ -1328,14 +1328,17 @@ async function announceRouteFareAfterOrder(session, account, result) {
   if (!geo.origin || !geo.destination) return;
 
   const groupId = account && account.requester_group_id;
-  if (!(await isRouteFareSearchEnabled(groupId))) return;
+  const settings = await getRouteFareSettings(groupId);
+  if (!settings.route && !settings.fare) return;
 
   // 검색이 늦어지면 진행중 안내를 먼저 보낸다 — 접수 확인 뒤 아무 말 없이 몇 초가 흐르면
-  // 고객은 대화가 거기서 끝난 줄 안다.
+  // 고객은 대화가 거기서 끝난 줄 안다. 경로 안내를 끈 법인에는 요금만 기다리는 것이므로
+  // 문구도 그에 맞춘다.
   let noticePromise = null;
   const noticeTimer = setTimeout(() => {
-    noticePromise = botSay(session, '경로탐색중......', '경로탐색 진행')
-      .catch((e) => console.error('경로탐색 진행 안내 실패:', e.message));
+    const noticeText = settings.route ? '경로탐색중......' : '요금검색중......';
+    noticePromise = botSay(session, noticeText, '경로/요금 검색 진행')
+      .catch((e) => console.error('경로/요금 진행 안내 실패:', e.message));
   }, 1500);
 
   // 진행중 안내가 아직 발신 중이면 그게 끝난 뒤에 결과를 보낸다 — 안 그러면 "탐색중"이

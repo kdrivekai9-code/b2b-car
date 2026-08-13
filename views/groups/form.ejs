@@ -77,13 +77,20 @@
         <!-- 체크 해제 시 브라우저가 이 필드를 아예 안 보낸다 — "안 보냄"과 "끔"을 구분하려고
              같은 이름의 숨은 필드로 항상 '0'을 먼저 보낸다(routes/groups.js가 배열/단일값
              모두 처리). -->
-        <input type="hidden" name="route_fare_search_enabled" value="0">
-        <input type="checkbox" name="route_fare_search_enabled" value="1" <%= group.route_fare_search_enabled === false ? '' : 'checked' %>>
-        AI 접수(웹 챗봇·카카오톡 상담) 시 경로탐색·요금검색 결과를 자동으로 안내한다
+        <input type="hidden" name="route_search_enabled" value="0">
+        <input type="checkbox" name="route_search_enabled" value="1" <%= group.route_search_enabled === false ? '' : 'checked' %>>
+        경로탐색 결과(거리·소요시간·통행료)를 안내한다
+      </label>
+      <label class="checkline">
+        <input type="hidden" name="fare_search_enabled" value="0">
+        <input type="checkbox" name="fare_search_enabled" value="1" <%= group.fare_search_enabled === false ? '' : 'checked' %>>
+        요금검색 결과(구간요금)를 안내한다
       </label>
       <p class="page-sub">
-        꺼두면 이 법인 소속 오더는 경로/요금 계산 자체를 건너뜁니다 — 접수 확인이 더 빠르게
-        끝나고, 안 쓰는 검색 때문에 대기할 일이 없습니다.
+        AI 접수(웹 챗봇·카카오톡 상담)에서 자동으로 붙는 안내입니다. 둘 다 끄면 계산 자체를
+        건너뛰어 접수 확인이 더 빠르게 끝납니다. 요금은 경로 거리로 계산하므로,
+        "경로탐색 끔 + 요금검색 켬"은 경로 안내만 감추고 계산은 그대로 합니다.
+        고객이 직접 요금을 물어본 경우는 이 설정과 무관하게 답변합니다.
       </p>
     </div>
   </form>

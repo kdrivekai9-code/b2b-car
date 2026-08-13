@@ -29,12 +29,15 @@ const FULL_PARSE = {
   memo_customer: null,
 };
 
-async function setupMocks(page, { routeFareEnabled }) {
-  await page.addInitScript((enabled) => {
+async function setupMocks(page, { routeEnabled = true, fareEnabled = true } = {}) {
+  await page.addInitScript(({ route, fare }) => {
     // ai_intake.ejs의 인라인 스크립트가 서버 값으로 이 전역을 덮어쓰므로, 단순 대입으로는
     // 테스트 값이 살아남지 않는다 — getter로 고정한다(아래 __aiIntakeRouteFinal과 같은 방식).
-    Object.defineProperty(window, '__routeFareSearchEnabled', {
-      get: () => enabled, set: () => {}, configurable: true,
+    Object.defineProperty(window, '__routeSearchEnabled', {
+      get: () => route, set: () => {}, configurable: true,
+    });
+    Object.defineProperty(window, '__fareSearchEnabled', {
+      get: () => fare, set: () => {}, configurable: true,
     });
     window.__aiIntakeResolveAddress = function (mainId) {
       const input = document.getElementById(mainId);
@@ -54,7 +57,7 @@ async function setupMocks(page, { routeFareEnabled }) {
       pin();
       new MutationObserver(pin).observe(document.body, { subtree: true, childList: true, characterData: true });
     });
-  }, routeFareEnabled);
+  }, { route: routeEnabled, fare: fareEnabled });
 
   await page.route('**/orders/ai-intake/parse', async (route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(FULL_PARSE) });
@@ -96,7 +99,7 @@ test.describe('AI intake 경로/요금 안내 순서', () => {
   test.describe.configure({ timeout: 90000 });
 
   test('요금 조회가 느려도 접수 확인이 먼저 나가고, 진행중 안내 뒤에 요금이 따라온다', async ({ page }) => {
-    await setupMocks(page, { routeFareEnabled: true });
+    await setupMocks(page, { routeEnabled: true, fareEnabled: true });
     await openAiIntakeWithRetry(page, { baseUrl: BASE_URL, loginId: LOGIN_ID, password: PASSWORD });
 
     await sendMessage(page, '내일 오후 2시 서울 강서구 양천로53길 30에서 경기 성남시 분당구 판교역로 160으로 토레스 12가3456 탁송 부탁드립니다');
@@ -120,8 +123,8 @@ test.describe('AI intake 경로/요금 안내 순서', () => {
     expect(noticeIdx).toBeLessThan(fareIdx);
   });
 
-  test('법인 토글이 꺼져 있으면 요금 조회 자체를 하지 않는다', async ({ page }) => {
-    await setupMocks(page, { routeFareEnabled: false });
+  test('둘 다 꺼져 있으면 요금 조회 자체를 하지 않는다', async ({ page }) => {
+    await setupMocks(page, { routeEnabled: false, fareEnabled: false });
 
     let farePreviewCalls = 0;
     page.on('request', (req) => {
@@ -137,5 +140,35 @@ test.describe('AI intake 경로/요금 안내 순서', () => {
     const all = await botTexts(page);
     expect(all.some((t) => /경로탐색중|요금검색중|예상요금|구간요금/.test(t))).toBe(false);
     expect(farePreviewCalls).toBe(0);
+  });
+  test('요금검색만 끄면 요금 안내가 사라진다(경로탐색은 그대로)', async ({ page }) => {
+    await setupMocks(page, { routeEnabled: true, fareEnabled: false });
+
+    let farePreviewCalls = 0;
+    page.on('request', (req) => {
+      if (req.url().includes('/orders/fare-preview')) farePreviewCalls += 1;
+    });
+
+    await openAiIntakeWithRetry(page, { baseUrl: BASE_URL, loginId: LOGIN_ID, password: PASSWORD });
+    await sendMessage(page, '내일 오후 2시 서울 강서구 양천로53길 30에서 경기 성남시 분당구 판교역로 160으로 토레스 12가3456 탁송 부탁드립니다');
+
+    await expect.poll(async () => (await botTexts(page)).length, { timeout: 5000 }).toBeGreaterThan(0);
+    await page.waitForTimeout(FARE_DELAY_MS + 1000);
+
+    const all = await botTexts(page);
+    expect(all.some((t) => /90,000|예상요금|구간요금/.test(t))).toBe(false);
+    expect(farePreviewCalls).toBe(0);
+  });
+
+  test('경로탐색만 끄면 요금은 안내하되 거리·소요시간을 빼고 말한다', async ({ page }) => {
+    await setupMocks(page, { routeEnabled: false, fareEnabled: true });
+    await openAiIntakeWithRetry(page, { baseUrl: BASE_URL, loginId: LOGIN_ID, password: PASSWORD });
+    await sendMessage(page, '내일 오후 2시 서울 강서구 양천로53길 30에서 경기 성남시 분당구 판교역로 160으로 토레스 12가3456 탁송 부탁드립니다');
+
+    await expect.poll(async () => (await botTexts(page)).some((t) => /90,000/.test(t)), { timeout: 20000 }).toBe(true);
+
+    const fareText = (await botTexts(page)).find((t) => /90,000/.test(t)) || '';
+    expect(fareText).not.toMatch(/거리 /);
+    expect(fareText).not.toMatch(/예상소요시간/);
   });
 });
