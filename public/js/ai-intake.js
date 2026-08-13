@@ -709,6 +709,24 @@
     return ampm + ' ' + hour12 + '시 ' + pad2(minute) + ' 분';
   }
 
+  // 도착지 인도시간 기준 확인 메시지를 보낼 때 경로탐색이 아직 안 끝나 "경로 확정 후
+  // 계산됩니다"로 마무리한 경우, 실제 값을 뒤늦게라도 알려주기 위한 후속 안내 플래그.
+  // 주소+일시가 한 메시지에 같이 오면(실사용 흔한 패턴) 경로탐색이 비동기라 이 확인
+  // 메시지를 만드는 시점엔 아직 안 끝나 있는 게 거의 항상이라 — 이게 없으면 고객은
+  // "경로 확정 후 계산됩니다"만 보고 그 뒤로 영영 실제 픽업시간을 못 받는다(실사용 지적).
+  var pendingPickupTimeFollowUp = false;
+
+  // order-form.js의 syncReservationBasisPreview()가 경로탐색을 다시 확정할 때마다 부른다 —
+  // 후속 안내가 대기 중일 때만 실제로 말풍선을 보낸다(그 외엔 조용히 무시, side panel 갱신은
+  // order-form.js가 이미 직접 한다).
+  window.__aiIntakeOnPickupTimeResolved = function () {
+    if (!pendingPickupTimeFollowUp) return;
+    var text = formatPickupExpectedTimeText();
+    if (!text) return; // 아직도 못 구했으면(예: 그새 즉시/픽업기준으로 바뀜) 다음 갱신을 기다린다.
+    pendingPickupTimeFollowUp = false;
+    sayBot('출발지 픽업예상시간은 ' + text + '입니다.');
+  };
+
   // 주소/상호 입력을 실제 카카오 검색으로 확정 — 성공하면 확인 말풍선, 실패하면 그 항목만 비우고 재요청 말풍선.
   // 검색어가 모호해서(예: "OO주차장") 결과가 갈리면 addBubble 없이 { ambiguous:true, ... }만 반환하고,
   // 실제 확인 질문은 호출부(handleOrderIntent)가 모든 필드 처리를 마친 뒤 한 번에 물어보게 한다.
@@ -2651,9 +2669,15 @@
           var dtMsg = formattedDateTime + '으로 (' + basisLabel + ') 예약되었습니다.';
           if (isDeliveryReservationBasis()) {
             var pickupExpected = formatPickupExpectedTimeText();
-            dtMsg += pickupExpected
-              ? ('\n출발지 픽업예상시간은 ' + pickupExpected + '입니다.')
-              : ('\n출발지 픽업예상시간은 경로 확정 후 계산됩니다.');
+            if (pickupExpected) {
+              dtMsg += '\n출발지 픽업예상시간은 ' + pickupExpected + '입니다.';
+            } else {
+              dtMsg += '\n출발지 픽업예상시간은 경로 확정 후 계산됩니다.';
+              // 주소+일시가 한 메시지에 같이 온 경우 경로탐색이 비동기라 아직 못 구한 것뿐이다 —
+              // order-form.js가 나중에 경로를 확정하면(__aiIntakeOnPickupTimeResolved) 뒤늦게라도
+              // 후속 말풍선으로 알려준다.
+              pendingPickupTimeFollowUp = true;
+            }
           }
           if (newOrderType) dtMsg += '\n"' + ORDER_INTENT_LABELS[newOrderType] + '"로 확인되었습니다.';
           sayBot(dtMsg);

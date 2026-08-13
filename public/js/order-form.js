@@ -213,6 +213,9 @@
     if (pickupPreviewValue) pickupPreviewValue.textContent = formatLocalDateTime(pickupDateTime);
     setRouteFormulaText('(경로탐색 : ' + formatDuration(currentRouteDurationSec) + ' +30분여유)');
     syncDeliveryReservationMemo();
+    // AI 챗봇 화면(ai-intake.js)이 "경로 확정 후 계산됩니다"로 마무리한 확인 메시지의 후속
+    // 안내를 여기서 트리거한다 — 이 페이지가 아니면(오더 등록/상담관리 화면) 정의돼 있지 않다.
+    if (window.__aiIntakeOnPickupTimeResolved) window.__aiIntakeOnPickupTimeResolved();
   }
 
   // ---------- 연락처 자동 하이픈 포맷팅 + 유효성 검사 ----------
