@@ -63,10 +63,14 @@
                 <input type="radio" name="delay_mode_<%= e.key %>" value="later" data-delay-mode="<%= e.key %>" <%= e.delayMinutes === 0 ? '' : 'checked' %>>
                 상태 변경 후
               </label>
-              <%# readonly를 쓴다 — disabled는 값이 전송되지 않아 서버 검증(필수)에 걸린다. %>
-              <input type="number" id="delay_<%= e.key %>" name="delay_<%= e.key %>" value="<%= e.delayMinutes %>"
-                     min="0" max="120" step="1" required <%= e.delayMinutes === 0 ? 'readonly' : '' %>>
-              <span>분 뒤</span>
+              <%# 시간칸은 "상태 변경 후"일 때만 보인다. 숨길 때도 DOM에서 빼지 않는다 —
+                  disabled나 제거를 하면 값이 전송되지 않아 서버 검증(0~120 정수 필수)에 걸린다.
+                  그래서 감추기만 하고 readonly로 잠근다. %>
+              <span class="delay-later-only" id="delay_wrap_<%= e.key %>" <%= e.delayMinutes === 0 ? 'hidden' : '' %>>
+                <input type="number" id="delay_<%= e.key %>" name="delay_<%= e.key %>" value="<%= e.delayMinutes %>"
+                       min="0" max="120" step="1" required <%= e.delayMinutes === 0 ? 'readonly' : '' %>>
+                <span>분 뒤</span>
+              </span>
             </div>
             <p class="page-sub">보내기 직전에 상태를 한 번 더 확인해서, 그사이 상황이 바뀌었으면 보내지 않습니다.</p>
           </div>
@@ -159,19 +163,24 @@
     });
   });
 
-  // 즉시 / N분 뒤 — "즉시"를 고르면 숫자칸을 0으로 두고 읽기전용으로 만든다.
-  // disabled로 하면 값이 전송되지 않아 서버 검증(0~120 정수 필수)에 걸린다.
+  // 즉시 / N분 뒤 — "즉시"를 고르면 시간칸을 감추고 0으로 두고 읽기전용으로 만든다.
+  // 감추기만 하고 DOM에는 남긴다: disabled나 제거는 값이 전송되지 않아 서버 검증(0~120 정수
+  // 필수)에 걸린다. readonly는 값이 그대로 전송된다.
   document.querySelectorAll('input[data-delay-mode]').forEach(function (radio) {
     radio.addEventListener('change', function () {
       var key = radio.getAttribute('data-delay-mode');
       var input = document.getElementById('delay_' + key);
+      var wrap = document.getElementById('delay_wrap_' + key);
       if (!input) return;
       if (radio.value === 'now' && radio.checked) {
         input.value = '0';
         input.readOnly = true;
+        if (wrap) wrap.hidden = true;
       } else if (radio.value === 'later' && radio.checked) {
+        if (wrap) wrap.hidden = false;
         input.readOnly = false;
         if (input.value === '0') input.value = '1';
+        // 감춰진 칸에 focus()를 부르면 아무 일도 일어나지 않는다 — 보이게 만든 뒤에 부른다.
         input.focus();
       }
     });

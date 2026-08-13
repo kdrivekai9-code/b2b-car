@@ -778,7 +778,13 @@ textarea.single-line-textarea{min-height:36px;height:36px;padding:8px 10px;resiz
 /* 배차지연 알림 설정(지사관리) — 콜 유형 다중선택 + "접수 후 N분 미배차" 인라인 입력 */
 .call-type-choices{display:flex;flex-wrap:wrap;gap:14px;padding:6px 0;}
 .delay-minutes-input{display:flex;align-items:center;gap:8px;}
-.delay-minutes-input input{width:90px;}
+/* 숫자칸만 좁힌다. input 전체에 걸면 같은 줄의 라디오 버튼까지 90px로 늘어나, 동그라미와
+   글자 사이에 빈 상자가 있는 것처럼 보인다(실제로 그렇게 보였다). */
+.delay-minutes-input input[type=number]{width:90px;}
+/* "상태 변경 후"일 때만 보이는 시간칸 묶음. display를 주므로 [hidden]도 명시해야 한다 —
+   지정한 display가 브라우저 기본 hidden 규칙(display:none)을 덮어써서 안 숨는다. */
+.delay-minutes-input .delay-later-only{display:inline-flex;align-items:center;gap:8px;}
+.delay-minutes-input .delay-later-only[hidden]{display:none;}
 
 /* 연동 오류 현황 — 헤더의 기간 선택 폼 */
 .inline-filter-form{display:inline-flex;align-items:center;gap:8px;margin-right:8px;}

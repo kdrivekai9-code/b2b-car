@@ -72,9 +72,11 @@ test.describe('지사관리 · 고객 통보', () => {
     await openPage(page);
 
     // 사건이 하나 늘었는데 화면에서 빠지면, 그 통보만 아무도 못 끄는 상태가 된다.
+    // 시간칸은 "상태 변경 후"일 때만 보이므로(즉시면 감춘다) 존재만 확인한다 — 보임 여부는
+    // 아래 '즉시를 고르면' 검사에서 라디오와 함께 본다.
     for (const key of ['dispatched', 'started', 'completed', 'dispatch_cancelled', 'cancelled']) {
       await expect(page.locator(`textarea[name="message_${key}"]`)).toBeVisible();
-      await expect(page.locator(`input[name="delay_${key}"]`)).toBeVisible();
+      await expect(page.locator(`input[name="delay_${key}"]`)).toHaveCount(1);
       await expect(page.locator(`input[name="enabled_${key}"]`)).toBeVisible();
     }
 
@@ -102,18 +104,52 @@ test.describe('지사관리 · 고객 통보', () => {
     await expect(box).toHaveValue('{oid}{driver_name}');
   });
 
-  test('즉시를 고르면 분 입력이 0으로 잠긴다', async ({ page }) => {
+  test('즉시를 고르면 분 입력이 감춰지고 0으로 잠긴다', async ({ page }) => {
     await openPage(page);
 
     const delay = page.locator('input[name="delay_dispatched"]');
     await page.locator('input[name="delay_mode_dispatched"][value="now"]').check();
+    // 시간칸은 눈에서 사라진다 — "즉시"인데 분 입력이 남아 있으면 뭘 고른 건지 헷갈린다.
+    await expect(delay).toBeHidden();
     await expect(delay).toHaveValue('0');
-    // disabled가 아니라 readonly여야 한다 — disabled면 값이 전송되지 않아 서버 검증에 걸린다.
+    // 감췄을 뿐 DOM에는 남아야 한다. disabled/제거면 값이 전송되지 않아 서버 검증(필수)에 걸린다.
     await expect(delay).toHaveJSProperty('readOnly', true);
     await expect(delay).toBeEnabled();
 
     await page.locator('input[name="delay_mode_dispatched"][value="later"]').check();
+    await expect(delay).toBeVisible();
     await expect(delay).toHaveJSProperty('readOnly', false);
+  });
+
+  test('즉시로 저장해도 서버 검증에 걸리지 않는다', async ({ page }) => {
+    // 시간칸을 감추는 방식이 잘못되면(disabled·DOM 제거) 값이 전송되지 않아 저장이 조용히
+    // 실패하거나 서버 검증 오류로 튄다. 감춘 채로 실제 저장까지 되는지 본다.
+    await openPage(page);
+    const url = page.url();
+    const originalDelay = await page.locator('input[name="delay_completed"]').inputValue();
+
+    try {
+      await page.locator('input[name="delay_mode_completed"][value="now"]').check();
+      await page.locator('button[type="submit"][form="customerNotificationsForm"]').click();
+      await page.waitForLoadState('domcontentloaded');
+      await expect(page.locator('.success-msg')).toContainText('저장되었습니다');
+
+      const row = await db.get(
+        "SELECT delay_minutes FROM branch_customer_notifications WHERE branch_id = ? AND event_type = 'completed'",
+        [branchId]
+      );
+      expect(Number(row.delay_minutes)).toBe(0);
+    } finally {
+      // 실제 운영 지사의 설정이라 원래 값으로 되돌린다. 원래도 0이었으면 되돌릴 것이 없다 —
+      // 없는 값을 만들어 넣지 않는다(1분으로 되돌렸다가 실제 설정을 바꿔버린 적이 있다).
+      if (originalDelay !== '0') {
+        await page.goto(url, { waitUntil: 'domcontentloaded' });
+        await page.locator('input[name="delay_mode_completed"][value="later"]').check();
+        await page.locator('input[name="delay_completed"]').fill(originalDelay);
+        await page.locator('button[type="submit"][form="customerNotificationsForm"]').click();
+        await page.waitForLoadState('domcontentloaded');
+      }
+    }
   });
 
   test('사진첨부는 운행시작·운행완료에만 있고 저장된다', async ({ page }) => {
