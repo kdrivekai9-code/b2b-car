@@ -72,7 +72,7 @@
   var senderLabel = { user: '고객', bot: 'AI', agent: '상담원', system: '시스템' };
   var senderClass = { user: 'ai-user', bot: 'ai-bot', agent: 'ai-agent', system: 'ai-bot' };
   var DELIVERY_BUFFER_SECONDS = 30 * 60;
-  var DELIVERY_RESERVATION_MEMO_PREFIX = '**도착지 예약**:';
+  var DELIVERY_RESERVATION_MEMO_PREFIX = '일시:';
   var cardRouteDurationSec = null;
 
   function escapeHtml(value) {
@@ -122,13 +122,15 @@
     return input.dataset.lon + ',' + input.dataset.lat;
   }
 
-  function parseCardDisplayedDateTime() {
-    var dateValue = String(orderReservedDate && orderReservedDate.value || '').trim();
-    var timeValue = String(orderReservedTime && orderReservedTime.value || '').trim();
-    var d = dateValue.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    var t = timeValue.match(/^(\d{2}):(\d{2})$/);
+  function parseDateTimeValue(dateValue, timeValue) {
+    var d = String(dateValue || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    var t = String(timeValue || '').trim().match(/^(\d{2}):(\d{2})$/);
     if (!d || !t) return null;
     return new Date(Number(d[1]), Number(d[2]) - 1, Number(d[3]), Number(t[1]), Number(t[2]), 0, 0);
+  }
+
+  function parseCardDisplayedDateTime() {
+    return parseDateTimeValue(orderReservedDate && orderReservedDate.value, orderReservedTime && orderReservedTime.value);
   }
 
   function formatLocalDateTime(dt) {
@@ -144,7 +146,7 @@
 
   function formatDeliveryReservationMemoDateTime(dt) {
     if (!dt || isNaN(dt.getTime())) return '';
-    return dt.getFullYear() + '년 ' + pad2(dt.getMonth() + 1) + '월 ' + pad2(dt.getDate()) + ' 일 ' + pad2(dt.getHours()) + '시 ' + pad2(dt.getMinutes()) + ' 분 도착요망';
+    return pad2(dt.getMonth() + 1) + '/' + pad2(dt.getDate()) + ' ' + pad2(dt.getHours()) + '시' + pad2(dt.getMinutes()) + '분 도착요망';
   }
 
   function syncCardDeliveryReservationMemo() {
@@ -172,15 +174,19 @@
     return !!(orderReservationBasisImmediate && orderReservationBasisImmediate.checked);
   }
 
+  function applyDateTimeToCardReservedDateTimeSelects(dt) {
+    setReservedDateSelectors(dt.getFullYear() + '-' + pad2(dt.getMonth() + 1) + '-' + pad2(dt.getDate()));
+    setReservedTimeSelectors(pad2(dt.getHours()) + ':' + pad2(dt.getMinutes()));
+    syncReservedDateField();
+    syncReservedTimeField();
+  }
+
   // "즉시" 기준 선택 시 예약 날짜/시간을 현재 시각(10분 단위 반올림)으로 맞추고 편집을 막는다 —
   // public/js/order-form.js의 같은 이름 로직과 동일한 규칙(오더 등록·AI 챗봇 화면과 일관성 유지).
   function applyNowToCardReservedDateTimeSelects() {
     if (!hasOrderPane) return null;
     var now = roundDateToNearestTenMinutes(new Date());
-    setReservedDateSelectors(now.getFullYear() + '-' + pad2(now.getMonth() + 1) + '-' + pad2(now.getDate()));
-    setReservedTimeSelectors(pad2(now.getHours()) + ':' + pad2(now.getMinutes()));
-    syncReservedDateField();
-    syncReservedTimeField();
+    applyDateTimeToCardReservedDateTimeSelects(now);
     return now;
   }
 
@@ -200,9 +206,17 @@
     orderPickupReservedTime.value = pad2(dt.getHours()) + ':' + pad2(dt.getMinutes());
   }
 
+  // 직전 호출 때의 기준 — "방금 도착지 인도시간 기준에서 벗어났다"를 판단하는 데만 쓴다.
+  var previousCardReservationBasis = null;
+
   function syncCardReservationPreview() {
     if (!hasOrderPane) return;
     var immediateBasis = isImmediateBasis();
+    var deliveryBasis = !immediateBasis && isDeliveryBasis();
+    var currentBasis = immediateBasis ? 'immediate' : (deliveryBasis ? 'delivery' : 'pickup');
+    var justLeftDeliveryForPickup = previousCardReservationBasis === 'delivery' && currentBasis === 'pickup';
+    previousCardReservationBasis = currentBasis;
+
     setCardReservedDateTimeSelectsDisabled(immediateBasis);
     if (immediateBasis) {
       var nowDt = applyNowToCardReservedDateTimeSelects();
@@ -212,8 +226,14 @@
       syncCardDeliveryReservationMemo();
       return;
     }
-    var deliveryBasis = isDeliveryBasis();
     if (!deliveryBasis) {
+      // 도착지 인도시간 기준에서 막 픽업시간 기준으로 바꾼 경우, 화면에 남은 시각은 인도
+      // 요청 시각이지 픽업 시각이 아니다 — 직전에 계산해둔 픽업 시각을 화면에 반영한다
+      // (public/js/order-form.js와 동일한 규칙).
+      if (justLeftDeliveryForPickup && orderPickupReservedDate && orderPickupReservedTime) {
+        var convertedDt = parseDateTimeValue(orderPickupReservedDate.value, orderPickupReservedTime.value);
+        if (convertedDt) applyDateTimeToCardReservedDateTimeSelects(convertedDt);
+      }
       if (orderPickupPreviewBlock) orderPickupPreviewBlock.style.display = 'none';
       setCardPickupHidden(parseCardDisplayedDateTime());
       if (orderDeliveryRouteFormula) orderDeliveryRouteFormula.textContent = '(경로탐색 : -)';

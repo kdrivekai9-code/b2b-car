@@ -13,7 +13,7 @@ import OrderSidePanel from '../[id]/OrderSidePanel';
 // picker beyond a simple list.
 
 const DELIVERY_BUFFER_SECONDS = 30 * 60;
-const DELIVERY_RESERVATION_MEMO_PREFIX = '**도착지 예약**:';
+const DELIVERY_RESERVATION_MEMO_PREFIX = '일시:';
 
 function pad2(n) {
   return String(n).padStart(2, '0');
@@ -32,7 +32,7 @@ function roundDateToNearestTenMinutes(dt) {
 }
 
 function formatDeliveryReservationMemoDateTime(dt) {
-  return `${dt.getFullYear()}년 ${pad2(dt.getMonth() + 1)}월 ${pad2(dt.getDate())} 일 ${pad2(dt.getHours())}시 ${pad2(dt.getMinutes())} 분 도착요망`;
+  return `${pad2(dt.getMonth() + 1)}/${pad2(dt.getDate())} ${pad2(dt.getHours())}시${pad2(dt.getMinutes())}분 도착요망`;
 }
 
 // 메모 텍스트에서 기존 "**도착지 예약**: ..." 줄을 항상 먼저 제거하고, 배송기준일 때만
@@ -209,6 +209,9 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
   // 막는다. ref를 쓰는 이유는 state 갱신은 다음 렌더까지 반영이 늦어 아주 빠른 연속
   // 클릭(같은 렌더에서 두 번 호출되는 경우)은 state 체크로 못 막기 때문이다.
   const submittingRef = useRef(false);
+  // "방금 도착지 인도시간 기준에서 벗어났다"를 판단하기 위한 직전 예약기준 — order-form.js의
+  // previousReservationBasis와 같은 역할.
+  const previousReservationBasisRef = useRef(state.reservation_basis);
   const [error, setError] = useState(null);
   const [routeInfo, setRouteInfo] = useState({ km: null, durationSec: null, toll: null, hasFerryLeg: false, isFinal: false });
   const [fareHint, setFareHint] = useState('');
@@ -326,6 +329,8 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
       Number(state.reservedTimeHour), Number(state.reservedTimeMinute), 0, 0
     );
     const isDelivery = state.reservation_basis === 'delivery';
+    const justLeftDeliveryForPickup = previousReservationBasisRef.current === 'delivery' && state.reservation_basis === 'pickup';
+    previousReservationBasisRef.current = state.reservation_basis;
 
     if (state.reservation_basis === 'immediate') {
       // 즉시 선택 시 예약 날짜/시간을 현재 시각(10분 단위 반올림)으로 맞춘다 — 이미 같은 값이면
@@ -347,6 +352,24 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
     }
 
     if (!isDelivery) {
+      // 도착지 인도시간 기준에서 막 픽업시간 기준으로 바꾼 경우, 화면에 남은 시각은 고객이
+      // 말한 인도 요청 시각이지 픽업 시각이 아니다 — 직전에 계산해둔 픽업 시각(state.pickup_
+      // reserved_date/time, 아직 이번 effect가 안 건드림)을 화면에 반영해준다(실사용 지적:
+      // 안 하면 인도 시각을 그대로 픽업 시각으로 오인해 등록하게 된다).
+      if (justLeftDeliveryForPickup && state.pickup_reserved_date && state.pickup_reserved_time) {
+        const [py, pmo, pd] = state.pickup_reserved_date.split('-');
+        const [ph, pmi] = state.pickup_reserved_time.split(':');
+        if (py && pmo && pd && ph && pmi) {
+          if (state.reservedDateYear !== py) dispatch({ type: 'SET_FIELD', name: 'reservedDateYear', value: py });
+          if (state.reservedDateMonth !== pmo) dispatch({ type: 'SET_FIELD', name: 'reservedDateMonth', value: pmo });
+          if (state.reservedDateDay !== pd) dispatch({ type: 'SET_FIELD', name: 'reservedDateDay', value: pd });
+          if (state.reservedTimeHour !== ph) dispatch({ type: 'SET_FIELD', name: 'reservedTimeHour', value: ph });
+          if (state.reservedTimeMinute !== pmi) dispatch({ type: 'SET_FIELD', name: 'reservedTimeMinute', value: pmi });
+          const nextMemo = deriveMemoWithReservationLine(state.memo_customer, false, null);
+          if (nextMemo !== state.memo_customer) dispatch({ type: 'SET_FIELD', name: 'memo_customer', value: nextMemo });
+          return;
+        }
+      }
       dispatch({ type: 'SET_FIELD', name: 'pickup_reserved_date', value: `${state.reservedDateYear}-${state.reservedDateMonth}-${state.reservedDateDay}` });
       dispatch({ type: 'SET_FIELD', name: 'pickup_reserved_time', value: `${state.reservedTimeHour}:${state.reservedTimeMinute}` });
       const nextMemo = deriveMemoWithReservationLine(state.memo_customer, false, null);

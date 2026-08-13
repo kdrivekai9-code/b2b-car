@@ -78,7 +78,7 @@
   var routeDurationFormulaHeader = document.getElementById('routeDurationFormulaHeader');
   var memoCustomerInput = form ? form.querySelector('textarea[name="memo_customer"]') : null;
   var currentRouteDurationSec = null;
-  var DELIVERY_RESERVATION_MEMO_PREFIX = '**도착지 예약**:';
+  var DELIVERY_RESERVATION_MEMO_PREFIX = '일시:';
 
   function isDeliveryReservationBasis() {
     return !!(reservationBasisDelivery && reservationBasisDelivery.checked);
@@ -92,15 +92,17 @@
     return String(value).padStart(2, '0');
   }
 
+  function parseDateTimeValue(dateValue, timeValue) {
+    var d = String(dateValue || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    var t = String(timeValue || '').trim().match(/^(\d{2}):(\d{2})$/);
+    if (!d || !t) return null;
+    return new Date(Number(d[1]), Number(d[2]) - 1, Number(d[3]), Number(t[1]), Number(t[2]), 0, 0);
+  }
+
   function parseVisibleReservedDateTime() {
     var dateInput = document.querySelector('input[name="reserved_date"]');
     var timeInput = document.getElementById('reserved_time');
-    var dateValue = dateInput && dateInput.value ? dateInput.value.trim() : '';
-    var timeValue = timeInput && timeInput.value ? timeInput.value.trim() : '';
-    var d = dateValue.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    var t = timeValue.match(/^(\d{2}):(\d{2})$/);
-    if (!d || !t) return null;
-    return new Date(Number(d[1]), Number(d[2]) - 1, Number(d[3]), Number(t[1]), Number(t[2]), 0, 0);
+    return parseDateTimeValue(dateInput && dateInput.value, timeInput && timeInput.value);
   }
 
   function formatLocalDateTime(dt) {
@@ -116,7 +118,7 @@
 
   function formatDeliveryReservationMemoDateTime(dt) {
     if (!dt || isNaN(dt.getTime())) return '';
-    return dt.getFullYear() + '년 ' + pad2(dt.getMonth() + 1) + '월 ' + pad2(dt.getDate()) + ' 일 ' + pad2(dt.getHours()) + '시 ' + pad2(dt.getMinutes()) + ' 분 도착요망';
+    return pad2(dt.getMonth() + 1) + '/' + pad2(dt.getDate()) + ' ' + pad2(dt.getHours()) + '시' + pad2(dt.getMinutes()) + '분 도착요망';
   }
 
   function syncDeliveryReservationMemo() {
@@ -152,21 +154,26 @@
     if (routeDurationFormulaHeader) routeDurationFormulaHeader.textContent = text ? ('· ' + text) : '';
   }
 
+  // 예약 날짜/시간 드롭다운(연/월/일/시/분)과 숨은 필드를 주어진 시각으로 맞춘다.
+  function applyDateTimeToReservedDateTimeSelects(dt) {
+    if (reservedDateYearSelect) reservedDateYearSelect.value = String(dt.getFullYear());
+    if (reservedDateMonthSelect) reservedDateMonthSelect.value = pad2(dt.getMonth() + 1);
+    if (reservedDateDaySelect) reservedDateDaySelect.value = pad2(dt.getDate());
+    var hourSelect = document.getElementById('reserved_time_hour');
+    var minuteSelect = document.getElementById('reserved_time_minute');
+    if (hourSelect) hourSelect.value = pad2(dt.getHours());
+    if (minuteSelect) minuteSelect.value = pad2(dt.getMinutes());
+    syncReservedDateField();
+    var timeHidden = document.getElementById('reserved_time');
+    if (timeHidden && hourSelect && minuteSelect) timeHidden.value = hourSelect.value + ':' + minuteSelect.value;
+  }
+
   // "즉시" 기준 선택 시 예약 날짜/시간 드롭다운을 현재 시각(10분 단위 반올림)으로 맞추고
   // 편집을 막는다 — 실제 제출 시각까지 최대한 가깝게 유지하려고 제출 직전(submit 핸들러)에도
   // 다시 호출된다.
   function applyNowToReservedDateTimeSelects() {
     var now = roundDateToNearestTenMinutes(new Date());
-    if (reservedDateYearSelect) reservedDateYearSelect.value = String(now.getFullYear());
-    if (reservedDateMonthSelect) reservedDateMonthSelect.value = pad2(now.getMonth() + 1);
-    if (reservedDateDaySelect) reservedDateDaySelect.value = pad2(now.getDate());
-    var hourSelect = document.getElementById('reserved_time_hour');
-    var minuteSelect = document.getElementById('reserved_time_minute');
-    if (hourSelect) hourSelect.value = pad2(now.getHours());
-    if (minuteSelect) minuteSelect.value = pad2(now.getMinutes());
-    syncReservedDateField();
-    var timeHidden = document.getElementById('reserved_time');
-    if (timeHidden && hourSelect && minuteSelect) timeHidden.value = hourSelect.value + ':' + minuteSelect.value;
+    applyDateTimeToReservedDateTimeSelects(now);
     return now;
   }
 
@@ -176,8 +183,16 @@
       .forEach(function (el) { if (el) el.disabled = disabled; });
   }
 
+  // 직전 호출 때의 기준 — "방금 도착지 인도시간 기준에서 벗어났다"를 판단하는 데만 쓴다.
+  var previousReservationBasis = null;
+
   function syncReservationBasisPreview() {
     var immediateBasis = isImmediateReservationBasis();
+    var deliveryBasis = !immediateBasis && isDeliveryReservationBasis();
+    var currentBasis = immediateBasis ? 'immediate' : (deliveryBasis ? 'delivery' : 'pickup');
+    var justLeftDeliveryForPickup = previousReservationBasis === 'delivery' && currentBasis === 'pickup';
+    previousReservationBasis = currentBasis;
+
     setReservedDateTimeSelectsDisabled(immediateBasis);
     if (immediateBasis) {
       var nowDt = applyNowToReservedDateTimeSelects();
@@ -188,8 +203,16 @@
       return;
     }
 
-    var deliveryBasis = isDeliveryReservationBasis();
     if (!deliveryBasis) {
+      // 도착지 인도시간 기준에서 막 픽업시간 기준으로 바꾼 경우, 화면에 남아있는 시각은
+      // 고객이 말한 "인도 요청 시각"이지 픽업 시각이 아니다 — 그대로 두면 인도 시각을
+      // 픽업 시각으로 오인해 등록하게 된다(실사용 지적). 직전에 계산해둔 픽업 시각(아직
+      // 안 지워짐 — 아래 setPickupHiddenFields가 이번 호출에서 덮어쓰기 전)이 있으면
+      // 화면에 그대로 반영해준다.
+      if (justLeftDeliveryForPickup && pickupReservedDateInput && pickupReservedTimeInput) {
+        var convertedDt = parseDateTimeValue(pickupReservedDateInput.value, pickupReservedTimeInput.value);
+        if (convertedDt) applyDateTimeToReservedDateTimeSelects(convertedDt);
+      }
       if (pickupPreviewBlock) pickupPreviewBlock.style.display = 'none';
       setPickupHiddenFields(parseVisibleReservedDateTime());
       setRouteFormulaText('');

@@ -13,9 +13,28 @@ import RouteCalculator from '../../orders/new/RouteCalculator';
 // 이동한다(서버 응답은 legacy의 res.redirect와 완전히 동일한 목적지).
 
 const DELIVERY_BUFFER_SECONDS = 30 * 60;
+// OrderForm.js와 동일한 규칙(사용자 요청) — 도착지 인도시간 기준일 때만 요청사항에 원래
+// 고객이 말한 인도 요청 시각을 남긴다. 예전엔 "메모는 자유 텍스트라 자동 삽입 안 함"이라고
+// 미뤄뒀었는데, 실제로는 픽업 시각만 남으면 기사에게 "몇 시까지 인도해야 하는지"가 전달이
+// 안 돼서 다른 화면과 맞춰 넣기로 했다.
+const DELIVERY_RESERVATION_MEMO_PREFIX = '일시:';
 
 function pad2(n) {
   return String(n).padStart(2, '0');
+}
+
+function formatDeliveryReservationMemoDateTime(dt) {
+  return `${pad2(dt.getMonth() + 1)}/${pad2(dt.getDate())} ${pad2(dt.getHours())}시${pad2(dt.getMinutes())}분 도착요망`;
+}
+
+function deriveMemoWithReservationLine(currentMemo, isDeliveryBasis, deliveryDateTime) {
+  const hasMemo = String(currentMemo || '').trim().length > 0;
+  const rawLines = hasMemo ? String(currentMemo).split(/\r?\n/) : [];
+  const keptLines = rawLines.filter((line) => String(line || '').trim().indexOf(DELIVERY_RESERVATION_MEMO_PREFIX) !== 0);
+  if (isDeliveryBasis && deliveryDateTime && !Number.isNaN(deliveryDateTime.getTime())) {
+    keptLines.push(`${DELIVERY_RESERVATION_MEMO_PREFIX} ${formatDeliveryReservationMemoDateTime(deliveryDateTime)}`);
+  }
+  return keptLines.join('\n').replace(/^\n+|\n+$/g, '');
 }
 
 function getLastDayOfMonth(year, month) {
@@ -210,6 +229,8 @@ export default function IntakeMiniForm({ chatSessionId, branches, groups, paymen
   const [vehicleTypeSuggestions, setVehicleTypeSuggestions] = useState([]);
   const [fareHint, setFareHint] = useState('');
   const vehicleTypeDebounceRef = useRef(null);
+  // "방금 도착지 인도시간 기준에서 벗어났다"를 판단하기 위한 직전 예약기준.
+  const previousReservationBasisRef = useRef(state.reservation_basis);
   const fareRequestIdRef = useRef(0);
   const vehicleTypeRequired = /제주/.test(state.destination_address || '');
 
@@ -224,11 +245,12 @@ export default function IntakeMiniForm({ chatSessionId, branches, groups, paymen
   ];
 
   // 예약기준 역산 — OrderForm.js와 동일 로직(도착지 인도시간 기준일 때만 출발지 픽업시간을
-  // 경로탐색 소요시간 + 30분 여유로 역산). legacy는 여기에 더해 메모에 "**도착지 예약**:" 줄을
-  // 자동으로 넣지만, 이 미니폼은 메모 필드가 자유 텍스트라 사용자가 직접 적는 걸 존중하고
-  // 자동 삽입은 하지 않는다(레이스 없이 명확한 편이 낫다는 판단 — legacy만큼의 자동화가
-  // 필요하면 후속으로 추가 가능).
+  // 경로탐색 소요시간 + 30분 여유로 역산, 요청사항에 "일시: MM/DD HH시MM분 도착요망" 줄도
+  // 같이 남긴다 — 사용자 요청).
   useEffect(() => {
+    const justLeftDeliveryForPickup = previousReservationBasisRef.current === 'delivery' && state.reservation_basis === 'pickup';
+    previousReservationBasisRef.current = state.reservation_basis;
+
     if (state.reservation_basis === 'immediate') {
       // 즉시 선택 시 예약 날짜/시간을 현재 시각(10분 단위 반올림)으로 맞춘다.
       const now = roundDateToNearestTenMinutes(new Date());
@@ -247,10 +269,29 @@ export default function IntakeMiniForm({ chatSessionId, branches, groups, paymen
       return;
     }
     if (state.reservation_basis !== 'delivery') {
+      // 도착지 인도시간 기준에서 막 픽업시간 기준으로 바꾼 경우, 화면에 남은 시각은 인도
+      // 요청 시각이지 픽업 시각이 아니다 — 직전에 계산해둔 픽업 시각을 화면에 반영한다
+      // (OrderForm.js와 동일한 규칙).
+      if (justLeftDeliveryForPickup && state.pickup_reserved_date && state.pickup_reserved_time) {
+        const [py, pmo, pd] = state.pickup_reserved_date.split('-');
+        const [ph, pmi] = state.pickup_reserved_time.split(':');
+        if (py && pmo && pd && ph && pmi) {
+          if (state.reservedDateYear !== py) setField('reservedDateYear', py);
+          if (state.reservedDateMonth !== pmo) setField('reservedDateMonth', pmo);
+          if (state.reservedDateDay !== pd) setField('reservedDateDay', pd);
+          if (state.reservedTimeHour !== ph) setField('reservedTimeHour', ph);
+          if (state.reservedTimeMinute !== pmi) setField('reservedTimeMinute', pmi);
+          const nextMemo = deriveMemoWithReservationLine(state.memo_customer, false, null);
+          if (nextMemo !== state.memo_customer) setField('memo_customer', nextMemo);
+          return;
+        }
+      }
       const nextDate = `${state.reservedDateYear}-${state.reservedDateMonth}-${state.reservedDateDay}`;
       const nextTime = `${state.reservedTimeHour}:${state.reservedTimeMinute}`;
       if (state.pickup_reserved_date !== nextDate) setField('pickup_reserved_date', nextDate);
       if (state.pickup_reserved_time !== nextTime) setField('pickup_reserved_time', nextTime);
+      const nextMemo = deriveMemoWithReservationLine(state.memo_customer, false, null);
+      if (nextMemo !== state.memo_customer) setField('memo_customer', nextMemo);
       return;
     }
     const deliveryDateTime = new Date(
@@ -261,13 +302,15 @@ export default function IntakeMiniForm({ chatSessionId, branches, groups, paymen
     if (!Number.isFinite(durationSec) || durationSec <= 0) {
       if (state.pickup_reserved_date) setField('pickup_reserved_date', '');
       if (state.pickup_reserved_time) setField('pickup_reserved_time', '');
-      return;
+    } else {
+      const rounded = roundDateToNearestTenMinutes(new Date(deliveryDateTime.getTime() - (durationSec + DELIVERY_BUFFER_SECONDS) * 1000));
+      const nextDate = `${rounded.getFullYear()}-${pad2(rounded.getMonth() + 1)}-${pad2(rounded.getDate())}`;
+      const nextTime = `${pad2(rounded.getHours())}:${pad2(rounded.getMinutes())}`;
+      if (state.pickup_reserved_date !== nextDate) setField('pickup_reserved_date', nextDate);
+      if (state.pickup_reserved_time !== nextTime) setField('pickup_reserved_time', nextTime);
     }
-    const rounded = roundDateToNearestTenMinutes(new Date(deliveryDateTime.getTime() - (durationSec + DELIVERY_BUFFER_SECONDS) * 1000));
-    const nextDate = `${rounded.getFullYear()}-${pad2(rounded.getMonth() + 1)}-${pad2(rounded.getDate())}`;
-    const nextTime = `${pad2(rounded.getHours())}:${pad2(rounded.getMinutes())}`;
-    if (state.pickup_reserved_date !== nextDate) setField('pickup_reserved_date', nextDate);
-    if (state.pickup_reserved_time !== nextTime) setField('pickup_reserved_time', nextTime);
+    const nextMemo = deriveMemoWithReservationLine(state.memo_customer, true, deliveryDateTime);
+    if (nextMemo !== state.memo_customer) setField('memo_customer', nextMemo);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.reservation_basis, state.reservedDateYear, state.reservedDateMonth, state.reservedDateDay, state.reservedTimeHour, state.reservedTimeMinute, routeInfo.durationSec]);
 
