@@ -150,6 +150,13 @@ async function main() {
         `UPDATE chat_sessions SET draft_json = '{"phase":"collecting","pendingField":"origin_address"}' WHERE id = ?`,
         [created.sessionId]
       );
+      // "진행 중" 표시만으로는 부족하다 — 고객이 최근에 말을 걸었어야 실제로 대화 중이다.
+      // (표시는 고객이 답하지 않으면 영원히 남아서, 그것만 보면 몇 시간 전 대화가 통보를 계속
+      // 미룬다. OID1237이 그 사례였다.)
+      await db.run(
+        `INSERT INTO chat_messages (session_id, sender, message) VALUES (?, 'user', ?)`,
+        [created.sessionId, `${MARK} 고객 발화`]
+      );
       const busyBefore = await countMessages();
       out = await notify.runKakaoOrderNotifications(opts);
       check('발송하지 않고 미룬다', out.delivered.deferred, 1);
@@ -162,7 +169,8 @@ async function main() {
       check('큐에 pending으로 남아 있다', queued.status, 'pending');
       check('미룬 횟수가 1', Number(queued.defer_count), 1);
 
-      // 대화가 끝나면 발송된다. scheduled_at을 앞으로 당겨 2분을 기다리지 않는다.
+      // 대화가 끝나면 발송된다(진행 중 표시가 사라진다). scheduled_at을 앞으로 당겨 2분을
+      // 기다리지 않는다.
       await db.run('UPDATE chat_sessions SET draft_json = NULL WHERE id = ?', [created.sessionId]);
       await db.run(
         `UPDATE kakao_order_notifications SET scheduled_at = now() - interval '1 minute'

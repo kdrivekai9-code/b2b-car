@@ -216,6 +216,39 @@ check('웹 — 깨진 JSON도 바쁘지 않음으로 본다', isSessionBusy({ dr
 check('카카오 — 접수 진행 중이면 바쁨', isSessionBusy({ intake_slots_json: '{"origin":"x"}' }), true);
 check('카카오 — 도우미 확인 대기면 바쁨', isSessionBusy({ mcp_pending_json: '{"tool":"call.create"}' }), true);
 check('빈 세션은 바쁘지 않음', isSessionBusy({}), false);
+
+// 확인 대기(mcp_pending_json)는 고객이 답하지 않으면 스스로 사라지지 않는다. 마지막 고객
+// 발화까지 함께 보지 않으면 몇 시간 전에 떠난 대화가 배차 통보를 계속 미룬다(OID1237 실측).
+const NOW = Date.parse('2026-08-13T20:50:00+09:00');
+const busySession = { mcp_pending_json: '{"mcpTool":"call.create"}' };
+check(
+  '방금 말을 걸었으면 바쁨',
+  isSessionBusy(busySession, { lastCustomerMessageAt: '2026-08-13 20:48:00', nowMs: NOW }),
+  true
+);
+check(
+  '9시간 전 대화면 바쁘지 않음(떠난 대화)',
+  isSessionBusy(busySession, { lastCustomerMessageAt: '2026-08-13 11:57:15', nowMs: NOW }),
+  false
+);
+check(
+  '창 경계(10분)를 넘으면 바쁘지 않음',
+  isSessionBusy(busySession, { lastCustomerMessageAt: '2026-08-13 20:39:00', nowMs: NOW }),
+  false
+);
+check(
+  '고객 발화가 아예 없으면 바쁘지 않음',
+  isSessionBusy(busySession, { lastCustomerMessageAt: null, nowMs: NOW }),
+  false
+);
+// 마지막 발화를 모르면(법인 공유 피드처럼 안 넘기는 곳) 예전처럼 표시만 보고 판단한다.
+check('마지막 발화를 안 넘기면 예전 방식', isSessionBusy(busySession), true);
+// 진행 중 표시가 아예 없으면 발화 시각과 무관하게 바쁘지 않다.
+check(
+  '표시가 없으면 방금 말했어도 바쁘지 않음',
+  isSessionBusy({}, { lastCustomerMessageAt: '2026-08-13 20:49:59', nowMs: NOW }),
+  false
+);
 check('세션이 없으면 바쁘지 않음', isSessionBusy(null), false);
 
 console.log('\n[중복 판정 키]');
