@@ -11,7 +11,13 @@ if (!process.env.DATABASE_URL) {
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false },
-  max: process.env.VERCEL ? 3 : 10,
+  // DB_POOL_MAX로 덮어쓸 수 있다 — 값을 바꿔가며 재보려고 코드를 고치는 일이 없게 한다.
+  // 실측(동시 100, SELECT count(*) FROM orders): max 5→341 q/s, 10→696, 20→1250, 40→2069.
+  // 거의 선형이라 이 앱에서는 풀 크기가 곧 처리량 상한이다. 그래도 기본값을 올리지 않은 이유는
+  // 프로덕션(Vercel)의 제약이 다르기 때문이다 — 인스턴스가 수평 확장되므로 인스턴스당 3개라도
+  // 인스턴스 수만큼 곱해지고, 그 합이 Supabase 풀러 한도를 넘으면 그때는 앱 전체가 막힌다.
+  // 로컬만 올리는 것은 안전하지만(단일 프로세스) 프로덕션 값은 풀러 한도를 확인하고 정해야 한다.
+  max: Number(process.env.DB_POOL_MAX) || (process.env.VERCEL ? 3 : 10),
   // 유휴 소켓을 오래 들고 있지 않는다. 이 값이 이번 사고의 노출 창을 그대로 결정한다 —
   // 풀에 캐시된 채 썩을 수 있는 소켓의 수명이기 때문이다. 재접속 비용은 실측 100~150ms라
   // 짧게 잡는 편이 훨씬 싸다(예전 로컬 값은 30초였다).
