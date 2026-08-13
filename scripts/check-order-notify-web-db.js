@@ -101,7 +101,7 @@ async function main() {
     };
     const opts = () => ({
       ...baseOpts,
-      onlyOrderIds: [created.orderId, created.orderId2, created.orderId3].filter(Boolean),
+      onlyOrderIds: [created.orderId, created.orderId2, created.orderId3, created.orderId4].filter(Boolean),
     });
     const countMessages = async () => {
       const row = await db.get(
@@ -144,6 +144,9 @@ async function main() {
     if (supportsDefer) {
       // 같은 오더·같은 기사면 중복 방지(order_id, event_type, dedupe_key)가 두 번째 예약을
       // 막는다 — 그게 정상 동작이라, 미루기를 보려면 아직 통보를 안 보낸 새 오더가 필요하다.
+      //
+      // 사건은 운행완료를 쓴다. 배차·운행시작은 늦으면 가치가 없어 아예 미루지 않는 사건이라
+      // (NEVER_DEFER_EVENTS) 미루기를 관측할 수 없다.
       const busyOrder = await db.get(
         `INSERT INTO orders (oid, branch_id, status, chat_session_id, order_type, memo_customer,
                              origin_address, destination_address, reserved_date, reserved_time)
@@ -151,17 +154,17 @@ async function main() {
         [`${MARK}-oid3`, branch.id, created.sessionId, MARK, '대전', '대구', '2026-08-22', '10:00']
       );
       created.orderId3 = busyOrder.id;
-      await transition(created.orderId3, '기사배정', '운행시작');
+      await transition(created.orderId3, '기사배정', '완료');
       await db.run(
         `UPDATE chat_sessions SET draft_json = '{"phase":"collecting","pendingField":"origin_address"}' WHERE id = ?`,
         [created.sessionId]
       );
-      // "진행 중" 표시만으로는 부족하다 — 고객이 최근에 말을 걸었어야 실제로 대화 중이다.
+      // 표시만으로는 부족하다 — 봇이 질문을 던져놓고 답을 기다리는 중이어야 실제 대화 중이다.
       // (표시는 고객이 답하지 않으면 영원히 남아서, 그것만 보면 몇 시간 전 대화가 통보를 계속
       // 미룬다. OID1237이 그 사례였다.)
       await db.run(
-        `INSERT INTO chat_messages (session_id, sender, message) VALUES (?, 'user', ?)`,
-        [created.sessionId, `${MARK} 고객 발화`]
+        `INSERT INTO chat_messages (session_id, sender, message) VALUES (?, 'bot', ?)`,
+        [created.sessionId, `${MARK} 출발지가 어디인가요?`]
       );
       const busyBefore = await countMessages();
       out = await notify.runKakaoOrderNotifications(opts());
@@ -169,22 +172,62 @@ async function main() {
       check('상담 이력이 늘지 않는다', await countMessages(), busyBefore);
       const queued = await db.get(
         `SELECT status, defer_count FROM kakao_order_notifications
-         WHERE order_id = ? AND event_type = 'started' ORDER BY id DESC LIMIT 1`,
+         WHERE order_id = ? AND event_type = 'completed' ORDER BY id DESC LIMIT 1`,
         [created.orderId3]
       );
       check('큐에 pending으로 남아 있다', queued.status, 'pending');
       check('미룬 횟수가 1', Number(queued.defer_count), 1);
 
-      // 대화가 끝나면 발송된다(진행 중 표시가 사라진다). scheduled_at을 앞으로 당겨 2분을
-      // 기다리지 않는다.
-      await db.run('UPDATE chat_sessions SET draft_json = NULL WHERE id = ?', [created.sessionId]);
+      // 고객이 답하면(마지막 메시지가 고객) 더는 기다리는 상태가 아니라 발송된다.
+      // scheduled_at을 앞으로 당겨 2분을 기다리지 않는다.
+      await db.run(
+        `INSERT INTO chat_messages (session_id, sender, message) VALUES (?, 'user', ?)`,
+        [created.sessionId, `${MARK} 대전이요`]
+      );
       await db.run(
         `UPDATE kakao_order_notifications SET scheduled_at = now() - interval '1 minute'
-         WHERE order_id = ? AND event_type = 'started' AND status = 'pending'`,
+         WHERE order_id = ? AND event_type = 'completed' AND status = 'pending'`,
         [created.orderId3]
       );
       out = await notify.runKakaoOrderNotifications(opts());
-      check('대화가 끝나면 발송된다', out.delivered.sent, 1);
+      check('고객이 답하면 발송된다', out.delivered.sent, 1);
+    } else {
+      console.log('  (건너뜀)');
+    }
+
+    console.log('[배차·운행시작은 대화 중이어도 미루지 않는다]');
+    if (supportsDefer) {
+      // 늦게 도착한 "기사님 배차되었습니다"는 안내로서 가치가 없다 — 봇이 답을 기다리는
+      // 중이어도 그대로 보낸다(사용자 확정).
+      const urgentOrder = await db.get(
+        `INSERT INTO orders (oid, branch_id, status, chat_session_id, order_type, memo_customer,
+                             origin_address, destination_address, reserved_date, reserved_time)
+         VALUES (?, ?, '접수', ?, 'dispatch', ?, ?, ?, ?, ?) RETURNING id`,
+        [`${MARK}-oid4`, branch.id, created.sessionId, MARK, '광주', '전주', '2026-08-23', '11:00']
+      );
+      created.orderId4 = urgentOrder.id;
+      // 봇이 질문을 던져놓고 답을 기다리는 상태를 만든다(위 운행완료는 이 상태에서 미뤄졌다).
+      await db.run(
+        `UPDATE chat_sessions SET draft_json = '{"phase":"collecting","pendingField":"origin_address"}' WHERE id = ?`,
+        [created.sessionId]
+      );
+      await db.run(
+        `INSERT INTO chat_messages (session_id, sender, message) VALUES (?, 'bot', ?)`,
+        [created.sessionId, `${MARK} 도착지가 어디인가요?`]
+      );
+      await transition(created.orderId4, '접수', '기사배정');
+      await notify.collectFromHistory();
+      await db.run(
+        `UPDATE kakao_order_notifications SET scheduled_at = now() - interval '1 minute'
+         WHERE order_id = ? AND status = 'pending'`,
+        [created.orderId4]
+      );
+      const urgentBefore = await countMessages();
+      out = await notify.sendDue(opts());
+      check('대화 중이어도 배차 통보는 미루지 않는다', out.deferred, 0);
+      check('그대로 발송된다', out.sent, 1);
+      check('상담 이력이 늘었다', (await countMessages()) > urgentBefore, true);
+      await db.run('UPDATE chat_sessions SET draft_json = NULL WHERE id = ?', [created.sessionId]);
     } else {
       console.log('  (건너뜀)');
     }
@@ -217,7 +260,7 @@ async function main() {
     // 지사 설정 원복 — 손대기 전 상태로 통째로 되돌린다(attach_photos까지).
     await snapshot.restoreSettings(savedBranchId, savedSettings);
     // 만든 행만 지운다.
-    for (const id of [created.orderId, created.orderId2, created.orderId3].filter(Boolean)) {
+    for (const id of [created.orderId, created.orderId2, created.orderId3, created.orderId4].filter(Boolean)) {
       await db.run('DELETE FROM kakao_order_notifications WHERE order_id = ?', [id]).catch(() => {});
       await db.run('DELETE FROM order_status_history WHERE order_id = ?', [id]).catch(() => {});
       await db.run('DELETE FROM orders WHERE id = ?', [id]).catch(() => {});
