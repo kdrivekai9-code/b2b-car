@@ -93,10 +93,16 @@ async function main() {
 
     const kakaoSent = [];
     const broadcasts = [];
-    const opts = {
+    // 이 큐는 전역이다 — 범위를 안 좁히면 마침 대기 중이던 진짜 고객 통보까지 가짜 발신으로
+    // 삼켜 "보냈다"고 기록해버린다(실제로 겪은 사고). 이 스크립트가 만든 오더만 처리한다.
+    const baseOpts = {
       send: async (_s, text) => { kakaoSent.push(text); return { ok: true }; },
       broadcast: async (sessionId, message) => { broadcasts.push({ sessionId, message }); },
     };
+    const opts = () => ({
+      ...baseOpts,
+      onlyOrderIds: [created.orderId, created.orderId2, created.orderId3].filter(Boolean),
+    });
     const countMessages = async () => {
       const row = await db.get(
         `SELECT COUNT(*) AS n FROM chat_messages WHERE session_id = ? AND sender = 'system'`,
@@ -107,7 +113,7 @@ async function main() {
 
     console.log('[웹 세션에 배차 통보]');
     await transition(created.orderId, '접수', '기사배정');
-    let out = await notify.runKakaoOrderNotifications(opts);
+    let out = await notify.runKakaoOrderNotifications(opts());
     check('통보 1건 발송', out.delivered.sent, 1);
     check('웹 채널로 집계', out.delivered.byChannel.web, 1);
     check('카카오 발신은 0회(웹 세션이므로)', kakaoSent.length, 0);
@@ -120,7 +126,7 @@ async function main() {
 
     console.log('[운행시작 통보]');
     await transition(created.orderId, '기사배정', '운행시작');
-    out = await notify.runKakaoOrderNotifications(opts);
+    out = await notify.runKakaoOrderNotifications(opts());
     check('운행시작 1건 발송', out.delivered.sent, 1);
     const startedText = broadcasts[broadcasts.length - 1].message.message;
     check('운행시작 문구', /요청하신 탁송건이 운행시작 되었습니다/.test(startedText), true);
@@ -130,7 +136,7 @@ async function main() {
     // 고객에게 같은 안내가 매분 반복된다.
     const before = await countMessages();
     await transition(created.orderId, '운행시작', '기사배정');
-    out = await notify.runKakaoOrderNotifications(opts);
+    out = await notify.runKakaoOrderNotifications(opts());
     check('배차 통보가 다시 나가지 않는다', out.delivered.sent, 0);
     check('상담 이력이 늘지 않는다', await countMessages(), before);
 
@@ -158,7 +164,7 @@ async function main() {
         [created.sessionId, `${MARK} 고객 발화`]
       );
       const busyBefore = await countMessages();
-      out = await notify.runKakaoOrderNotifications(opts);
+      out = await notify.runKakaoOrderNotifications(opts());
       check('발송하지 않고 미룬다', out.delivered.deferred, 1);
       check('상담 이력이 늘지 않는다', await countMessages(), busyBefore);
       const queued = await db.get(
@@ -177,7 +183,7 @@ async function main() {
          WHERE order_id = ? AND event_type = 'started' AND status = 'pending'`,
         [created.orderId3]
       );
-      out = await notify.runKakaoOrderNotifications(opts);
+      out = await notify.runKakaoOrderNotifications(opts());
       check('대화가 끝나면 발송된다', out.delivered.sent, 1);
     } else {
       console.log('  (건너뜀)');
@@ -203,7 +209,7 @@ async function main() {
       [created.orderId2]
     );
     const beforeDelayed = await countMessages();
-    out = await notify.sendDue(opts);
+    out = await notify.sendDue(opts());
     check('배차 통보가 그대로 발송된다', out.sent >= 1, true);
     check('상담 이력이 늘었다', (await countMessages()) > beforeDelayed, true);
 

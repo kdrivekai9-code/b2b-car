@@ -66,6 +66,9 @@ async function main() {
 
     const sentTexts = [];
     const fakeSend = async (_session, text) => { sentTexts.push(text); return { ok: true }; };
+    // 이 큐는 전역이다 — 범위를 안 좁히면 마침 대기 중이던 진짜 고객 통보까지 가짜 발신으로
+    // 삼켜 "보냈다"고 기록해버린다(실제로 겪은 사고). 이 스크립트가 만든 오더만 처리한다.
+    const opts = () => ({ send: fakeSend, onlyOrderIds: [created.orderId].filter(Boolean) });
 
     console.log('[배차 통보]');
     await db.run('UPDATE orders SET status = ? WHERE id = ?', ['기사배정', created.orderId]);
@@ -74,7 +77,7 @@ async function main() {
       [created.orderId, MARK]
     );
 
-    const first = await notify.runKakaoOrderNotifications({ send: fakeSend });
+    const first = await notify.runKakaoOrderNotifications(opts());
     check('전이를 잡아 통보를 예약한다', first.collected.scheduled, 1);
     check('지연 시간이 지나기 전에는 보내지 않는다', first.delivered.sent, 0);
 
@@ -83,11 +86,11 @@ async function main() {
       `UPDATE kakao_order_notifications SET scheduled_at = now() - interval '1 second' WHERE order_id = ? AND status = 'pending'`,
       [created.orderId]
     );
-    const second = await notify.sendDue({ send: fakeSend });
+    const second = await notify.sendDue(opts());
     check('지연 시간이 지나면 보낸다', second.sent, 1);
     check('문구에 기사 정보가 들어간다', sentTexts[0].includes('홍길동') && sentTexts[0].includes('기사님 배차되었습니다'), true);
 
-    const third = await notify.sendDue({ send: fakeSend });
+    const third = await notify.sendDue(opts());
     check('같은 통보가 두 번 나가지 않는다', third.sent, 0);
 
     console.log('\n[1분 사이에 취소되면 보내지 않는다]');
@@ -109,7 +112,7 @@ async function main() {
       `UPDATE kakao_order_notifications SET scheduled_at = now() - interval '1 second' WHERE order_id = ? AND status = 'pending'`,
       [created.orderId]
     );
-    const fifth = await notify.sendDue({ send: fakeSend });
+    const fifth = await notify.sendDue(opts());
     check('발송 직전 상태가 바뀌었으면 보내지 않는다', fifth.sent, 0);
     check('보내지 않은 건은 skipped로 남는다', fifth.skipped, 1);
 
@@ -118,7 +121,7 @@ async function main() {
       `INSERT INTO order_status_history (order_id, actor_user_id, old_status, new_status, note) VALUES (?, NULL, '기사배정', '접수', ?)`,
       [created.orderId, MARK]
     );
-    const sixth = await notify.runKakaoOrderNotifications({ send: fakeSend });
+    const sixth = await notify.runKakaoOrderNotifications(opts());
     check('배차 취소는 미루지 않고 곧바로 보낸다', sixth.delivered.sent, 1);
     check(
       '문구는 다시 배차 중임을 알린다',
@@ -132,7 +135,7 @@ async function main() {
       `INSERT INTO order_status_history (order_id, actor_user_id, old_status, new_status, note) VALUES (?, NULL, '기사배정', '완료', ?)`,
       [created.orderId, MARK]
     );
-    const completed = await notify.runKakaoOrderNotifications({ send: fakeSend });
+    const completed = await notify.runKakaoOrderNotifications(opts());
     check('운행완료는 미루지 않고 보낸다', completed.delivered.sent, 1);
     check('문구가 운행완료 안내다', sentTexts[sentTexts.length - 1].includes('운행완료 되었습니다'), true);
 
@@ -144,7 +147,7 @@ async function main() {
     // 오더취소는 기본으로 꺼져 있다 — 콜마너가 재배차 직전에 잠깐 '취소'를 주기 때문에
     // 그대로 통보하면 멀쩡한 오더를 취소됐다고 알리는 오발신이 된다(OID1237 실측).
     const beforeCancelSent = sentTexts.length;
-    const cancelled = await notify.runKakaoOrderNotifications({ send: fakeSend });
+    const cancelled = await notify.runKakaoOrderNotifications(opts());
     check('오더취소는 기본으로 보내지 않는다', cancelled.delivered.sent, 0);
     check('취소 문구가 나가지 않았다', sentTexts.length, beforeCancelSent);
     check('예약 자체를 만들지 않는다(꺼진 사건)', cancelled.collected.disabled >= 1, true);
@@ -189,7 +192,7 @@ async function main() {
           `INSERT INTO order_status_history (order_id, actor_user_id, old_status, new_status, note) VALUES (?, NULL, '완료', '취소', ?)`,
           [created.orderId, MARK]
         );
-        const customRun = await notify.runKakaoOrderNotifications({ send: fakeSend });
+        const customRun = await notify.runKakaoOrderNotifications(opts());
         check('지사 문구로 보낸다', customRun.delivered.sent, 1);
         check(
           '보낸 문구가 지사가 정한 그대로다',
