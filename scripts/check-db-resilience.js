@@ -35,8 +35,40 @@ async function main() {
   check('keepAlive 켜짐', !!o.keepAlive, true);
   check('커넥션 획득 한도가 있다', Number.isFinite(o.connectionTimeoutMillis) && o.connectionTimeoutMillis > 0, true);
   check('쿼리 한도가 있다', Number.isFinite(o.query_timeout) && o.query_timeout > 0, true);
+  check('커넥션 수명 상한이 있다', Number.isFinite(o.maxLifetimeSeconds) && o.maxLifetimeSeconds > 0, true);
   // 무한 대기(0/undefined)로 되돌아가면 이 검사가 바로 잡는다.
-  console.log(`       (connectionTimeout=${o.connectionTimeoutMillis}ms, query_timeout=${o.query_timeout}ms, idle=${o.idleTimeoutMillis}ms, max=${o.max})`);
+  console.log(`       (connectionTimeout=${o.connectionTimeoutMillis}ms, query_timeout=${o.query_timeout}ms, idle=${o.idleTimeoutMillis}ms, maxLifetime=${o.maxLifetimeSeconds}s, max=${o.max})`);
+
+  console.log('\n[커넥션 수명 상한이 실제로 지켜진다]');
+  // 설정값만 확인하면 "이 pg 버전이 그 옵션을 무시한다"는 경우를 놓친다. 수명 1초짜리 임시 풀로
+  // 실제로 커넥션이 교체되는지 본다(운영 풀 300초를 기다릴 수는 없다).
+  const { Pool } = require('pg');
+  const shortLived = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: { rejectUnauthorized: false },
+    max: 1,
+    maxLifetimeSeconds: 1,
+    idleTimeoutMillis: 30000,
+  });
+  // 교체를 pid로 판정할 수는 없다 — 트랜잭션 풀러를 지나면 백엔드 pid가 클라이언트 커넥션과
+  // 1:1이 아니다(실측: 교체 전후 pid가 같게 나온다). 풀이 커넥션을 실제로 버릴 때 내는
+  // 'remove' 이벤트를 본다. 이 이벤트가 안 오면 이 pg 버전이 옵션을 무시하는 것이다.
+  let removed = 0;
+  shortLived.on('remove', () => { removed += 1; });
+  try {
+    const first = await shortLived.connect();
+    await first.query('SELECT 1');
+    first.release();
+    check('수명 안에서는 커넥션을 버리지 않는다', removed, 0);
+    await new Promise((r) => setTimeout(r, 1500)); // 수명(1초)을 넘긴다
+    const second = await shortLived.connect();
+    await second.query('SELECT 1');
+    second.release();
+    check('수명을 넘긴 커넥션은 버려진다', removed >= 1, true);
+    console.log(`       remove 이벤트 ${removed}회 — 설정값만이 아니라 실제로 교체된다`);
+  } finally {
+    await shortLived.end().catch(() => {});
+  }
 
   console.log('\n[완전히 끊긴 소켓 — 즉시 실패하고 풀이 회복한다]');
   const c1 = await makeDeadClient('closed');
