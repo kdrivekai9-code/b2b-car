@@ -12,10 +12,6 @@
   ],
   "crons": [
     {
-      "path": "/login",
-      "schedule": "*/5 * * * *"
-    },
-    {
       "path": "/",
       "schedule": "*/5 * * * *"
     },
