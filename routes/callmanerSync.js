@@ -100,6 +100,10 @@ const SYNC_BY_CONF_SLIP_LIMIT = Number(process.env.CALLMANER_SYNC_ORDER_LIMIT ||
 const SYNC_LOOKBACK_DAYS = Number(process.env.CALLMANER_SYNC_LOOKBACK_DAYS || 3);
 const SYNC_CONCURRENCY = Number(process.env.CALLMANER_SYNC_CONCURRENCY || 5);
 const TERMINAL_LOCAL_STATUSES = ['완료', '취소'];
+// 완료/취소로 기록된 뒤에도 이 시간 동안은 계속 상태를 확인한다. 콜마너가 재배차 직전에 잠깐
+// 주는 '취소'를 우리가 종료로 굳혀버리는 것을 막기 위한 창이다(실측상 1~2분 안에 되살아난다).
+// 너무 길게 잡으면 종료 건까지 매분 조회하게 되므로 기본 60분으로 둔다.
+const TERMINAL_RECHECK_MINUTES = Number(process.env.CALLMANER_TERMINAL_RECHECK_MINUTES || 60);
 const DISPATCHED_LOCAL_STATUS = '기사배정';
 const STARTED_LOCAL_STATUS = '운행시작';
 // 콜마너 baecha_status: 0 배차상태아님 / 1 기사도착 / 2 운행시작 (정의서 "오더상세조회").
@@ -127,15 +131,28 @@ function isBackwardTransition(currentStatus, nextStatus) {
 
 async function syncOrdersByConfSlip(branch) {
   const placeholders = TERMINAL_LOCAL_STATUSES.map(() => '?').join(',');
-  // 1분마다 도는 폴링이라 대상 건수를 묶어둔다 — 종료 상태가 아니고 최근 접수된 오더만 본다
-  // (오래된 미완료 건까지 매분 조회하면 API 호출이 계속 쌓인다).
+  // 1분마다 도는 폴링이라 대상 건수를 묶어둔다 — 최근 접수된 오더만 본다(오래된 건까지 매분
+  // 조회하면 API 호출이 계속 쌓인다).
+  //
+  // 완료/취소도 잠시 동안은 계속 본다(사용자 요청). 예전에는 종료 상태를 아예 빼서, 한 번
+  // 취소로 기록되면 그 오더를 다시는 조회하지 않았다 — 그런데 콜마너는 기사가 배차를 취소하면
+  // 잠깐 '취소'를 준 뒤 곧바로 '접수'로 되돌려 재배차를 진행한다(OID1237 실측: 18:41:29 취소 →
+  // 18:42:30 접수). 그 순간을 잡으면 오더가 실제로는 살아 있는데 우리 화면에는 영영 '취소'로
+  // 굳어버린다. 되살아나는 것은 대개 1~2분 안이라 짧은 창만 열어두면 충분하다.
+  //
+  // ORDER BY로 진행 중인 오더를 먼저 담는다 — 종료 건이 LIMIT을 차지해 정작 진행 중인 오더가
+  // 밀려나면 안 된다.
   const orders = await db.all(
     `SELECT * FROM orders
      WHERE branch_id = ? AND callmaner_conf_slip IS NOT NULL
-       AND status NOT IN (${placeholders})
        AND created_at >= to_char((now() at time zone 'Asia/Seoul') - interval '${SYNC_LOOKBACK_DAYS} days', 'YYYY-MM-DD HH24:MI:SS')
-     ORDER BY id DESC LIMIT ?`,
-    [branch.id, ...TERMINAL_LOCAL_STATUSES, SYNC_BY_CONF_SLIP_LIMIT]
+       AND (
+         status NOT IN (${placeholders})
+         OR updated_at >= to_char((now() at time zone 'Asia/Seoul') - interval '${TERMINAL_RECHECK_MINUTES} minutes', 'YYYY-MM-DD HH24:MI:SS')
+       )
+     ORDER BY (status IN (${placeholders})) ASC, id DESC
+     LIMIT ?`,
+    [branch.id, ...TERMINAL_LOCAL_STATUSES, ...TERMINAL_LOCAL_STATUSES, SYNC_BY_CONF_SLIP_LIMIT]
   );
 
   // 연락처(userHp) 단위로 묶어 목록조회(OrderHistory) 한 번에 그 번호의 오더를 모두 받는다.

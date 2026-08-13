@@ -143,7 +143,14 @@ function broadcastSessionListChangedAsync(payload) {
 
 // 공유 시크릿 검증 — callmaner 쪽에 이 값을 전달해 웹훅 요청 헤더(X-Webhook-Secret)에 실어달라고
 // 요청해야 한다(8.1 확인 필요). 시크릿을 아직 설정하지 않았으면(로컬 개발 등) 검증을 건너뛴다.
+//
+// 크론 경로(/cron/*)는 이 검증에서 뺀다. Vercel 크론은 X-Webhook-Secret이 아니라
+// Authorization: Bearer <CRON_SECRET>을 보내므로 여기서 전부 401로 막혔고, 그 탓에 능동 통보
+// 크론이 매분 호출되면서도 한 번도 실행되지 못했다(실측: 프로덕션 로그에서 /callmaner/sync는
+// 200, /kakao-consult/cron/order-notifications만 401). 크론 라우트는 각자 CRON_SECRET을
+// 검사하므로 인증이 빠지는 것이 아니다.
 function checkWebhookAuth(req, res, next) {
+  if (req.path.startsWith('/cron/')) return next();
   const secret = process.env.KAKAO_CONSULT_WEBHOOK_SECRET;
   if (!secret) return next();
   if (req.get('X-Webhook-Secret') !== secret) return res.status(401).json({ error: 'Unauthorized' });
