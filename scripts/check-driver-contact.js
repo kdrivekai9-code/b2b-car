@@ -21,6 +21,11 @@ function extract(name) {
   return SRC.slice(start, end);
 }
 
+// summarizeOrders가 참조하는 바깥 의존은 여기서 주입한다 — 함수 본문만 떼어내 돌리므로
+// 같은 파일의 require/다른 함수는 스코프에 없다. joinAddress는 실제 모듈 것을 그대로 쓴다
+// (여기서 흉내내면 주소 합치는 규칙이 갈라진다).
+const { joinAddress } = require('../lib/intakeSummary');
+
 const sandbox = {
   ORDER_STATE_LABELS: {},
   access: { maskPhone: (v) => String(v || '') },
@@ -30,9 +35,9 @@ const sandbox = {
 
 // eslint-disable-next-line no-new-func
 const summarizeOrders = new Function(
-  'ORDER_STATE_LABELS', 'access', 'formatDateTime', 'evaluateDispatchDelay',
+  'ORDER_STATE_LABELS', 'access', 'formatDateTime', 'evaluateDispatchDelay', 'joinAddress',
   `${extract('summarizeOrders')}; return summarizeOrders;`
-)(sandbox.ORDER_STATE_LABELS, sandbox.access, sandbox.formatDateTime, sandbox.evaluateDispatchDelay);
+)(sandbox.ORDER_STATE_LABELS, sandbox.access, sandbox.formatDateTime, sandbox.evaluateDispatchDelay, joinAddress);
 
 let failed = 0;
 function check(label, actual, expected) {
