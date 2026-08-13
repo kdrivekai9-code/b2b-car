@@ -13,6 +13,7 @@
 require('dotenv').config();
 const db = require('../db');
 const notify = require('../lib/kakaoOrderNotify');
+const snapshot = require('./notifySnapshot');
 
 const MARK = 'e2e-web-notify-check';
 
@@ -44,6 +45,11 @@ async function transition(orderId, from, to) {
 
 async function main() {
   const created = { sessionId: null, orderId: null };
+  // 프로덕션 상태를 건드리는 값들 — finally에서 반드시 되돌린다. try 안에서 원복하면 그 앞의
+  // 검사가 하나만 실패해도 지사 설정과 커서가 바뀐 채로 남는다.
+  let savedSettings = [];
+  let savedBranchId = null;
+  let savedCursor = null;
   const supportsDefer = await hasColumn('kakao_order_notifications', 'defer_count');
   if (!supportsDefer) console.log('(defer_count 컬럼이 없어 미루기 검사는 건너뜁니다 — 마이그레이션 20260814010000 필요)\n');
 
@@ -69,10 +75,9 @@ async function main() {
     );
     created.orderId = order.id;
 
-    // 지사 설정이 이 사건을 껐을 수 있으니 검사 동안은 확실히 켜둔다(원래 값은 복원한다).
-    const savedSettings = await db.all(
-      'SELECT * FROM branch_customer_notifications WHERE branch_id = ?', [branch.id]
-    ).catch(() => []);
+    // 지사 설정이 이 사건을 껐을 수 있으니 검사 동안은 확실히 켜둔다(원래 값은 finally에서 복원한다).
+    savedSettings = await snapshot.snapshotSettings(branch.id);
+    savedBranchId = branch.id;
     for (const t of ['dispatched', 'started', 'completed']) {
       await db.run(
         `INSERT INTO branch_customer_notifications (branch_id, event_type, enabled, delay_minutes, message_template)
@@ -82,8 +87,9 @@ async function main() {
       ).catch(() => {});
     }
 
-    const maxHistory = await db.get('SELECT COALESCE(MAX(id), 0) AS id FROM order_status_history');
-    await db.run('UPDATE kakao_notification_cursor SET last_history_id = ? WHERE id = 1', [maxHistory.id]);
+    // 커서는 프로덕션 상태다 — 손대기 전 값을 떠두고 finally에서 되돌린다
+    // (이유는 scripts/notifySnapshot.js 주석).
+    savedCursor = await snapshot.advanceCursorToNow();
 
     const kakaoSent = [];
     const broadcasts = [];
@@ -193,16 +199,9 @@ async function main() {
     check('배차 통보가 그대로 발송된다', out.sent >= 1, true);
     check('상담 이력이 늘었다', (await countMessages()) > beforeDelayed, true);
 
-    // 지사 설정 원복
-    await db.run('DELETE FROM branch_customer_notifications WHERE branch_id = ?', [branch.id]).catch(() => {});
-    for (const row of savedSettings) {
-      await db.run(
-        `INSERT INTO branch_customer_notifications (branch_id, event_type, enabled, delay_minutes, message_template)
-         VALUES (?, ?, ?, ?, ?)`,
-        [row.branch_id, row.event_type, row.enabled, row.delay_minutes, row.message_template]
-      ).catch(() => {});
-    }
   } finally {
+    // 지사 설정 원복 — 손대기 전 상태로 통째로 되돌린다(attach_photos까지).
+    await snapshot.restoreSettings(savedBranchId, savedSettings);
     // 만든 행만 지운다.
     for (const id of [created.orderId, created.orderId2, created.orderId3].filter(Boolean)) {
       await db.run('DELETE FROM kakao_order_notifications WHERE order_id = ?', [id]).catch(() => {});
@@ -213,6 +212,8 @@ async function main() {
       await db.run('DELETE FROM chat_messages WHERE session_id = ?', [created.sessionId]).catch(() => {});
       await db.run('DELETE FROM chat_sessions WHERE id = ?', [created.sessionId]).catch(() => {});
     }
+    // 커서 복원은 검사용 이력 행을 지운 뒤에 한다.
+    await snapshot.restoreCursor(savedCursor);
   }
 
   console.log(failed ? `\n${failed}건 실패` : '\n모두 통과');
