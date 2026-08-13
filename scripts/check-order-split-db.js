@@ -128,21 +128,41 @@ async function main() {
       check('어느 건을 물어야 하는지 알려준다', result.detail.missingSchedule, [2]);
     }
 
-    console.log('\n[같은 날 경유는 여전히 자동 등록 대상이 아니다]');
+    console.log('\n[같은 날 경유는 한 건으로 등록하고 경유지를 저장한다]');
     {
-      // 나뉘지 않으면 경유지가 한 건에 남는데, 접수 서비스가 경유지를 저장하지 못한다.
+      // 예전에는 접수 서비스가 경유지를 저장하지 못해 waypoint_unsupported로 되돌렸는데,
+      // 지금은 createOrder가 order_waypoints까지 저장한다(lib/kakaoIntakeService.js
+      // geocodeBoth → createOrder). 키수령지 폼(차가 서 있는 곳이 경유지로 내려오는 형태,
+      // lib/kakaoIntakeParser.js remap 주석 참고)이 이 경로로 등록되므로 여기서 못박는다.
       const result = await createOrdersFromIntake({
         session, account,
         parsed: makeParsed({ waypoints: [{ address: '대전 중구 중앙로 101' }] }),
       });
-      check('등록하지 않는다', result.ok, false);
-      check('이유를 밝힌다', result.reason, 'waypoint_unsupported');
+      check('한 건으로 등록한다', result.ok, true);
+      check('나누지 않는다', (result.created || []).length, 1);
+      const newId = (result.created || [])[0] && result.created[0].orderId;
+      if (newId) createdOrderIds.push(newId);
+      const saved = newId
+        ? await db.all('SELECT address FROM order_waypoints WHERE order_id = ? ORDER BY id', [newId])
+        : [];
+      check('경유지를 저장한다', saved.map((w) => w.address), ['대전 중구 중앙로 101']);
     }
   } finally {
+    // 경유지 검증을 넣은 뒤로 order_waypoints도 생기므로 함께 지운다 — 안 지우면 orders 삭제가
+    // 외래키에 걸려 실패하고 프로덕션 DB에 테스트 오더가 남는다(실제로 1건 남아 수동 정리했다).
+    // 남은 행 집계도 createdOrderIds에 담기지 않은 건까지 잡도록 MARK 기준으로 한 번 더 지운다.
     if (createdOrderIds.length) {
+      await db.run(`DELETE FROM order_waypoints WHERE order_id = ANY(?)`, [createdOrderIds]).catch(() => {});
       await db.run(`DELETE FROM order_legs WHERE order_id = ANY(?)`, [createdOrderIds]).catch(() => {});
       await db.run(`DELETE FROM order_status_history WHERE order_id = ANY(?)`, [createdOrderIds]).catch(() => {});
       await db.run(`DELETE FROM orders WHERE id = ANY(?) AND memo_customer LIKE ?`, [createdOrderIds, `%${MARK}%`]).catch(() => {});
+    }
+    const stray = await db.all('SELECT id FROM orders WHERE memo_customer LIKE ?', [`%${MARK}%`]).catch(() => []);
+    for (const row of stray) {
+      for (const t of ['order_waypoints', 'order_legs', 'order_status_history']) {
+        await db.run(`DELETE FROM ${t} WHERE order_id = ?`, [row.id]).catch(() => {});
+      }
+      await db.run('DELETE FROM orders WHERE id = ? AND memo_customer LIKE ?', [row.id, `%${MARK}%`]).catch(() => {});
     }
     const left = await db.all('SELECT id FROM orders WHERE memo_customer LIKE ?', [`%${MARK}%`]).catch(() => []);
     console.log(`\n정리: 만든 오더 ${createdOrderIds.length}건, 남은 행 ${left.length}`);
