@@ -26,11 +26,9 @@ select c.branch_id, '운행시작', 1, 0,
 alter table branch_customer_notifications
   add column if not exists attach_photos boolean not null default false;
 
--- 배차 통보 지연 기본값을 1분 → 2분으로 올린다(실사용 요청). 관리자가 직접 바꾼 값은
--- 건드리지 않고, 아직 옛 기본값(1)인 행만 올린다.
-update branch_customer_notifications
-   set delay_minutes = 2
- where event_type = 'dispatched' and delay_minutes = 1;
+-- (여기에 배차 지연을 1분 → 2분으로 올리는 UPDATE가 있었으나 되돌렸다 —
+--  20260814030000_restore_dispatch_delay_default.sql 참고. 지연은 관리자가 화면에서 정하는
+--  값이라 마이그레이션이 저장된 값을 덮어쓰면 안 된다.)
 
 -- ---------------- 3) 통보 큐 — 채널과 미룬 횟수 ----------------
 -- channel: 어느 채널로 나갔는지(kakao/web) 사후 추적용.

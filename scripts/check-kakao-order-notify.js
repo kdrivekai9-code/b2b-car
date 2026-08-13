@@ -115,7 +115,10 @@ check(
   '[OID1234] 오더가 취소되었습니다. 문의사항은 상담원에게 말씀해주세요.'
 );
 check('사건 다섯 가지 모두 기본 문구가 있다', Object.keys(DEFAULT_EVENT_SETTINGS).length, 5);
-check('배차 통보는 2분 뒤에 보낸다', DEFAULT_EVENT_SETTINGS.dispatched.delayMinutes, 2);
+// 지연은 관리자가 화면에서 정하는 값이고 여기 값은 "아무것도 설정 안 했을 때의 출발점"이다.
+// 한때 이 값을 2분으로 올리고 마이그레이션으로 저장된 행까지 바꿔, 관리자가 설정한 적 없는
+// 값이 조용히 바뀐 적이 있다. 기본값을 함부로 움직이지 않도록 못박아 둔다.
+check('배차 통보 기본 지연은 1분', DEFAULT_EVENT_SETTINGS.dispatched.delayMinutes, 1);
 check('운행시작·운행완료는 즉시', [DEFAULT_EVENT_SETTINGS.started.delayMinutes, DEFAULT_EVENT_SETTINGS.completed.delayMinutes], [0, 0]);
 // 콜마너는 기사가 배차를 취소하면 잠깐 '취소'를 준 뒤 '접수'로 되돌린다(OID1237 실측:
 // 18:41:29 취소 → 18:42:30 접수). 그 순간을 잡아 통보하면 멀쩡한 오더를 취소됐다고 알린다.
