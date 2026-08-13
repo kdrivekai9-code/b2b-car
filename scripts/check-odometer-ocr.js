@@ -70,6 +70,10 @@ function fakeReader({ odometerKm, confidence, throws }) {
   });
   check('링크가 만료되면 모델을 부르지 않는다', r.km, null);
   check('다운로드 실패 사유를 남긴다', /404/.test(r.reason || ''), true);
+  // 링크가 죽은 것은 모델 탓이 아니다 — 나중에 사진이 올라오면 다시 시도할 수 있게 구분한다.
+  check('다운로드 실패는 재시도 가능으로 표시', r.retryable, true);
+  r = await ocr.readOdometerKm('x.jpg', fakeReader({ odometerKm: 12345, confidence: 0.2 }));
+  check('모델이 못 읽은 것은 재시도 대상이 아니다', !!r.retryable, false);
 
   console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
   process.exit(failures === 0 ? 0 : 1);
