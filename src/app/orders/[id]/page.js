@@ -20,7 +20,7 @@ export const maxDuration = 30;
 
 const STATUS_COLORS = {
   '오더등록': 'gray', '대기': 'gray', '대기(확인중)': 'amber', '접수': 'blue',
-  '접수(배차중)': 'blue', '기사배정': 'amber', '문의': 'purple', '사고': 'red',
+  '접수(배차중)': 'blue', '기사배정': 'amber', '운행시작': 'teal', '문의': 'purple', '사고': 'red',
   '과태료': 'red', '취소요청': 'red', '취소': 'dark', '완료': 'green',
 };
 
@@ -111,6 +111,40 @@ export default async function OrderDetailPage({ params }) {
               <OdometerSummary photos={data.photos} />
             </>
           )}
+        </div>
+      )}
+
+      {/* 콜마너 탁송사진 — 기사 업로드 사진과 별도다(외부 CDN 링크만 보관, 우리 버킷으로
+          복사하지 않는다). 링크가 만료되면 썸네일이 깨지므로 onError로 썸네일만 숨기고
+          링크는 남긴다. views/orders/detail.ejs에도 같은 섹션이 있다. */}
+      {data.canViewPhotos && (data.callmanerPhotos || []).length > 0 && (
+        <div className="card" style={{ marginTop: 18 }}>
+          <h2>🚚 콜마너 탁송사진</h2>
+          {['start', 'end'].map((phase) => {
+            const rows = (data.callmanerPhotos || []).filter((p) => p.phase === phase);
+            if (!rows.length) return null;
+            const label = phase === 'start' ? '운행전' : '운행후';
+            return (
+              <div key={phase}>
+                <p className="page-sub" style={{ margin: '6px 0 4px' }}><strong>{label}</strong> {rows.length}장</p>
+                <div className="upload-gallery">
+                  {rows.map((p) => (
+                    <a key={p.id} href={p.url} target="_blank" rel="noreferrer" className="upload-photo-item">
+                      <img
+                        src={p.url}
+                        alt={`${label} ${p.seq}번째 사진`}
+                        onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                      />
+                      <span className="upload-photo-leg">{p.seq}</span>
+                    </a>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+          <p className="page-sub" style={{ margin: '8px 0 0' }}>
+            콜마너가 제공하는 링크를 그대로 보여줍니다 — 콜마너 쪽에서 만료되면 열리지 않을 수 있습니다.
+          </p>
         </div>
       )}
 

@@ -553,10 +553,33 @@ router.post('/:id/dispatch-delay/:settingId/delete', asyncHandler(async (req, re
 // 기본값(lib/kakaoOrderNotify.js의 DEFAULT_EVENT_SETTINGS)으로 동작한다 — 지사를 새로 만들 때마다
 // 설정을 넣어주지 않아도 통보가 나가야 해서 옵트아웃으로 뒀다.
 const NOTIFY_EVENT_HINTS = {
-  dispatched: '기사가 배정되었을 때. 배차 직후 취소되는 경우가 있어 기본값은 1분 뒤에 보내고, 그사이 배차가 풀리면 보내지 않습니다.',
+  dispatched: '기사가 배정되었을 때. 배차 직후 취소되는 경우가 있어 기본값은 2분 뒤에 보내고, 그사이 배차가 풀리면 보내지 않습니다.',
+  started: '기사가 운행을 시작했을 때. 콜마너에서 운행시작(배차이후상태)이 들어와야 나갑니다.',
   completed: '운행이 완료되었을 때.',
   dispatch_cancelled: '배차받은 기사가 취소해서 다시 배차를 찾는 중일 때. 오더는 살아 있습니다.',
   cancelled: '오더 자체가 취소되었을 때.',
+};
+
+// 사진을 붙일 수 있는 사건 — 콜마너 탁송사진은 운행전/운행후로만 온다. 배차 시점에는 아직
+// 사진이 없어서 스위치를 켜도 보낼 것이 없다.
+const NOTIFY_PHOTO_EVENTS = new Set(['started', 'completed']);
+
+// 미리보기용 예시 오더. 실제 렌더러(renderTemplate)에 그대로 통과시켜 보여준다 — 화면에서
+// 규칙을 다시 구현하면 실제로 고객이 받는 문구와 어긋난다.
+const NOTIFY_PREVIEW_ORDER = {
+  oid: 'OID1246',
+  order_type: 'dispatch',
+  callmaner_driver_name: '홍길동',
+  callmaner_driver_phone: '050-7111-2222',
+  origin_address: '서울 강서구 양천로53길 30',
+  origin_address_detail: '3층',
+  destination_address: '경기 성남시 분당구 판교역로 160',
+  destination_address_detail: 'B동 로비',
+  reserved_date: '2026-08-20',
+  reserved_time: '14:00',
+  odometer_start: 12345,
+  odometer_end: 12470,
+  distance_total: 125,
 };
 
 async function loadCustomerNotificationPage(branchId) {
@@ -567,8 +590,9 @@ async function loadCustomerNotificationPage(branchId) {
   if (!branch) return { branch: null };
 
   // 마이그레이션(20260809020000) 적용 전에도 화면이 뜨게 한다 — 저장된 값이 없으면 기본값을 보여준다.
+  // 컬럼을 나열하면 attach_photos가 없는 DB에서 42703이 나므로 *로 받아 코드에서 판단한다.
   const saved = await db.all(
-    'SELECT event_type, enabled, delay_minutes, message_template FROM branch_customer_notifications WHERE branch_id = ?',
+    'SELECT * FROM branch_customer_notifications WHERE branch_id = ?',
     [branchId]
   ).catch((e) => {
     console.error('고객 통보 설정 조회 실패(기본값으로 표시):', e.message);
@@ -579,17 +603,25 @@ async function loadCustomerNotificationPage(branchId) {
   const events = kakaoOrderNotify.EVENT_TYPES.map((key) => {
     const fallback = kakaoOrderNotify.DEFAULT_EVENT_SETTINGS[key];
     const row = savedByEvent.get(key);
+    const template = (row && String(row.message_template || '').trim()) || fallback.template;
+    const attachPhotos = row && row.attach_photos !== undefined
+      ? row.attach_photos === true
+      : !!fallback.attachPhotos;
     return {
       key,
       label: fallback.label,
       hint: NOTIFY_EVENT_HINTS[key] || '',
       enabled: row ? row.enabled !== false : fallback.enabled,
       delayMinutes: row && Number.isFinite(Number(row.delay_minutes)) ? Number(row.delay_minutes) : fallback.delayMinutes,
-      template: (row && String(row.message_template || '').trim()) || fallback.template,
+      template,
+      attachPhotos,
+      photoSupported: NOTIFY_PHOTO_EVENTS.has(key),
+      // 실제 발송에 쓰는 렌더러를 그대로 통과시킨 결과를 보여준다.
+      preview: kakaoOrderNotify.renderTemplate(template, NOTIFY_PREVIEW_ORDER),
     };
   });
 
-  return { branch, branches, events };
+  return { branch, branches, events, variables: kakaoOrderNotify.TEMPLATE_VARIABLES };
 }
 
 // 상담원 상태로 붙잡힌 세션을 봇으로 되돌리기까지의 유휴 시간. 비워두면 기본값(30분)을 쓰고,
@@ -597,13 +629,14 @@ async function loadCustomerNotificationPage(branchId) {
 const DEFAULT_AGENT_IDLE_RELEASE_MINUTES = 30;
 
 router.get('/:id/customer-notifications', asyncHandler(async (req, res) => {
-  const { branch, branches, events } = await loadCustomerNotificationPage(req.params.id);
+  const { branch, branches, events, variables } = await loadCustomerNotificationPage(req.params.id);
   if (!branch) return res.status(404).send('지사를 찾을 수 없습니다.');
   res.render('branches/customer_notifications', {
     title: '고객 통보 - ' + branch.name,
     branch,
     branches,
     events,
+    variables,
     // 마이그레이션(20260810010000) 적용 전이면 컬럼이 없다 — 그때는 기본값을 보여준다.
     agentIdleReleaseMinutes: branch.agent_idle_release_minutes == null
       ? DEFAULT_AGENT_IDLE_RELEASE_MINUTES
@@ -619,7 +652,7 @@ router.post('/:id/customer-notifications', asyncHandler(async (req, res) => {
   const branch = await db.get('SELECT id FROM branches WHERE id = ?', [req.params.id]);
   if (!branch) return res.status(404).send('지사를 찾을 수 없습니다.');
 
-  // 저장은 네 사건을 한 번에 받는다 — 하나라도 잘못되면 아무것도 저장하지 않는다. 절반만
+  // 저장은 모든 사건을 한 번에 받는다 — 하나라도 잘못되면 아무것도 저장하지 않는다. 절반만
   // 반영되면 화면에 보이는 것과 실제로 나가는 문구가 어긋난다.
   const rows = [];
   for (const key of kakaoOrderNotify.EVENT_TYPES) {
@@ -635,7 +668,14 @@ router.post('/:id/customer-notifications', asyncHandler(async (req, res) => {
     if (!template) {
       return res.redirect(base + '?error=' + encodeURIComponent(`${fallback.label}의 문구를 입력해주세요.`));
     }
-    rows.push({ key, enabled: !!req.body['enabled_' + key], delayMinutes, template });
+    rows.push({
+      key,
+      enabled: !!req.body['enabled_' + key],
+      delayMinutes,
+      template,
+      // 사진을 붙일 수 없는 사건(배차)에서 스위치가 켜져 오면 무시한다 — 그 시점에는 사진이 없다.
+      attachPhotos: NOTIFY_PHOTO_EVENTS.has(key) && !!req.body['attach_photos_' + key],
+    });
   }
 
   // 유휴 복귀 시간도 이 화면에서 함께 저장한다 — 같은 상담 흐름 설정이라 화면을 나눌 이유가 없다.
@@ -651,15 +691,31 @@ router.post('/:id/customer-notifications', asyncHandler(async (req, res) => {
     });
 
   for (const row of rows) {
-    await db.run(`
-      INSERT INTO branch_customer_notifications (branch_id, event_type, enabled, delay_minutes, message_template)
-      VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT (branch_id, event_type) DO UPDATE SET
-        enabled = excluded.enabled,
-        delay_minutes = excluded.delay_minutes,
-        message_template = excluded.message_template,
-        updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS')
-    `, [req.params.id, row.key, row.enabled, row.delayMinutes, row.template]);
+    try {
+      await db.run(`
+        INSERT INTO branch_customer_notifications (branch_id, event_type, enabled, delay_minutes, message_template, attach_photos)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT (branch_id, event_type) DO UPDATE SET
+          enabled = excluded.enabled,
+          delay_minutes = excluded.delay_minutes,
+          message_template = excluded.message_template,
+          attach_photos = excluded.attach_photos,
+          updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS')
+      `, [req.params.id, row.key, row.enabled, row.delayMinutes, row.template, row.attachPhotos]);
+    } catch (e) {
+      // attach_photos 컬럼이 없는 DB(마이그레이션 전)에서는 그 칸만 빼고 저장한다 — 문구/지연
+      // 설정이 사진 스위치 하나 때문에 통째로 막히면 안 된다.
+      if (!e || e.code !== '42703') throw e;
+      await db.run(`
+        INSERT INTO branch_customer_notifications (branch_id, event_type, enabled, delay_minutes, message_template)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT (branch_id, event_type) DO UPDATE SET
+          enabled = excluded.enabled,
+          delay_minutes = excluded.delay_minutes,
+          message_template = excluded.message_template,
+          updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS')
+      `, [req.params.id, row.key, row.enabled, row.delayMinutes, row.template]);
+    }
   }
 
   res.redirect(base + '?notice=' + encodeURIComponent('고객 통보 설정이 저장되었습니다.'));

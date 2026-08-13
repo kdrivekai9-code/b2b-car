@@ -207,6 +207,15 @@ table.density-comfortable th,table.density-comfortable td{padding:16px 14px;}
 .badge{display:inline-block;padding:4px 11px;border-radius:999px;font-size:11.5px;font-weight:700;letter-spacing:.01em;}
 .badge.gray{background:#eef0f4;color:#4b5563;} .badge.blue{background:#e7f0fb;color:#2e5c8a;} .badge.amber{background:#fef3e2;color:#b45309;}
 .badge.purple{background:#f3e8fd;color:#6d28d9;} .badge.red{background:#fde8e8;color:#b91c1c;} .badge.green{background:#e6f7ec;color:#15803d;} .badge.dark{background:#eceef1;color:#374151;} .badge.indigo{background:#e7e9fd;color:#4338ca;}
+/* 운행시작 — 기사배정(amber) 다음 단계라 눈으로 구분되는 색을 따로 준다. */
+.badge.teal{background:#dcf5f1;color:#0f766e;}
+
+/* 통보에 딸린 사진 첨부(콜마너 탁송사진) — 말풍선 안에 썸네일+링크로 보여준다.
+   링크가 만료되면 썸네일만 사라지고(JS onerror) 캡션 글자는 남아 링크 구실을 한다. */
+.ai-chat-attachments{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;}
+.ai-chat-attachment{display:flex;flex-direction:column;align-items:center;gap:2px;text-decoration:none;color:inherit;font-size:11px;}
+.ai-chat-attachment img{width:72px;height:72px;object-fit:cover;border-radius:6px;border:1px solid rgba(127,127,127,.25);display:block;}
+.ai-chat-attachment:hover{text-decoration:underline;}
 
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:9px 18px;border-radius:var(--radius-sm);border:1px solid transparent;background:linear-gradient(135deg,var(--blue),var(--navy2));color:#fff;font-size:13px;cursor:pointer;font-weight:700;box-shadow:0 2px 6px rgba(52,104,192,.25);transition:var(--transition);}
 .btn:hover{transform:translateY(-1px);box-shadow:0 6px 16px rgba(52,104,192,.32);text-decoration:none;filter:brightness(1.04);}

@@ -5,7 +5,14 @@
 // (실제 발신·중복방지는 마이그레이션을 적용한 뒤 scripts/check-kakao-order-notify-db.js로 본다.)
 //
 //   node scripts/check-kakao-order-notify.js
-const { classifyTransition, buildMessage, renderTemplate, driverKey, DEFAULT_EVENT_SETTINGS } = require('../lib/kakaoOrderNotify');
+const {
+  classifyTransition, buildMessage, renderTemplate, driverKey, mergeAddress,
+  DEFAULT_EVENT_SETTINGS, TEMPLATE_VARIABLES,
+} = require('../lib/kakaoOrderNotify');
+
+// buildMessage는 { text, attachPhotos }를 돌려준다(사진은 텍스트가 아니라 별도 발송이라
+// 스위치로 다룬다) — 문구만 보는 검사에서는 text만 꺼내 쓴다.
+const msg = (...args) => buildMessage(...args).text;
 
 let failed = 0;
 
@@ -26,6 +33,11 @@ check('기사배정 → 대기 = 배차취소', classifyTransition('기사배정
 check('기사배정 → 예약 = 배차취소', classifyTransition('기사배정', '예약'), 'dispatch_cancelled');
 check('기사배정 → 취소 = 오더취소', classifyTransition('기사배정', '취소'), 'cancelled');
 check('접수 → 취소 = 오더취소', classifyTransition('접수', '취소'), 'cancelled');
+check('기사배정 → 운행시작 = 운행시작', classifyTransition('기사배정', '운행시작'), 'started');
+check('접수 → 운행시작 = 운행시작(배차를 놓친 경우도)', classifyTransition('접수', '운행시작'), 'started');
+check('운행시작 → 완료 = 운행완료', classifyTransition('운행시작', '완료'), 'completed');
+check('운행시작 → 취소 = 오더취소', classifyTransition('운행시작', '취소'), 'cancelled');
+check('운행시작 → 접수 = 배차취소(운행 중 기사가 빠짐)', classifyTransition('운행시작', '접수'), 'dispatch_cancelled');
 
 // 배차취소와 오더취소가 갈리는 지점 — 오더가 끝난 것을 "다시 배차 중"이라고 안내하면
 // 고객은 오지 않을 기사를 기다린다.
@@ -36,31 +48,135 @@ check('기사배정 → 기사배정은 통보 없음', classifyTransition('기�
 check('접수 → 대기는 통보 없음', classifyTransition('접수', '대기'), null);
 check('완료 → 완료는 통보 없음', classifyTransition('완료', '완료'), null);
 check('old_status가 없으면 통보 없음', classifyTransition(null, '기사배정'), null);
+// 콜마너는 운행 중에도 status='배차'를 계속 주므로 운행시작 → 기사배정 왕복이 실제로 생긴다.
+// 이걸 배차로 보면 "배차되었습니다"가 매분 다시 나간다.
+check('운행시작 → 기사배정은 통보 없음(콜마너 흔들림)', classifyTransition('운행시작', '기사배정'), null);
 
 console.log('\n[기본 문구]');
-const withDriver = { oid: 'OID1234', callmaner_driver_name: '홍길동', callmaner_driver_phone: '010-1111-2222' };
+const full = {
+  oid: 'OID1234', order_type: 'dispatch',
+  callmaner_driver_name: '홍길동', callmaner_driver_phone: '050-7111-2222',
+  origin_address: '서울 강서구 양천로53길 30', origin_address_detail: '3층',
+  destination_address: '경기 성남시 분당구 판교역로 160', destination_address_detail: 'B동 로비',
+  reserved_date: '2026-08-20', reserved_time: '14:00',
+};
 check(
-  '배차완료 — 기사 정보 포함',
-  buildMessage('dispatched', withDriver),
-  '[OID1234] 배차가 완료되었습니다.\n기사: 홍길동 (010-1111-2222)'
+  '배차완료 — 사용자 지정 형식 그대로',
+  msg('dispatched', full),
+  '요청하신 탁송건이 기사님 배차되었습니다.\n접수번호: OID1234\n일시: 2026-08-20 14:00\n'
+  + '서울 강서구 양천로53길 30 3층 → 경기 성남시 분당구 판교역로 160 B동 로비\n'
+  + '기사명: 홍길동\n기사전화번호: 050-7111-2222'
 );
 check(
-  '배차완료 — 기사 정보가 없으면 그 줄을 통째로 뺀다',
-  buildMessage('dispatched', { oid: 'OID1234' }),
-  '[OID1234] 배차가 완료되었습니다.'
+  '운행시작',
+  msg('started', full),
+  '요청하신 탁송건이 운행시작 되었습니다.\n접수번호: OID1234\n일시: 2026-08-20 14:00\n'
+  + '서울 강서구 양천로53길 30 3층 → 경기 성남시 분당구 판교역로 160 B동 로비'
+);
+check(
+  '운행완료',
+  msg('completed', full),
+  '요청하신 탁송건이 운행완료 되었습니다.\n접수번호: OID1234\n일시: 2026-08-20 14:00\n'
+  + '서울 강서구 양천로53길 30 3층 → 경기 성남시 분당구 판교역로 160 B동 로비'
+);
+check('오더종류 — 프리미엄대리', msg('started', { ...full, order_type: 'premium' }).split('\n')[0], '요청하신 프리미엄대리건이 운행시작 되었습니다.');
+check('오더종류 — 일일기사', msg('started', { ...full, order_type: 'daily_driver' }).split('\n')[0], '요청하신 일일기사건이 운행시작 되었습니다.');
+check('오더종류를 모르면 그 자리만 빈다', msg('started', { ...full, order_type: null }).split('\n')[0], '요청하신 건이 운행시작 되었습니다.');
+check(
+  '배차완료 — 기사 정보가 없으면 그 두 줄을 통째로 뺀다',
+  msg('dispatched', { ...full, callmaner_driver_name: null, callmaner_driver_phone: null }),
+  '요청하신 탁송건이 기사님 배차되었습니다.\n접수번호: OID1234\n일시: 2026-08-20 14:00\n'
+  + '서울 강서구 양천로53길 30 3층 → 경기 성남시 분당구 판교역로 160 B동 로비'
+);
+// 주소가 비었을 때 화살표만 남은 줄이 고객에게 나가면 안 된다.
+check(
+  '주소가 둘 다 없으면 화살표 줄이 통째로 사라진다',
+  msg('started', { ...full, origin_address: null, origin_address_detail: null, destination_address: null, destination_address_detail: null }),
+  '요청하신 탁송건이 운행시작 되었습니다.\n접수번호: OID1234\n일시: 2026-08-20 14:00'
+);
+check(
+  '도착지만 없으면 매달린 화살표를 뗀다',
+  msg('started', { ...full, destination_address: null, destination_address_detail: null }).split('\n')[3],
+  '서울 강서구 양천로53길 30 3층'
+);
+check(
+  '출발지만 없으면 앞의 화살표를 뗀다',
+  msg('started', { ...full, origin_address: null, origin_address_detail: null }).split('\n')[3],
+  '경기 성남시 분당구 판교역로 160 B동 로비'
 );
 check(
   '배차취소 — 다시 배차 중임을 알린다',
-  buildMessage('dispatch_cancelled', withDriver),
+  msg('dispatch_cancelled', full),
   '[OID1234] 배차받은 기사님이 취소하였고, 다른 기사님께 배차 진행중입니다.'
 );
-check('운행완료', buildMessage('completed', withDriver), '[OID1234] 운행이 완료되었습니다. 이용해주셔서 감사합니다.');
 check(
   '오더취소',
-  buildMessage('cancelled', withDriver),
+  msg('cancelled', full),
   '[OID1234] 오더가 취소되었습니다. 문의사항은 상담원에게 말씀해주세요.'
 );
-check('사건 네 가지 모두 기본 문구가 있다', Object.keys(DEFAULT_EVENT_SETTINGS).length, 4);
+check('사건 다섯 가지 모두 기본 문구가 있다', Object.keys(DEFAULT_EVENT_SETTINGS).length, 5);
+check('배차 통보는 2분 뒤에 보낸다', DEFAULT_EVENT_SETTINGS.dispatched.delayMinutes, 2);
+check('운행시작·운행완료는 즉시', [DEFAULT_EVENT_SETTINGS.started.delayMinutes, DEFAULT_EVENT_SETTINGS.completed.delayMinutes], [0, 0]);
+
+console.log('\n[상세주소 합치기]');
+// 웹 오더등록은 origin_address에 상세를 이미 합쳐 저장한다(combineAddress) — 그대로 또 붙이면
+// "… 30 3층 3층"이 된다.
+check('이미 합쳐진 주소는 그대로', mergeAddress('서울 강서구 양천로53길 30 3층', '3층'), '서울 강서구 양천로53길 30 3층');
+check('따로 저장된 주소는 합친다', mergeAddress('서울 강서구 양천로53길 30', '3층'), '서울 강서구 양천로53길 30 3층');
+check('상세가 없으면 주소만', mergeAddress('서울 강서구', null), '서울 강서구');
+check('주소가 없으면 상세만', mergeAddress(null, '3층'), '3층');
+check('둘 다 없으면 빈 문자열', mergeAddress(null, null), '');
+
+console.log('\n[주행거리]');
+const withOdo = { ...full, odometer_start: 12345, odometer_end: 12470, distance_total: 125 };
+check(
+  '단위(km)와 천단위 쉼표가 값에 붙는다',
+  renderTemplate('출발 {odometer_start} / 도착 {odometer_end} / 총 {distance_total}', withOdo),
+  '출발 12,345km / 도착 12,470km / 총 125km'
+);
+check(
+  '값이 없으면 그 줄이 통째로 사라진다',
+  renderTemplate('접수번호: {oid}\n최종 운행 거리: {distance_total}', full),
+  '접수번호: OID1234'
+);
+check(
+  'context가 오더 컬럼보다 우선한다(방금 인식한 값)',
+  renderTemplate('총 {distance_total}', withOdo, { distanceTotal: 200 }),
+  '총 200km'
+);
+check('음수는 값 없음으로 본다', renderTemplate('최종 운행 거리: {distance_total}', { ...full, distance_total: -5 }), '');
+check('숫자가 아니어도 값 없음으로 본다', renderTemplate('최종 운행 거리: {distance_total}', { ...full, distance_total: 'abc' }), '');
+// 빈 줄을 지우는 규칙은 "라벨: {변수}" 꼴을 본다. 콜론 없이 쓰면 값이 비었을 때 앞의 글자가
+// 남는다("총 {distance_total}" → "총") — 설정 화면 안내도 콜론 꼴을 권한다.
+check('콜론이 없으면 라벨이 남는다(알려진 한계)', renderTemplate('총 {distance_total}', { ...full, distance_total: null }), '총');
+
+console.log('\n[사진 첨부 스위치]');
+check('기본은 꺼짐', buildMessage('started', full).attachPhotos, false);
+check('지사 설정으로 켠다', buildMessage('started', full, { ...DEFAULT_EVENT_SETTINGS.started, attachPhotos: true }).attachPhotos, true);
+check(
+  '문구에 {photos}를 적어도 켠 것으로 본다',
+  buildMessage('started', full, { template: '사진입니다 {photos}', attachPhotos: false }).attachPhotos,
+  true
+);
+check(
+  '{photos}는 문구에서 지운다(고객에게 그대로 나가면 안 된다)',
+  buildMessage('started', full, { template: '사진 {photos}', attachPhotos: false }).text,
+  '사진'
+);
+
+console.log('\n[변수 목록]');
+// 설정 화면 칩과 렌더러가 같은 목록을 써야 한다 — 화면에만 있는 변수는 치환되지 않는다.
+check('변수 목록이 비어 있지 않다', TEMPLATE_VARIABLES.length > 0, true);
+check(
+  '모든 토큰이 실제로 치환된다',
+  TEMPLATE_VARIABLES.filter((v) => renderTemplate(v.token, withOdo) === v.token).map((v) => v.token),
+  []
+);
+check(
+  '토큰은 모두 ASCII다(한글은 \\w에 안 걸려 치환되지 않는다)',
+  TEMPLATE_VARIABLES.filter((v) => !/^\{\w+\}$/.test(v.token)).map((v) => v.token),
+  []
+);
 
 console.log('\n[지사가 고친 문구]');
 const order = {
@@ -80,9 +196,23 @@ check(
 check('모르는 변수는 그대로 둔다(오타를 눈에 띄게)', renderTemplate('{없는변수} {oid}', order), '{없는변수} OID9');
 check(
   '지사가 넣은 문구를 그대로 쓴다',
-  buildMessage('dispatched', order, { template: '{oid} 기사님이 배정되었어요. {driver_name}' }),
+  msg('dispatched', order, { template: '{oid} 기사님이 배정되었어요. {driver_name}' }),
   'OID9 기사님이 배정되었어요. 김철수'
 );
+
+console.log('\n[끼어들기 판정]');
+// 고객이 봇 질문에 답을 쓰는 중이면 통보를 미룬다. 이 판정이 헐거우면 접수 대화가 끊기고,
+// 너무 빡빡하면 통보가 계속 미뤄진다.
+const { isSessionBusy } = require('../lib/sessionBusy');
+check('웹 — 질문에 답 대기 중이면 바쁨', isSessionBusy({ draft_json: '{"phase":"collecting","pendingField":"origin_address"}' }), true);
+check('웹 — 확인 단계는 바쁘지 않음', isSessionBusy({ draft_json: '{"phase":"confirming"}' }), false);
+check('웹 — pendingField가 없으면 바쁘지 않음', isSessionBusy({ draft_json: '{"phase":"collecting"}' }), false);
+check('웹 — draft가 없으면 바쁘지 않음', isSessionBusy({ draft_json: null }), false);
+check('웹 — 깨진 JSON도 바쁘지 않음으로 본다', isSessionBusy({ draft_json: '{쓰레기' }), false);
+check('카카오 — 접수 진행 중이면 바쁨', isSessionBusy({ intake_slots_json: '{"origin":"x"}' }), true);
+check('카카오 — 도우미 확인 대기면 바쁨', isSessionBusy({ mcp_pending_json: '{"tool":"call.create"}' }), true);
+check('빈 세션은 바쁘지 않음', isSessionBusy({}), false);
+check('세션이 없으면 바쁘지 않음', isSessionBusy(null), false);
 
 console.log('\n[중복 판정 키]');
 // 취소 후 다른 기사에게 다시 배차되면 새 통보여야 한다 — 키가 같으면 두 번째 배차가 묻힌다.

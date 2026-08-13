@@ -63,16 +63,16 @@ async function main() {
 
     const first = await notify.runKakaoOrderNotifications({ send: fakeSend });
     check('전이를 잡아 통보를 예약한다', first.collected.scheduled, 1);
-    check('1분이 지나기 전에는 보내지 않는다', first.delivered.sent, 0);
+    check('지연 시간이 지나기 전에는 보내지 않는다', first.delivered.sent, 0);
 
-    // 예약 시각을 앞당겨 1분이 지난 상황을 만든다.
+    // 예약 시각을 앞당겨 지연 시간(배차 기본 2분)이 지난 상황을 만든다.
     await db.run(
       `UPDATE kakao_order_notifications SET scheduled_at = now() - interval '1 second' WHERE order_id = ? AND status = 'pending'`,
       [created.orderId]
     );
     const second = await notify.sendDue({ send: fakeSend });
-    check('1분이 지나면 보낸다', second.sent, 1);
-    check('문구에 기사 정보가 들어간다', sentTexts[0].includes('홍길동') && sentTexts[0].includes('배차가 완료'), true);
+    check('지연 시간이 지나면 보낸다', second.sent, 1);
+    check('문구에 기사 정보가 들어간다', sentTexts[0].includes('홍길동') && sentTexts[0].includes('기사님 배차되었습니다'), true);
 
     const third = await notify.sendDue({ send: fakeSend });
     check('같은 통보가 두 번 나가지 않는다', third.sent, 0);
@@ -121,7 +121,7 @@ async function main() {
     );
     const completed = await notify.runKakaoOrderNotifications({ send: fakeSend });
     check('운행완료는 미루지 않고 보낸다', completed.delivered.sent, 1);
-    check('문구가 운행완료 안내다', sentTexts[sentTexts.length - 1].includes('운행이 완료'), true);
+    check('문구가 운행완료 안내다', sentTexts[sentTexts.length - 1].includes('운행완료 되었습니다'), true);
 
     await db.run('UPDATE orders SET status = ? WHERE id = ?', ['취소', created.orderId]);
     await db.run(

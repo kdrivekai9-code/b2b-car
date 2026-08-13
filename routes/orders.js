@@ -28,6 +28,7 @@ const { splitIntake } = require('../lib/orderSplit');
 const { DISPATCH_FIELDS } = require('../lib/intakeFields');
 // 접수 요약 문구는 카카오 상담톡과 같은 모듈이 만든다.
 const { buildSummaryText } = require('../lib/intakeSummary');
+const callmanerPhotos = require('../lib/callmanerPhotos');
 const { getRouteFareSettings } = require('../lib/routeFareSearch');
 
 // 폼에서 온 좌표 문자열을 숫자로 — 빈 문자열/미입력/숫자 아님은 전부 null(컬럼이 numeric이라
@@ -1262,6 +1263,9 @@ router.get('/:id/data.json', asyncHandler(async (req, res) => {
     || (u.role === 'branch_manager' && !!photoSettings.branch_manager_can_view)
     || (u.role === 'client' && !!photoSettings.client_can_view);
   const photos = canViewPhotos ? await db.all('SELECT * FROM order_photos WHERE order_id = ? ORDER BY id DESC', [req.params.id]) : [];
+  // 콜마너 탁송사진(운행전/운행후)은 기사 업로드 사진과 별도 테이블이다 — 링크만 보관하므로
+  // 콜마너가 만료시키면 썸네일이 깨질 수 있다(화면에서 onerror로 링크만 남긴다).
+  const callmanerPhotoRows = canViewPhotos ? await callmanerPhotos.loadPhotos(req.params.id) : [];
   const legs = await buildOrderLegs(req.params.id, order, waypoints);
 
   res.json({
@@ -1285,7 +1289,7 @@ router.get('/:id/data.json', asyncHandler(async (req, res) => {
       })),
     },
     rawWaypoints: waypoints,
-    history, drivers, photos, canViewPhotos, legs,
+    history, drivers, photos, callmanerPhotos: callmanerPhotoRows, canViewPhotos, legs,
     ORDER_STATUSES: statusConfig.map((s) => s.status_code),
     baseUrl: req.protocol + '://' + req.get('host'),
     currentUserRole: u.role,
@@ -1681,13 +1685,17 @@ router.get('/:id', asyncHandler(async (req, res) => {
     || (u.role === 'branch_manager' && !!photoSettings.branch_manager_can_view)
     || (u.role === 'client' && !!photoSettings.client_can_view);
   const photos = canViewPhotos ? await db.all('SELECT * FROM order_photos WHERE order_id = ? ORDER BY id DESC', [req.params.id]) : [];
+  // 콜마너 탁송사진(운행전/운행후)은 기사 업로드 사진과 별도 테이블이다 — 링크만 보관하므로
+  // 콜마너가 만료시키면 썸네일이 깨질 수 있다(화면에서 onerror로 링크만 남긴다).
+  const callmanerPhotoRows = canViewPhotos ? await callmanerPhotos.loadPhotos(req.params.id) : [];
   const legs = await buildOrderLegs(req.params.id, order, waypoints);
   // "상태 변경" 카드가 고객에게 대기/취소만 허용하도록 제한하려면(POST /:id/status와 같은
   // 기준) 배차 여부를 뷰에도 넘겨줘야 한다 — data.json(Next.js)은 이미 이 값을 내려주고 있었다.
   order.hasAssignedDriver = hasAssignedDriver(order, legs);
 
   res.render('orders/detail', {
-    title: '오더 상세 - ' + order.oid, order, history, waypoints, drivers, photos, canViewPhotos, legs,
+    title: '오더 상세 - ' + order.oid, order, history, waypoints, drivers, photos,
+    callmanerPhotos: callmanerPhotoRows, canViewPhotos, legs,
     baseUrl: req.protocol + '://' + req.get('host'),
     ORDER_STATUSES: statusConfig.map((s) => s.status_code),
   });

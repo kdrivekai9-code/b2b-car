@@ -2,7 +2,7 @@
 <div class="page-head-row">
   <div>
     <h1 class="page-title"><%= branch.name %> · 고객 통보</h1>
-    <p class="page-sub">오더 상태가 바뀌면 카카오 상담톡으로 접수한 고객에게 먼저 안내합니다. 상태별로 사용 여부·보내는 시점·문구를 정합니다.</p>
+    <p class="page-sub">오더 상태가 바뀌면 고객에게 먼저 안내합니다. 상태별로 사용 여부·보내는 시점·문구를 정합니다.</p>
   </div>
   <div class="page-head-actions">
     <a class="btn secondary" href="/branches">지사 목록으로</a>
@@ -18,9 +18,9 @@
   <form id="customerNotificationsForm" method="POST" action="/branches/<%= branch.id %>/customer-notifications">
     <div class="section-title">🔔 상태별 고객 통보</div>
     <p class="page-sub">
-      카카오 상담톡으로 접수한 오더에만 나갑니다(웹에서 접수한 오더는 대상이 아닙니다).
-      문구에는 <code>{oid}</code> <code>{driver_name}</code> <code>{driver_phone}</code>
-      <code>{origin}</code> <code>{destination}</code> <code>{reserved_at}</code> 를 쓸 수 있고, 값이 없으면 그 자리는 지워집니다.
+      카카오 상담톡과 웹 챗봇으로 접수한 오더 모두에 나갑니다. 문구 위의 변수 버튼을 누르면
+      커서 위치에 변수가 들어갑니다 — 값이 없으면 그 줄은 통째로 사라지므로
+      <code>기사명: {driver_name}</code>처럼 <strong>"라벨: 변수"</strong> 꼴로 쓰는 것을 권합니다.
     </p>
 
     <div class="notify-event-block">
@@ -55,16 +55,51 @@
           <div class="field">
             <label>보내는 시점</label>
             <div class="delay-minutes-input">
-              <span>상태 변경 후</span>
-              <input type="number" name="delay_<%= e.key %>" value="<%= e.delayMinutes %>" min="0" max="120" step="1" required>
+              <label class="checkline inline">
+                <input type="radio" name="delay_mode_<%= e.key %>" value="now" data-delay-mode="<%= e.key %>" <%= e.delayMinutes === 0 ? 'checked' : '' %>>
+                즉시
+              </label>
+              <label class="checkline inline">
+                <input type="radio" name="delay_mode_<%= e.key %>" value="later" data-delay-mode="<%= e.key %>" <%= e.delayMinutes === 0 ? '' : 'checked' %>>
+                상태 변경 후
+              </label>
+              <%# readonly를 쓴다 — disabled는 값이 전송되지 않아 서버 검증(필수)에 걸린다. %>
+              <input type="number" id="delay_<%= e.key %>" name="delay_<%= e.key %>" value="<%= e.delayMinutes %>"
+                     min="0" max="120" step="1" required <%= e.delayMinutes === 0 ? 'readonly' : '' %>>
               <span>분 뒤</span>
             </div>
-            <p class="page-sub">0이면 곧바로 보냅니다. 보내기 직전에 상태를 한 번 더 확인해서, 그사이 상황이 바뀌었으면 보내지 않습니다.</p>
+            <p class="page-sub">보내기 직전에 상태를 한 번 더 확인해서, 그사이 상황이 바뀌었으면 보내지 않습니다.</p>
           </div>
         </div>
         <div class="field">
           <label>문구</label>
-          <textarea name="message_<%= e.key %>" rows="3" required><%= e.template %></textarea>
+          <div class="var-chip-row">
+            <% variables.forEach(function (v) { %>
+              <button type="button" class="var-chip" data-target="message_<%= e.key %>" data-token="<%= v.token %>" title="<%= v.hint %>"><%= v.label %></button>
+            <% }) %>
+            <% if (e.photoSupported) { %>
+              <%- /* 사진은 텍스트가 아니라 별도 발송이라(카카오는 이미지 메시지, 웹은 첨부)
+                     문구 안에 위치를 지정할 수 없다 — 그래서 토큰이 아니라 스위치다. */ null %>
+              <label class="var-chip toggle<%= e.attachPhotos ? ' on' : '' %>">
+                <input type="checkbox" name="attach_photos_<%= e.key %>" value="1" <%= e.attachPhotos ? 'checked' : '' %>>
+                📷 사진첨부
+              </label>
+            <% } else { %>
+              <span class="var-chip disabled" title="배차 시점에는 아직 탁송사진이 없습니다">📷 사진첨부</span>
+            <% } %>
+          </div>
+          <textarea id="message_<%= e.key %>" name="message_<%= e.key %>" rows="6" required><%= e.template %></textarea>
+          <% if (e.photoSupported) { %>
+            <p class="page-sub">
+              사진첨부를 켜면 카카오는 사진 메시지로, 웹 챗봇은 썸네일+링크로 함께 보냅니다.
+              지사 <a href="/branches/<%= branch.id %>/photo-settings">사진 설정</a>에서
+              "고객 열람 허용"이 꺼져 있으면 나가지 않습니다.
+            </p>
+          <% } %>
+          <div class="notify-preview">
+            <span class="notify-preview-label">예시 (저장하면 갱신됩니다)</span>
+            <pre><%= e.preview %></pre>
+          </div>
         </div>
       </div>
     <% }) %>
@@ -76,6 +111,72 @@
   .notify-event-block:last-child { border-bottom: 0; }
   .notify-event-block textarea { width: 100%; font-family: inherit; }
   .notify-event-block code { background: rgba(127, 127, 127, 0.12); padding: 1px 4px; border-radius: 3px; }
+  .checkline.inline { display: inline-flex; align-items: center; gap: 4px; margin-right: 8px; }
+  .var-chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+  .var-chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 4px 10px; border: 1px solid var(--border, #e5e7eb); border-radius: 999px;
+    background: var(--card, #fff); color: var(--text, #374151);
+    font-size: 12px; font-weight: 600; cursor: pointer; line-height: 1.6;
+  }
+  .var-chip:hover { background: rgba(127, 127, 127, 0.08); }
+  .var-chip.toggle input { margin: 0; }
+  .var-chip.toggle.on { background: #dcf5f1; border-color: #99ddd3; color: #0f766e; }
+  .var-chip.disabled { opacity: .45; cursor: not-allowed; }
+  .notify-preview { margin-top: 8px; }
+  .notify-preview-label { font-size: 11.5px; font-weight: 700; color: var(--muted, #6b7280); }
+  .notify-preview pre {
+    margin: 4px 0 0; padding: 10px 12px; border-radius: 8px;
+    background: rgba(127, 127, 127, 0.08); font-family: inherit; font-size: 13px;
+    line-height: 1.6; white-space: pre-wrap; word-break: break-all;
+  }
 </style>
+
+<script>
+(function () {
+  // 변수 칩 — 커서 위치에 토큰을 넣는다. 문구창을 직접 타이핑해도 되지만, 토큰 이름을 외우게
+  // 하지 않으려는 것이다(토큰은 ASCII라 한글 라벨만 보고는 알 수 없다).
+  document.querySelectorAll('.var-chip[data-token]').forEach(function (chip) {
+    chip.addEventListener('click', function () {
+      var target = document.getElementById(chip.getAttribute('data-target'));
+      var token = chip.getAttribute('data-token');
+      if (!target || !token) return;
+      var start = target.selectionStart;
+      var end = target.selectionEnd;
+      if (typeof target.setRangeText === 'function' && start !== null) {
+        target.setRangeText(token, start, end, 'end');
+      } else {
+        target.value += token; // 아주 오래된 브라우저 폴백
+      }
+      target.focus();
+    });
+  });
+
+  // 사진첨부 토글 — 켜진 상태가 눈에 보이도록 칩 색을 바꾼다.
+  document.querySelectorAll('.var-chip.toggle input[type="checkbox"]').forEach(function (box) {
+    box.addEventListener('change', function () {
+      box.closest('.var-chip').classList.toggle('on', box.checked);
+    });
+  });
+
+  // 즉시 / N분 뒤 — "즉시"를 고르면 숫자칸을 0으로 두고 읽기전용으로 만든다.
+  // disabled로 하면 값이 전송되지 않아 서버 검증(0~120 정수 필수)에 걸린다.
+  document.querySelectorAll('input[data-delay-mode]').forEach(function (radio) {
+    radio.addEventListener('change', function () {
+      var key = radio.getAttribute('data-delay-mode');
+      var input = document.getElementById('delay_' + key);
+      if (!input) return;
+      if (radio.value === 'now' && radio.checked) {
+        input.value = '0';
+        input.readOnly = true;
+      } else if (radio.value === 'later' && radio.checked) {
+        input.readOnly = false;
+        if (input.value === '0') input.value = '1';
+        input.focus();
+      }
+    });
+  });
+})();
+</script>
 
 <%- include('../partials/footer') %>

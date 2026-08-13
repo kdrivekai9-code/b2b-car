@@ -1,0 +1,214 @@
+// 웹챗 능동 통보의 DB 흐름을 실제 테이블로 확인한다 — 운행시작 사건, 웹 세션 전달,
+// 접수 중 미루기, 지연 중 상태변화까지.
+//
+// 마이그레이션 20260814010000_add_drive_started_photos_odometer.sql을 적용한 뒤에 돌아간다
+// (없으면 미루기 관련 검사만 자동으로 건너뛴다).
+//
+// 실제 발신은 하지 않는다 — 카카오 발신 함수와 브로드캐스트를 모두 주입해 가로챈다. 확인하려다
+// 진짜 고객에게 메시지가 나가면 그게 바로 이 기능이 막으려던 사고다.
+//
+// 이 DB는 프로덕션과 같으므로, 만든 행만 정확히 지목해 지운다.
+//
+//   node scripts/check-order-notify-web-db.js
+require('dotenv').config();
+const db = require('../db');
+const notify = require('../lib/kakaoOrderNotify');
+
+const MARK = 'e2e-web-notify-check';
+
+let failed = 0;
+function check(label, actual, expected) {
+  const ok = JSON.stringify(actual) === JSON.stringify(expected);
+  if (!ok) failed += 1;
+  console.log(`  ${ok ? 'OK  ' : '실패'} ${label}`);
+  if (!ok) console.log(`         기대: ${JSON.stringify(expected)}\n         실제: ${JSON.stringify(actual)}`);
+}
+
+async function hasColumn(table, column) {
+  const row = await db.get(
+    'SELECT 1 AS ok FROM information_schema.columns WHERE table_name = ? AND column_name = ?',
+    [table, column]
+  );
+  return !!row;
+}
+
+// 상태를 바꾸고 이력까지 남긴다(폴링/관리자 변경이 하는 것과 같은 형태).
+async function transition(orderId, from, to) {
+  await db.run('UPDATE orders SET status = ? WHERE id = ?', [to, orderId]);
+  await db.run(
+    `INSERT INTO order_status_history (order_id, actor_user_id, old_status, new_status, note)
+     VALUES (?, NULL, ?, ?, ?)`,
+    [orderId, from, to, MARK]
+  );
+}
+
+async function main() {
+  const created = { sessionId: null, orderId: null };
+  const supportsDefer = await hasColumn('kakao_order_notifications', 'defer_count');
+  if (!supportsDefer) console.log('(defer_count 컬럼이 없어 미루기 검사는 건너뜁니다 — 마이그레이션 20260814010000 필요)\n');
+
+  try {
+    // 웹 세션 — 카카오 발신 키가 없다. 예전에는 이것 때문에 통보 대상에서 아예 빠졌다.
+    const session = await db.get(
+      `INSERT INTO chat_sessions (user_id, status, channel) VALUES (NULL, 'bot', 'web') RETURNING id`
+    );
+    created.sessionId = session.id;
+
+    const branch = await db.get('SELECT id FROM branches ORDER BY id LIMIT 1');
+    const order = await db.get(
+      `INSERT INTO orders (oid, branch_id, status, chat_session_id, order_type,
+                           callmaner_driver_name, callmaner_driver_phone, memo_customer,
+                           origin_address, origin_address_detail, destination_address, destination_address_detail,
+                           reserved_date, reserved_time)
+       VALUES (?, ?, '접수', ?, 'dispatch', '홍길동', '050-7111-2222', ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+      [
+        `${MARK}-oid`, branch.id, created.sessionId, MARK,
+        '서울 강서구 양천로53길 30', '3층', '경기 성남시 분당구 판교역로 160', 'B동 로비',
+        '2026-08-20', '14:00',
+      ]
+    );
+    created.orderId = order.id;
+
+    // 지사 설정이 이 사건을 껐을 수 있으니 검사 동안은 확실히 켜둔다(원래 값은 복원한다).
+    const savedSettings = await db.all(
+      'SELECT * FROM branch_customer_notifications WHERE branch_id = ?', [branch.id]
+    ).catch(() => []);
+    for (const t of ['dispatched', 'started', 'completed']) {
+      await db.run(
+        `INSERT INTO branch_customer_notifications (branch_id, event_type, enabled, delay_minutes, message_template)
+         VALUES (?, ?, true, 0, ?)
+         ON CONFLICT (branch_id, event_type) DO UPDATE SET enabled = true, delay_minutes = 0`,
+        [branch.id, t, notify.DEFAULT_EVENT_SETTINGS[t].template]
+      ).catch(() => {});
+    }
+
+    const maxHistory = await db.get('SELECT COALESCE(MAX(id), 0) AS id FROM order_status_history');
+    await db.run('UPDATE kakao_notification_cursor SET last_history_id = ? WHERE id = 1', [maxHistory.id]);
+
+    const kakaoSent = [];
+    const broadcasts = [];
+    const opts = {
+      send: async (_s, text) => { kakaoSent.push(text); return { ok: true }; },
+      broadcast: async (sessionId, message) => { broadcasts.push({ sessionId, message }); },
+    };
+    const countMessages = async () => {
+      const row = await db.get(
+        `SELECT COUNT(*) AS n FROM chat_messages WHERE session_id = ? AND sender = 'system'`,
+        [created.sessionId]
+      );
+      return Number(row.n);
+    };
+
+    console.log('[웹 세션에 배차 통보]');
+    await transition(created.orderId, '접수', '기사배정');
+    let out = await notify.runKakaoOrderNotifications(opts);
+    check('통보 1건 발송', out.delivered.sent, 1);
+    check('웹 채널로 집계', out.delivered.byChannel.web, 1);
+    check('카카오 발신은 0회(웹 세션이므로)', kakaoSent.length, 0);
+    check('상담 이력 1건', await countMessages(), 1);
+    check('브로드캐스트 1회', broadcasts.length, 1);
+    const firstText = broadcasts[0] && broadcasts[0].message && broadcasts[0].message.message;
+    check('문구에 오더종류가 들어간다', /요청하신 탁송건이 기사님 배차되었습니다/.test(firstText || ''), true);
+    check('상세주소가 한 번만 나온다', (String(firstText || '').match(/3층/g) || []).length, 1);
+    check('기사 안심번호가 들어간다', /050-7111-2222/.test(firstText || ''), true);
+
+    console.log('[운행시작 통보]');
+    await transition(created.orderId, '기사배정', '운행시작');
+    out = await notify.runKakaoOrderNotifications(opts);
+    check('운행시작 1건 발송', out.delivered.sent, 1);
+    const startedText = broadcasts[broadcasts.length - 1].message.message;
+    check('운행시작 문구', /요청하신 탁송건이 운행시작 되었습니다/.test(startedText), true);
+
+    console.log('[콜마너 흔들림 — 운행시작 → 기사배정]');
+    // 콜마너는 운행 중에도 status='배차'를 계속 준다. 이 전이로 배차 통보가 다시 나가면
+    // 고객에게 같은 안내가 매분 반복된다.
+    const before = await countMessages();
+    await transition(created.orderId, '운행시작', '기사배정');
+    out = await notify.runKakaoOrderNotifications(opts);
+    check('배차 통보가 다시 나가지 않는다', out.delivered.sent, 0);
+    check('상담 이력이 늘지 않는다', await countMessages(), before);
+
+    console.log('[접수 대화 중이면 미룬다]');
+    if (supportsDefer) {
+      await db.run('UPDATE orders SET status = ? WHERE id = ?', ['운행시작', created.orderId]);
+      await transition(created.orderId, '기사배정', '운행시작');
+      await db.run(
+        `UPDATE chat_sessions SET draft_json = '{"phase":"collecting","pendingField":"origin_address"}' WHERE id = ?`,
+        [created.sessionId]
+      );
+      const busyBefore = await countMessages();
+      out = await notify.runKakaoOrderNotifications(opts);
+      check('발송하지 않고 미룬다', out.delivered.deferred, 1);
+      check('상담 이력이 늘지 않는다', await countMessages(), busyBefore);
+      const queued = await db.get(
+        `SELECT status, defer_count FROM kakao_order_notifications
+         WHERE order_id = ? AND event_type = 'started' ORDER BY id DESC LIMIT 1`,
+        [created.orderId]
+      );
+      check('큐에 pending으로 남아 있다', queued.status, 'pending');
+      check('미룬 횟수가 1', Number(queued.defer_count), 1);
+
+      // 대화가 끝나면 발송된다. scheduled_at을 앞으로 당겨 2분을 기다리지 않는다.
+      await db.run('UPDATE chat_sessions SET draft_json = NULL WHERE id = ?', [created.sessionId]);
+      await db.run(
+        `UPDATE kakao_order_notifications SET scheduled_at = now() - interval '1 minute'
+         WHERE order_id = ? AND event_type = 'started' AND status = 'pending'`,
+        [created.orderId]
+      );
+      out = await notify.runKakaoOrderNotifications(opts);
+      check('대화가 끝나면 발송된다', out.delivered.sent, 1);
+    } else {
+      console.log('  (건너뜀)');
+    }
+
+    console.log('[지연 중 상태가 운행시작으로 바뀌어도 배차 통보는 나간다]');
+    // 배차 통보는 2분 뒤에 나가는데 그 사이 기사가 출발할 수 있다. 여기서 막히면 고객은
+    // 배차 사실을 영영 못 듣는다.
+    const order2 = await db.get(
+      `INSERT INTO orders (oid, branch_id, status, chat_session_id, order_type, memo_customer,
+                           origin_address, destination_address, reserved_date, reserved_time)
+       VALUES (?, ?, '접수', ?, 'dispatch', ?, ?, ?, ?, ?) RETURNING id`,
+      [`${MARK}-oid2`, branch.id, created.sessionId, MARK, '서울', '부산', '2026-08-21', '09:00']
+    );
+    created.orderId2 = order2.id;
+    await transition(created.orderId2, '접수', '기사배정');
+    // 감지만 하고(예약 생성) 발송 전에 상태를 바꾼다.
+    await notify.collectFromHistory();
+    await db.run('UPDATE orders SET status = ? WHERE id = ?', ['운행시작', created.orderId2]);
+    await db.run(
+      `UPDATE kakao_order_notifications SET scheduled_at = now() - interval '1 minute'
+       WHERE order_id = ? AND status = 'pending'`,
+      [created.orderId2]
+    );
+    const beforeDelayed = await countMessages();
+    out = await notify.sendDue(opts);
+    check('배차 통보가 그대로 발송된다', out.sent >= 1, true);
+    check('상담 이력이 늘었다', (await countMessages()) > beforeDelayed, true);
+
+    // 지사 설정 원복
+    await db.run('DELETE FROM branch_customer_notifications WHERE branch_id = ?', [branch.id]).catch(() => {});
+    for (const row of savedSettings) {
+      await db.run(
+        `INSERT INTO branch_customer_notifications (branch_id, event_type, enabled, delay_minutes, message_template)
+         VALUES (?, ?, ?, ?, ?)`,
+        [row.branch_id, row.event_type, row.enabled, row.delay_minutes, row.message_template]
+      ).catch(() => {});
+    }
+  } finally {
+    // 만든 행만 지운다.
+    for (const id of [created.orderId, created.orderId2].filter(Boolean)) {
+      await db.run('DELETE FROM kakao_order_notifications WHERE order_id = ?', [id]).catch(() => {});
+      await db.run('DELETE FROM order_status_history WHERE order_id = ?', [id]).catch(() => {});
+      await db.run('DELETE FROM orders WHERE id = ?', [id]).catch(() => {});
+    }
+    if (created.sessionId) {
+      await db.run('DELETE FROM chat_messages WHERE session_id = ?', [created.sessionId]).catch(() => {});
+      await db.run('DELETE FROM chat_sessions WHERE id = ?', [created.sessionId]).catch(() => {});
+    }
+  }
+
+  console.log(failed ? `\n${failed}건 실패` : '\n모두 통과');
+  process.exit(failed ? 1 : 0);
+}
+
+main().catch((e) => { console.error(e); process.exit(1); });

@@ -381,8 +381,17 @@
 
   // isQuestion: 사용자에게 다음 답을 요구하는 말풍선(필수항목 질문/확인질문/후보선택 등)에만
   // true로 넘긴다 — 정보 전달용 응답과 구분되도록 배경색을 다르게(하늘색) 표시한다.
-  function addBubble(text, who, createdAt, isQuestion) {
-    renderer.addBubble(text, who, createdAt, isQuestion);
+  // 통보에 딸린 사진 첨부(chat_messages.attachments_json). 컬럼이 없는 DB에서는 값이 없고,
+  // 그때는 본문에 링크가 글자로 들어 있다(lib/kakaoOrderNotify.js deliverWeb 폴백).
+  function parseAttachments(message) {
+    var raw = message && message.attachments_json;
+    if (!raw) return null;
+    if (typeof raw === 'object') return raw;
+    try { return JSON.parse(raw); } catch (e) { return null; }
+  }
+
+  function addBubble(text, who, createdAt, isQuestion, attachments) {
+    renderer.addBubble(text, who, createdAt, isQuestion, attachments);
   }
 
   // 필드 검증(주소/연락처/차량번호) 확인·재요청 말풍선은 화면에는 즉시 보여주면서도, 다음 정식
@@ -3659,7 +3668,7 @@
       if (!m || m.id <= lastPolledId) return;
       lastPolledId = m.id;
       if (m.sender === 'agent') addBubble(m.message, 'agent');
-      else if (m.sender === 'system') addBubble(m.message, 'system');
+      else if (m.sender === 'system') addBubble(m.message, 'system', null, false, parseAttachments(m));
     });
   }
 
@@ -3704,7 +3713,7 @@
       if (m.sender === 'user') resetTurnBotRow();
       if (m.sender === 'agent') addBubble(m.message, 'agent', m.created_at);
       else if (m.sender === 'user') addBubble(m.message, 'user', m.created_at);
-      else if (m.sender === 'system') addBubble(m.message, 'system', m.created_at);
+      else if (m.sender === 'system') addBubble(m.message, 'system', m.created_at, false, parseAttachments(m));
       // DB에는 "질문 말풍선" 플래그가 없어, 질문 문구는 항상 "?"로 끝난다는 관례를 휴리스틱으로
       // 써서 복원 시에도 파란 질문 배경이 유지되게 한다(그렇지 않으면 새로고침할 때마다 사라짐).
       else addBubble(m.message, 'bot', m.created_at, /\?\s*$/.test(String(m.message || '').trim()));

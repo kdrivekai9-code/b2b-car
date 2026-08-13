@@ -126,7 +126,36 @@
       return row;
     }
 
-    function addBubble(text, who, createdAt, isQuestion) {
+    // 첨부 사진(콜마너 탁송사진) 썸네일 + 원본 링크. 링크는 콜마너 CDN을 가리키고 만료될 수
+    // 있어, 썸네일이 깨지면(onerror) 이미지만 숨기고 링크 글자는 남긴다 — 사진을 못 보더라도
+    // "사진이 있었다"는 사실과 주소는 남아야 한다.
+    // innerHTML을 쓰지 않는다(이 파일의 다른 렌더러와 같은 이유 — 서버가 준 값이 그대로 들어온다).
+    function appendAttachments(parent, attachments) {
+      if (!Array.isArray(attachments) || !attachments.length) return;
+      var wrap = document.createElement('div');
+      wrap.className = 'ai-chat-attachments';
+      attachments.forEach(function (item, idx) {
+        var url = item && item.url ? String(item.url) : '';
+        if (!url) return;
+        var link = document.createElement('a');
+        link.className = 'ai-chat-attachment';
+        link.href = url;
+        link.target = '_blank';
+        link.rel = 'noopener';
+        var img = document.createElement('img');
+        img.src = url;
+        img.alt = (item && item.caption) ? String(item.caption) : ('첨부 사진 ' + (idx + 1));
+        img.addEventListener('error', function () { img.style.display = 'none'; });
+        link.appendChild(img);
+        var cap = document.createElement('span');
+        cap.textContent = (item && item.caption) ? String(item.caption) : ('사진 ' + (idx + 1));
+        link.appendChild(cap);
+        wrap.appendChild(link);
+      });
+      if (wrap.childNodes.length) parent.appendChild(wrap);
+    }
+
+    function addBubble(text, who, createdAt, isQuestion, attachments) {
       var div = document.createElement('div');
       div.className = 'ai-chat-bubble ' + (who === 'user' ? 'ai-user' : (who === 'agent' ? 'ai-agent' : (who === 'system' ? 'ai-system' : 'ai-bot')));
       if (who === 'bot' && isQuestion) div.className += ' ai-bot-question';
@@ -146,6 +175,7 @@
         var systemBody = document.createElement('div');
         appendTextWithAutoBold(systemBody, String(text == null ? '' : text));
         div.appendChild(systemBody);
+        appendAttachments(div, attachments);
       } else if (who === 'bot') {
         var botBody = document.createElement('div');
         var rawText = String(text == null ? '' : text);

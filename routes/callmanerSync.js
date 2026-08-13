@@ -5,6 +5,8 @@ const express = require('express');
 const db = require('../db');
 const asyncHandler = require('../middleware/asyncHandler');
 const callmaner = require('../lib/callmaner');
+const callmanerPhotos = require('../lib/callmanerPhotos');
+const odometerOcr = require('../lib/odometerOcr');
 const { notify } = require('../lib/push');
 const { broadcastOrderListChanged } = require('../lib/realtimeChat');
 const { logIntegrationErrorAsync } = require('../lib/integrationLog');
@@ -98,6 +100,30 @@ const SYNC_BY_CONF_SLIP_LIMIT = Number(process.env.CALLMANER_SYNC_ORDER_LIMIT ||
 const SYNC_LOOKBACK_DAYS = Number(process.env.CALLMANER_SYNC_LOOKBACK_DAYS || 3);
 const SYNC_CONCURRENCY = Number(process.env.CALLMANER_SYNC_CONCURRENCY || 5);
 const TERMINAL_LOCAL_STATUSES = ['완료', '취소'];
+const DISPATCHED_LOCAL_STATUS = '기사배정';
+const STARTED_LOCAL_STATUS = '운행시작';
+// 콜마너 baecha_status: 0 배차상태아님 / 1 기사도착 / 2 운행시작 (정의서 "오더상세조회").
+const BAECHA_STATUS_DRIVING = '2';
+
+// 콜마너 상태 + 배차이후상태를 로컬 상태 하나로 합친다. 콜마너는 기사가 출발한 뒤에도 계속
+// status='배차'를 주고, 출발 여부는 baecha_status로만 구분된다.
+function resolveLocalStatus(info) {
+  const mapped = callmaner.STATUS_TEXT_TO_LOCAL_STATUS[info.status];
+  if (mapped === DISPATCHED_LOCAL_STATUS && String(info.baechaStatus || '') === BAECHA_STATUS_DRIVING) {
+    return STARTED_LOCAL_STATUS;
+  }
+  return mapped;
+}
+
+// 운행시작 → 기사배정으로 되돌리는 것을 막는다.
+//
+// 이 가드가 없으면: 콜마너는 운행 중에도 status='배차'를 계속 주므로 baecha_status를 못 받은
+// 주기(단건조회 실패, 응답에 값 없음 등)마다 매핑 결과가 '기사배정'이 되어 상태가 매분
+// 운행시작 ↔ 기사배정을 왕복한다. 상태가 바뀔 때마다 order_status_history에 행이 쌓이고,
+// 그걸 읽는 능동 통보(lib/kakaoOrderNotify.js)가 "배차되었습니다"를 매분 고객에게 보낸다.
+function isBackwardTransition(currentStatus, nextStatus) {
+  return currentStatus === STARTED_LOCAL_STATUS && nextStatus === DISPATCHED_LOCAL_STATUS;
+}
 
 async function syncOrdersByConfSlip(branch) {
   const placeholders = TERMINAL_LOCAL_STATUSES.map(() => '?').join(',');
@@ -159,6 +185,31 @@ async function syncOrdersByConfSlip(branch) {
     }));
   }
 
+  // 운행시작 판정용 보강 조회 — 목록조회(OrderHistory)는 baecha_status를 안 준다(응답에 아예
+  // 없는 필드다, lib/callmaner.js orderHistory 참고). 그래서 콜마너가 '배차'라고 답한 오더만
+  // 골라 단건조회(OrderInfo)를 한 번 더 부른다. 이미 로컬이 '운행시작'인 오더는 다시 안 부른다 —
+  // 운행시작은 배차로 되돌아가지 않으므로 물어볼 필요가 없고, 그만큼 호출이 줄어든다.
+  const needBaecha = orders.filter((order) => {
+    const info = infoByOrderId.get(order.id);
+    if (!info || info.status !== '배차') return false;
+    if (order.status === STARTED_LOCAL_STATUS) return false;
+    return info.baechaStatus === undefined; // 단건조회로 이미 받은 건은 값이 있다(빈 문자열 포함)
+  });
+  for (let i = 0; i < needBaecha.length; i += SYNC_CONCURRENCY) {
+    const chunk = needBaecha.slice(i, i + SYNC_CONCURRENCY);
+    await Promise.all(chunk.map(async (order) => {
+      try {
+        const detail = await callmaner.orderInfo(branch, order.callmaner_conf_slip, order.origin_contact);
+        // 목록조회로 받은 정보에 baecha_status만 얹는다(요금/기사명은 목록 값을 그대로 신뢰).
+        const base = infoByOrderId.get(order.id) || {};
+        infoByOrderId.set(order.id, { ...base, baechaStatus: detail.baechaStatus });
+      } catch (e) {
+        logIntegrationErrorAsync({ source: 'callmaner', operation: 'order_info_baecha', refType: 'order', refId: order.id,
+          message: e.message, context: { confSlip: order.callmaner_conf_slip, oid: order.oid } });
+      }
+    }));
+  }
+
   let updated = 0;
   for (const order of orders) {
     const info = infoByOrderId.get(order.id);
@@ -181,8 +232,13 @@ async function syncOrdersByConfSlip(branch) {
       info.status === '배차' ? '02' : null
     ).catch((e) => console.error(`기사정보 동기화 실패 (conf_slip=${order.callmaner_conf_slip}):`, e.message));
 
-    const mappedStatus = callmaner.STATUS_TEXT_TO_LOCAL_STATUS[info.status];
-    const note = `[콜마너] 상태동기화(단건조회): ${info.status || '-'}`;
+    const resolvedStatus = resolveLocalStatus(info);
+    // 되돌림(운행시작 → 기사배정)은 매핑 결과를 버린다 — 콜마너 쪽 표기(callmaner_status)만
+    // 갱신되도록 아래 else 분기로 흘려보낸다.
+    const mappedStatus = isBackwardTransition(order.status, resolvedStatus) ? null : resolvedStatus;
+    const note = resolvedStatus === STARTED_LOCAL_STATUS
+      ? `[콜마너] 상태동기화(단건조회): ${info.status || '-'}(운행시작)`
+      : `[콜마너] 상태동기화(단건조회): ${info.status || '-'}`;
     if (info.status === order.callmaner_status && (!mappedStatus || mappedStatus === order.status)) continue;
 
     if (mappedStatus && mappedStatus !== order.status) {
@@ -203,6 +259,26 @@ async function syncOrdersByConfSlip(branch) {
           title: '오더 상태 변경(콜마너)', body: `${order.oid}: ${order.status} → ${mappedStatus}`, url: `/orders/${order.id}`,
         });
       } catch (e) { console.error('콜마너 동기화 알림 발송 실패:', e.message); }
+
+      // 탁송사진은 상태가 운행시작/완료로 바뀐 그 순간에만 가져온다 — 매 폴링마다 부르면
+      // 안 바뀐 오더에도 호출이 쌓인다. 정의서는 "탁송콜 완료시" 채워진다고 하므로 운행시작
+      // 시점에는 아직 없을 수 있고(빈 응답), 그건 오류가 아니다.
+      if (mappedStatus === STARTED_LOCAL_STATUS || mappedStatus === '완료') {
+        const collected = await callmanerPhotos.collectPhotos(callmaner, branch, order)
+          .catch((e) => {
+            logIntegrationErrorAsync({
+              source: 'callmaner', operation: 'cons_picture', refType: 'order', refId: order.id,
+              message: e.message, context: { confSlip: order.callmaner_conf_slip, oid: order.oid, status: mappedStatus },
+            });
+            return null;
+          });
+        // 사진이 새로 들어왔을 때만 계기판을 읽는다 — 제미나이 호출이라 공짜가 아니다.
+        // 통보는 이 값이 없어도 나가므로(주행거리 줄만 빠진다) 실패해도 동기화를 막지 않는다.
+        if (collected && (collected.before || collected.after)) {
+          await callmanerPhotos.syncOdometer(odometerOcr, branch, order)
+            .catch((e) => console.error(`계기판 주행거리 동기화 실패 (oid=${order.oid}):`, e.message));
+        }
+      }
       updated += 1;
     } else if (info.status !== order.callmaner_status) {
       // 매핑 대상이 아닌 상태는 콜마너 쪽 표기만 갱신하고 로컬 status는 그대로 둔다.
@@ -235,7 +311,11 @@ router.get('/sync', checkCronAuth, asyncHandler(async (req, res) => {
         if (!order) continue;
 
         const statusCode = item.status_code;
-        const mappedStatus = callmaner.STATUS_CODE_TO_LOCAL_STATUS[statusCode];
+        const codeStatus = callmaner.STATUS_CODE_TO_LOCAL_STATUS[statusCode];
+        // 이 경로(OrderAllStatus)에는 baecha_status가 없어 운행시작을 알 수 없다 — 그래서
+        // 02(배차)를 그대로 매핑하면 이미 운행시작인 오더를 기사배정으로 되돌린다. 아래
+        // 단건조회 경로와 같은 가드를 둔다.
+        const mappedStatus = isBackwardTransition(order.status, codeStatus) ? null : codeStatus;
         const rawNote = `[콜마너] 상태동기화: ${item.status || ''}(${statusCode || ''})`;
 
         // 기사(이름/사번/연락처) 정보는 상태 매핑 여부와 무관하게 항상 확인한다 — 03(타사배차)처럼
@@ -306,3 +386,8 @@ router.get('/sync', checkCronAuth, asyncHandler(async (req, res) => {
 }));
 
 module.exports = router;
+// 운행시작 판정과 되돌림 가드는 콜마너를 실제로 호출하지 않고 확인할 수 있어야 한다 —
+// 되돌림 가드가 깨지면 고객에게 "배차되었습니다"가 매분 다시 나간다
+// (scripts/check-callmaner-drive-started.js).
+module.exports.resolveLocalStatus = resolveLocalStatus;
+module.exports.isBackwardTransition = isBackwardTransition;
