@@ -28,6 +28,15 @@ function readStateText(msg) {
 function isQuestionBubble(msg) {
   return msg.sender === 'bot' && /\?\s*$/.test(String(msg.message || '').trim());
 }
+// 능동 통보에 딸린 사진(chat_messages.attachments_json). 고객 화면에는 썸네일+링크로 나가는데
+// 상담원 화면에서만 안 보이면 "무엇이 이미 안내됐는지"를 알 수 없다 — 같은 형태로 보여준다.
+// 컬럼이 없는 DB(마이그레이션 전)에서는 값이 없고, 그때는 본문에 링크가 글자로 들어 있다.
+function parseAttachments(msg) {
+  var raw = msg && msg.attachments_json;
+  if (!raw) return [];
+  if (typeof raw === 'object') return Array.isArray(raw) ? raw : [];
+  try { var parsed = JSON.parse(raw); return Array.isArray(parsed) ? parsed : []; } catch (e) { return []; }
+}
 %>
 
 <div class="page-head-row">
@@ -105,7 +114,7 @@ function isQuestionBubble(msg) {
         <% var senderClass = { user: 'ai-user', agent: 'ai-agent' }; %>
         <% messages.forEach(function(m){ %>
           <div class="ai-chat-item <%= senderClass[m.sender] || 'ai-bot' %>" data-id="<%= m.id %>">
-            <div class="ai-chat-bubble <%= senderClass[m.sender] || 'ai-bot' %><%= isQuestionBubble(m) ? ' ai-bot-question' : '' %>"><span class="bubble-label"><%= (senderLabel[m.sender] || m.sender) + (isAutoSent(m) ? ' · 자동 발송됨' : '') %></span><%= m.message %></div>
+            <div class="ai-chat-bubble <%= senderClass[m.sender] || 'ai-bot' %><%= isQuestionBubble(m) ? ' ai-bot-question' : '' %>"><span class="bubble-label"><%= (senderLabel[m.sender] || m.sender) + (isAutoSent(m) ? ' · 자동 발송됨' : '') %></span><%= m.message %><% var atts = parseAttachments(m); if (atts.length) { %><div class="ai-chat-attachments"><% atts.forEach(function(a, i){ %><a class="ai-chat-attachment" href="<%= a.url %>" target="_blank" rel="noopener"><img src="<%= a.url %>" alt="<%= a.caption || ('첨부 사진 ' + (i + 1)) %>" onerror="this.style.display='none'"><span><%= a.caption || ('사진 ' + (i + 1)) %></span></a><% }) %></div><% } %></div>
             <div class="bubble-footer">
               <div class="bubble-time"><%= formatChatTime(m.created_at) %></div>
               <% if (readStateText(m)) { %>
@@ -188,6 +197,37 @@ function isQuestionBubble(msg) {
     return m.sender === 'bot' && /\?\s*$/.test(String(m.message || '').trim());
   }
 
+  // 서버 렌더(위 parseAttachments)와 같은 것을 실시간 수신 경로에서도 그린다.
+  // innerHTML을 쓰지 않는다 — 사진 캡션·URL이 그대로 들어오는 자리다.
+  function appendAttachments(bubble, m) {
+    var raw = m && m.attachments_json;
+    if (!raw) return;
+    var list;
+    try { list = typeof raw === 'object' ? raw : JSON.parse(raw); } catch (e) { return; }
+    if (!Array.isArray(list) || !list.length) return;
+    var wrap = document.createElement('div');
+    wrap.className = 'ai-chat-attachments';
+    list.forEach(function (a, i) {
+      var url = a && a.url ? String(a.url) : '';
+      if (!url) return;
+      var link = document.createElement('a');
+      link.className = 'ai-chat-attachment';
+      link.href = url;
+      link.target = '_blank';
+      link.rel = 'noopener';
+      var img = document.createElement('img');
+      img.src = url;
+      img.alt = (a && a.caption) ? String(a.caption) : ('첨부 사진 ' + (i + 1));
+      img.addEventListener('error', function () { img.style.display = 'none'; });
+      link.appendChild(img);
+      var cap = document.createElement('span');
+      cap.textContent = (a && a.caption) ? String(a.caption) : ('사진 ' + (i + 1));
+      link.appendChild(cap);
+      wrap.appendChild(link);
+    });
+    if (wrap.childNodes.length) bubble.appendChild(wrap);
+  }
+
   function appendMessage(m) {
     if (!m || m.id <= lastId) return;
     var who = classBySender[m.sender] || 'ai-bot';
@@ -203,6 +243,7 @@ function isQuestionBubble(msg) {
     labelSpan.textContent = (labelBySender[m.sender] || m.sender) + (isAutoSentJs(m) ? ' · 자동 발송됨' : '');
     bubble.appendChild(labelSpan);
     bubble.appendChild(document.createTextNode(m.message));
+    appendAttachments(bubble, m);
     item.appendChild(bubble);
 
     var footer = document.createElement('div');

@@ -40,6 +40,48 @@ function isAutoSent(message) {
   return message.sender === 'agent' && String(message.message || '').includes(AUTO_SENT_MARK);
 }
 
+// 능동 통보에 딸린 사진(chat_messages.attachments_json). 고객 화면에는 썸네일+링크로 나가는데
+// 상담원 화면에서만 안 보이면 "무엇이 이미 안내됐는지"를 알 수 없다 — 같은 형태로 보여준다.
+// 컬럼이 없는 DB(마이그레이션 전)에서는 값이 없고, 그때는 본문에 링크가 글자로 들어 있다.
+function parseAttachments(message) {
+  const raw = message && message.attachments_json;
+  if (!raw) return [];
+  if (typeof raw === 'object') return Array.isArray(raw) ? raw : [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+// 링크는 콜마너 CDN을 가리키고 만료될 수 있다 — 썸네일이 깨지면 이미지만 숨기고 캡션 글자는
+// 남겨 링크 구실을 하게 둔다(views/chat/session_detail.ejs, 오더상세와 같은 방식).
+function MessageAttachments({ message }) {
+  const items = parseAttachments(message);
+  if (!items.length) return null;
+  return (
+    <div className="ai-chat-attachments">
+      {items.map((item, i) => (
+        <a
+          key={item.url || i}
+          className="ai-chat-attachment"
+          href={item.url}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <img
+            src={item.url}
+            alt={item.caption || `첨부 사진 ${i + 1}`}
+            onError={(e) => { e.currentTarget.style.display = 'none'; }}
+          />
+          <span>{item.caption || `사진 ${i + 1}`}</span>
+        </a>
+      ))}
+    </div>
+  );
+}
+
 function MessageBubble({ message }) {
   const who = SENDER_CLASS[message.sender] || 'ai-bot';
   const label = SENDER_LABEL[message.sender] || message.sender;
@@ -52,6 +94,7 @@ function MessageBubble({ message }) {
       <div className={bubbleClass}>
         <span className="bubble-label">{label}{isAutoSent(message) ? ' · 자동 발송됨' : ''}</span>
         {message.message || ''}
+        <MessageAttachments message={message} />
       </div>
       {(time || readText) && (
         <div className="bubble-footer">
