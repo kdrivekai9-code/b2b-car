@@ -60,11 +60,25 @@ const pool = new Pool({
 // 풀이 막히기 시작하면 그 사실만이라도 남긴다. 2026-08-13 사고에서 가장 아팠던 것은 서버가
 // 멈춘 것 자체가 아니라 로그에 아무 흔적이 없어 원인을 좁힐 수 없었던 점이다 — 대기 건수는
 // "지금 커넥션을 못 얻고 줄 서 있다"는 뜻이므로, 이 줄이 찍히면 곧바로 풀 문제로 볼 수 있다.
+//
+// 처음에는 30초마다 waitingCount를 들여다보기만 했는데, 부하 테스트에서 그 방식이 쓸모없다는
+// 것이 드러났다: 동시 400건을 밀어 넣어 지연이 3초까지 올라간 구간에서도 경고가 한 줄도 안
+// 찍혔다(scripts/load-test-read.js). 버스트가 3초인데 표본을 30초에 한 번 뜨니 그사이를
+// 통째로 지나친 것이다. 그래서 표본이 아니라 최고수위를 기록한다 — 쿼리마다 대기 건수를 보고
+// 최댓값만 남긴 뒤, 30초마다 그 최댓값을 보고하고 초기화한다. 프로퍼티 한 번 읽는 비용이라
+// 쿼리 경로에 부담이 없다.
+let waitingHighWater = 0;
+function noteWaiting() {
+  if (pool.waitingCount > waitingHighWater) waitingHighWater = pool.waitingCount;
+}
+
 // unref: 이 타이머 때문에 스크립트나 서버리스 함수가 끝나지 못하는 일은 없어야 한다.
 const poolWatch = setInterval(() => {
-  if (pool.waitingCount > 0) {
-    console.warn(`DB 풀 대기 ${pool.waitingCount}건 (total=${pool.totalCount}, idle=${pool.idleCount}, max=${pool.options.max})`);
+  const peak = Math.max(waitingHighWater, pool.waitingCount);
+  if (peak > 0) {
+    console.warn(`DB 풀 대기 최대 ${peak}건 (지금 ${pool.waitingCount}건, total=${pool.totalCount}, idle=${pool.idleCount}, max=${pool.options.max})`);
   }
+  waitingHighWater = 0;
 }, 30000);
 if (typeof poolWatch.unref === 'function') poolWatch.unref();
 
@@ -119,6 +133,7 @@ function isReadOnlySql(sql) {
 }
 
 async function queryWithReadRetry(sql, params) {
+  noteWaiting();
   try {
     return await pool.query(sql, params);
   } catch (e) {
@@ -141,6 +156,7 @@ async function get(sql, params = []) {
 // INSERT/UPDATE 문에 'RETURNING id'가 포함되어 있으면 lastInsertRowid로 매핑해준다
 // (SQLite의 info.lastInsertRowid를 사용하던 기존 호출부와의 호환을 위함).
 async function run(sql, params = []) {
+  noteWaiting();
   const { rows, rowCount } = await pool.query(toPgSql(sql), params);
   return { rowCount, lastInsertRowid: rows[0] ? rows[0].id : undefined };
 }
