@@ -3736,7 +3736,14 @@
         // 상태머신(dispatchPhase)으로 보내지 않고 여기서 바로 답한다 — 그쪽으로 보내면 "수정
         // 요청"으로 오인되거나(matchFieldKeyword 개선 이전 사고) 잘해야 "등록해 드릴까요, 아니면
         // 수정해 드릴까요?"로 되물을 뿐 실제 질문에는 답하지 못한다.
-        if ((phase === 'confirming' || phase === 'choose_field') && tryAnswerPickupTimeQuestion(text)) {
+        //
+        // phase==='collecting'도 포함하는 이유(실사용 사고): 이 기능을 넣기 전, "출발지 픽업시간은
+        // 어떻게 되죠?" 질문이 matchFieldKeyword 오탐으로 origin_address 필드 수정 시도로
+        // 잘못 넘어가(applyFieldChoice) phase가 'collecting'/pendingField가 'origin_address'로
+        // 바뀐 채 멈춘 대화가 실제로 있었다. 그 세션은 이미 상태가 그렇게 틀어져 있어 phase가
+        // confirming/choose_field로 돌아오지 않으므로, collecting 단계에서도 이 질문을 먼저
+        // 가로채지 않으면 (틀어진 상태 그대로) 계속 엉뚱한 응답(FAQ 오분류 등)이 나간다.
+        if ((phase === 'confirming' || phase === 'choose_field' || phase === 'collecting') && tryAnswerPickupTimeQuestion(text)) {
           return null;
         }
 
