@@ -3288,7 +3288,15 @@
   }
 
   // ---------------- "어느 부분을 수정해드릴까요?" 응답 처리 ----------------
+  // FIELD_KEYWORDS는 "출발"/"도착" 같은 단어가 문장 어디에든 있으면 매칭하는 단순 포함 검사라,
+  // "출발지에는 몇시에 오냐구요?"처럼 그 필드에 대한 질문까지 "출발지 주소를 고치고 싶다"로
+  // 오인했다(실사용 사고: 픽업시간을 물었는데 "출발지 주소를 다시 알려주세요?"가 나감). 의문사가
+  // 있고 수정 의도 표현이 없으면 키워드 매칭을 건너뛰고 Gemini 분류(classifyFallback)로 넘겨서,
+  // 그쪽이 unclear/agent로 처리하게 한다.
+  var QUESTION_NOT_CORRECTION_RE = /(몇\s?시|언제|얼마|어떻게|왜|뭐|무엇|어디)/;
+  var CORRECTION_INTENT_RE = /(수정|변경|바꿔|바꾸|틀렸|잘못|다시\s?(알려|입력|말씀)|고쳐)/;
   function matchFieldKeyword(text) {
+    if (QUESTION_NOT_CORRECTION_RE.test(text) && !CORRECTION_INTENT_RE.test(text)) return null;
     for (var i = 0; i < FIELD_KEYWORDS.length; i++) {
       if (FIELD_KEYWORDS[i].re.test(text)) return currentFieldMetaFor(FIELD_KEYWORDS[i].id);
     }
