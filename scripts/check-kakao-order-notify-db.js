@@ -164,6 +164,11 @@ async function main() {
       // 그대로 두면 여기서 만드는 예약이 "이미 보낸 통보"로 막힌다(그게 정상 동작이다).
       // 이 구간은 설정이 반영되는지를 보는 것이므로, 이 테스트가 만든 통보 기록만 비우고 시작한다.
       await db.run('DELETE FROM kakao_order_notifications WHERE order_id = ?', [created.orderId]);
+      // 커서를 지금 지점으로 다시 맞춘다 — 이 구간은 여기서 만드는 전이만 봐야 한다.
+      // 앞 구간이나 이전 실행에서 남은 이력이 섞이면 scanned/disabled 수가 달라져 결과가
+      // 실행할 때마다 바뀐다(실제로 그렇게 들쭉날쭉했다).
+      const blockCursor = await db.get('SELECT COALESCE(MAX(id), 0) AS id FROM order_status_history');
+      await db.run('UPDATE kakao_notification_cursor SET last_history_id = ? WHERE id = 1', [blockCursor.id]);
       const putSetting = async (eventType, enabled, delayMinutes, template) => {
         await db.run(`
           INSERT INTO branch_customer_notifications (branch_id, event_type, enabled, delay_minutes, message_template)
@@ -215,6 +220,11 @@ async function main() {
     // 만든 것만 지운다.
     if (created.orderId) {
       await db.run('DELETE FROM kakao_order_notifications WHERE order_id = ?', [created.orderId]);
+      // 커서를 지금 지점으로 다시 맞춘다 — 이 구간은 여기서 만드는 전이만 봐야 한다.
+      // 앞 구간이나 이전 실행에서 남은 이력이 섞이면 scanned/disabled 수가 달라져 결과가
+      // 실행할 때마다 바뀐다(실제로 그렇게 들쭉날쭉했다).
+      const blockCursor = await db.get('SELECT COALESCE(MAX(id), 0) AS id FROM order_status_history');
+      await db.run('UPDATE kakao_notification_cursor SET last_history_id = ? WHERE id = 1', [blockCursor.id]);
       await db.run('DELETE FROM order_status_history WHERE order_id = ? AND note = ?', [created.orderId, MARK]);
       await db.run('DELETE FROM orders WHERE id = ? AND memo_customer = ?', [created.orderId, MARK]);
     }

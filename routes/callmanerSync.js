@@ -7,6 +7,7 @@ const asyncHandler = require('../middleware/asyncHandler');
 const callmaner = require('../lib/callmaner');
 const callmanerPhotos = require('../lib/callmanerPhotos');
 const odometerOcr = require('../lib/odometerOcr');
+const { runKakaoOrderNotifications } = require('../lib/kakaoOrderNotify');
 const { notify } = require('../lib/push');
 const { broadcastOrderListChanged } = require('../lib/realtimeChat');
 const { logIntegrationErrorAsync } = require('../lib/integrationLog');
@@ -399,7 +400,25 @@ router.get('/sync', checkCronAuth, asyncHandler(async (req, res) => {
     }
   }
 
-  res.json({ ok: true, summary });
+  // 상태를 막 갱신한 직후에 고객 통보까지 이어서 처리한다.
+  //
+  // 왜 여기서 또 부르나: 통보 크론(/kakao-consult/cron/order-notifications)도 매분 돌지만,
+  // 두 크론이 각자 1분 주기라 "상태 감지 → 통보 발송" 사이에 최대 1분이 더 붙는다. 상태를
+  // 방금 바꾼 이 자리에서 이어 부르면 그 한 홉이 사라진다(실측: 완료 통보가 상태변경 후
+  // 2분 30초 걸렸고 그중 47초가 이 대기였다).
+  //
+  // 두 곳에서 부르지만 중복 발송은 나지 않는다 — sendDue가 FOR UPDATE SKIP LOCKED로 통보를
+  // 원자적으로 집어가므로 한쪽만 가져간다(lib/kakaoOrderNotify.js claimDue).
+  let notified = null;
+  try {
+    notified = await runKakaoOrderNotifications();
+  } catch (e) {
+    // 통보가 실패해도 동기화 자체는 성공으로 본다 — 통보는 크론이 1분 뒤 다시 시도한다.
+    console.error('콜마너 동기화 후 통보 처리 실패:', e.message);
+    notified = { error: e.message };
+  }
+
+  res.json({ ok: true, summary, notified });
 }));
 
 module.exports = router;
