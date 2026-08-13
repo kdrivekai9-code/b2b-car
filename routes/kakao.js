@@ -5,6 +5,7 @@ const { requireAuth } = require('../middleware/auth');
 const asyncHandler = require('../middleware/asyncHandler');
 const { generateJson } = require('../lib/vertexAi');
 const { abbreviateSido, formatSigugun } = require('../lib/kakaoRegion');
+const { getKakaoDirections } = require('../lib/routeFareSearch');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -49,145 +50,6 @@ async function fetchMergedDocuments(query) {
 // 유무가 달라 일관되지 않으므로, 주소 선택 시 이미 알고 있는 위경도로 좌표->행정구역 API를
 // 한 번 더 호출해 항상 같은 방식으로 얻는다("콜마너 외부연동 인터페이스 정의서"
 // "바. 공통주의사항" 2/3 참조).
-
-function firstNonEmptyString() {
-  for (let i = 0; i < arguments.length; i += 1) {
-    const v = arguments[i];
-    if (typeof v === 'string' && v.trim()) return v.trim();
-  }
-  return '';
-}
-
-function hasFerryKeyword(text) {
-  return /(선박|여객선|카페리|도선|ferry|페리|항구|선착장|여객터미널|항\b)/i.test(String(text || ''));
-}
-
-function looksLikePortName(name) {
-  return /(항|항구|선착장|여객터미널|터미널)/.test(String(name || ''));
-}
-
-function parsePortsFromText(text) {
-  const s = String(text || '').trim();
-  if (!s) return { fromPort: '', toPort: '' };
-  const m1 = s.match(/(.+?)\s*(?:에서|출발)\s*(.+?)\s*(?:까지|도착|행)/);
-  if (m1) return { fromPort: m1[1].trim(), toPort: m1[2].trim() };
-  const m2 = s.match(/(.+?)\s*(?:->|→|[-~])\s*(.+)/);
-  if (m2) return { fromPort: m2[1].trim(), toPort: m2[2].trim() };
-  return { fromPort: '', toPort: '' };
-}
-
-function extractFerryLegs(route) {
-  const legs = [];
-  const seen = new Set();
-
-  (route.sections || []).forEach((section) => {
-    const guides = Array.isArray(section.guides) ? section.guides : [];
-    guides.forEach((guide) => {
-      const summary = firstNonEmptyString(
-        guide.name,
-        guide.guidance,
-        guide.road_name,
-        guide.instruction,
-        guide.message,
-        guide.text,
-      );
-
-      const parsed = parsePortsFromText(summary);
-      const fromPort = firstNonEmptyString(
-        guide.from_name,
-        guide.from,
-        guide.origin_name,
-        guide.start_name,
-        parsed.fromPort,
-      );
-      const toPort = firstNonEmptyString(
-        guide.to_name,
-        guide.to,
-        guide.destination_name,
-        guide.end_name,
-        parsed.toPort,
-      );
-
-      const candidateText = [summary, fromPort, toPort].filter(Boolean).join(' ');
-      if (!hasFerryKeyword(candidateText)) return;
-
-      const key = [fromPort, toPort, summary].join('|');
-      if (seen.has(key)) return;
-      seen.add(key);
-
-      legs.push({
-        fromPort: fromPort || null,
-        toPort: toPort || null,
-        summary: summary || null,
-        distance: Number.isFinite(guide.distance) ? guide.distance : null,
-        duration: Number.isFinite(guide.duration) ? guide.duration : null,
-      });
-    });
-
-    // guides에서 못 건진 경우 roads 이름을 보조 후보로 사용한다.
-    (section.roads || []).forEach((road) => {
-      const roadName = firstNonEmptyString(road.name, road.road_name);
-      if (!hasFerryKeyword(roadName)) return;
-      const parsed = parsePortsFromText(roadName);
-      if (!looksLikePortName(parsed.fromPort) && !looksLikePortName(parsed.toPort)) return;
-      const key = [parsed.fromPort, parsed.toPort, roadName].join('|');
-      if (seen.has(key)) return;
-      seen.add(key);
-      legs.push({
-        fromPort: parsed.fromPort || null,
-        toPort: parsed.toPort || null,
-        summary: roadName || null,
-        distance: Number.isFinite(road.distance) ? road.distance : null,
-        duration: Number.isFinite(road.duration) ? road.duration : null,
-      });
-    });
-  });
-
-  return legs;
-}
-
-// 차량 페리 항로(예: 완도-제주)에서는 카카오가 진입/진출 지점을 각각 별도 guide로 표시한다
-// (관측된 guidance: "페리항로 진입"/"페리항로 진출"). 진출 guide의 distance/duration이 그 두
-// 지점 사이 실제 페리 항해 구간 값과 정확히 일치한다(대전→서귀포 성산 실측 경로에서 진입 이전
-// 구간 296.4km/219분 + 페리 구간 97.2km/91분 + 진출 이후 구간 39.5km/49분 = 총 433.2km/359분
-// 으로, 카카오가 응답하는 총 거리·시간과 정확히 합산됨을 확인). 이를 이용해 "출발지→승선항",
-// "항해", "하선항→도착지" 세 구간으로 나눠 각각 실제 거리/소요시간을 계산할 수 있다.
-function extractFerrySegments(route) {
-  const flatGuides = [];
-  (route.sections || []).forEach((section) => {
-    (section.guides || []).forEach((guide) => flatGuides.push(guide));
-  });
-
-  let enterIdx = -1;
-  let exitIdx = -1;
-  for (let i = 0; i < flatGuides.length; i += 1) {
-    const guidance = String(flatGuides[i].guidance || '');
-    if (enterIdx === -1 && /페리항로\s*진입/.test(guidance)) {
-      enterIdx = i;
-    } else if (enterIdx !== -1 && exitIdx === -1 && /페리항로\s*진출/.test(guidance)) {
-      exitIdx = i;
-      break;
-    }
-  }
-  if (enterIdx === -1 || exitIdx === -1) return null;
-
-  const sumDist = (arr) => arr.reduce((s, g) => s + (Number.isFinite(g.distance) ? g.distance : 0), 0);
-  const sumDur = (arr) => arr.reduce((s, g) => s + (Number.isFinite(g.duration) ? g.duration : 0), 0);
-  const beforeGuides = flatGuides.slice(1, enterIdx + 1); // 출발지(index 0) 제외, 승선항 도착까지
-  const afterGuides = flatGuides.slice(exitIdx + 1); // 하선항 이후부터 목적지까지
-  const ferryGuide = flatGuides[exitIdx];
-
-  return {
-    fromPort: flatGuides[enterIdx].name || null,
-    toPort: flatGuides[exitIdx].name || null,
-    beforeDistanceM: sumDist(beforeGuides),
-    beforeDurationS: sumDur(beforeGuides),
-    ferryDistanceM: Number.isFinite(ferryGuide.distance) ? ferryGuide.distance : null,
-    ferryDurationS: Number.isFinite(ferryGuide.duration) ? ferryGuide.duration : null,
-    afterDistanceM: sumDist(afterGuides),
-    afterDurationS: sumDur(afterGuides),
-  };
-}
 
 const ADDRESS_CORRECTION_SCHEMA = {
   type: 'OBJECT',
@@ -294,115 +156,19 @@ router.get('/region', asyncHandler(async (req, res) => {
 // 카카오모빌리티 자동차 길찾기(유료 API, 별도 키/계약 필요) — 실제 도로 경로/거리/톨비 조회
 router.get('/directions', asyncHandler(async (req, res) => {
   const { origin, destination, waypoints, priority, avoid, departure_time } = req.query;
-  if (!origin || !destination) return res.status(400).json({ error: 'origin, destination가 필요합니다.' });
-  if (!process.env.KAKAO_REST_API_KEY) return res.status(500).json({ error: 'KAKAO_REST_API_KEY가 설정되어 있지 않습니다.' });
-
-  function toPoint(str) {
-    const [x, y] = str.split(',').map(Number);
-    return { x, y };
-  }
-
-  const allowedPriority = ['RECOMMEND', 'TIME', 'DISTANCE'];
-  const allowedAvoid = ['toll', 'motorway', 'ferries', 'schoolzone', 'uturn'];
-  const avoidList = avoid ? avoid.split(',').filter((a) => allowedAvoid.includes(a)) : [];
-
-  function kstNowCompact() {
-    const fmt = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'Asia/Seoul',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-    });
-    const parts = fmt.formatToParts(new Date()).reduce((acc, p) => {
-      if (p.type !== 'literal') acc[p.type] = p.value;
-      return acc;
-    }, {});
-    return `${parts.year}${parts.month}${parts.day}${parts.hour}${parts.minute}`;
-  }
-
-  function normalizeDepartureTime(raw) {
-    const compact = String(raw || '').replace(/\D/g, '');
-    if (!/^\d{12}$/.test(compact)) return null;
-    return compact;
-  }
-
-  const normalizedDeparture = normalizeDepartureTime(departure_time);
-  const waypointList = waypoints ? waypoints.split('|').filter(Boolean) : [];
-  const canUseFuture = !!(normalizedDeparture && normalizedDeparture >= kstNowCompact() && waypointList.length <= 5);
-
-  let kakaoRes;
-  if (canUseFuture) {
-    const qs = new URLSearchParams();
-    qs.set('origin', origin);
-    qs.set('destination', destination);
-    qs.set('departure_time', normalizedDeparture);
-    qs.set('priority', allowedPriority.includes(priority) ? priority : 'RECOMMEND');
-    if (waypointList.length) qs.set('waypoints', waypointList.join('|'));
-    if (avoidList.length) qs.set('avoid', avoidList.join('|'));
-    kakaoRes = await fetch('https://apis-navi.kakaomobility.com/v1/future/directions?' + qs.toString(), {
-      method: 'GET',
-      headers: {
-        Authorization: 'KakaoAK ' + process.env.KAKAO_REST_API_KEY,
-        'Content-Type': 'application/json',
-      },
-    });
-  } else {
-    const body = {
-      origin: toPoint(origin),
-      destination: toPoint(destination),
-      waypoints: waypointList.map(toPoint),
-      priority: allowedPriority.includes(priority) ? priority : 'RECOMMEND',
-    };
-    if (avoidList.length) body.avoid = avoidList;
-
-    kakaoRes = await fetch('https://apis-navi.kakaomobility.com/v1/waypoints/directions', {
-      method: 'POST',
-      headers: {
-        Authorization: 'KakaoAK ' + process.env.KAKAO_REST_API_KEY,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    });
-  }
-
-  if (!kakaoRes.ok) {
-    const text = await kakaoRes.text();
-    return res.status(502).json({ error: '길찾기 요청 실패', detail: text });
-  }
-  const data = await kakaoRes.json();
-  const route = data.routes && data.routes[0];
-  if (!route || route.result_code !== 0) {
-    return res.status(422).json({ error: '경로를 찾을 수 없습니다.', detail: route && route.result_msg });
-  }
-
-  const path = [];
-  (route.sections || []).forEach((section) => {
-    (section.roads || []).forEach((road) => {
-      const v = road.vertexes || [];
-      for (let i = 0; i + 1 < v.length; i += 2) {
-        path.push([v[i + 1], v[i]]); // vertexes는 [경도, 위도] 순서 -> [위도, 경도]로 변환
-      }
-    });
+  const result = await getKakaoDirections({
+    origin,
+    destination,
+    waypoints: waypoints ? String(waypoints).split('|').filter(Boolean) : [],
+    priority,
+    avoid,
+    departureTime: departure_time,
   });
-
-  const ferryLegs = extractFerryLegs(route);
-  const ferrySegments = ferryLegs.length > 0 ? extractFerrySegments(route) : null;
-
-  res.json({
-    totalDistance: route.summary.distance, // meters
-    totalDuration: route.summary.duration, // seconds
-    tollFare: route.summary.fare ? route.summary.fare.toll : null,
-    segments: (route.sections || []).map((s) => ({ distance: s.distance, duration: s.duration })),
-    hasFerryLeg: ferryLegs.length > 0,
-    ferryLegs,
-    ferrySegments,
-    path,
-    usedFuture: canUseFuture,
-    departureTimeApplied: canUseFuture ? normalizedDeparture : null,
-  });
+  if (!result.ok) {
+    return res.status(result.status).json({ error: result.error, detail: result.detail });
+  }
+  const { ok, ...payload } = result;
+  res.json(payload);
 }));
 
 module.exports = router;

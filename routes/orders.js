@@ -28,6 +28,7 @@ const { splitIntake } = require('../lib/orderSplit');
 const { DISPATCH_FIELDS } = require('../lib/intakeFields');
 // 접수 요약 문구는 카카오 상담톡과 같은 모듈이 만든다.
 const { buildSummaryText } = require('../lib/intakeSummary');
+const { isRouteFareSearchEnabled } = require('../lib/routeFareSearch');
 
 // 폼에서 온 좌표 문자열을 숫자로 — 빈 문자열/미입력/숫자 아님은 전부 null(컬럼이 numeric이라
 // 빈 문자열을 그대로 넣으면 22P02로 터진다). 출발·도착지와 경유지 양쪽에서 같이 쓴다.
@@ -284,6 +285,9 @@ async function buildAiIntakeInitData(scope, userId) {
     // 접수 대화 판단을 서버로 옮긴 Stage A(탁송만, lib/webIntakeTurn.js) — 기본 OFF.
     // EJS(GET /ai-intake)와 Next(GET /ai-intake/data.json)가 이 함수를 공유하므로 값도 같이 간다.
     aiIntakeServerTurnEnabled: process.env.AI_INTAKE_SERVER_TURN_ENABLED === '1',
+    // 법인별 경로탐색/요금검색 on-off(groups_tbl.route_fare_search_enabled). 꺼둔 법인은
+    // 접수 중 경로/요금 안내를 아예 만들지 않는다 — 안 보는 결과를 기다릴 이유가 없다.
+    routeFareSearchEnabled: await isRouteFareSearchEnabled(scope.group_id),
   };
 }
 

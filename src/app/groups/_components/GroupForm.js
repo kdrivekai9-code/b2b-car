@@ -71,6 +71,20 @@ export default function GroupForm({ mode, group, branches }) {
           </select>
         </div>
       </div>
+      <div className="section-title">🧭 AI 접수 경로/요금 안내</div>
+      <div className="field full">
+        <label className="checkline">
+          {/* 체크 해제 시 브라우저가 이 필드를 아예 안 보낸다 — 숨은 필드로 항상 '0'을 먼저
+              보내 "안 보냄"과 "끔"을 구분한다(routes/groups.js가 배열/단일값 모두 처리). */}
+          <input type="hidden" name="route_fare_search_enabled" value="0" />
+          <input type="checkbox" name="route_fare_search_enabled" value="1" defaultChecked={group.route_fare_search_enabled !== false} />
+          AI 접수(웹 챗봇·카카오톡 상담) 시 경로탐색·요금검색 결과를 자동으로 안내한다
+        </label>
+        <p className="page-sub">
+          꺼두면 이 법인 소속 오더는 경로/요금 계산 자체를 건너뜁니다 — 접수 확인이 더 빠르게
+          끝나고, 안 쓰는 검색 때문에 대기할 일이 없습니다.
+        </p>
+      </div>
     </form>
   );
 }

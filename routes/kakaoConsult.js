@@ -41,6 +41,7 @@ const { runDispatchAgent, loadPending: loadMcpPending } = require('../lib/mcpDis
 const { notify } = require('../lib/push');
 const { broadcastMessage, broadcastSessionListChanged } = require('../lib/realtimeChat');
 const { logIntegrationErrorAsync } = require('../lib/integrationLog');
+const { isRouteFareSearchEnabled, searchRouteAndFare } = require('../lib/routeFareSearch');
 
 const router = express.Router();
 
@@ -1310,6 +1311,71 @@ async function completeIntake(session, parsed, rawText, cache) {
 
 // "네" 확인 후 실제 등록 — 예전 completeIntake의 등록 로직을 그대로 옮겼다. 확인 단계를
 // 하나 끼워 넣었을 뿐, 등록 자체(콜마너 연동·분리 접수 판단)는 바뀌지 않았다.
+function formatDurationText(durationSec) {
+  const minutes = Math.max(1, Math.round(Number(durationSec || 0) / 60));
+  if (minutes < 60) return `${minutes}분`;
+  const rest = minutes % 60;
+  return rest ? `${Math.floor(minutes / 60)}시간 ${rest}분` : `${Math.floor(minutes / 60)}시간`;
+}
+
+// 접수 확인을 보낸 뒤에 이어지는 경로/요금 안내. 웹 챗봇은 브라우저 지도가 경로를 그리면서
+// 같은 값을 얻지만 카카오 고객에게는 그 화면이 없어, 서버가 직접 카카오모빌리티를 호출해
+// 같은 내용을 말로 알려준다(두 채널이 같은 lib/routeFareSearch.js를 쓴다).
+// 이 함수를 부르는 시점에 접수 확인은 이미 발신됐으므로, 여기서 걸리는 시간은 고객이 오더가
+// 접수됐다는 사실을 아는 데 아무 영향을 주지 않는다.
+async function announceRouteFareAfterOrder(session, account, result) {
+  const geo = result.geo || {};
+  if (!geo.origin || !geo.destination) return;
+
+  const groupId = account && account.requester_group_id;
+  if (!(await isRouteFareSearchEnabled(groupId))) return;
+
+  // 검색이 늦어지면 진행중 안내를 먼저 보낸다 — 접수 확인 뒤 아무 말 없이 몇 초가 흐르면
+  // 고객은 대화가 거기서 끝난 줄 안다.
+  let noticePromise = null;
+  const noticeTimer = setTimeout(() => {
+    noticePromise = botSay(session, '경로탐색중......', '경로탐색 진행')
+      .catch((e) => console.error('경로탐색 진행 안내 실패:', e.message));
+  }, 1500);
+
+  // 진행중 안내가 아직 발신 중이면 그게 끝난 뒤에 결과를 보낸다 — 안 그러면 "탐색중"이
+  // 결과보다 늦게 도착해 순서가 뒤집혀 보인다.
+  async function sayInOrder(text, label) {
+    clearTimeout(noticeTimer);
+    if (noticePromise) await noticePromise;
+    await botSay(session, text, label);
+  }
+
+  const vehicleType = result.created && result.created[0] && result.created[0].vehicle
+    ? result.created[0].vehicle.vehicleType
+    : null;
+
+  const search = await searchRouteAndFare({
+    groupId,
+    branchId: account.branch_id,
+    originLat: geo.origin.lat,
+    originLon: geo.origin.lon,
+    destinationLat: geo.destination.lat,
+    destinationLon: geo.destination.lon,
+    vehicleType,
+    onRoute: (route) => sayInOrder(
+      `경로탐색 결과입니다.\n· 총 거리 ${route.distanceKm.toFixed(1)}km\n· 예상 소요시간 ${formatDurationText(route.durationSec)}`
+      + (route.tollFare ? `\n· 통행료 ${Number(route.tollFare).toLocaleString('ko-KR')}원` : ''),
+      '경로탐색 결과'
+    ),
+  }).catch((e) => {
+    console.error('카카오 경로/요금 후속 안내 실패:', e.message);
+    return null;
+  });
+
+  clearTimeout(noticeTimer);
+  if (!search || !search.ok || search.fare == null) return;
+  await sayInOrder(
+    `예상 요금은 약 ${Number(search.fare).toLocaleString('ko-KR')}원입니다. (등록된 요금표 기준이라 실제 청구액과 다를 수 있습니다)`,
+    '요금검색 결과'
+  );
+}
+
 async function registerDispatchOrder(session, parsed, rawText, cache) {
   const account = await resolveIntakeContextCached(session);
   let result;
@@ -1342,6 +1408,7 @@ async function registerDispatchOrder(session, parsed, rawText, cache) {
       .catch((e) => console.error('접수 완료 후 폼 프리필 정리 실패:', e.message));
     await botSay(session, result.message, '접수 확인');
     broadcastSessionListChangedAsync({ event: 'order_created', sessionId: session.id });
+    await announceRouteFareAfterOrder(session, account, result);
     return;
   }
 
@@ -1917,3 +1984,6 @@ module.exports.processBotTurn = processBotTurn;
 // 반복 판정에서 빼야 하는 짧은 답인지 — 이 판정이 헐거우면 고객이 번호로 고른 답에 봇이
 // 침묵한다. DB 없이 확인할 수 있게 노출한다(scripts/check-kakao-repeat-guard.js).
 module.exports.isTooShortForRepeatCheck = isTooShortForRepeatCheck;
+// 접수 확인 뒤 경로/요금 안내의 발신 순서(진행중 안내 → 경로 → 요금)는 카카오 채널 전체를
+// 띄우지 않고는 눈으로 볼 수 없다 — 위 두 개와 같은 이유로 노출한다.
+module.exports.announceRouteFareAfterOrder = announceRouteFareAfterOrder;

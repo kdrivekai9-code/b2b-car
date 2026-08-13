@@ -1223,6 +1223,14 @@
   var deferredFareGuideTimer = null;
   var deferredFareGuideNoticeShown = false;
 
+  // 법인별 on/off(groups_tbl.route_fare_search_enabled) — 서버가 ai_intake.ejs에 내려준다.
+  // 값이 아예 없으면(구버전 페이지 캐시 등) 기존 동작대로 켜짐으로 본다.
+  // 주의: 이 토글은 "접수 흐름에서 자동으로 붙는" 경로/요금 안내만 끈다. 사용자가 직접
+  // 요금을 물어본 경우(요금문의 흐름)는 답을 줘야 하므로 그대로 둔다.
+  function isRouteFareSearchEnabled() {
+    return window.__routeFareSearchEnabled !== false;
+  }
+
   function clearDeferredFareGuideTimer() {
     if (deferredFareGuideTimer) {
       clearInterval(deferredFareGuideTimer);
@@ -1231,6 +1239,7 @@
   }
 
   function scheduleDeferredFareGuide() {
+    if (!isRouteFareSearchEnabled()) return;
     if (!val('origin_address') || !val('destination_address')) return;
     if (!deferredFareGuideNoticeShown) {
       deferredFareGuideNoticeShown = true;
@@ -1257,6 +1266,47 @@
         logBotMessage({ logText: fareGuideText, needsAgent: false, requestedFeature: null });
       });
     }, 900);
+  }
+
+  var backgroundFareGuideRunning = false;
+
+  // 접수 확인/다음 질문을 막지 않고 뒤에서 경로탐색+요금조회를 진행한다 — 예전에는 이
+  // 조회(최대 20초 대기)가 끝나야 접수 확인 말풍선이 나갔다. 실사용 요청: 사용자가 입력한
+  // 주문서 확인을 먼저 보여주고, 오래 걸리면 "경로탐색중......"만 띄운 뒤 결과가 나오는
+  // 대로 안내한다.
+  function startBackgroundFareGuide() {
+    if (!isRouteFareSearchEnabled()) return;
+    if (!val('origin_address') || !val('destination_address')) return;
+    if (backgroundFareGuideRunning) return;
+    backgroundFareGuideRunning = true;
+
+    var searchingTimer = setTimeout(function () {
+      searchingTimer = null;
+      // 경로가 이미 확정됐다면 남은 건 요금표 조회뿐이라 문구를 구분해준다.
+      var searchingText = isRouteDistanceFinal() ? '요금검색중......' : '경로탐색중......';
+      addBubble(searchingText, 'bot');
+      logBotMessage({ logText: searchingText, needsAgent: false, requestedFeature: null });
+    }, 1500);
+
+    function stopSearchingNotice() {
+      if (searchingTimer) {
+        clearTimeout(searchingTimer);
+        searchingTimer = null;
+      }
+      backgroundFareGuideRunning = false;
+    }
+
+    announceFareGuideFromDb().then(function (fareGuideText) {
+      stopSearchingNotice();
+      if (fareGuideText === false) return; // 같은 경로로 이미 안내를 마쳤음
+      if (fareGuideText) {
+        logBotMessage({ logText: fareGuideText, needsAgent: false, requestedFeature: null });
+        return;
+      }
+      scheduleDeferredFareGuide();
+    }).catch(function () {
+      stopSearchingNotice();
+    });
   }
 
   function parseRouteDistanceKm() {
@@ -2269,17 +2319,16 @@
   function finishPremiumCollection() {
     if (!val('destination_contact')) setField('destination_contact', val('origin_contact'));
     setPendingField(null);
-    return announceFareGuideFromDb()
-      .then(function () {
-        phase = 'confirming';
-        return fetchSummaryText();
-      })
+    phase = 'confirming';
+    return fetchSummaryText()
       .then(function (summary) {
         addBubble(summary, 'bot');
         logBotMessage({ logText: summary, needsAgent: false, requestedFeature: null });
         var confirmQ = '위 내용으로 등록해 드릴까요?';
         addBubble(confirmQ, 'bot', null, true);
         logBotMessage({ logText: confirmQ, needsAgent: false, requestedFeature: null });
+        // 탁송 흐름과 동일하게 요약/확인질문을 먼저 내보낸 뒤 경로/요금은 뒤에서 따라붙인다.
+        startBackgroundFareGuide();
         return null;
       });
   }
@@ -2773,23 +2822,12 @@
       var ambiguousList = results.filter(function (r) { return r && r.ambiguous; });
       if (ambiguousList.length) return startDisambiguation(ambiguousList);
 
-      // 요금 안내(있으면)를 먼저 보여주고, 다음 질문은 그 뒤 마지막에 물어본다 — 질문이 다른
-      // 응답 내용 사이에 끼어들어 순서가 뒤섞이지 않도록 한다.
-      var farePromise = (val('origin_address') && val('destination_address'))
-        ? announceFareGuideFromDb().then(function (fareGuideText) {
-            if (fareGuideText === false) return; // 이미 같은 경로로 안내를 마쳤음 — 대기 안내 불필요
-            if (fareGuideText) {
-              logBotMessage({ logText: fareGuideText, needsAgent: false, requestedFeature: null });
-              return;
-            }
-            scheduleDeferredFareGuide();
-          })
-        : Promise.resolve();
-
-      return farePromise.then(function () {
-        var doneText = proceedAfterCollecting();
-        return { logText: doneText || null, needsAgent: false, requestedFeature: null };
-      });
+      // 접수 내용 확인/다음 질문을 먼저 내보내고, 경로/요금 안내는 뒤에서 따라붙인다.
+      // setTimeout(0)으로 미루는 이유: 호출부가 이 반환값(doneText)으로 말풍선을 그리기
+      // 전에 요금 말풍선이 먼저 끼어들면 순서가 뒤집힌다.
+      var doneText = proceedAfterCollecting();
+      setTimeout(startBackgroundFareGuide, 0);
+      return { logText: doneText || null, needsAgent: false, requestedFeature: null };
     });
   }
 
