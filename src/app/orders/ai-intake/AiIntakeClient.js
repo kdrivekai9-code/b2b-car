@@ -533,11 +533,15 @@ export default function AiIntakeClient({
     return nextId;
   }
 
-  async function handleCollectingPhase(sid, text) {
-    if (pendingField === 'origin_contact' || pendingField === 'destination_contact') {
+  // pendingFieldOverride: 상담원 연결 제안을 접고 곧바로 답을 처리할 때 쓴다. React 상태
+  // 갱신(setPendingField)은 즉시 반영되지 않아서, 복구된 값을 인자로 넘겨야 이번 호출이
+  // 옛 pendingField를 보고 엉뚱하게 처리하는 것을 막을 수 있다.
+  async function handleCollectingPhase(sid, text, pendingFieldOverride) {
+    const activePendingField = pendingFieldOverride !== undefined ? pendingFieldOverride : pendingField;
+    if (activePendingField === 'origin_contact' || activePendingField === 'destination_contact') {
       const directPhone = extractPhone(text);
       if (directPhone) {
-        const nextFields = mergeOrderFields(collectedFields, { [pendingField]: directPhone });
+        const nextFields = mergeOrderFields(collectedFields, { [activePendingField]: directPhone });
         setCollectedFields(nextFields);
         setPendingField(null);
         setPhase('confirming');
@@ -559,7 +563,7 @@ export default function AiIntakeClient({
       }
     }
 
-    if (pendingField === 'vehicle_number') {
+    if (activePendingField === 'vehicle_number') {
       const compact = String(text || '').replace(/\s+/g, '');
       if (VEHICLE_NUMBER_SKIP_RE.test(compact)) {
         const nextFields = mergeOrderFields(collectedFields, { vehicle_number: '' });
@@ -634,7 +638,7 @@ export default function AiIntakeClient({
       return;
     }
 
-    if (pendingField === 'memo_customer') {
+    if (activePendingField === 'memo_customer') {
       const trimmed = String(text || '').trim();
       const nextMemo = ADDITIONAL_REQUEST_NONE_RE.test(trimmed) ? '' : trimmed;
       const nextFields = mergeOrderFields(collectedFields, { memo_customer: nextMemo });
@@ -694,7 +698,7 @@ export default function AiIntakeClient({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       // sessionId는 FAQ 검색 문맥 보강(직전 사용자 질문 참고)에만 쓰인다(lib/knowledgeSearch.js).
-      body: JSON.stringify({ text, pendingField: pendingField || null, classified: reuseClassified, sessionId }),
+      body: JSON.stringify({ text, pendingField: activePendingField || null, classified: reuseClassified, sessionId }),
     });
 
     if (isAgentRequest(text) || parseData.intent === 'unsupported') {
@@ -717,18 +721,18 @@ export default function AiIntakeClient({
     }
 
     const patchFields = pickOrderFields(parseData);
-    if (pendingField) {
-      const pendingValue = pendingField === 'reserved_date'
+    if (activePendingField) {
+      const pendingValue = activePendingField === 'reserved_date'
         ? (patchFields.reserved_date || patchFields.reserved_time)
-        : patchFields[pendingField];
+        : patchFields[activePendingField];
       if (!pendingValue) {
         if (await noteTrouble(sid)) return;
-        const retryPrompt = PENDING_FIELD_PROMPTS[pendingField] || (pendingField + ' 값을 이해하지 못했습니다. 다시 입력해주세요.');
+        const retryPrompt = PENDING_FIELD_PROMPTS[activePendingField] || (activePendingField + ' 값을 이해하지 못했습니다. 다시 입력해주세요.');
         await replyWithMessage(sid, retryPrompt, {
           draftState: {
             source: 'next-ai-intake-client',
             phase: 'collecting',
-            pendingField,
+            activePendingField,
             fields: collectedFields,
             pendingDisambiguation,
             disambiguationQueue,
@@ -1027,7 +1031,7 @@ export default function AiIntakeClient({
       };
       setPreOfferState(null);
       setPhase(resume.phase || 'collecting');
-      setPendingField(resume.pendingField || null);
+      setPendingField(resume.activePendingField || null);
       setPendingDisambiguation(resume.pendingDisambiguation || null);
       setDisambiguationQueue(Array.isArray(resume.disambiguationQueue) ? resume.disambiguationQueue : []);
 
@@ -1038,8 +1042,8 @@ export default function AiIntakeClient({
         followUp += '\n수정할 항목을 말씀해주세요.';
       } else if (resume.phase === 'choose_address_candidate' && resume.pendingDisambiguation) {
         followUp += '\n' + candidateListText(resume.pendingDisambiguation);
-      } else if (resume.pendingField) {
-        followUp += '\n' + resume.pendingField + ' 값을 다시 입력해주세요.';
+      } else if (resume.activePendingField) {
+        followUp += '\n' + resume.activePendingField + ' 값을 다시 입력해주세요.';
       }
 
       await replyWithMessage(sid, followUp, {
@@ -1047,12 +1051,35 @@ export default function AiIntakeClient({
         requestedFeature: null,
         draftState: makeDraftState({
           phase: resume.phase || 'collecting',
-          pendingField: resume.pendingField || null,
+          pendingField: resume.activePendingField || null,
           pendingDisambiguation: resume.pendingDisambiguation || null,
           disambiguationQueue: Array.isArray(resume.disambiguationQueue) ? resume.disambiguationQueue : [],
           preOfferState: null,
         }),
       });
+      return;
+    }
+
+    // "네/아니요"가 아니라 원래 묻던 질문의 답을 곧바로 보낸 경우다 — 되묻지 말고 그 답을 받는다.
+    //
+    // 2026-08-14 세션 923 실측(EJS 접수장): 잘못된 차량번호("48조94233") 뒤에 이 제안이 떴는데
+    // 고객은 제안에 답하는 대신 정정한 번호("123가4949")를 보냈다. 그 입력이 아래 되묻기로
+    // 버려져서 "아니오"를 한 번 더 치고 번호를 다시 입력해야 했다 — 3턴이 낭비됐다.
+    // 같은 결함이 이 화면에도 있어 함께 고친다(public/js/ai-intake.js와 같은 규칙).
+    //
+    // 형식이 확실한 필드에서만 이 지름길을 쓴다. 아무 텍스트나 답으로 받으면, 이 제안을 띄운
+    // 원인(연속 실패·화남)이 그대로 반복돼 제안과 실패가 무한히 오갈 수 있다.
+    const resumeField = (preOfferState || {}).pendingField || null;
+    if (resumeField === 'vehicle_number'
+        && VEHICLE_NUMBER_RE.test(String(text || '').replace(/\s+/g, ''))) {
+      const resume = preOfferState || {};
+      setPreOfferState(null);
+      setPhase(resume.phase || 'collecting');
+      setPendingField(resumeField);
+      setPendingDisambiguation(resume.pendingDisambiguation || null);
+      setDisambiguationQueue(Array.isArray(resume.disambiguationQueue) ? resume.disambiguationQueue : []);
+      // 상태 갱신은 즉시 반영되지 않으므로 복구된 필드를 인자로 넘긴다.
+      await handleCollectingPhase(sid, text, resumeField);
       return;
     }
 

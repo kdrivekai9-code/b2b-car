@@ -231,7 +231,15 @@ test.describe('Chat admin card messaging', () => {
     await assignDone;
 
     await expect(assignSelfBtn).toHaveText('내가 담당중');
-    await expect(page.locator('#cardViewerHead')).toContainText('담당자: 시스템 관리자');
+    // 담당자 이름은 로그인한 계정에서 읽는다. 예전에는 '시스템 관리자'(admin 계정의 이름)를
+    // 하드코딩해서, QA 전용 계정(E2E_LOGIN_ID=qa_test_bot)으로 돌리면 화면은 정상인데 검사만
+    // 실패했다 — 검사 결과가 어느 계정으로 돌렸는지에 좌우되면 안 된다.
+    // 화면이 쓰는 것과 같은 출처(card-data.json의 currentUser)에서 읽어 DB 의존도 만들지 않는다.
+    const meRes = await page.request.get(BASE_URL + '/chat/sessions/card-data.json');
+    expect(meRes.ok()).toBeTruthy();
+    const myName = ((await meRes.json()).currentUser || {}).name;
+    expect(myName, '로그인한 계정 이름을 확인할 수 없습니다').toBeTruthy();
+    await expect(page.locator('#cardViewerHead')).toContainText(`담당자: ${myName}`);
 
     const messagesRes = await page.request.get(BASE_URL + '/chat/sessions/' + sessionId + '/messages?limit=50');
     expect(messagesRes.ok()).toBeTruthy();

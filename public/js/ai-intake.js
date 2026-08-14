@@ -3107,6 +3107,26 @@
     return true;
   }
 
+  // 상담원 연결 제안을 접고 원래 하던 질문으로 되돌린다. "아니요"로 접을 때와, 아래처럼
+  // 사용자가 곧바로 답을 보내와서 접을 때가 같은 복구 절차를 써야 해서 따로 뺐다.
+  function resumeFromOfferAgent() {
+    var resumed = flowApi.normalizeOfferAgentResumeState(preOfferState);
+    preOfferState = null;
+    phase = resumed.phase;
+    pendingField = resumed.pendingField;
+    updateQuickReplies();
+    pendingDisambiguation = resumed.pendingDisambiguation;
+    disambiguationQueue = resumed.disambiguationQueue || [];
+    syncStatePatch({
+      preOfferState: preOfferState,
+      phase: phase,
+      pendingField: pendingField,
+      pendingDisambiguation: pendingDisambiguation,
+      disambiguationQueue: disambiguationQueue.slice(),
+    });
+    return resumed;
+  }
+
   function handleOfferAgentPhase(text) {
     if (isAffirmative(text) || isAgentRequest(text)) {
       preOfferState = null;
@@ -3115,20 +3135,7 @@
       return;
     }
     if (isNegative(text) || /^(괜찮|계속|아니)/i.test(text.trim())) {
-      var resumed = flowApi.normalizeOfferAgentResumeState(preOfferState);
-      preOfferState = null;
-      phase = resumed.phase;
-      pendingField = resumed.pendingField;
-      updateQuickReplies();
-      pendingDisambiguation = resumed.pendingDisambiguation;
-      disambiguationQueue = resumed.disambiguationQueue || [];
-      syncStatePatch({
-        preOfferState: preOfferState,
-        phase: phase,
-        pendingField: pendingField,
-        pendingDisambiguation: pendingDisambiguation,
-        disambiguationQueue: disambiguationQueue.slice(),
-      });
+      var resumed = resumeFromOfferAgent();
 
       var backText = '네, 계속 진행하겠습니다.';
       addBubble(backText, 'bot');
@@ -3150,6 +3157,21 @@
       }
       return;
     }
+    // "네/아니요"가 아니라 원래 묻던 질문의 답을 곧바로 보낸 경우다 — 되묻지 말고 그 답을 받는다.
+    //
+    // 2026-08-14 세션 923 실측: 잘못된 차량번호("48조94233") 뒤에 이 제안이 떴는데, 고객은
+    // 제안에 답하는 대신 정정한 번호("123가4949")를 보냈다. 그 입력이 아래 되묻기로 버려져서,
+    // 고객은 "아니오"를 한 번 더 치고 번호를 다시 입력해야 했다 — 3턴이 낭비됐다.
+    //
+    // 형식이 확실한 필드에서만 이 지름길을 쓴다. 아무 텍스트나 답으로 받으면, 이 제안을 띄운
+    // 원인(연속 실패·화남)이 그대로 반복돼 제안과 실패가 무한히 오갈 수 있다.
+    if (preOfferState && preOfferState.pendingField === 'vehicle_number'
+        && VEHICLE_NUMBER_RE.test(String(text || '').trim().replace(/\s+/g, ''))) {
+      resumeFromOfferAgent();
+      handleVehicleNumberPendingReply(text);
+      return;
+    }
+
     var clarify = flowApi.getOfferAgentClarifyText();
     addBubble(clarify, 'bot');
     logBotMessage({ logText: clarify, needsAgent: false, requestedFeature: null });
