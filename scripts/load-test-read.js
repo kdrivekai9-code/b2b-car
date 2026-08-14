@@ -25,14 +25,20 @@ const http = require('http');
 const db = require('../db');
 
 const BASE = process.env.LOAD_TEST_BASE || 'http://127.0.0.1:3000';
+// 로그인만 다른 곳에 할 수 있게 분리한다 — Next(3001)에는 POST /login 핸들러가 없어서
+// 로그인은 Express(3000)로 하고 부하만 3001에 걸어야 한다. 같은 호스트면 쿠키는 포트와
+// 무관하게 공유되므로 그대로 쓸 수 있다.
+const LOGIN_BASE = process.env.LOAD_TEST_LOGIN_BASE || 'http://127.0.0.1:3000';
 const LOGIN_ID = process.env.E2E_LOGIN_ID || 'qa_test_bot';
 const PASSWORD = process.env.E2E_PASSWORD || '';
 
 // 읽기 전용이고 부작용이 없는 경로만. 늘릴 때는 "이 경로가 쓰기를 하지 않는가"를 먼저 확인한다.
 const ALLOWED_PATHS = [
-  '/dashboard/data.json', // 대시보드 집계 — 여러 테이블을 읽는 가장 무거운 조회
-  '/orders',              // 오더 목록 화면
-  '/login',               // DB를 타지 않는 대조군(순수 렌더링 비용)
+  '/dashboard/data.json',            // 대시보드 집계 — 여러 테이블을 읽는 가장 무거운 조회
+  '/chat/sessions/card-data.json',   // 상담 세션 목록 — 관리자가 10초마다 폴링하는 그 경로
+  '/orders',                         // 오더 목록 화면
+  '/',                               // Next 대시보드 페이지(3001에서 측정할 때)
+  '/login',                          // DB를 타지 않는 대조군(순수 렌더링 비용)
 ];
 
 function parseArgs() {
@@ -48,9 +54,9 @@ function parseArgs() {
   return out;
 }
 
-function request(method, path, { cookie, body } = {}) {
+function request(method, path, { cookie, body, base } = {}) {
   return new Promise((resolve) => {
-    const url = new URL(path, BASE);
+    const url = new URL(path, base || BASE);
     const payload = body ? new URLSearchParams(body).toString() : null;
     const started = process.hrtime.bigint();
     const req = http.request(
@@ -136,7 +142,7 @@ async function main() {
   console.log(`대상: ${BASE}${path}`);
   console.log(`단계: 동시 ${levels.join(' → ')} / 각 단계 ${requests}건\n`);
 
-  const login = await request('POST', '/login', { body: { login_id: LOGIN_ID, password: PASSWORD } });
+  const login = await request('POST', '/login', { base: LOGIN_BASE, body: { login_id: LOGIN_ID, password: PASSWORD } });
   const cookie = (login.setCookie || []).map((c) => c.split(';')[0]).join('; ');
   if (!cookie) {
     console.error(`로그인 실패(status=${login.status}) — 세션 쿠키를 받지 못했습니다.`);
