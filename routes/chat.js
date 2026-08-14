@@ -18,7 +18,7 @@ const { describeMappedAccount } = require('../lib/kakaoIntakeService');
 const { logIntegrationErrorAsync } = require('../lib/integrationLog');
 const {
   broadcastMessage, broadcastReadReceipt, broadcastSessionListChanged, openSessionStream, openSessionListStream, closeChannel,
-  startAgentPresence, isAnyAgentOnline, listOnlineAgentNames,
+  startAgentPresence, isAnyAgentOnline, listOnlineAgentNames, PRESENCE_STALE_SECONDS,
 } = require('../lib/realtimeChat');
 
 const router = express.Router();
@@ -683,6 +683,33 @@ router.get('/sessions/needs-agent-summary', requireRole('admin'), asyncHandler(a
   res.json({ sessions: rows });
 }));
 
+// 목록이 바뀌었는지만 싸게 확인하는 "버전". 목록 전체를 다시 읽지 않고 이 값만 비교한다.
+//
+// 왜 필요한가: 관리자 화면은 10초마다 card-data.json을 부르는데, 그 조회가 세션마다 상관
+// 서브쿼리 2개(last_message, COUNT(*))에 LATERAL 조인까지 돈다. 세션 168개면 서브쿼리 336개다.
+// 실측: card-data.json 120~155ms vs 이 버전 쿼리 15ms. 더 중요한 것은 증가 곡선이다 —
+// 목록 조회는 세션 수에 비례해 무거워지지만(O(세션 수)) 이 버전은 인덱스 조회 네 번이라
+// 세션이 늘어도 그대로다(O(1)). 폴링의 대부분은 "바뀐 것 없음"으로 끝나므로 그 경우의 비용이
+// 전체 비용을 정한다.
+//
+// 무엇을 담아야 하는가 — 카드 목록이 달라지는 모든 원인을 덮어야 한다:
+//   · 세션이 늘거나 상태가 바뀜        → max(updated_at), count(*)
+//   · 새 메시지(마지막 메시지·건수 변화) → max(chat_messages.id)
+//   · 상담원 접속 현황(카드뷰가 함께 그림) → 살아 있는 presence 행 수
+// count(*)를 chat_messages에 쓰지 않은 이유는 순차 스캔이 되기 때문이다 — max(id)면 충분하다
+// (메시지는 지워지지 않는다).
+async function buildSessionListVersion() {
+  const row = await db.get(`
+    SELECT
+      (SELECT max(updated_at) FROM chat_sessions) AS s_updated,
+      (SELECT count(*)::int FROM chat_sessions) AS s_count,
+      (SELECT max(id) FROM chat_messages) AS m_max,
+      (SELECT count(*)::int FROM chat_agent_presence
+        WHERE last_seen_at > now() - interval '${PRESENCE_STALE_SECONDS} seconds') AS agents
+  `);
+  return [row.s_updated, row.s_count, row.m_max, row.agents].join('|');
+}
+
 // 목록(list/card 뷰 공통)이 쓰는 세션 조회만 따로 뺐다 — Next.js Stage 1 프리뷰(list 뷰의
 // 읽기 전용 테이블만 대상)는 이 데이터만 있으면 되고, 카드뷰 전용 데이터(onlineAgents,
 // branches 등 — 실시간 채팅/오더등록폼에서만 쓰임)는 필요 없다.
@@ -759,14 +786,22 @@ router.get('/sessions/data.json', requireRole('admin'), asyncHandler(async (req,
 // 호출하는 JSON 버전 — 카드뷰의 좌측 세션목록 + 온라인 상담원 배지에 필요한 초기 데이터.
 // 실시간 갱신은 이 엔드포인트가 아니라 클라이언트가 여는 EventSource(/sessions/:id/stream,
 // /agent-presence/stream)가 담당한다 — 이 라우트는 최초 로드/수동 새로고침 시에만 호출된다.
+// 목록이 바뀌었는지만 묻는다. 화면은 이 값이 달라졌을 때만 card-data.json을 부른다.
+router.get('/sessions/card-version.json', requireRole('admin'), asyncHandler(async (req, res) => {
+  res.json({ version: await buildSessionListVersion() });
+}));
+
 router.get('/sessions/card-data.json', requireRole('admin'), asyncHandler(async (req, res) => {
-  const [sessions, onlineAgents] = await Promise.all([
+  const [sessions, onlineAgents, version] = await Promise.all([
     buildSessionListSessions(),
     listOnlineAgentNames(),
+    // 전체를 받을 때 버전도 같이 준다 — 화면이 "이 데이터의 버전"을 알아야 다음 확인에서
+    // 비교할 수 있다. 따로 부르면 그 사이 변경을 놓친다.
+    buildSessionListVersion(),
   ]);
   // Stage 3 슬라이스 3: "접수 마무리" 탭은 카드뷰 자체보다 더 세밀하게 롤백할 수 있도록
   // 별도 플래그로 게이팅한다(카드뷰 전체를 끄지 않고 이 탭만 껐다 켤 수 있음).
-  res.json({ sessions, onlineAgents, currentUser: req.session.user, intakeEnabled: process.env.NEXT_STAGE3_CHAT_INTAKE_ENABLED === 'true' });
+  res.json({ sessions, onlineAgents, version, currentUser: req.session.user, intakeEnabled: process.env.NEXT_STAGE3_CHAT_INTAKE_ENABLED === 'true' });
 }));
 
 // ---------------- 관리자: 카드뷰용 메시지 지연 로딩 ----------------

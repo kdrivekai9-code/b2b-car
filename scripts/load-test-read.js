@@ -35,7 +35,8 @@ const PASSWORD = process.env.E2E_PASSWORD || '';
 // 읽기 전용이고 부작용이 없는 경로만. 늘릴 때는 "이 경로가 쓰기를 하지 않는가"를 먼저 확인한다.
 const ALLOWED_PATHS = [
   '/dashboard/data.json',            // 대시보드 집계 — 여러 테이블을 읽는 가장 무거운 조회
-  '/chat/sessions/card-data.json',   // 상담 세션 목록 — 관리자가 10초마다 폴링하는 그 경로
+  '/chat/sessions/card-data.json',   // 상담 세션 목록 — 변경이 있을 때만 부른다
+  '/chat/sessions/card-version.json',// 변경 여부만 묻는 경량 확인 — 폴링이 실제로 부르는 경로
   '/orders',                         // 오더 목록 화면
   '/',                               // Next 대시보드 페이지(3001에서 측정할 때)
   '/login',                          // DB를 타지 않는 대조군(순수 렌더링 비용)

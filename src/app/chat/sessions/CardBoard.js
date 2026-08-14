@@ -59,6 +59,8 @@ export default function CardBoard({ initialSessions, initialOnlineAgents, curren
   const [intakeLoading, setIntakeLoading] = useState(false);
   const intakeRefreshTimerRef = useRef(null);
   const listRefreshTimerRef = useRef(null);
+  // 마지막으로 받은 목록의 "버전". 폴링은 이 값이 달라졌을 때만 전체를 다시 읽는다.
+  const listVersionRef = useRef(null);
   const selectedIdRef = useRef(null);
   selectedIdRef.current = selected ? selected.id : null;
 
@@ -72,11 +74,19 @@ export default function CardBoard({ initialSessions, initialOnlineAgents, curren
 
     // 이벤트만 믿지 않는다. 이 신호는 헤더의 agent-presence SSE → Supabase Realtime 브로드캐스트를
     // 거쳐 오는데, 그 사슬 어디가 끊겨도(서버리스에서 SSE가 잘리거나 브로드캐스트가 유실되면)
-    // 화면을 열어둔 채로는 새 고객 발화가 영영 안 보인다. 목록은 가벼운 조회라 주기적으로도
-    // 다시 읽는다 — 실측으로 카카오 고객 메시지가 목록에 안 뜨던 문제의 마지막 안전장치다.
+    // 화면을 열어둔 채로는 새 고객 발화가 영영 안 보인다. 목록은 주기적으로도 다시 읽는다 —
+    // 실측으로 카카오 고객 메시지가 목록에 안 뜨던 문제의 마지막 안전장치다.
+    //
+    // 주기는 그대로 두고(반응 속도를 늦추지 않는다) 매번 목록 전체를 읽는 대신 "바뀌었는지"만
+    // 묻는다. card-data.json은 세션마다 상관 서브쿼리를 돌아 실측 120~155ms이고 세션 수에
+    // 비례해 무거워지는데, 버전 확인은 15ms이고 세션이 늘어도 그대로다. 폴링의 대부분은
+    // "바뀐 것 없음"으로 끝나므로 그 경우의 비용이 전체 비용을 정한다.
+    //
+    // 변경이 있을 때만 왕복이 한 번 더 늘어난다(수십 ms) — 그 대가로 조용한 시간대의 부하가
+    // 10분의 1이 된다. 폴링 간격을 늘리는 방식과 달리 반응 속도는 그대로다.
     const listPoll = setInterval(() => {
       if (document.hidden) return; // 백그라운드 탭에서는 돌리지 않는다
-      refreshList();
+      refreshListIfChanged();
     }, 10000);
 
     // 다른 탭에 갔다 돌아오면 그동안 놓친 것을 즉시 따라잡는다.
@@ -178,8 +188,23 @@ export default function CardBoard({ initialSessions, initialOnlineAgents, curren
       .then((data) => {
         setSessions(data.sessions || []);
         setOnlineAgents(data.onlineAgents || []);
+        // 받은 데이터의 버전을 기억해 둔다 — 다음 확인은 이 값과 비교한다. 서버가 전체 응답에
+        // 버전을 함께 실어주므로, 따로 물어보다 그 사이 변경을 놓치는 일이 없다.
+        if (data.version !== undefined) listVersionRef.current = data.version;
       })
       .catch(() => {});
+  }
+
+  // 바뀌었을 때만 전체를 다시 읽는다. 버전을 아직 모르면(첫 폴링 등) 그냥 전체를 읽어 맞춘다.
+  // 확인이 실패하면 전체 조회로 넘어간다 — 확인이 안 된다고 목록을 멈추면 안 된다.
+  function refreshListIfChanged() {
+    if (listVersionRef.current === null) { refreshList(); return; }
+    fetchJson('/chat/sessions/card-version.json')
+      .then((data) => {
+        if (!data || data.version === undefined) { refreshList(); return; }
+        if (data.version !== listVersionRef.current) refreshList();
+      })
+      .catch(() => { refreshList(); });
   }
 
   return (
