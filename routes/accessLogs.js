@@ -2,7 +2,7 @@ const express = require('express');
 const db = require('../db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const asyncHandler = require('../middleware/asyncHandler');
-const { archiveOldAccessLogs } = require('../lib/accessLogRetention');
+const { archiveOldAccessLogs, purgeArchivedAccessLogs } = require('../lib/accessLogRetention');
 
 const router = express.Router();
 
@@ -19,8 +19,11 @@ const cronRouter = express.Router();
 // 하루 한 번 돈다. 보관 기간을 넘긴 행을 아카이브로 옮기고, 남은 건수를 함께 돌려준다 —
 // 한 번에 다 못 옮기면(배치 상한) 다음 실행이 이어간다.
 cronRouter.get('/cron/archive', checkCronAuth, asyncHandler(async (req, res) => {
-  const result = await archiveOldAccessLogs();
-  res.json(result);
+  // 순서가 중요하다: 먼저 오래된 것을 아카이브로 옮기고, 그다음 아카이브에서 상한을 넘긴 것을
+  // 지운다. 반대로 하면 방금 옮긴 행이 같은 실행에서 지워질 수 있다(설정에 따라).
+  const archived = await archiveOldAccessLogs();
+  const purged = await purgeArchivedAccessLogs();
+  res.json({ archived, purged });
 }));
 
 router.use(requireAuth, requireRole('admin'));
