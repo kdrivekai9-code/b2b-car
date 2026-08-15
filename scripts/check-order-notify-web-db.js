@@ -106,7 +106,7 @@ async function main() {
     };
     const opts = () => ({
       ...baseOpts,
-      onlyOrderIds: [created.orderId, created.orderId2, created.orderId3, created.orderId4].filter(Boolean),
+      onlyOrderIds: [created.orderId, created.orderId2, created.orderId3, created.orderId4, created.orderId5].filter(Boolean),
     });
     const countMessages = async () => {
       const row = await db.get(
@@ -200,6 +200,47 @@ async function main() {
       console.log('  (건너뜀)');
     }
 
+    console.log('[사진첨부가 켜져 있으면 첨부가 실제로 붙는다]');
+    if (supportsDefer) {
+      // loadNotifyPhotos가 예외를 던져도 catch가 빈 배열로 삼켜 "첨부 없이 발송"이 되고,
+      // 통보 행은 성공으로 남아 조용히 묻힌다(실제로 MAX_NOTIFY_PHOTOS 상수를 지웠다가
+      // 버튼 없이 나간 적이 있다). 첨부가 실제로 실렸는지 눈으로 확인한다.
+      const photoOrder = await db.get(
+        `INSERT INTO orders (oid, branch_id, status, chat_session_id, order_type, memo_customer,
+                             origin_address, destination_address, reserved_date, reserved_time)
+         VALUES (?, ?, '기사배정', ?, 'dispatch', ?, ?, ?, ?, ?) RETURNING id`,
+        [`${MARK}-oid5`, branch.id, created.sessionId, MARK, '울산', '창원', '2026-08-24', '13:00']
+      );
+      created.orderId5 = photoOrder.id;
+      for (let seq = 1; seq <= 3; seq += 1) {
+        await db.run(
+          `INSERT INTO order_callmaner_photos (order_id, phase, seq, url) VALUES (?, 'start', ?, ?)`,
+          [created.orderId5, seq, `https://example.invalid/${MARK}_1_${seq}.jpg`]
+        ).catch(() => {});
+      }
+      await db.run(
+        `INSERT INTO branch_customer_notifications (branch_id, event_type, enabled, delay_minutes, message_template, attach_photos)
+         VALUES (?, 'started', true, 0, ?, true)
+         ON CONFLICT (branch_id, event_type) DO UPDATE SET attach_photos = true, enabled = true, delay_minutes = 0`,
+        [branch.id, notify.DEFAULT_EVENT_SETTINGS.started.template]
+      ).catch(() => {});
+      await db.run('UPDATE branch_photo_settings SET client_can_view = 1 WHERE branch_id = ?', [branch.id]).catch(() => {});
+
+      await transition(created.orderId5, '기사배정', '운행시작');
+      out = await notify.runKakaoOrderNotifications(opts());
+      check('첨부 켜진 통보가 발송된다', out.delivered.sent, 1);
+      const withAtt = await db.get(
+        `SELECT attachments_json FROM chat_messages WHERE session_id = ? ORDER BY id DESC LIMIT 1`,
+        [created.sessionId]
+      );
+      let parsed = null;
+      try { parsed = JSON.parse(withAtt.attachments_json || 'null'); } catch (e) { parsed = null; }
+      check('첨부가 실제로 실렸다', Array.isArray(parsed) && parsed.length, 3);
+      check('첨부에 캡션이 붙는다', !!(parsed && parsed[0] && /운행전/.test(parsed[0].caption)), true);
+    } else {
+      console.log('  (건너뜀)');
+    }
+
     console.log('[배차·운행시작은 대화 중이어도 미루지 않는다]');
     if (supportsDefer) {
       // 늦게 도착한 "기사님 배차되었습니다"는 안내로서 가치가 없다 — 봇이 답을 기다리는
@@ -265,7 +306,8 @@ async function main() {
     // 지사 설정 원복 — 손대기 전 상태로 통째로 되돌린다(attach_photos까지).
     await snapshot.restoreSettings(savedBranchId, savedSettings);
     // 만든 행만 지운다.
-    for (const id of [created.orderId, created.orderId2, created.orderId3, created.orderId4].filter(Boolean)) {
+    for (const id of [created.orderId, created.orderId2, created.orderId3, created.orderId4, created.orderId5].filter(Boolean)) {
+      await db.run('DELETE FROM order_callmaner_photos WHERE order_id = ?', [id]).catch(() => {});
       await db.run('DELETE FROM kakao_order_notifications WHERE order_id = ?', [id]).catch(() => {});
       await db.run('DELETE FROM order_status_history WHERE order_id = ?', [id]).catch(() => {});
       await db.run('DELETE FROM orders WHERE id = ?', [id]).catch(() => {});
