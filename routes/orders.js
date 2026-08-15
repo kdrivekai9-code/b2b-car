@@ -338,7 +338,10 @@ async function loadAiIntakeRestoreData(userId, requestedSessionId) {
   let existingDraft = null;
   if (existingSession) {
     existingMessages = await db.all(
-      `SELECT id, sender, message, created_at FROM chat_messages WHERE session_id = ? ORDER BY id ASC`,
+      // *로 받는다 — 컬럼을 나열하면 나중에 추가되는 것이 조용히 빠진다. 실제로
+      // attachments_json(통보에 딸린 사진)이 여기서 빠져 있어서, 고객이 대화를 다시 열면
+      // 사진이 사라졌다(실시간 수신 경로에는 있었는데 복원 경로에만 없었다).
+      `SELECT * FROM chat_messages WHERE session_id = ? ORDER BY id ASC`,
       [existingSession.id]
     );
     if (existingSession.draft_json) {

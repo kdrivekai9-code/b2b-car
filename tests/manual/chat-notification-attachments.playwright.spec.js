@@ -18,6 +18,7 @@ const MARK = 'e2e-attach-check';
 const PHOTO_URL = 'https://web-api-pic-vault.callmaner.com/image/e2e-attach-check_1_13.jpg';
 
 let sessionId = null;
+let webSessionId = null;
 let supported = false;
 
 test.beforeAll(async () => {
@@ -31,6 +32,20 @@ test.beforeAll(async () => {
     `INSERT INTO chat_sessions (user_id, status, channel) VALUES (NULL, 'bot', 'web') RETURNING id`
   );
   sessionId = Number(s.id);
+
+  // 고객 위젯은 로그인한 사용자의 세션만 복원한다 — 검사용 계정 소유로 하나 더 만든다.
+  const user = await db.get('SELECT id FROM users WHERE login_id = ?', [LOGIN_ID]).catch(() => null);
+  if (user) {
+    const w = await db.get(
+      `INSERT INTO chat_sessions (user_id, status, channel) VALUES (?, 'bot', 'web') RETURNING id`,
+      [user.id]
+    );
+    webSessionId = Number(w.id);
+    await db.run(
+      `INSERT INTO chat_messages (session_id, sender, message, attachments_json) VALUES (?, 'system', ?, ?)`,
+      [webSessionId, `${MARK} 요청하신 탁송건이 운행시작 되었습니다.`, JSON.stringify([{ url: PHOTO_URL, caption: '운행전 13' }])]
+    );
+  }
   await db.run(
     `INSERT INTO chat_messages (session_id, sender, message, attachments_json) VALUES (?, 'system', ?, ?)`,
     [
@@ -42,6 +57,10 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
+  if (webSessionId) {
+    await db.run('DELETE FROM chat_messages WHERE session_id = ?', [webSessionId]).catch(() => {});
+    await db.run('DELETE FROM chat_sessions WHERE id = ?', [webSessionId]).catch(() => {});
+  }
   if (sessionId) {
     await db.run('DELETE FROM chat_messages WHERE session_id = ?', [sessionId]).catch(() => {});
     await db.run('DELETE FROM chat_sessions WHERE id = ?', [sessionId]).catch(() => {});
@@ -69,5 +88,20 @@ test.describe('상담원 화면 · 통보 사진 첨부', () => {
     await expect(link).toHaveAttribute('rel', /noopener/);
     // 썸네일이 깨져도 캡션은 남아야 한다 — 이 URL은 실제로 열리지 않는다.
     await expect(link).toContainText('운행후 13');
+  });
+
+  test('고객 챗봇 위젯에서도 보인다', async ({ page }) => {
+    test.skip(!supported || !webSessionId, 'attachments_json 컬럼 또는 검사 계정이 없습니다');
+
+    // 상담원 화면과 고객 화면은 렌더러가 서로 다르다(SessionViewer/EJS vs ai-intake-render.js).
+    // 게다가 고객 화면은 "대화 복원" 경로로 메시지를 받는데, 그 조회가 attachments_json을
+    // 빼고 있어서 상담원 화면에만 사진이 보이던 적이 있다 — 그 갈라짐을 여기서 막는다.
+    await loginWithRetry(page, { baseUrl: BASE_URL, loginId: LOGIN_ID, password: PASSWORD });
+    await page.goto(`${BASE_URL}/orders/ai-intake?session=${webSessionId}`, { waitUntil: 'networkidle' });
+
+    const link = page.locator('.ai-chat-attachment');
+    await expect(link).toHaveCount(1);
+    await expect(link).toHaveAttribute('href', PHOTO_URL);
+    await expect(link).toContainText('운행전 13');
   });
 });
