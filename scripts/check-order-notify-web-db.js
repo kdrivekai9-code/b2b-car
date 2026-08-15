@@ -237,6 +237,12 @@ async function main() {
       try { parsed = JSON.parse(withAtt.attachments_json || 'null'); } catch (e) { parsed = null; }
       check('첨부가 실제로 실렸다', Array.isArray(parsed) && parsed.length, 3);
       check('첨부에 캡션이 붙는다', !!(parsed && parsed[0] && /운행전/.test(parsed[0].caption)), true);
+      // 웹은 썸네일이 붙으므로 본문에 링크를 덧붙이지 않는다(카카오만 덧붙인다).
+      const webBody = await db.get(
+        `SELECT message FROM chat_messages WHERE session_id = ? ORDER BY id DESC LIMIT 1`,
+        [created.sessionId]
+      );
+      check('웹 본문에는 링크 줄을 덧붙이지 않는다', /사진 보기: http/.test(webBody.message || ''), false);
     } else {
       console.log('  (건너뜀)');
     }
