@@ -19,7 +19,12 @@
     .group-title { font-size: 15px; font-weight: 700; margin: 0 0 8px; }
     .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
     .cell { display: block; text-decoration: none; color: inherit; }
-    .cell img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 8px;
+    <%# object-fit은 cover가 아니라 contain이다 — 사진이 잘리면 안 된다.
+        기사가 찍는 원본은 세로인데 콜마너는 400x300 가로 캔버스에 담아 내보낸다(EXIF 방향
+        정보도 없다). 지금은 4:3이라 cover여도 안 잘리지만, 콜마너가 원본 비율로 바꿔주면
+        cover는 세로 사진의 위아래를 잘라낸다. 분쟁 증빙으로 쓰는 사진이라 한 귀퉁이라도
+        가려지면 안 되므로 비율과 무관하게 전체를 보여준다. %>
+    .cell img { width: 100%; aspect-ratio: 4 / 3; object-fit: contain; border-radius: 8px;
                 border: 1px solid rgba(127,127,127,.3); background: rgba(127,127,127,.12); display: block; }
     .cap { font-size: 11.5px; text-align: center; margin-top: 3px; color: #6b7280; }
     .cap.odo { color: #0f766e; font-weight: 700; }
