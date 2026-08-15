@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title><%= title %></title>
+  <%# 고객이 카카오톡에서 바로 여는 페이지다 — 로그인도 사이드바도 없다.
+      대부분 모바일에서 열리므로 스타일을 이 파일 안에 두고 가볍게 유지한다. %>
+  <style>
+    :root { color-scheme: light dark; }
+    body { margin: 0; padding: 16px; font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif;
+           background: #f5f6f8; color: #1f2937; }
+    @media (prefers-color-scheme: dark) { body { background: #14171c; color: #e5e7eb; } }
+    .wrap { max-width: 720px; margin: 0 auto; }
+    h1 { font-size: 18px; margin: 0 0 4px; }
+    .sub { font-size: 13px; color: #6b7280; margin: 0 0 16px; }
+    .route { font-size: 14px; margin: 0 0 16px; line-height: 1.6; }
+    .group { margin-bottom: 24px; }
+    .group-title { font-size: 15px; font-weight: 700; margin: 0 0 8px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
+    .cell { display: block; text-decoration: none; color: inherit; }
+    .cell img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 8px;
+                border: 1px solid rgba(127,127,127,.3); background: rgba(127,127,127,.12); display: block; }
+    .cap { font-size: 11.5px; text-align: center; margin-top: 3px; color: #6b7280; }
+    .cap.odo { color: #0f766e; font-weight: 700; }
+    @media (prefers-color-scheme: dark) { .cap.odo { color: #5eead4; } }
+    .empty { padding: 32px 12px; text-align: center; color: #6b7280; font-size: 14px; line-height: 1.7; }
+    .note { margin-top: 20px; font-size: 12px; color: #9ca3af; line-height: 1.6; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <% if (reason === 'not_found') { %>
+      <div class="empty">
+        링크가 올바르지 않거나 만료되었습니다.<br>
+        담당 상담원에게 문의해 주세요.
+      </div>
+    <% } else if (reason === 'not_allowed') { %>
+      <div class="empty">
+        이 오더의 사진은 공개되어 있지 않습니다.<br>
+        담당 상담원에게 문의해 주세요.
+      </div>
+    <% } else { %>
+      <h1>탁송 사진</h1>
+      <p class="sub">접수번호 <%= order.oid %></p>
+      <% if (order.origin_address || order.destination_address) { %>
+        <p class="route"><%= order.origin_address || '' %><% if (order.destination_address) { %> → <%= order.destination_address %><% } %></p>
+      <% } %>
+
+      <% if (reason === 'no_photos') { %>
+        <div class="empty">아직 등록된 사진이 없습니다.</div>
+      <% } %>
+
+      <% groups.forEach(function (g) { %>
+        <div class="group">
+          <div class="group-title"><%= g.label %> · <%= g.items.length %>장</div>
+          <div class="grid">
+            <% g.items.forEach(function (p) { %>
+              <%# 콜마너 링크를 그대로 연다(우리 서버로 복사하지 않는다). 만료되면 썸네일이
+                  깨지므로 그때는 이미지를 숨기고 번호 글자만 남긴다. %>
+              <a class="cell" href="<%= p.url %>" target="_blank" rel="noopener">
+                <img src="<%= p.url %>" alt="<%= g.label %> <%= p.seq %>번째 사진" loading="lazy"
+                     onerror="this.style.display='none'">
+                <div class="cap<%= Number(p.seq) === Number(odometerIndex) ? ' odo' : '' %>">
+                  <%= p.seq %><% if (Number(p.seq) === Number(odometerIndex)) { %> 계기판<% } %>
+                </div>
+              </a>
+            <% }) %>
+          </div>
+        </div>
+      <% }) %>
+
+      <p class="note">
+        사진을 누르면 원본이 열립니다. 사진은 배차 시스템에서 제공되며 일정 기간이 지나면
+        열리지 않을 수 있습니다.
+      </p>
+    <% } %>
+  </div>
+</body>
+</html>

@@ -21,6 +21,7 @@ const locationAliasRoutes = require('./routes/locationAliases');
 const settingsRoutes = require('./routes/settings');
 const driverRoutes = require('./routes/drivers');
 const photoUploadRoutes = require('./routes/photoUpload');
+const photoViewRoutes = require('./routes/photoView');
 const pushRoutes = require('./routes/push');
 const kakaoRoutes = require('./routes/kakao');
 const knowledgeBaseRoutes = require('./routes/knowledgeBase');
@@ -139,6 +140,9 @@ if (!isTest) {
 // 로그인 없이 접근하는 기사 사진 업로드 페이지는 '/'에 마운트된(내부적으로 모든 경로를 가로채는)
 // authRoutes/dashboardRoutes보다 반드시 먼저 등록해야 requireAuth에 걸리지 않는다.
 app.use('/upload', photoUploadRoutes);
+// 고객용 사진 모아보기 — 로그인 없이 토큰으로 연다(카카오톡 버튼이 여는 페이지).
+// 업로드와 열람은 권한이 달라 토큰도 라우터도 분리한다.
+app.use('/photos', photoViewRoutes);
 // 콜마너 상태동기화 크론도 세션 로그인 없는 서버 대 서버 호출이라 같은 이유로 먼저 등록한다
 // (자체 CRON_SECRET 검증은 routes/callmanerSync.js 안에서 한다).
 app.use('/callmaner', callmanerSyncRoutes);
