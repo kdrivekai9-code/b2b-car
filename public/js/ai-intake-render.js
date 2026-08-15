@@ -42,18 +42,42 @@
       aiConnectionEl.title = 'AI 연결 확인중';
     }
 
+    // 강조 구간은 굵게, 주소(http)는 누를 수 있는 링크로. Next 버전은
+    // src/app/orders/ai-intake/formatChatText.js에 같은 규칙이 있다 — 한쪽만 고치면 갈라진다.
+    //
+    // 링크 처리가 필요한 이유: 능동 통보 본문 끝에 사진 모아보기 주소가 한 줄 붙는데, 텍스트
+    // 노드로만 그리면 고객이 누를 수 없다(카카오는 평문 주소를 알아서 링크로 만들어준다).
     function appendTextWithAutoBold(container, text) {
       var raw = String(text == null ? '' : text);
-      var re = /\*\*[^*\n]+\*\*|'[^'\n]+'|\d{1,3}(?:,\d{3})*원|\d+(?:\.\d+)?km/g;
+      var re = /https?:\/\/[^\s<>"']+|\*\*[^*\n]+\*\*|'[^'\n]+'|\d{1,3}(?:,\d{3})*원|\d+(?:\.\d+)?km/g;
       var last = 0;
       var match;
       while ((match = re.exec(raw)) !== null) {
         var index = match.index;
+        var token = match[0];
+        var isUrl = token.indexOf('http') === 0;
+        if (isUrl) {
+          // 문장 끝의 마침표·닫는괄호까지 주소로 빨아들이지 않는다.
+          var trimmed = token.replace(/[.,;:)\]}]+$/, '');
+          if (trimmed !== token) {
+            token = trimmed;
+            re.lastIndex = index + token.length;
+          }
+        }
         if (index > last) container.appendChild(document.createTextNode(raw.slice(last, index)));
-        var strong = document.createElement('strong');
-        strong.textContent = match[0].indexOf('**') === 0 ? match[0].slice(2, -2) : match[0];
-        container.appendChild(strong);
-        last = index + match[0].length;
+        if (isUrl) {
+          var a = document.createElement('a');
+          a.href = token;
+          a.target = '_blank';
+          a.rel = 'noopener noreferrer';
+          a.textContent = token;
+          container.appendChild(a);
+        } else {
+          var strong = document.createElement('strong');
+          strong.textContent = token.indexOf('**') === 0 ? token.slice(2, -2) : token;
+          container.appendChild(strong);
+        }
+        last = index + token.length;
       }
       if (last < raw.length) container.appendChild(document.createTextNode(raw.slice(last)));
     }

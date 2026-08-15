@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { renderChatText } from '../../orders/ai-intake/formatChatText';
 
 // 카드뷰(CardBoard.js)와 상세페이지(SessionDetailView.js) 둘 다 쓰는 공유 대화 뷰어 —
 // 메시지 목록/SSE 실시간 수신/답장/담당지정(self)/삭제, 이 다섯 가지는 legacy에서도
@@ -93,7 +94,9 @@ function MessageBubble({ message }) {
     <div className={`ai-chat-item ${who}`} data-id={message.id} data-sender={message.sender}>
       <div className={bubbleClass}>
         <span className="bubble-label">{label}{isAutoSent(message) ? ' · 자동 발송됨' : ''}</span>
-        {message.message || ''}
+        {/* 주소만 링크로 만든다(bold:false) — 상담원이 고객에게 나간 사진 모아보기 주소를
+            그대로 눌러 확인할 수 있어야 한다. 강조 서식은 고객 화면 것이라 여기선 켜지 않는다. */}
+        {renderChatText(message.message || '', { bold: false })}
         <MessageAttachments message={message} />
       </div>
       {(time || readText) && (

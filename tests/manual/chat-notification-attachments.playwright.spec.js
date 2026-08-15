@@ -16,6 +16,9 @@ const PASSWORD = process.env.E2E_PASSWORD || 'Admin!2345';
 
 const MARK = 'e2e-attach-check';
 const PHOTO_URL = 'https://web-api-pic-vault.callmaner.com/image/e2e-attach-check_1_13.jpg';
+// 본문 끝에 붙는 사진 모아보기 주소. 평문으로 그리면 고객이 누를 수 없다(카카오와 달리 웹은
+// 자동으로 링크가 되지 않는다) — 세 화면 모두 <a>로 그리는지 확인한다.
+const VIEW_URL = 'https://b2bcarkr.vercel.app/photos/e2e-attach-check-token';
 
 let sessionId = null;
 let webSessionId = null;
@@ -43,14 +46,14 @@ test.beforeAll(async () => {
     webSessionId = Number(w.id);
     await db.run(
       `INSERT INTO chat_messages (session_id, sender, message, attachments_json) VALUES (?, 'system', ?, ?)`,
-      [webSessionId, `${MARK} 요청하신 탁송건이 운행시작 되었습니다.`, JSON.stringify([{ url: PHOTO_URL, caption: '운행전 13' }])]
+      [webSessionId, `${MARK} 요청하신 탁송건이 운행시작 되었습니다.\n사진 7장 모두 보기: ${VIEW_URL}`, JSON.stringify([{ url: PHOTO_URL, caption: '운행전 13' }])]
     );
   }
   await db.run(
     `INSERT INTO chat_messages (session_id, sender, message, attachments_json) VALUES (?, 'system', ?, ?)`,
     [
       sessionId,
-      `${MARK} 요청하신 탁송건이 운행완료 되었습니다.`,
+      `${MARK} 요청하신 탁송건이 운행완료 되었습니다.\n사진 7장 모두 보기: ${VIEW_URL}`,
       JSON.stringify([{ url: PHOTO_URL, caption: '운행후 13' }]),
     ]
   );
@@ -88,6 +91,15 @@ test.describe('상담원 화면 · 통보 사진 첨부', () => {
     await expect(link).toHaveAttribute('rel', /noopener/);
     // 썸네일이 깨져도 캡션은 남아야 한다 — 이 URL은 실제로 열리지 않는다.
     await expect(link).toContainText('운행후 13');
+
+    // 상담원이 "고객에게 무엇이 나갔는지" 볼 수 있어야 하므로 주소 자체는 본문에 남아야 한다.
+    //
+    // 여기서 <a>까지 요구하지 않는 이유: 이 검사는 기본값이 Express(3000)라 레거시 EJS 화면을
+    // 본다. 그쪽은 서버에서 <%= %>로 escape해 찍으므로 링크로 만들려면 HTML을 직접 조립해야
+    // 하는데, 롤백용 화면에 주입 경로를 여는 값을 하지 못한다 — 주소가 보이면 복사해서 열 수
+    // 있다. 프로덕션이 실제로 띄우는 Next 화면(SessionViewer)은 renderChatText로 링크가 되고,
+    // 그건 prod 빌드로 확인했다(next dev는 StrictMode 때문에 이 화면에 메시지가 아예 안 뜬다).
+    await expect(bubble).toContainText(VIEW_URL);
   });
 
   test('고객 챗봇 위젯에서도 보인다', async ({ page }) => {
@@ -103,5 +115,10 @@ test.describe('상담원 화면 · 통보 사진 첨부', () => {
     await expect(link).toHaveCount(1);
     await expect(link).toHaveAttribute('href', PHOTO_URL);
     await expect(link).toContainText('운행전 13');
+
+    // 고객 화면에서도 본문의 주소가 링크여야 한다 — 웹은 5장에서 썸네일이 잘리므로 나머지를
+    // 볼 방법이 이 링크뿐이다. 텍스트로만 그리면 기능 자체가 없는 것과 같다.
+    const viewLink = page.locator(`a[href="${VIEW_URL}"]`);
+    await expect(viewLink).toHaveCount(1);
   });
 });

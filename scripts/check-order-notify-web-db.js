@@ -212,7 +212,9 @@ async function main() {
         [`${MARK}-oid5`, branch.id, created.sessionId, MARK, '울산', '창원', '2026-08-24', '13:00']
       );
       created.orderId5 = photoOrder.id;
-      for (let seq = 1; seq <= 3; seq += 1) {
+      // 일부러 MAX_NOTIFY_PHOTOS(5)보다 많이 넣는다 — 웹은 썸네일을 5장에서 자르므로,
+      // 나머지를 볼 링크 줄이 붙는지가 이 블록의 핵심이다.
+      for (let seq = 1; seq <= 7; seq += 1) {
         await db.run(
           `INSERT INTO order_callmaner_photos (order_id, phase, seq, url) VALUES (?, 'start', ?, ?)`,
           [created.orderId5, seq, `https://example.invalid/${MARK}_1_${seq}.jpg`]
@@ -235,14 +237,15 @@ async function main() {
       );
       let parsed = null;
       try { parsed = JSON.parse(withAtt.attachments_json || 'null'); } catch (e) { parsed = null; }
-      check('첨부가 실제로 실렸다', Array.isArray(parsed) && parsed.length, 3);
+      check('첨부는 5장에서 잘린다', Array.isArray(parsed) && parsed.length, 5);
       check('첨부에 캡션이 붙는다', !!(parsed && parsed[0] && /운행전/.test(parsed[0].caption)), true);
-      // 웹은 썸네일이 붙으므로 본문에 링크를 덧붙이지 않는다(카카오만 덧붙인다).
+      // 잘린 나머지를 볼 방법이 웹에 없으면 안 된다 — 카카오는 링크로 전부 볼 수 있는데 웹만
+      // 5장에서 끊겨 채널 간 안내가 어긋나 있었다. 전체 장수를 밝힌 링크 줄이 본문에 붙는다.
       const webBody = await db.get(
         `SELECT message FROM chat_messages WHERE session_id = ? ORDER BY id DESC LIMIT 1`,
         [created.sessionId]
       );
-      check('웹 본문에는 링크 줄을 덧붙이지 않는다', /사진 보기: http/.test(webBody.message || ''), false);
+      check('웹 본문에 전체 장수 링크 줄이 붙는다', /사진 7장 모두 보기: http/.test(webBody.message || ''), true);
     } else {
       console.log('  (건너뜀)');
     }

@@ -291,25 +291,8 @@
     return null;
   }
 
-  function appendTextWithAutoBold(container, text) {
-    var raw = String(text == null ? '' : text);
-    var re = /\*\*[^*\n]+\*\*|'[^'\n]+'|\d{1,3}(?:,\d{3})*원|\d+(?:\.\d+)?km/g;
-    var last = 0;
-    var match;
-    while ((match = re.exec(raw)) !== null) {
-      var index = match.index;
-      if (index > last) {
-        container.appendChild(document.createTextNode(raw.slice(last, index)));
-      }
-      var strong = document.createElement('strong');
-      strong.textContent = match[0].indexOf('**') === 0 ? match[0].slice(2, -2) : match[0];
-      container.appendChild(strong);
-      last = index + match[0].length;
-    }
-    if (last < raw.length) {
-      container.appendChild(document.createTextNode(raw.slice(last)));
-    }
-  }
+  // (여기 있던 appendTextWithAutoBold 사본은 지웠다 — 이 파일은 렌더링을 renderer에 넘기므로
+  //  호출되지 않는 죽은 코드였고, ai-intake-render.js 쪽만 고치면 조용히 어긋난다.)
 
   function parseKstDateTime(raw) {
     if (!raw) return null;
