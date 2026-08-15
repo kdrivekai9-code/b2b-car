@@ -74,9 +74,23 @@ searchQueries에 정확히 1개만 넣어라(절대 여러 개 넣지 말 것).
 
 // 카카오 검색이 0건일 때만 호출 — Gemini에게 오타 교정 후보를 물어 재검색 시도한다(Redis 캐시나
 // 헤드리스 폴백 없이 Gemini 보정 한 단계만 추가한 축소 버전).
+//
+// thinking을 끈다. 이 호출은 고객이 그대로 기다리는 자리다 — 검색이 0건일 때만 불리므로
+// 이 시간이 곧 "결과가 없습니다 → 다시 검색하겠습니다" 사이의 침묵이다. 실사용에서 5,069ms가
+// 찍혔다(2026-08-14 세션 923, ai_call_logs).
+//
+// 실측 A/B(케이스 3종 × 3회, 어려운 오타 4종 × 3회 추가):
+//   thinking ON   수완한양수장인아파트 4,931ms / 롯데시티호텔 대전 2,237ms / 판교역 스타박스 2,155ms
+//   thinking OFF  같은 순서로            940ms /                902ms /                843ms
+//   정확도는 양쪽 모두 전부 정답(어려운 오타 12건 포함). 유일하게 달랐던 출력은
+//   "수완 한양수자인 아파트"(띄어쓰기)인데, 카카오 검색에 넣으면 원문(2건)보다 많은 5건이
+//   나오고 최상위 결과가 같아 오히려 낫다.
+// 즉 이 작업은 자유 문장에서 여러 필드를 뽑는 일(generateJson 기본 ON이 필요한 쪽)이 아니라
+// 후보 하나를 고르는 좁은 판단이라, lib/vertexAi.js 주석의 "스키마가 작고 판단이 단순한 호출"에
+// 해당한다. 5배 빠르고 정확도 손실이 없다.
 async function correctSearchQueryWithGemini(query) {
   try {
-    const result = await generateJson(ADDRESS_CORRECTION_INSTRUCTION, query, ADDRESS_CORRECTION_SCHEMA, { op: 'address_correct' });
+    const result = await generateJson(ADDRESS_CORRECTION_INSTRUCTION, query, ADDRESS_CORRECTION_SCHEMA, { thinking: false, op: 'address_correct' });
     const searchQueries = Array.isArray(result.searchQueries)
       ? result.searchQueries.map((v) => String(v || '').trim()).filter(Boolean).slice(0, 1)
       : [];
