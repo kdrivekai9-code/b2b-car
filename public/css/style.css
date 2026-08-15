@@ -718,6 +718,13 @@ textarea.single-line-textarea{min-height:36px;height:36px;padding:8px 10px;resiz
 .upload-gallery{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}
 .upload-gallery img{width:100%;height:80px;object-fit:cover;border-radius:6px;border:1px solid var(--border);}
 
+/* 콜마너 탁송사진 — 기사가 휴대폰으로 세로로 찍은 사진이라 9:16 세로 틀로 보여준다(사용자 지정).
+   기사 업로드 사진(.upload-gallery, 80px 가로 썸네일)과 성격이 달라 격자를 따로 둔다.
+   참고: 콜마너는 지금 세로 사진을 400x300 가로 캔버스에 눕혀 내보내고 있어서, 그게 고쳐지기
+   전까지는 이 틀 안에서 가운데가 확대돼 보인다. 원본은 클릭하면 그대로 열린다. */
+.callmaner-gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:8px;}
+.callmaner-gallery img{width:100%;aspect-ratio:9/16;height:auto;object-fit:cover;border-radius:6px;border:1px solid var(--border);background:rgba(127,127,127,.12);display:block;}
+
 @media (max-width:900px){
   .content{padding:10px 16px 40px;}
   .app{flex-direction:column;}

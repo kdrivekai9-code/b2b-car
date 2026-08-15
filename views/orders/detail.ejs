@@ -108,7 +108,7 @@
           <p class="page-sub" style="margin:6px 0 4px;">
             <strong><%= phase === 'start' ? '운행전' : '운행후' %></strong> <%= rows.length %>장
           </p>
-          <div class="upload-gallery">
+          <div class="callmaner-gallery">
             <% rows.forEach(function (p) { %>
               <a href="<%= p.url %>" target="_blank" rel="noopener" class="upload-photo-item">
                 <img src="<%= p.url %>" alt="<%= phase === 'start' ? '운행전' : '운행후' %> <%= p.seq %>번째 사진"

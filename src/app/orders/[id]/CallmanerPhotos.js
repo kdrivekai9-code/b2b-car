@@ -21,7 +21,7 @@ export default function CallmanerPhotos({ photos }) {
         return (
           <div key={phase}>
             <p className="page-sub" style={{ margin: '6px 0 4px' }}><strong>{label}</strong> {group.length}장</p>
-            <div className="upload-gallery">
+            <div className="callmaner-gallery">
               {group.map((p) => (
                 <a key={p.id} href={p.url} target="_blank" rel="noreferrer" className="upload-photo-item">
                   <img
