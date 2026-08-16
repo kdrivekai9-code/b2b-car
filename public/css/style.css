@@ -237,6 +237,10 @@ textarea{width:100%;min-height:70px;}
 form .row{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:14px;}
 form .field{display:flex;flex-direction:column;gap:5px;flex:1;min-width:200px;}
 form .field label{font-size:12px;color:var(--muted);font-weight:600;}
+/* 필드 아래 안내 문구. 스타일이 없어서 브라우저 기본 16px로 나오고 있었다 — 라벨(12px)·입력값
+   (13px)보다 커서, 그 옆에 놓인 선택박스가 상대적으로 작아 보였다(계정정보의 역할·소속지사가
+   바로 이 문구와 붙어 있다). 라벨과 같은 급으로 맞춘다. */
+form .field .hint{font-size:12px;color:var(--muted);line-height:1.6;}
 form .field.full{flex-basis:100%;}
 .required-mark{color:#dc2626;font-weight:800;margin-left:1px;}
 
