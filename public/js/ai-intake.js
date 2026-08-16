@@ -2928,9 +2928,13 @@
 
   // 배차 주문 도우미(콜마너 MCP 도구)에게 이번 메시지를 넘긴다. 처리했으면 말풍선을 붙이고
   // 대화 로그에도 남긴 뒤 true, 처리하지 못했으면 false를 돌려준다(호출부가 기존 경로로 폴백).
-  function tryDispatchAgent(text) {
+  // preloaded: 의도분류 응답(/orders/ai-intake/parse)에 이미 실려 온 도우미 결과. 서버가
+  // 분류와 도우미를 같이 돌려주므로, 있으면 요청을 한 번 아낀다(routes/orders.js의 주석 참조).
+  // 없으면 예전 그대로 도우미를 직접 부른다.
+  function tryDispatchAgent(text, preloaded) {
     if (!sessionId) return Promise.resolve(false);
-    return api.dispatchAgent(sessionId, text).then(function (result) {
+    var pending = preloaded ? Promise.resolve(preloaded) : api.dispatchAgent(sessionId, text);
+    return pending.then(function (result) {
       if (!result || !result.handled || !result.message) {
         if (dispatchAgentActive) {
           dispatchAgentActive = false;
@@ -4187,7 +4191,8 @@
           // 되묻기(noteTrouble) 규칙을 그대로 따라야 한다.
           if (!isAgentRequest(text) && !(phase === 'collecting' && pendingField)) {
             showThinkingBubble();
-            tryDispatchAgent(text).then(function (agentHandled) {
+            // 서버가 분류와 함께 이미 돌려준 결과가 있으면 그걸 쓴다(왕복 1회 절약).
+            tryDispatchAgent(text, data && data.dispatchAgent).then(function (agentHandled) {
               hideThinkingBubble();
               if (agentHandled) return;
               logBotMessage(handleUnsupportedIntent(data)).then(function (finalText) {

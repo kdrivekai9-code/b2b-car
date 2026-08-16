@@ -9,6 +9,11 @@ const { kstNow } = require('../lib/period');
 const { parseIntakeText } = require('../lib/aiIntakeParser');
 const { classifyAndExtract, classifyPhaseReply } = require('../lib/hybridChat');
 const { searchKnowledgeBase } = require('../lib/knowledgeSearch');
+// lib/mcpDispatchAgent는 이 파일의 updateOrderWithCallmaner를 require한다 — 여기서 맞require하면
+// 순환참조가 되어 그쪽이 로드 시점에 undefined를 잡는다(실제로 경고가 떴다). 쓰는 순간에 부른다.
+function dispatchAgentLib() {
+  return require('../lib/mcpDispatchAgent');
+}
 const { buildFareSuggestion } = require('../lib/agentAssist');
 // 인사·자기소개 응답은 카카오 상담톡(routes/kakaoConsult.js)과 같은 규칙을 써야 해서 공용 모듈로 뺐다.
 const { isGreeting, getSmalltalkMessage } = require('../lib/smallTalk');
@@ -609,6 +614,70 @@ function classifyOrderIntentByRule(text, fields) {
   return null;
 }
 
+// 클라이언트(public/js/ai-intake.js)가 도우미를 부르기 전에 거르는 조건과 같은 규칙을 서버에도
+// 둔다 — 명시적인 "상담원 연결"은 도우미를 거치지 않고, 되묻는 질문에 답하는 중(pendingField)에도
+// 도우미로 새지 않는다. 여기서는 미리 돌릴지 말지를 정할 뿐이라, 이 판단이 어긋나도 클라이언트가
+// 예전처럼 /dispatch-agent를 직접 부르는 경로가 그대로 남아 있어 기능이 빠지지는 않는다.
+const AGENT_REQUEST_RE = /상담원|상담사/;
+// 오더접수 본문처럼 보이면 미리 돌리지 않는다 — 어차피 접수 의도로 분류돼 결과를 버리게 되고,
+// 트래픽 대부분이 접수라 그만큼이 고스란히 낭비되는 Gemini 호출이 된다(클라이언트의 같은 이름
+// 함수와 같은 규칙).
+const ORDER_INTAKE_HINT_RE = /\d{2,3}[-\s]?\d{3,4}[-\s]?\d{4}|(^|[\n\s])(출발|출:|출\s|도착|도:|도\s|경유|경:|경\d)/;
+
+// 도우미가 실제로 다루는 일(주문 조회/변경/취소, 기사 연락처, 어디쯤인지, 요금 인상)의 신호가
+// 있을 때만 미리 돌린다.
+//
+// 왜 좁히는가: 투기 실행은 Gemini 한 번이 아니라 에이전트 한 판이다(실측 ≈3.3초, 모델 2라운드 +
+// 도구 호출). FAQ 질문마다 이걸 돌려놓고 버리면 낭비가 크다. 신호를 놓쳐도 손해는 "느려지는 것"
+// 뿐이다 — 그 경우 클라이언트가 예전처럼 /dispatch-agent를 직접 부른다.
+const DISPATCH_HINT_RE = /주문|오더|접수번호|배차|기사|취소|변경|수정|어디|언제\s*(와|도착)|도착\s*(시간|예정)|출발했|픽업|요금\s*(올려|인상|추가)|얼마나\s*(걸|남)/;
+
+function shouldProbeDispatch(text, pendingField, chatSessionId) {
+  if (!chatSessionId || pendingField) return false;
+  if (AGENT_REQUEST_RE.test(text) || ORDER_INTAKE_HINT_RE.test(text)) return false;
+  return DISPATCH_HINT_RE.test(text);
+}
+
+function startDispatchProbe(req, { text, pendingField, chatSessionId }) {
+  if (!shouldProbeDispatch(text, pendingField, chatSessionId)) return null;
+
+  return (async () => {
+    // 이 라우트는 원래 세션 소유를 확인하지 않는다(FAQ 검색 힌트로만 써서 민감한 값을 돌려주지
+    // 않기 때문). 도우미 결과는 남의 주문 내역일 수 있으므로 여기서는 반드시 확인한다.
+    // admin 우회도 두지 않는다 — 이건 고객이 자기 대화창에서 쓰는 경로다.
+    const session = await db.get('SELECT user_id, status FROM chat_sessions WHERE id = ?', [chatSessionId]);
+    if (!session || session.user_id !== req.session.user.id) return null;
+    if (session.status !== 'bot') return null; // 상담원이 붙은 세션에는 봇이 끼어들지 않는다
+
+    const history = await db.all(
+      `SELECT sender, message FROM chat_messages
+       WHERE session_id = ? AND sender IN ('user', 'bot') AND message IS NOT NULL
+       ORDER BY id DESC LIMIT 12`,
+      [chatSessionId]
+    );
+    history.reverse();
+    // 방금 저장된 이번 메시지는 text로 따로 넘기므로 히스토리 끝에서 뺀다(/dispatch-agent와 동일).
+    if (history.length && history[history.length - 1].sender === 'user' && history[history.length - 1].message === text) {
+      history.pop();
+    }
+    return dispatchAgentLib().runDispatchAgent({ user: req.session.user, sessionId: chatSessionId, text, history, speculative: true });
+  })().catch((e) => {
+    console.error('배차 도우미 사전 실행 실패:', e.message);
+    return null;
+  });
+}
+
+// 결과를 쓰지 않고 버릴 때 — 투기 실행이 남긴 대기 상태(목록 이어보기 위치 등)를 지운다.
+// 투기 실행은 대기 상태가 이미 있으면 아예 물러나므로(speculative_pending), 여기서 지우는 건
+// 반드시 그 실행이 만든 것이다. 남겨두면 다음 메시지가 "다음"으로 오해될 수 있다.
+function discardDispatchProbe(probe, chatSessionId) {
+  if (!probe) return;
+  probe.then((result) => {
+    if (!result || !result.handled) return;
+    return dispatchAgentLib().clearPending(chatSessionId);
+  }).catch((e) => console.error('배차 도우미 사전 실행 정리 실패:', e.message));
+}
+
 // 인사말은 의미 검색에 필요한 정보가 없어 어떤 지식 항목과도 우연히 유사해질 수 있다.
 // 이 경우 RAG와 의도 분류를 건너뛰고 대화 시작 안내를 반환한다.
 // 하이브리드 챗봇 1단계: 지식검색(FAQ) + 오더접수. Gemini로 의도를 분류해 두 갈래로 라우팅하고,
@@ -663,6 +732,15 @@ router.post('/ai-intake/parse', asyncHandler(async (req, res) => {
   const knowledgeSearchPromise = searchKnowledgeBase(text, { limit: 1, threshold: 0.7, sessionId: chatSessionId })
     .catch((e) => { console.error('지식베이스 사전 검색 실패:', e.message); return []; });
 
+  // 배차 주문 도우미(콜마너 MCP)도 지금 같이 출발시킨다 — 지식검색과 같은 이유다.
+  //
+  // 지금까지는 "의도분류 → unsupported 판정 → 클라이언트가 /dispatch-agent 재요청"으로
+  // 직렬이라, 고객은 분류(≈1.7초)를 기다린 뒤에야 도우미가 돌기 시작했다(실측 ai_call_logs:
+  // embed 0.6s ∥ intent_light 1.7s → HTTP 왕복 → mcp_dispatch 0.7~1.4s = 3~5초).
+  // 미리 같이 돌려두고 unsupported일 때만 그 결과를 쓰면 분류 시간이 통째로 겹쳐 사라지고,
+  // 왕복도 한 번 줄어든다. 접수 의도였으면 결과는 버린다(runDispatchAgent의 speculative 주석).
+  const dispatchProbe = startDispatchProbe(req, { text, pendingField, chatSessionId });
+
   // 접수 턴 엔진(/chat/:id/intake-turn)이 방금 같은 문장을 분류하고 fallthrough하면서 그 결과를
   // 함께 넘겨주면, 여기서 Gemini를 다시 태우지 않고 재사용한다 — 같은 발화에 분류 LLM이 두 번
   // 도는 것을 없애 응답 지연을 절반으로 줄인다(서버 접수턴이 켜진 경우에만 해당). 형태가 어긋난
@@ -682,6 +760,11 @@ router.post('/ai-intake/parse', asyncHandler(async (req, res) => {
   // 화남/답답함 신호는 의도(intent)와 무관하게 감지될 수 있어 응답 분기와 상관없이 항상 함께 내려준다.
   const seemsFrustrated = !!(geminiResult && geminiResult.seemsFrustrated);
 
+  // unsupported가 아니면 도우미 결과는 쓰지 않는다.
+  if (!(geminiResult && geminiResult.intent === 'unsupported')) {
+    discardDispatchProbe(dispatchProbe, chatSessionId);
+  }
+
   if (geminiResult && geminiResult.intent === 'faq') {
     // 구간이 붙은 요금 문의("사당역에서 반포역까지 얼마?")는 지식검색으로 풀 수 없다 —
     // 거리마다 답이 달라 등록해 둘 수 있는 항목이 아니다. 실제 요금표로 계산해 답한다.
@@ -696,7 +779,16 @@ router.post('/ai-intake/parse', asyncHandler(async (req, res) => {
   }
 
   if (geminiResult && geminiResult.intent === 'unsupported') {
-    return res.json({ intent: 'unsupported', requestedFeature: geminiResult.requestedFeature || null, seemsFrustrated });
+    // 미리 돌려둔 도우미가 답을 만들었으면 그대로 실어 보낸다 — 클라이언트가 /dispatch-agent를
+    // 다시 부르는 왕복이 사라진다. 못 만들었으면(조건 미충족·투기 중단·처리 불가) 이 필드 없이
+    // 나가고, 클라이언트는 예전 그대로 도우미를 직접 부른다(기능 회귀 없음).
+    const agent = dispatchProbe ? await dispatchProbe : null;
+    return res.json({
+      intent: 'unsupported',
+      requestedFeature: geminiResult.requestedFeature || null,
+      seemsFrustrated,
+      ...(agent && agent.handled ? { dispatchAgent: agent } : {}),
+    });
   }
 
   const fields = geminiResult ? normalizeGeminiOrderFields(geminiResult) : parseIntakeText(text);
@@ -2058,3 +2150,5 @@ module.exports = router;
 // 재사용한다 — Express 라우터 함수 자체에 속성을 붙이는 것이라 app.use(orderRoutes) 쪽에는
 // 영향이 없다.
 module.exports.updateOrderWithCallmaner = updateOrderWithCallmaner;
+// 도우미 사전 실행 여부 판단 — 순수함수라 검사에서 직접 부른다(scripts/check-mcp-speculative.js).
+module.exports.shouldProbeDispatch = shouldProbeDispatch;
