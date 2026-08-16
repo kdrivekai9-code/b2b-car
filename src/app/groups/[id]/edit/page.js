@@ -20,7 +20,7 @@ export default async function EditGroupPage({ params }) {
   if (res.status === 404) throw new Error('법인을 찾을 수 없습니다.');
   if (!res.ok) throw new Error('법인 정보를 불러오지 못했습니다 (' + res.status + ')');
 
-  const { currentUser, group, branches } = await res.json();
+  const { currentUser, group, groups, branches } = await res.json();
 
   return (
     <AppShell currentUser={currentUser} activePath="/groups">
@@ -37,7 +37,7 @@ export default async function EditGroupPage({ params }) {
       </div>
       {/* 법인 설정 탭. 요금표·고객통보 화면은 Express(EJS)가 그리는데 이 화면만 탭이 없어서,
           거기서 '법인 정보'를 누르면 탭 줄이 사라지고 되돌아갈 길이 끊겼다. */}
-      <GroupTabs active="basic" group={group} />
+      <GroupTabs active="basic" group={group} groups={groups || []} />
       <div className="card">
         <GroupForm mode="edit" group={group} branches={branches} />
       </div>

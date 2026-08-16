@@ -12,7 +12,7 @@
 </div>
 <%# 신규 등록에는 대상 법인이 없어 탭을 걸 곳이 없다 — 수정일 때만 보여준다. %>
 <% if (mode === 'edit') { %>
-  <%- include('../partials/group_tabs', { group: group, active: 'basic' }) %>
+  <%- include('../partials/group_tabs', { group: group, groups: groups, active: 'basic' }) %>
 <% } %>
 <div class="card">
   <form id="groupForm" method="POST" action="<%= mode === 'create' ? '/groups' : '/groups/' + group.id %>">

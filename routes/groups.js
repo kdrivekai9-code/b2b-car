@@ -115,21 +115,23 @@ router.post('/', asyncHandler(async (req, res) => {
 }));
 
 router.get('/:id/edit/data.json', asyncHandler(async (req, res) => {
-  const [group, branches] = await Promise.all([
-    db.get('SELECT * FROM groups_tbl WHERE id = ?', [req.params.id]),
+  // groups는 탭 줄 오른쪽의 법인 전환 선택박스가 쓴다 — 이게 없으면 다른 탭에는 있는 전환이
+  // 법인정보 화면에서만 사라진다(다른 화면은 loadGroupWithSiblings로 이미 함께 넘긴다).
+  const [{ group, groups }, branches] = await Promise.all([
+    loadGroupWithSiblings(req.params.id),
     db.all('SELECT * FROM branches ORDER BY name'),
   ]);
   if (!group) return res.status(404).json({ error: 'not_found' });
-  res.json({ currentUser: req.session.user, group, branches });
+  res.json({ currentUser: req.session.user, group, groups, branches });
 }));
 
 router.get('/:id/edit', asyncHandler(async (req, res) => {
-  const [group, branches] = await Promise.all([
-    db.get('SELECT * FROM groups_tbl WHERE id = ?', [req.params.id]),
+  const [{ group, groups }, branches] = await Promise.all([
+    loadGroupWithSiblings(req.params.id),
     db.all('SELECT * FROM branches ORDER BY name'),
   ]);
   if (!group) return res.status(404).send('법인을 찾을 수 없습니다.');
-  res.render('groups/form', { title: '법인 정보', group, branches, mode: 'edit' });
+  res.render('groups/form', { title: '법인 정보', group, groups, branches, mode: 'edit' });
 }));
 
 router.post('/:id', asyncHandler(async (req, res) => {
