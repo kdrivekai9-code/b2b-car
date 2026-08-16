@@ -8,6 +8,7 @@
     <a class="btn" href="/groups/new">+ 법인 등록</a>
   </div>
 </div>
+<%- include('../partials/group_tabs', { groups: groups, active: 'list' }) %>
 <div class="card">
   <div class="table-wrap">
   <table>
@@ -16,7 +17,8 @@
       <% if (groups.length === 0) { %><tr><td colspan="6" class="empty">등록된 법인이 없습니다.</td></tr><% } %>
       <% groups.forEach(function(g){ %>
         <tr>
-          <td><%= g.name %></td>
+          <%# 법인명을 누르면 법인 정보로 간다 — 목록에서 곧바로 설정에 들어가는 통로다. %>
+          <td><a href="/groups/<%= g.id %>/edit"><%= g.name %></a></td>
           <td><%= g.branch_name %></td>
           <td><%= g.main_phone || '-' %></td>
           <td><%= g.business_registration_number || '-' %></td>

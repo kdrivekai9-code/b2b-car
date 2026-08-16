@@ -1,6 +1,7 @@
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import AppShell from '../_components/AppShell';
+import GroupTabs from './_components/GroupTabs';
 
 export const dynamic = 'force-dynamic';
 export const preferredRegion = 'icn1';
@@ -31,6 +32,7 @@ export default async function GroupsPage() {
           <a className="btn" href="/groups/new">+ 법인 등록</a>
         </div>
       </div>
+      <GroupTabs active="list" groups={groups} />
       <div className="card">
         <div className="table-wrap">
           <table>
@@ -43,7 +45,9 @@ export default async function GroupsPage() {
               )}
               {groups.map((g) => (
                 <tr key={g.id}>
-                  <td>{g.name}</td>
+                  {/* 법인명을 누르면 법인 정보로 간다 — 목록에서 곧바로 설정에 들어가는 통로다.
+                      관리 열의 '수정'과 같은 곳을 가리키지만, 이름을 누르는 것이 더 자연스럽다. */}
+                  <td><a href={`/groups/${g.id}/edit`}>{g.name}</a></td>
                   <td>{g.main_phone || '-'}</td>
                   <td>{g.branch_name}</td>
                   <td>{g.contact_name || '-'}{g.contact_phone ? ' · ' + g.contact_phone : ''}</td>
