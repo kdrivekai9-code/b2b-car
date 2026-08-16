@@ -24,7 +24,12 @@
           <td>
             <div class="table-actions">
               <a class="btn small secondary" href="/groups/<%= g.id %>/edit">법인정보</a>
-              <a class="btn small" href="/groups/<%= g.id %>/users">사용자 리스트</a>
+              <%# 법인별 설정(정책 변경) — 요금표·통보를 지사가 아니라 법인 단위로 관리한다. %>
+              <a class="btn small" href="/groups/<%= g.id %>/accounts">계정정보</a>
+              <a class="btn small secondary" href="/groups/<%= g.id %>/fare-rules">탁송 요금</a>
+              <a class="btn small secondary" href="/groups/<%= g.id %>/daily-driver-fare-rules">일일기사 요금</a>
+              <a class="btn small secondary" href="/groups/<%= g.id %>/customer-notifications">고객 통보</a>
+              <a class="btn small secondary" href="/groups/<%= g.id %>/dispatch-delay">배차지연</a>
             </div>
           </td>
         </tr>

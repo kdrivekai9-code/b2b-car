@@ -1,46 +1,46 @@
 <%- include('../partials/header') %>
 <div class="page-head-row">
   <div>
-    <h1 class="page-title"><%= branch.name %> · 탁송 요금</h1>
+    <h1 class="page-title"><%= group.name %> · 탁송 요금</h1>
     <p class="page-sub">거리 기반 자동요금 계산 규칙입니다. 계산식: 기본요금 + (거리 − 기준거리) × (할증요금 ÷ 할증단위)</p>
   </div>
   <div class="page-head-actions">
-    <a class="btn secondary" href="/branches">지사 목록으로</a>
+    <a class="btn secondary" href="/groups">법인 목록으로</a>
     <button class="btn" type="submit" form="fareForm">저장</button>
   </div>
 </div>
-<%- include('../partials/branch_tabs', { branch: branch, active: 'fare' }) %>
+<%- include('../partials/group_tabs', { group: group, groups: groups, active: 'fare' }) %>
 
+<% if (error) { %><div class="alert error"><%= error %></div><% } %>
+
+<%# 비어 있을 때 무엇이 적용되는지 반드시 밝힌다 — 빈 표만 보이면 요금이 0원인 줄 안다. %>
 <div class="card">
-  <div class="section-title">📋 다른 지사 요금표 복사</div>
-  <form method="POST" action="/branches/<%= branch.id %>/fare-rules/copy" onsubmit="return confirm('선택한 지사의 요금표로 현재 지사 설정을 덮어쓸까요?');">
-    <div class="row">
-      <div class="field">
-        <label>원본 지사 선택</label>
-        <select name="source_branch_id" required>
-          <option value="">선택하세요</option>
-          <% branches.forEach(function (b) { if (b.id !== branch.id) { %>
-            <option value="<%= b.id %>"><%= b.name %></option>
-          <% } }) %>
-        </select>
-      </div>
-      <div class="field" style="display:flex;align-items:flex-end;">
-        <button class="btn secondary" type="submit">이 지사로 요금표 복사</button>
-      </div>
-    </div>
-    <p class="page-sub" style="margin-top:8px;">구간요금 규칙과 부가 요금/노출 설정이 함께 복사됩니다.</p>
-  </form>
+  <div class="section-title">📌 현재 적용되는 요금표</div>
+  <% if (tiers.length) { %>
+    <p class="page-sub" style="margin:0;"><b>이 법인 전용 요금표</b>가 적용됩니다. (구간 <%= tiers.length %>개)</p>
+  <% } else { %>
+    <p class="page-sub" style="margin:0;">
+      이 법인에 등록된 요금표가 없어 <b>소속 지사(<%= group.branch_name || '-' %>)의 탁송 요금표</b>가 적용됩니다.
+      (지사 구간 <%= branchTiers.length %>개<%= branchExtra.fare_table_enabled ? '' : ' · 지사 요금표 사용 꺼짐' %>)
+    </p>
+    <% if (branchTiers.length) { %>
+      <form method="POST" action="/groups/<%= group.id %>/fare-rules/copy" style="margin-top:10px;"
+            onsubmit="return confirm('소속 지사 요금표를 이 법인으로 복사할까요?');">
+        <button class="btn secondary" type="submit">소속 지사 요금표 가져오기</button>
+      </form>
+    <% } %>
+  <% } %>
 </div>
 
-<form id="fareForm" method="POST" action="/branches/<%= branch.id %>/fare-rules">
+<form id="fareForm" method="POST" action="/groups/<%= group.id %>/fare-rules">
   <div class="card">
     <div class="section-title">📏 거리 구간별 요금 규칙</div>
     <div class="table-wrap">
-    <table id="fareTiersTable" data-branch-id="<%= branch.id %>" data-representative="1">
+    <table id="fareTiersTable">
       <thead>
         <tr>
           <th>구간</th><th>기준거리(km)</th><th>기본요금(원)</th><th>할증단위(km)</th><th>할증요금(원)</th>
-          <th>최대거리(km)</th><th>최대요금(원)</th><th>반올림단위</th><th>반올림방식</th><th>대표요금제</th><th></th>
+          <th>최대거리(km)</th><th>최대요금(원)</th><th>반올림단위</th><th>반올림방식</th><th></th>
         </tr>
       </thead>
       <tbody id="fareTiersBody">
@@ -61,7 +61,6 @@
                 <option value="down" <%= t.round_method === 'down' ? 'selected' : '' %>>내림</option>
               </select>
             </td>
-            <td style="text-align:center;"><input type="checkbox" name="tier_representative" value="<%= i %>" class="tier-representative-toggle" data-tier-id="<%= t.id %>" <%= t.is_representative ? 'checked' : '' %>></td>
             <td><button type="button" class="btn small secondary remove-tier-btn">삭제</button></td>
           </tr>
         <% }) %>
@@ -83,18 +82,14 @@
       <div class="field"><label>도착 후 취소요금(원)</label><input type="number" name="cancel_after_fee" value="<%= extra.cancel_after_fee || 0 %>" min="0"></div>
     </div>
     <div class="row">
-      <div class="field"><label class="checkline"><input type="checkbox" name="fare_table_enabled" value="1" <%= extra.fare_table_enabled ? 'checked' : '' %>> 이 요금표 사용 (미사용 시 요금을 수동으로 입력)</label></div>
+      <div class="field"><label class="checkline"><input type="checkbox" name="fare_table_enabled" value="1" <%= extra.fare_table_enabled ? 'checked' : '' %>> 이 요금표 사용 (끄면 소속 지사 요금표를 씁니다)</label></div>
       <div class="field"><label class="checkline"><input type="checkbox" name="fare_visible_to_client" value="1" <%= extra.fare_visible_to_client !== 0 ? 'checked' : '' %>> 고객사(딜러)에게 요금 노출</label></div>
       <div class="field"><label class="checkline"><input type="checkbox" name="fare_editable_by_client" value="1" <%= extra.fare_editable_by_client ? 'checked' : '' %>> 고객사(딜러)의 금액 수정 허용</label></div>
     </div>
   </div>
 </form>
 
-<% if (typeof saved !== 'undefined' && saved) { %>
-  <div class="toast" id="fareSavedToast">저장되었습니다.</div>
-<% } %>
-<% if (typeof copied !== 'undefined' && copied) { %>
-  <div class="toast" id="fareCopiedToast"><%= copiedFrom ? (copiedFrom + ' 지사의 요금표를 복사했습니다.') : '요금표를 복사했습니다.' %></div>
-<% } %>
+<% if (saved) { %><div class="toast">저장되었습니다.</div><% } %>
+<% if (copied) { %><div class="toast">소속 지사 요금표를 가져왔습니다.</div><% } %>
 <script src="/js/fare-rules.js"></script>
 <%- include('../partials/footer') %>

@@ -51,7 +51,13 @@ export default async function GroupsPage() {
                   <td>
                     <div className="table-actions">
                       <a className="btn small secondary" href={'/groups/' + g.id + '/edit'}>수정</a>
-                      <a className="btn small secondary" href={'/groups/' + g.id + '/users'}>구성원</a>
+                      {/* 법인별 설정(정책 변경) — 요금표·통보를 지사가 아니라 법인 단위로 관리한다.
+                          각 화면은 EJS(routes/groups.js)로, 지사 설정 화면과 같은 모양이다. */}
+                      <a className="btn small secondary" href={'/groups/' + g.id + '/accounts'}>계정정보</a>
+                      <a className="btn small secondary" href={'/groups/' + g.id + '/fare-rules'}>탁송 요금</a>
+                      <a className="btn small secondary" href={'/groups/' + g.id + '/daily-driver-fare-rules'}>일일기사 요금</a>
+                      <a className="btn small secondary" href={'/groups/' + g.id + '/customer-notifications'}>고객 통보</a>
+                      <a className="btn small secondary" href={'/groups/' + g.id + '/dispatch-delay'}>배차지연</a>
                     </div>
                   </td>
                 </tr>

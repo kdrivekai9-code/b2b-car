@@ -2,6 +2,12 @@ const express = require('express');
 const db = require('../db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const asyncHandler = require('../middleware/asyncHandler');
+const bcrypt = require('bcryptjs');
+const kakaoOrderNotify = require('../lib/kakaoOrderNotify');
+// 지사 화면과 같은 표시 규칙을 쓴다 — 복사하면 갈라진다.
+const {
+  NOTIFY_PHOTO_EVENTS, DISPATCH_CALL_TYPES, parseCallTypes, buildEventRows,
+} = require('../lib/customerNotifySettings');
 
 const router = express.Router();
 router.use(requireAuth, requireRole('admin'));
@@ -218,6 +224,461 @@ router.get('/:id/users', asyncHandler(async (req, res) => {
 
   if (!group) return res.status(404).send('법인을 찾을 수 없습니다.');
   res.render('groups/users', { title: '법인 사용자 리스트', group, users });
+}));
+
+// ============================================================================
+// 법인별 설정 (정책 변경: 요금표·고객통보를 지사별에서 법인별로 관리한다)
+//
+// 지사 설정을 없애지 않는다 — 법인에 값이 없으면 지사 값을 그대로 쓴다. 그래서 각 화면은
+// "지금 무엇이 적용되고 있는지"를 반드시 밝힌다. 빈 표만 보여주면 요금이 0원이거나 통보가
+// 꺼진 줄 알게 된다.
+// ============================================================================
+
+// 탭 전환 셀렉트가 쓸 법인 목록까지 함께 읽는다(지사 화면의 loadBranch*와 같은 방식).
+async function loadGroupWithSiblings(groupId) {
+  const [group, groups] = await Promise.all([
+    db.get(`
+      SELECT g.*, b.name AS branch_name
+      FROM groups_tbl g
+      LEFT JOIN branches b ON b.id = g.branch_id
+      WHERE g.id = ?
+    `, [groupId]),
+    db.all('SELECT id, name FROM groups_tbl ORDER BY name'),
+  ]);
+  return { group, groups };
+}
+
+// ---------------- 계정정보 ----------------
+// 법인 소속 계정을 이 화면 안에서 등록/수정한다. 법인이 자동으로 고정되므로 실수로 다른 법인에
+// 계정을 만들 일이 없다(사용자 확정). 삭제는 두지 않고 비활성화만 한다 — 그 계정으로 접수된
+// 오더·상담 이력이 남아 있어서, 행을 지우면 이력에서 사용자명이 사라진다(사용자 확정).
+router.get('/:id/accounts', asyncHandler(async (req, res) => {
+  const { group, groups } = await loadGroupWithSiblings(req.params.id);
+  if (!group) return res.status(404).send('법인을 찾을 수 없습니다.');
+  const [users, branches] = await Promise.all([
+    db.all(`
+      SELECT u.*, b.name AS branch_name
+      FROM users u
+      LEFT JOIN branches b ON b.id = u.branch_id
+      WHERE u.group_id = ?
+      ORDER BY u.status = 'active' DESC, u.id DESC
+    `, [req.params.id]),
+    db.all('SELECT id, name FROM branches ORDER BY id'),
+  ]);
+  res.render('groups/accounts', {
+    title: '계정정보 - ' + group.name,
+    group, groups, users, branches,
+    editing: users.find((u) => String(u.id) === String(req.query.edit)) || null,
+    error: req.query.error || null,
+    notice: req.query.notice || null,
+  });
+}));
+
+router.post('/:id/accounts', asyncHandler(async (req, res) => {
+  const base = '/groups/' + req.params.id + '/accounts';
+  const group = await db.get('SELECT id, branch_id FROM groups_tbl WHERE id = ?', [req.params.id]);
+  if (!group) return res.status(404).send('법인을 찾을 수 없습니다.');
+
+  const loginId = String(req.body.login_id || '').trim();
+  const name = String(req.body.name || '').trim();
+  const password = String(req.body.password || '');
+  const role = ['admin', 'branch_manager', 'client'].includes(req.body.role) ? req.body.role : 'client';
+  const phone = String(req.body.phone || '').trim();
+  // 지사를 고르지 않으면 법인이 속한 지사로 둔다 — 이 화면에서 만드는 계정은 그 법인 소속이라
+  // 다른 지사로 새는 편이 오히려 사고다.
+  const branchId = Number(req.body.branch_id) || group.branch_id || null;
+
+  if (!loginId) return res.redirect(base + '?error=' + encodeURIComponent('아이디를 입력해주세요.'));
+  if (!name) return res.redirect(base + '?error=' + encodeURIComponent('이름을 입력해주세요.'));
+  if (!password || password.length < 4) {
+    return res.redirect(base + '?error=' + encodeURIComponent('비밀번호는 4자 이상으로 입력해주세요.'));
+  }
+  const duplicate = await db.get('SELECT id FROM users WHERE login_id = ?', [loginId]);
+  if (duplicate) return res.redirect(base + '?error=' + encodeURIComponent(`이미 사용 중인 아이디입니다: ${loginId}`));
+
+  const hash = await bcrypt.hash(password, 10);
+  await db.run(
+    `INSERT INTO users (login_id, password_hash, name, phone, role, branch_id, group_id, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'active')`,
+    [loginId, hash, name, phone, role, branchId, req.params.id]
+  );
+  res.redirect(base + '?notice=' + encodeURIComponent(`계정 "${name}"(${loginId})을 등록했습니다.`));
+}));
+
+router.post('/:id/accounts/:userId', asyncHandler(async (req, res) => {
+  const base = '/groups/' + req.params.id + '/accounts';
+  // 이 법인 소속 계정만 고칠 수 있다(주소창으로 남의 계정 id를 넣는 것 방지).
+  const user = await db.get('SELECT * FROM users WHERE id = ? AND group_id = ?', [req.params.userId, req.params.id]);
+  if (!user) return res.redirect(base + '?error=' + encodeURIComponent('이 법인 소속 계정이 아닙니다.'));
+
+  const name = String(req.body.name || '').trim();
+  const phone = String(req.body.phone || '').trim();
+  const role = ['admin', 'branch_manager', 'client'].includes(req.body.role) ? req.body.role : user.role;
+  const branchId = Number(req.body.branch_id) || user.branch_id || null;
+  const password = String(req.body.password || '');
+  if (!name) return res.redirect(base + '?error=' + encodeURIComponent('이름을 입력해주세요.'));
+  if (password && password.length < 4) {
+    return res.redirect(base + '?error=' + encodeURIComponent('비밀번호는 4자 이상으로 입력해주세요.'));
+  }
+
+  // 비밀번호는 입력했을 때만 바꾼다 — 빈 칸으로 저장했다고 비밀번호가 지워지면 안 된다.
+  if (password) {
+    const hash = await bcrypt.hash(password, 10);
+    await db.run(
+      'UPDATE users SET name=?, phone=?, role=?, branch_id=?, password_hash=? WHERE id=?',
+      [name, phone, role, branchId, hash, user.id]
+    );
+  } else {
+    await db.run(
+      'UPDATE users SET name=?, phone=?, role=?, branch_id=? WHERE id=?',
+      [name, phone, role, branchId, user.id]
+    );
+  }
+  res.redirect(base + '?notice=' + encodeURIComponent(`계정 "${name}" 정보를 저장했습니다.`));
+}));
+
+router.post('/:id/accounts/:userId/status', asyncHandler(async (req, res) => {
+  const base = '/groups/' + req.params.id + '/accounts';
+  const user = await db.get('SELECT * FROM users WHERE id = ? AND group_id = ?', [req.params.userId, req.params.id]);
+  if (!user) return res.redirect(base + '?error=' + encodeURIComponent('이 법인 소속 계정이 아닙니다.'));
+  // 자기 계정을 스스로 잠그면 화면에서 나가지도 못한다.
+  if (String(user.id) === String(req.session.user.id)) {
+    return res.redirect(base + '?error=' + encodeURIComponent('본인 계정은 여기서 비활성화할 수 없습니다.'));
+  }
+  const next = user.status === 'active' ? 'inactive' : 'active';
+  await db.run('UPDATE users SET status = ? WHERE id = ?', [next, user.id]);
+  res.redirect(base + '?notice=' + encodeURIComponent(
+    `계정 "${user.name}"을 ${next === 'active' ? '활성화' : '비활성화'}했습니다.`
+  ));
+}));
+
+// ---------------- 탁송 요금 ----------------
+// 지사 요금표(fare_rules)와 같은 구조·같은 화면 부품을 쓴다. 다른 점은 하나 — 이 표가 비어
+// 있으면 지사 표가 적용된다는 사실을 화면이 밝힌다.
+async function loadGroupFarePage(groupId) {
+  const { group, groups } = await loadGroupWithSiblings(groupId);
+  if (!group) return { group: null };
+  const [tiers, extraRow, branchTiers, branchExtra] = await Promise.all([
+    db.all('SELECT * FROM group_fare_rules WHERE group_id = ? ORDER BY tier_seq', [groupId]),
+    db.get('SELECT * FROM group_fare_extra_settings WHERE group_id = ?', [groupId]),
+    db.all('SELECT * FROM fare_rules WHERE branch_id = ? ORDER BY tier_seq', [group.branch_id]),
+    db.get('SELECT * FROM fare_extra_settings WHERE branch_id = ?', [group.branch_id]),
+  ]);
+  return { group, groups, tiers, extra: extraRow || {}, branchTiers, branchExtra: branchExtra || {} };
+}
+
+router.get('/:id/fare-rules', asyncHandler(async (req, res) => {
+  const page = await loadGroupFarePage(req.params.id);
+  if (!page.group) return res.status(404).send('법인을 찾을 수 없습니다.');
+  res.render('groups/fare_rules', {
+    title: '탁송 요금 - ' + page.group.name,
+    ...page,
+    saved: req.query.saved === '1',
+    copied: req.query.copied === '1',
+    error: req.query.error || null,
+  });
+}));
+
+// 지사 표를 그대로 가져와 시작한다(사용자 확정) — 같은 표를 손으로 다시 넣게 하지 않는다.
+router.post('/:id/fare-rules/copy', asyncHandler(async (req, res) => {
+  const base = '/groups/' + req.params.id + '/fare-rules';
+  const group = await db.get('SELECT id, branch_id FROM groups_tbl WHERE id = ?', [req.params.id]);
+  if (!group) return res.status(404).send('법인을 찾을 수 없습니다.');
+  if (!group.branch_id) return res.redirect(base + '?error=' + encodeURIComponent('이 법인에 소속 지사가 없습니다.'));
+
+  const [tiers, extra] = await Promise.all([
+    db.all('SELECT * FROM fare_rules WHERE branch_id = ? ORDER BY tier_seq', [group.branch_id]),
+    db.get('SELECT * FROM fare_extra_settings WHERE branch_id = ?', [group.branch_id]),
+  ]);
+  if (!tiers.length) return res.redirect(base + '?error=' + encodeURIComponent('소속 지사에 등록된 탁송 요금표가 없습니다.'));
+
+  const client = await db.pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('DELETE FROM group_fare_rules WHERE group_id = $1', [req.params.id]);
+    for (const t of tiers) {
+      await client.query(
+        `INSERT INTO group_fare_rules (group_id, tier_seq, base_distance_km, base_fare, surcharge_unit_km,
+                                       surcharge_fare, max_distance_km, max_fare, round_unit, round_method, is_representative)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+        [req.params.id, t.tier_seq, t.base_distance_km, t.base_fare, t.surcharge_unit_km,
+          t.surcharge_fare, t.max_distance_km, t.max_fare, t.round_unit, t.round_method, t.is_representative]
+      );
+    }
+    const e = extra || {};
+    await client.query(
+      `INSERT INTO group_fare_extra_settings (group_id, round_trip_ratio, wait_threshold_min, wait_fee,
+                                              cancel_before_fee, cancel_after_fee, fare_table_enabled,
+                                              fare_visible_to_client, fare_editable_by_client)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+       ON CONFLICT (group_id) DO UPDATE SET
+         round_trip_ratio = excluded.round_trip_ratio,
+         wait_threshold_min = excluded.wait_threshold_min,
+         wait_fee = excluded.wait_fee,
+         cancel_before_fee = excluded.cancel_before_fee,
+         cancel_after_fee = excluded.cancel_after_fee,
+         fare_table_enabled = excluded.fare_table_enabled,
+         fare_visible_to_client = excluded.fare_visible_to_client,
+         fare_editable_by_client = excluded.fare_editable_by_client`,
+      [req.params.id, e.round_trip_ratio || 180, e.wait_threshold_min || 15, e.wait_fee || 0,
+        e.cancel_before_fee || 0, e.cancel_after_fee || 0, e.fare_table_enabled ? 1 : 0,
+        e.fare_visible_to_client === 0 ? 0 : 1, e.fare_editable_by_client ? 1 : 0]
+    );
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+  res.redirect(base + '?copied=1');
+}));
+
+router.post('/:id/fare-rules', asyncHandler(async (req, res) => {
+  const b = (v) => [].concat(v || []);
+  const baseDist = b(req.body.base_distance_km);
+  const baseFare = b(req.body.base_fare);
+  const surUnit = b(req.body.surcharge_unit_km);
+  const surFare = b(req.body.surcharge_fare);
+  const maxDist = b(req.body.max_distance_km);
+  const maxFare = b(req.body.max_fare);
+  const roundUnit = b(req.body.round_unit);
+  const roundMethod = b(req.body.round_method);
+
+  await db.run('DELETE FROM group_fare_rules WHERE group_id = ?', [req.params.id]);
+  for (let i = 0; i < baseDist.length; i++) {
+    if (baseDist[i] === '' && baseFare[i] === '') continue;
+    await db.run(`
+      INSERT INTO group_fare_rules (group_id, tier_seq, base_distance_km, base_fare, surcharge_unit_km,
+                                    surcharge_fare, max_distance_km, max_fare, round_unit, round_method)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+      req.params.id, i + 1,
+      Number(baseDist[i]) || 0, Number(baseFare[i]) || 0,
+      Number(surUnit[i]) || 1, Number(surFare[i]) || 0,
+      maxDist[i] ? Number(maxDist[i]) : null, maxFare[i] ? Number(maxFare[i]) : null,
+      Number(roundUnit[i]) || 1000, roundMethod[i] || 'round',
+    ]);
+  }
+
+  const {
+    round_trip_ratio, wait_threshold_min, wait_fee, cancel_before_fee, cancel_after_fee,
+    fare_table_enabled, fare_visible_to_client, fare_editable_by_client,
+  } = req.body;
+  await db.run(
+    `INSERT INTO group_fare_extra_settings (group_id, round_trip_ratio, wait_threshold_min, wait_fee,
+                                            cancel_before_fee, cancel_after_fee, fare_table_enabled,
+                                            fare_visible_to_client, fare_editable_by_client)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT (group_id) DO UPDATE SET
+       round_trip_ratio = excluded.round_trip_ratio,
+       wait_threshold_min = excluded.wait_threshold_min,
+       wait_fee = excluded.wait_fee,
+       cancel_before_fee = excluded.cancel_before_fee,
+       cancel_after_fee = excluded.cancel_after_fee,
+       fare_table_enabled = excluded.fare_table_enabled,
+       fare_visible_to_client = excluded.fare_visible_to_client,
+       fare_editable_by_client = excluded.fare_editable_by_client`,
+    [req.params.id, Number(round_trip_ratio) || 180, Number(wait_threshold_min) || 15,
+      Number(wait_fee) || 0, Number(cancel_before_fee) || 0, Number(cancel_after_fee) || 0,
+      fare_table_enabled ? 1 : 0, fare_visible_to_client ? 1 : 0, fare_editable_by_client ? 1 : 0]
+  );
+  res.redirect('/groups/' + req.params.id + '/fare-rules?saved=1');
+}));
+
+// ---------------- 일일기사 요금 ----------------
+// 시간 구간 기반(지사의 premium_fare_rules와 같은 구조). 이 상품에 실제로 쓰이는 표라 이름을
+// 일일기사로 맞췄다 — 프리미엄(대리)은 요금 체계가 나오면 별도 표를 만든다.
+router.get('/:id/daily-driver-fare-rules', asyncHandler(async (req, res) => {
+  const { group, groups } = await loadGroupWithSiblings(req.params.id);
+  if (!group) return res.status(404).send('법인을 찾을 수 없습니다.');
+  const [tiers, branchTiers] = await Promise.all([
+    db.all('SELECT * FROM group_daily_driver_fare_rules WHERE group_id = ? ORDER BY tier_seq', [req.params.id]),
+    db.all('SELECT * FROM premium_fare_rules WHERE branch_id = ? ORDER BY tier_seq', [group.branch_id]),
+  ]);
+  res.render('groups/daily_driver_fare_rules', {
+    title: '일일기사 요금 - ' + group.name,
+    group, groups, tiers, branchTiers,
+    saved: req.query.saved === '1',
+    copied: req.query.copied === '1',
+    error: req.query.error || null,
+  });
+}));
+
+router.post('/:id/daily-driver-fare-rules/copy', asyncHandler(async (req, res) => {
+  const base = '/groups/' + req.params.id + '/daily-driver-fare-rules';
+  const group = await db.get('SELECT id, branch_id FROM groups_tbl WHERE id = ?', [req.params.id]);
+  if (!group) return res.status(404).send('법인을 찾을 수 없습니다.');
+  const tiers = await db.all('SELECT * FROM premium_fare_rules WHERE branch_id = ? ORDER BY tier_seq', [group.branch_id]);
+  if (!tiers.length) return res.redirect(base + '?error=' + encodeURIComponent('소속 지사에 등록된 일일기사 요금표가 없습니다.'));
+
+  await db.run('DELETE FROM group_daily_driver_fare_rules WHERE group_id = ?', [req.params.id]);
+  for (const t of tiers) {
+    await db.run(
+      `INSERT INTO group_daily_driver_fare_rules (group_id, tier_seq, base_hours, fare_amount, extra_per_hour, note)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [req.params.id, t.tier_seq, t.base_hours, t.fare_amount, t.extra_per_hour, t.note || null]
+    );
+  }
+  res.redirect(base + '?copied=1');
+}));
+
+router.post('/:id/daily-driver-fare-rules', asyncHandler(async (req, res) => {
+  const b = (v) => [].concat(v || []);
+  const baseHours = b(req.body.base_hours);
+  const fareAmount = b(req.body.fare_amount);
+  const extraPerHour = b(req.body.extra_per_hour);
+  const note = b(req.body.note);
+
+  await db.run('DELETE FROM group_daily_driver_fare_rules WHERE group_id = ?', [req.params.id]);
+  for (let i = 0; i < baseHours.length; i++) {
+    if (baseHours[i] === '' && fareAmount[i] === '') continue;
+    await db.run(
+      `INSERT INTO group_daily_driver_fare_rules (group_id, tier_seq, base_hours, fare_amount, extra_per_hour, note)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [req.params.id, i + 1, Number(baseHours[i]) || 0, Number(fareAmount[i]) || 0,
+        Number(extraPerHour[i]) || 0, (note[i] || '').trim() || null]
+    );
+  }
+  res.redirect('/groups/' + req.params.id + '/daily-driver-fare-rules?saved=1');
+}));
+
+// ---------------- 프리미엄(대리) 요금 ----------------
+// 요금 체계가 아직 정해지지 않아 자리만 만들어 둔다(사용자 확정). 표를 미리 만들어두면 비어 있는
+// 표가 계산에 끼어들 수 있어, 저장할 곳 자체를 두지 않았다.
+router.get('/:id/premium-fare-rules', asyncHandler(async (req, res) => {
+  const { group, groups } = await loadGroupWithSiblings(req.params.id);
+  if (!group) return res.status(404).send('법인을 찾을 수 없습니다.');
+  res.render('groups/premium_fare_rules', { title: '프리미엄(대리) 요금 - ' + group.name, group, groups });
+}));
+
+// ---------------- 고객 통보 ----------------
+// 사건 목록·문구 규칙·미리보기는 지사 화면과 한 벌을 쓴다(lib/customerNotifySettings.js).
+// 저장된 값이 없으면 지사 값을 보여주고, 그 사실을 화면이 밝힌다(inherited).
+router.get('/:id/customer-notifications', asyncHandler(async (req, res) => {
+  const { group, groups } = await loadGroupWithSiblings(req.params.id);
+  if (!group) return res.status(404).send('법인을 찾을 수 없습니다.');
+  const [saved, branchSaved] = await Promise.all([
+    db.all('SELECT * FROM group_customer_notifications WHERE group_id = ?', [req.params.id]).catch(() => []),
+    db.all('SELECT * FROM branch_customer_notifications WHERE branch_id = ?', [group.branch_id]).catch(() => []),
+  ]);
+  res.render('groups/customer_notifications', {
+    title: '고객 통보 - ' + group.name,
+    group, groups,
+    events: buildEventRows(saved, { inheritedRows: branchSaved }),
+    variables: kakaoOrderNotify.TEMPLATE_VARIABLES,
+    hasOwnSettings: saved.length > 0,
+    error: req.query.error || null,
+    notice: req.query.notice || null,
+  });
+}));
+
+router.post('/:id/customer-notifications', asyncHandler(async (req, res) => {
+  const base = '/groups/' + req.params.id + '/customer-notifications';
+  const group = await db.get('SELECT id FROM groups_tbl WHERE id = ?', [req.params.id]);
+  if (!group) return res.status(404).send('법인을 찾을 수 없습니다.');
+
+  // 한 번에 다 받는다 — 절반만 저장되면 화면에 보이는 것과 실제로 나가는 문구가 어긋난다.
+  const rows = [];
+  for (const key of kakaoOrderNotify.EVENT_TYPES) {
+    const fallback = kakaoOrderNotify.DEFAULT_EVENT_SETTINGS[key];
+    const delayMinutes = Number(req.body['delay_' + key]);
+    // textarea의 \r\n을 그대로 저장하면 고객에게 나가는 문구에 캐리지 리턴이 섞인다.
+    const template = String(req.body['message_' + key] || '').replace(/\r\n?/g, '\n').trim();
+    if (!Number.isInteger(delayMinutes) || delayMinutes < 0 || delayMinutes > 120) {
+      return res.redirect(base + '?error=' + encodeURIComponent(`${fallback.label}의 보내는 시점은 0~120분 사이로 입력해주세요.`));
+    }
+    if (!template) {
+      return res.redirect(base + '?error=' + encodeURIComponent(`${fallback.label}의 문구를 입력해주세요.`));
+    }
+    rows.push({
+      key,
+      enabled: !!req.body['enabled_' + key],
+      delayMinutes,
+      template,
+      attachPhotos: NOTIFY_PHOTO_EVENTS.has(key) && !!req.body['attach_photos_' + key],
+    });
+  }
+
+  for (const row of rows) {
+    await db.run(`
+      INSERT INTO group_customer_notifications (group_id, event_type, enabled, delay_minutes, message_template, attach_photos)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT (group_id, event_type) DO UPDATE SET
+        enabled = excluded.enabled,
+        delay_minutes = excluded.delay_minutes,
+        message_template = excluded.message_template,
+        attach_photos = excluded.attach_photos,
+        updated_at = now()
+    `, [req.params.id, row.key, row.enabled, row.delayMinutes, row.template, row.attachPhotos]);
+  }
+  res.redirect(base + '?notice=' + encodeURIComponent('고객 통보 설정이 저장되었습니다.'));
+}));
+
+// 법인 설정을 지우면 다시 지사 설정을 따른다 — "지사와 같게 되돌리기"를 이렇게 제공한다.
+router.post('/:id/customer-notifications/reset', asyncHandler(async (req, res) => {
+  await db.run('DELETE FROM group_customer_notifications WHERE group_id = ?', [req.params.id]);
+  res.redirect('/groups/' + req.params.id + '/customer-notifications?notice='
+    + encodeURIComponent('법인 설정을 지웠습니다. 이제 소속 지사 설정을 따릅니다.'));
+}));
+
+// ---------------- 배차지연 알림 ----------------
+// 저장소는 지사 화면과 같은 dispatch_delay_settings다(이미 group_id로 법인별이었다). 지사 화면은
+// 그 지사의 모든 법인을 한 줄씩 관리하고, 이 화면은 이 법인 한 줄만 관리한다 — 같은 행이다.
+router.get('/:id/dispatch-delay', asyncHandler(async (req, res) => {
+  const { group, groups } = await loadGroupWithSiblings(req.params.id);
+  if (!group) return res.status(404).send('법인을 찾을 수 없습니다.');
+  const setting = await db.get(
+    'SELECT * FROM dispatch_delay_settings WHERE branch_id = ? AND group_id = ?',
+    [group.branch_id, req.params.id]
+  ).catch(() => null);
+  res.render('groups/dispatch_delay', {
+    title: '배차지연 알림 - ' + group.name,
+    group, groups, setting,
+    callTypes: DISPATCH_CALL_TYPES,
+    selected: setting ? String(setting.call_types || '').split(',').map((v) => v.trim()) : [],
+    error: req.query.error || null,
+    notice: req.query.notice || null,
+  });
+}));
+
+router.post('/:id/dispatch-delay', asyncHandler(async (req, res) => {
+  const base = '/groups/' + req.params.id + '/dispatch-delay';
+  const group = await db.get('SELECT id, branch_id FROM groups_tbl WHERE id = ?', [req.params.id]);
+  if (!group) return res.status(404).send('법인을 찾을 수 없습니다.');
+  if (!group.branch_id) return res.redirect(base + '?error=' + encodeURIComponent('이 법인에 소속 지사가 없습니다.'));
+
+  const callTypes = parseCallTypes(req.body.call_types);
+  const delayMinutes = Number(req.body.delay_minutes);
+  const raiseAmount = Number(req.body.raise_amount);
+  if (!callTypes.length) {
+    return res.redirect(base + '?error=' + encodeURIComponent('적용할 콜 유형을 하나 이상 선택해주세요.'));
+  }
+  if (!Number.isInteger(delayMinutes) || delayMinutes < 1 || delayMinutes > 120) {
+    return res.redirect(base + '?error=' + encodeURIComponent('배차지연 판단 시간은 1~120분 사이로 입력해주세요.'));
+  }
+  if (!Number.isInteger(raiseAmount) || raiseAmount < 1000 || raiseAmount > 10000 || raiseAmount % 1000 !== 0) {
+    return res.redirect(base + '?error=' + encodeURIComponent('요금 상향금액은 1,000원 단위로 10,000원까지 선택해주세요.'));
+  }
+
+  await db.run(`
+    INSERT INTO dispatch_delay_settings (branch_id, group_id, call_types, delay_minutes, raise_amount)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT (branch_id, group_id) DO UPDATE SET
+      call_types = excluded.call_types,
+      delay_minutes = excluded.delay_minutes,
+      raise_amount = excluded.raise_amount,
+      updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS')
+  `, [group.branch_id, req.params.id, callTypes.join(','), delayMinutes, raiseAmount]);
+  res.redirect(base + '?notice=' + encodeURIComponent('배차지연 알림 설정이 저장되었습니다.'));
+}));
+
+router.post('/:id/dispatch-delay/delete', asyncHandler(async (req, res) => {
+  const group = await db.get('SELECT branch_id FROM groups_tbl WHERE id = ?', [req.params.id]);
+  await db.run('DELETE FROM dispatch_delay_settings WHERE branch_id = ? AND group_id = ?',
+    [group && group.branch_id, req.params.id]);
+  res.redirect('/groups/' + req.params.id + '/dispatch-delay?notice='
+    + encodeURIComponent('설정을 삭제했습니다. 이 법인에는 배차지연 선제 안내가 나가지 않습니다.'));
 }));
 
 module.exports = router;

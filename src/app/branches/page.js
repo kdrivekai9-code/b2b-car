@@ -54,8 +54,8 @@ export default async function BranchesPage() {
                       <a className="btn small secondary" href={'/branches/' + b.id + '/edit'}>수정</a>
                       <a className="btn small secondary" href={'/branches/' + b.id + '/payment-methods'}>결제</a>
                       <a className="btn small secondary" href={'/branches/' + b.id + '/operating-hours'}>운영시간</a>
-                      <a className="btn small secondary" href={'/branches/' + b.id + '/fare-rules'}>요금</a>
-                      <a className="btn small secondary" href={'/branches/' + b.id + '/premium-fare-rules'}>프리미엄 요금</a>
+                      <a className="btn small secondary" href={'/branches/' + b.id + '/fare-rules'}>탁송 요금</a>
+                      <a className="btn small secondary" href={'/branches/' + b.id + '/premium-fare-rules'}>일일기사 요금</a>
                     </div>
                   </td>
                 </tr>

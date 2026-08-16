@@ -1,7 +1,13 @@
 // 요금표 설정 화면: 거리 구간 행 동적 추가/삭제
+//
+// 지사 화면(views/branches/fare_rules.ejs)과 법인 화면(views/groups/fare_rules.ejs)이 함께 쓴다.
+// "대표요금제" 칸은 지사에만 있다(법인 요금표에는 그 개념이 없다) — 표가 data-representative="1"
+// 일 때만 그 칸을 만든다. 항상 만들면 법인 화면에서 열 수가 헤더보다 하나 많아진다.
 (function () {
   var tbody = document.getElementById('fareTiersBody');
   var addBtn = document.getElementById('addTierBtn');
+  var fareTable = document.getElementById('fareTiersTable');
+  var hasRepresentative = !!(fareTable && fareTable.dataset.representative === '1');
 
   function renumberTiers() {
     tbody.querySelectorAll('tr').forEach(function (row, i) {
@@ -73,7 +79,7 @@
         '<td><input type="number" name="max_fare" min="0" step="1000"></td>' +
         '<td><input type="number" name="round_unit" value="1000" min="1" step="1"></td>' +
         '<td><select name="round_method"><option value="up">올림</option><option value="round" selected>반올림</option><option value="down">내림</option></select></td>' +
-        '<td style="text-align:center;"><input type="checkbox" name="tier_representative" value=""></td>' +
+        (hasRepresentative ? '<td style="text-align:center;"><input type="checkbox" name="tier_representative" value=""></td>' : '') +
         '<td><button type="button" class="btn small secondary remove-tier-btn">삭제</button></td>';
       tbody.appendChild(row);
       wireRemove(row);

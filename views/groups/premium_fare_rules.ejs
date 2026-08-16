@@ -1,0 +1,24 @@
+<%- include('../partials/header') %>
+<div class="page-head-row">
+  <div>
+    <h1 class="page-title"><%= group.name %> · 프리미엄(대리) 요금</h1>
+    <p class="page-sub">프리미엄(대리) 상품의 요금표입니다.</p>
+  </div>
+  <div class="page-head-actions">
+    <a class="btn secondary" href="/groups">법인 목록으로</a>
+  </div>
+</div>
+<%- include('../partials/group_tabs', { group: group, groups: groups, active: 'premium_fare' }) %>
+
+<div class="card">
+  <div class="section-title">🚧 준비 중</div>
+  <p class="page-sub" style="margin-bottom:0;">
+    프리미엄(대리) 요금 체계가 아직 정해지지 않아 자리만 만들어 두었습니다.
+    저장할 곳을 미리 만들면 비어 있는 표가 요금 계산에 끼어들 수 있어, 지금은 입력을 받지 않습니다.
+  </p>
+  <p class="page-sub" style="margin-bottom:0;">
+    현재 프리미엄 오더의 요금은 <b>일일기사 요금표</b>를 그대로 씁니다(두 상품이 한 표를 공유하던 기존 동작).
+    요금 체계가 정해지면 이 화면에 별도 표를 만들고 그때 갈라냅니다.
+  </p>
+</div>
+<%- include('../partials/footer') %>

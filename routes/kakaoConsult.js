@@ -424,7 +424,12 @@ async function sendAndLog(session, text, label) {
 // 계산해 답한다. 구간이 없는 "요금조회 되나요?" 같은 안내성 질문은 그대로 FAQ가 받는다.
 async function tryAnswerFare(session, text, extracted) {
   const account = await resolveIntakeContextCached(session).catch(() => null);
-  const draft = await buildFareSuggestion(text, { branchId: account && account.branch_id, extracted })
+  const draft = await buildFareSuggestion(text, {
+    branchId: account && account.branch_id,
+    // 이 상담톡 계정이 매인 법인의 요금표를 먼저 본다(없으면 지사 표).
+    groupId: (account && account.requester_group_id) || null,
+    extracted,
+  })
     .catch((e) => { console.error('카카오 요금 안내 실패:', e.message); return null; });
   if (!draft) return false;
   await botSay(session, draft.text, '요금 안내');

@@ -2,6 +2,10 @@ const express = require('express');
 const db = require('../db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const asyncHandler = require('../middleware/asyncHandler');
+// 고객 통보·배차지연 화면의 표시 규칙은 법인 화면과 한 벌만 둔다.
+const {
+  NOTIFY_PHOTO_EVENTS, DISPATCH_CALL_TYPES, parseCallTypes, buildEventRows,
+} = require('../lib/customerNotifySettings');
 const { ORDER_STATUSES } = require('../config');
 const { getEffectivePaymentMethods, getEffectiveStatuses } = require('../lib/branchPolicy');
 // 고객 통보 설정 화면이 "어떤 사건이 있고 기본값이 무엇인지"를 통보 모듈에서 그대로 가져온다 —
@@ -148,7 +152,8 @@ router.post('/:id/operating-hours/exceptions/:exceptionId/delete', asyncHandler(
   res.redirect('/branches/' + req.params.id + '/operating-hours');
 }));
 
-// ---------------- 요금표 설정 ----------------
+// ---------------- 탁송 요금 (지사) ----------------
+// 법인 요금표가 없을 때 쓰는 기본값이다(routes/groups.js의 법인 탁송 요금표 참조).
 router.get('/:id/fare-rules', asyncHandler(async (req, res) => {
   const [branch, tiers, extraRow, branches] = await Promise.all([
     db.get('SELECT * FROM branches WHERE id = ?', [req.params.id]),
@@ -159,7 +164,7 @@ router.get('/:id/fare-rules', asyncHandler(async (req, res) => {
   if (!branch) return res.status(404).send('지사를 찾을 수 없습니다.');
   const extra = extraRow || {};
   res.render('branches/fare_rules', {
-    title: '요금표 설정 - ' + branch.name,
+    title: '탁송 요금 - ' + branch.name,
     branch,
     tiers,
     extra,
@@ -456,17 +461,7 @@ router.post('/:id/extra-settings', asyncHandler(async (req, res) => {
 // ---------------- 배차지연 알림 설정 ----------------
 // 챗봇이 "배차가 지연되고 있으니 요금을 올릴까요?"라고 먼저 제안할 대상을 고객사(법인) 단위로
 // 등록한다. 등록되지 않은 고객사에는 선제 안내가 나가지 않는다(옵트인).
-const DISPATCH_CALL_TYPES = [
-  { key: 'corporate_call', label: '법인콜', orderType: 'premium' },
-  { key: 'daily_driver', label: '일일기사', orderType: 'daily_driver' },
-  { key: 'dispatch', label: '탁송', orderType: 'dispatch' },
-];
-
-function parseCallTypes(raw) {
-  const values = Array.isArray(raw) ? raw : (raw ? [raw] : []);
-  const allowed = DISPATCH_CALL_TYPES.map((t) => t.key);
-  return values.map(String).filter((v) => allowed.indexOf(v) >= 0);
-}
+// 콜 유형 목록·파싱은 법인 화면(routes/groups.js)과 공유한다(lib/customerNotifySettings.js).
 
 async function loadDispatchDelayPage(branchId) {
   const [branch, branches, groups, settings] = await Promise.all([
@@ -552,35 +547,8 @@ router.post('/:id/dispatch-delay/:settingId/delete', asyncHandler(async (req, re
 // 어떤 상태 변화를 언제 어떤 문구로 알릴지 지사가 정한다. 설정을 저장하지 않은 지사는 코드
 // 기본값(lib/kakaoOrderNotify.js의 DEFAULT_EVENT_SETTINGS)으로 동작한다 — 지사를 새로 만들 때마다
 // 설정을 넣어주지 않아도 통보가 나가야 해서 옵트아웃으로 뒀다.
-const NOTIFY_EVENT_HINTS = {
-  dispatched: '기사가 배정되었을 때. 배차 직후 취소되는 경우가 있어 기본값은 2분 뒤에 보내고, 그사이 배차가 풀리면 보내지 않습니다.',
-  started: '기사가 운행을 시작했을 때. 콜마너에서 운행시작(배차이후상태)이 들어와야 나갑니다.',
-  completed: '운행이 완료되었을 때.',
-  dispatch_cancelled: '배차받은 기사가 취소해서 다시 배차를 찾는 중일 때. 오더는 살아 있습니다.',
-  cancelled: '오더 자체가 취소되었을 때.',
-};
 
-// 사진을 붙일 수 있는 사건 — 콜마너 탁송사진은 운행전/운행후로만 온다. 배차 시점에는 아직
-// 사진이 없어서 스위치를 켜도 보낼 것이 없다.
-const NOTIFY_PHOTO_EVENTS = new Set(['started', 'completed']);
 
-// 미리보기용 예시 오더. 실제 렌더러(renderTemplate)에 그대로 통과시켜 보여준다 — 화면에서
-// 규칙을 다시 구현하면 실제로 고객이 받는 문구와 어긋난다.
-const NOTIFY_PREVIEW_ORDER = {
-  oid: 'OID1246',
-  order_type: 'dispatch',
-  callmaner_driver_name: '홍길동',
-  callmaner_driver_phone: '050-7111-2222',
-  origin_address: '서울 강서구 양천로53길 30',
-  origin_address_detail: '3층',
-  destination_address: '경기 성남시 분당구 판교역로 160',
-  destination_address_detail: 'B동 로비',
-  reserved_date: '2026-08-20',
-  reserved_time: '14:00',
-  odometer_start: 12345,
-  odometer_end: 12470,
-  distance_total: 125,
-};
 
 async function loadCustomerNotificationPage(branchId) {
   const [branch, branches] = await Promise.all([
@@ -600,26 +568,7 @@ async function loadCustomerNotificationPage(branchId) {
   });
   const savedByEvent = new Map(saved.map((row) => [row.event_type, row]));
 
-  const events = kakaoOrderNotify.EVENT_TYPES.map((key) => {
-    const fallback = kakaoOrderNotify.DEFAULT_EVENT_SETTINGS[key];
-    const row = savedByEvent.get(key);
-    const template = (row && String(row.message_template || '').trim()) || fallback.template;
-    const attachPhotos = row && row.attach_photos !== undefined
-      ? row.attach_photos === true
-      : !!fallback.attachPhotos;
-    return {
-      key,
-      label: fallback.label,
-      hint: NOTIFY_EVENT_HINTS[key] || '',
-      enabled: row ? row.enabled !== false : fallback.enabled,
-      delayMinutes: row && Number.isFinite(Number(row.delay_minutes)) ? Number(row.delay_minutes) : fallback.delayMinutes,
-      template,
-      attachPhotos,
-      photoSupported: NOTIFY_PHOTO_EVENTS.has(key),
-      // 실제 발송에 쓰는 렌더러를 그대로 통과시킨 결과를 보여준다.
-      preview: kakaoOrderNotify.renderTemplate(template, NOTIFY_PREVIEW_ORDER),
-    };
-  });
+  const events = buildEventRows(saved);
 
   return { branch, branches, events, variables: kakaoOrderNotify.TEMPLATE_VARIABLES };
 }
@@ -721,7 +670,9 @@ router.post('/:id/customer-notifications', asyncHandler(async (req, res) => {
   res.redirect(base + '?notice=' + encodeURIComponent('고객 통보 설정이 저장되었습니다.'));
 }));
 
-// ---------------- 프리미엄 요금표 ----------------
+// ---------------- 일일기사 요금 (지사) ----------------
+// 이름만 바뀌었고 테이블(premium_fare_rules)은 그대로다 — 이 표를 실제로 쓰는 상품이
+// 일일기사라 이름을 맞췄다. 프리미엄(대리)은 요금 체계가 나오면 별도 표를 만든다.
 router.get('/:id/premium-fare-rules', asyncHandler(async (req, res) => {
   const [branch, tiers, branches] = await Promise.all([
     db.get('SELECT * FROM branches WHERE id = ?', [req.params.id]),
@@ -730,7 +681,7 @@ router.get('/:id/premium-fare-rules', asyncHandler(async (req, res) => {
   ]);
   if (!branch) return res.status(404).send('지사를 찾을 수 없습니다.');
   res.render('branches/premium_fare_rules', {
-    title: '프리미엄 요금표 - ' + branch.name,
+    title: '일일기사 요금 - ' + branch.name,
     branch, tiers, branches,
     saved: req.query.saved === '1',
   });

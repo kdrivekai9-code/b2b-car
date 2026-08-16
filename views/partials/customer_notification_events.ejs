@@ -1,0 +1,153 @@
+<%
+  // 고객 통보 사건 블록 — 지사(views/branches/customer_notifications.ejs)와
+  // 법인(views/groups/customer_notifications.ejs) 화면이 함께 쓴다.
+  //
+  // 왜 파티셜인가: 두 화면이 같은 폼을 그린다. 복사해두면 변수 칩 하나를 늘려도 한쪽만 고쳐
+  // 갈라진다 — 이 코드베이스에서 실제로 반복된 사고다.
+  //
+  // 필요한 값: events, variables, photoSettingsUrl
+%>
+    <% events.forEach(function (e) { %>
+      <div class="notify-event-block">
+        <div class="row">
+          <div class="field">
+            <label class="checkline">
+              <input type="checkbox" name="enabled_<%= e.key %>" value="1" <%= e.enabled ? 'checked' : '' %>>
+              <strong><%= e.label %></strong> 통보 사용
+            </label>
+            <p class="page-sub"><%= e.hint %></p>
+          </div>
+          <div class="field">
+            <label>보내는 시점</label>
+            <div class="delay-minutes-input">
+              <label class="checkline inline">
+                <input type="radio" name="delay_mode_<%= e.key %>" value="now" data-delay-mode="<%= e.key %>" <%= e.delayMinutes === 0 ? 'checked' : '' %>>
+                즉시
+              </label>
+              <label class="checkline inline">
+                <input type="radio" name="delay_mode_<%= e.key %>" value="later" data-delay-mode="<%= e.key %>" <%= e.delayMinutes === 0 ? '' : 'checked' %>>
+                상태 변경 후
+              </label>
+              <%# 시간칸은 "상태 변경 후"일 때만 보인다. 숨길 때도 DOM에서 빼지 않는다 —
+                  disabled나 제거를 하면 값이 전송되지 않아 서버 검증(0~120 정수 필수)에 걸린다.
+                  그래서 감추기만 하고 readonly로 잠근다. %>
+              <span class="delay-later-only" id="delay_wrap_<%= e.key %>" <%= e.delayMinutes === 0 ? 'hidden' : '' %>>
+                <input type="number" id="delay_<%= e.key %>" name="delay_<%= e.key %>" value="<%= e.delayMinutes %>"
+                       min="0" max="120" step="1" required <%= e.delayMinutes === 0 ? 'readonly' : '' %>>
+                <span>분 뒤</span>
+              </span>
+            </div>
+            <p class="page-sub">보내기 직전에 상태를 한 번 더 확인해서, 그사이 상황이 바뀌었으면 보내지 않습니다.</p>
+          </div>
+        </div>
+        <div class="field">
+          <label>문구</label>
+          <div class="var-chip-row">
+            <% variables.forEach(function (v) { %>
+              <button type="button" class="var-chip" data-target="message_<%= e.key %>" data-token="<%= v.token %>" title="<%= v.hint %>"><%= v.label %></button>
+            <% }) %>
+            <% if (e.photoSupported) { %>
+              <%- /* 사진은 텍스트가 아니라 별도 발송이라(카카오는 이미지 메시지, 웹은 첨부)
+                     문구 안에 위치를 지정할 수 없다 — 그래서 토큰이 아니라 스위치다. */ null %>
+              <label class="var-chip toggle<%= e.attachPhotos ? ' on' : '' %>">
+                <input type="checkbox" name="attach_photos_<%= e.key %>" value="1" <%= e.attachPhotos ? 'checked' : '' %>>
+                📷 사진첨부
+              </label>
+            <% } else { %>
+              <span class="var-chip disabled" title="배차 시점에는 아직 탁송사진이 없습니다">📷 사진첨부</span>
+            <% } %>
+          </div>
+          <textarea id="message_<%= e.key %>" name="message_<%= e.key %>" rows="6" required><%= e.template %></textarea>
+          <% if (e.photoSupported) { %>
+            <p class="page-sub">
+              사진첨부를 켜면 카카오는 사진 메시지로, 웹 챗봇은 썸네일+링크로 함께 보냅니다.
+              지사 <a href="<%= photoSettingsUrl %>">사진 설정</a>에서
+              "고객 열람 허용"이 꺼져 있으면 나가지 않습니다.
+            </p>
+          <% } %>
+          <div class="notify-preview">
+            <span class="notify-preview-label">예시 (저장하면 갱신됩니다)</span>
+            <pre><%= e.preview %></pre>
+          </div>
+        </div>
+      </div>
+    <% }) %>
+
+<style>
+  .notify-event-block { padding: 16px 0; border-bottom: 1px solid var(--border, #e5e7eb); }
+  .notify-event-block:last-child { border-bottom: 0; }
+  .notify-event-block textarea { width: 100%; font-family: inherit; }
+  .notify-event-block code { background: rgba(127, 127, 127, 0.12); padding: 1px 4px; border-radius: 3px; }
+  .checkline.inline { display: inline-flex; align-items: center; gap: 4px; margin-right: 8px; }
+  .var-chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+  .var-chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 4px 10px; border: 1px solid var(--border, #e5e7eb); border-radius: 999px;
+    background: var(--card, #fff); color: var(--text, #374151);
+    font-size: 12px; font-weight: 600; cursor: pointer; line-height: 1.6;
+  }
+  .var-chip:hover { background: rgba(127, 127, 127, 0.08); }
+  .var-chip.toggle input { margin: 0; }
+  .var-chip.toggle.on { background: #dcf5f1; border-color: #99ddd3; color: #0f766e; }
+  .var-chip.disabled { opacity: .45; cursor: not-allowed; }
+  .notify-preview { margin-top: 8px; }
+  .notify-preview-label { font-size: 11.5px; font-weight: 700; color: var(--muted, #6b7280); }
+  .notify-preview pre {
+    margin: 4px 0 0; padding: 10px 12px; border-radius: 8px;
+    background: rgba(127, 127, 127, 0.08); font-family: inherit; font-size: 13px;
+    line-height: 1.6; white-space: pre-wrap; word-break: break-all;
+  }
+</style>
+
+<script>
+(function () {
+  // 변수 칩 — 커서 위치에 토큰을 넣는다. 문구창을 직접 타이핑해도 되지만, 토큰 이름을 외우게
+  // 하지 않으려는 것이다(토큰은 ASCII라 한글 라벨만 보고는 알 수 없다).
+  document.querySelectorAll('.var-chip[data-token]').forEach(function (chip) {
+    chip.addEventListener('click', function () {
+      var target = document.getElementById(chip.getAttribute('data-target'));
+      var token = chip.getAttribute('data-token');
+      if (!target || !token) return;
+      var start = target.selectionStart;
+      var end = target.selectionEnd;
+      if (typeof target.setRangeText === 'function' && start !== null) {
+        target.setRangeText(token, start, end, 'end');
+      } else {
+        target.value += token; // 아주 오래된 브라우저 폴백
+      }
+      target.focus();
+    });
+  });
+
+  // 사진첨부 토글 — 켜진 상태가 눈에 보이도록 칩 색을 바꾼다.
+  document.querySelectorAll('.var-chip.toggle input[type="checkbox"]').forEach(function (box) {
+    box.addEventListener('change', function () {
+      box.closest('.var-chip').classList.toggle('on', box.checked);
+    });
+  });
+
+  // 즉시 / N분 뒤 — "즉시"를 고르면 시간칸을 감추고 0으로 두고 읽기전용으로 만든다.
+  // 감추기만 하고 DOM에는 남긴다: disabled나 제거는 값이 전송되지 않아 서버 검증(0~120 정수
+  // 필수)에 걸린다. readonly는 값이 그대로 전송된다.
+  document.querySelectorAll('input[data-delay-mode]').forEach(function (radio) {
+    radio.addEventListener('change', function () {
+      var key = radio.getAttribute('data-delay-mode');
+      var input = document.getElementById('delay_' + key);
+      var wrap = document.getElementById('delay_wrap_' + key);
+      if (!input) return;
+      if (radio.value === 'now' && radio.checked) {
+        input.value = '0';
+        input.readOnly = true;
+        if (wrap) wrap.hidden = true;
+      } else if (radio.value === 'later' && radio.checked) {
+        if (wrap) wrap.hidden = false;
+        input.readOnly = false;
+        if (input.value === '0') input.value = '1';
+        // 감춰진 칸에 focus()를 부르면 아무 일도 일어나지 않는다 — 보이게 만든 뒤에 부른다.
+        input.focus();
+      }
+    });
+  });
+})();
+</script>
+

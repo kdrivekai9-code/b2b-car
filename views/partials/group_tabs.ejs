@@ -1,0 +1,44 @@
+<%
+  // 법인 설정 탭. 지사 탭(branch_tabs.ejs)과 같은 구조·같은 클래스를 쓴다 — 두 화면이 하는 일이
+  // 같아서 모양까지 같아야 관리자가 헷갈리지 않는다.
+  //
+  // 요금표·고객통보·배차지연은 법인에 값이 없으면 지사 값을 그대로 쓴다(폴백). 그래서 각 화면은
+  // "지금 무엇이 적용되고 있는지"를 반드시 밝힌다 — 빈 화면만 보여주면 요금이 0원인 줄 안다.
+  const tabDefs = [
+    { key: 'basic', label: '법인 정보', path: 'edit' },
+    // 계정정보는 accounts다. users(/groups/:id/users)는 Next가 그리는 읽기전용 목록이라
+    // 이 화면과 다르다 — 여기서 등록/수정/비활성화까지 한다.
+    { key: 'accounts', label: '계정정보', path: 'accounts' },
+    { key: 'fare', label: '탁송 요금', path: 'fare-rules' },
+    { key: 'daily_driver_fare', label: '일일기사 요금', path: 'daily-driver-fare-rules' },
+    { key: 'premium_fare', label: '프리미엄(대리) 요금', path: 'premium-fare-rules' },
+    { key: 'customer_notifications', label: '고객 통보', path: 'customer-notifications' },
+    { key: 'dispatch_delay', label: '배차지연 알림', path: 'dispatch-delay' },
+  ];
+  const groupList = typeof groups !== 'undefined' ? groups : [];
+  const targetGroup = (typeof group !== 'undefined' && group && group.id) ? group : (groupList.length ? groupList[0] : null);
+  const activeDef = tabDefs.find(function (t) { return t.key === active; });
+  const switchPath = (activeDef && activeDef.path) ? activeDef.path : 'edit';
+%>
+<div class="tabs branch-tabs">
+  <a href="/groups" class="<%= active === 'list' ? 'active' : '' %>">법인 관리</a>
+  <% if (targetGroup) { %>
+    <% tabDefs.forEach(function (t) { %>
+      <a href="/groups/<%= targetGroup.id %>/<%= t.path %>" class="<%= active === t.key ? 'active' : '' %>"><%= t.label %></a>
+    <% }) %>
+  <% } %>
+  <% if (groupList.length > 1 && targetGroup) { %>
+    <select id="groupTabSwitch" class="branch-tab-switch">
+      <% groupList.forEach(function (g) { %>
+        <option value="<%= g.id %>" <%= String(targetGroup.id) === String(g.id) ? 'selected' : '' %>><%= g.name %></option>
+      <% }) %>
+    </select>
+  <% } %>
+</div>
+<% if (groupList.length > 1 && targetGroup) { %>
+  <script>
+    document.getElementById('groupTabSwitch').addEventListener('change', function () {
+      window.location.href = '/groups/' + this.value + '/<%= switchPath %>';
+    });
+  </script>
+<% } %>

@@ -1,0 +1,46 @@
+<%- include('../partials/header') %>
+<div class="page-head-row">
+  <div>
+    <h1 class="page-title"><%= group.name %> · 고객 통보</h1>
+    <p class="page-sub">이 법인의 오더에 나가는 안내입니다. 상태별로 사용 여부·보내는 시점·문구를 정합니다.</p>
+  </div>
+  <div class="page-head-actions">
+    <a class="btn secondary" href="/groups">법인 목록으로</a>
+    <button class="btn" type="submit" form="groupNotificationsForm">저장</button>
+  </div>
+</div>
+<%- include('../partials/group_tabs', { group: group, groups: groups, active: 'customer_notifications' }) %>
+
+<% if (error) { %><div class="error-msg"><%= error %></div><% } %>
+<% if (notice) { %><div class="success-msg"><%= notice %></div><% } %>
+
+<%# 비어 있을 때 무엇이 적용되는지 밝힌다 — 빈 화면만 보이면 통보가 꺼진 줄 안다. %>
+<div class="card">
+  <div class="section-title">📌 현재 적용되는 설정</div>
+  <% if (hasOwnSettings) { %>
+    <p class="page-sub" style="margin:0;"><b>이 법인 전용 통보 설정</b>이 적용됩니다.</p>
+    <form method="POST" action="/groups/<%= group.id %>/customer-notifications/reset" style="margin-top:10px;"
+          onsubmit="return confirm('법인 설정을 지우고 소속 지사 설정을 따르게 할까요?');">
+      <button class="btn secondary" type="submit">지사 설정으로 되돌리기</button>
+    </form>
+  <% } else { %>
+    <p class="page-sub" style="margin:0;">
+      이 법인에 저장된 설정이 없어 <b>소속 지사(<%= group.branch_name || '-' %>)의 통보 설정</b>이 적용됩니다.
+      아래 값은 그 지사 설정을 그대로 보여주는 것이며, 저장하면 이 법인 전용 설정이 됩니다.
+    </p>
+  <% } %>
+</div>
+
+<div class="card">
+  <form id="groupNotificationsForm" method="POST" action="/groups/<%= group.id %>/customer-notifications">
+    <div class="section-title">🔔 상태별 고객 통보</div>
+    <p class="page-sub">
+      카카오 상담톡과 웹 챗봇으로 접수한 오더 모두에 나갑니다. 문구 위의 변수 버튼을 누르면
+      커서 위치에 변수가 들어갑니다 — 값이 없으면 그 줄은 통째로 사라지므로
+      <code>기사명: {driver_name}</code>처럼 <strong>"라벨: 변수"</strong> 꼴로 쓰는 것을 권합니다.
+    </p>
+    <%- include('../partials/customer_notification_events', { events: events, variables: variables, photoSettingsUrl: '/branches/' + group.branch_id + '/photo-settings' }) %>
+  </form>
+</div>
+
+<%- include('../partials/footer') %>

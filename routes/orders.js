@@ -769,7 +769,11 @@ router.post('/ai-intake/parse', asyncHandler(async (req, res) => {
     // 구간이 붙은 요금 문의("사당역에서 반포역까지 얼마?")는 지식검색으로 풀 수 없다 —
     // 거리마다 답이 달라 등록해 둘 수 있는 항목이 아니다. 실제 요금표로 계산해 답한다.
     // 화면은 matches[].category/answer를 그대로 그리므로 같은 모양으로 실어 보낸다.
-    const fare = await buildFareSuggestion(text, { branchId: req.session.user.branch_id, extracted: geminiResult })
+    const fare = await buildFareSuggestion(text, {
+      branchId: req.session.user.branch_id,
+      groupId: req.session.user.group_id || null,
+      extracted: geminiResult,
+    })
       .catch((e) => { console.error('요금 안내 계산 실패:', e.message); return null; });
     if (fare) {
       return res.json({ intent: 'faq', matches: [{ category: '요금안내', answer: fare.text }], seemsFrustrated });

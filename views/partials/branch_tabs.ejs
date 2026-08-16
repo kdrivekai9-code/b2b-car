@@ -3,8 +3,11 @@
     { key: 'basic', label: '기본 정보', path: 'edit' },
     { key: 'payment', label: '결제방식 설정', path: 'payment-methods' },
     { key: 'hours', label: '운영시간 설정', path: 'operating-hours' },
-    { key: 'fare', label: '요금표 설정', path: 'fare-rules' },
-    { key: 'premium_fare', label: '프리미엄 요금표', path: 'premium-fare-rules' },
+    // 이름 변경(정책): 이 표들은 이제 "법인 표가 없을 때 쓰는 기본값"이다 — 법인관리 쪽에
+    // 같은 이름의 표가 생겼다. 프리미엄 요금표는 실제로 일일기사에 쓰고 있어 이름을 맞췄다
+    // (프리미엄(대리)은 요금 체계가 따로 나오면 그때 별도 표를 만든다).
+    { key: 'fare', label: '탁송 요금', path: 'fare-rules' },
+    { key: 'premium_fare', label: '일일기사 요금', path: 'premium-fare-rules' },
     { key: 'status', label: '오더 상태 설정', path: 'order-status' },
     { key: 'photo', label: '사진 업로드 안내', path: 'photo-settings' },
     { key: 'extra', label: '추가기능', path: 'extra-settings' },

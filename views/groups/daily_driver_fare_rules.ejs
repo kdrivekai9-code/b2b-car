@@ -1,0 +1,82 @@
+<%- include('../partials/header') %>
+<div class="page-head-row">
+  <div>
+    <h1 class="page-title"><%= group.name %> · 일일기사 요금</h1>
+    <p class="page-sub">시간 구간 기반 요금입니다. 계산식: 기본요금 + (이용시간 − 기준시간) × 시간당 추가요금</p>
+  </div>
+  <div class="page-head-actions">
+    <a class="btn secondary" href="/groups">법인 목록으로</a>
+    <button class="btn" type="submit" form="ddFareForm">저장</button>
+  </div>
+</div>
+<%- include('../partials/group_tabs', { group: group, groups: groups, active: 'daily_driver_fare' }) %>
+
+<% if (error) { %><div class="alert error"><%= error %></div><% } %>
+
+<div class="card">
+  <div class="section-title">📌 현재 적용되는 요금표</div>
+  <% if (tiers.length) { %>
+    <p class="page-sub" style="margin:0;"><b>이 법인 전용 요금표</b>가 적용됩니다. (구간 <%= tiers.length %>개)</p>
+  <% } else { %>
+    <p class="page-sub" style="margin:0;">
+      이 법인에 등록된 요금표가 없어 <b>소속 지사(<%= group.branch_name || '-' %>)의 일일기사 요금표</b>가 적용됩니다.
+      (지사 구간 <%= branchTiers.length %>개)
+    </p>
+    <% if (branchTiers.length) { %>
+      <form method="POST" action="/groups/<%= group.id %>/daily-driver-fare-rules/copy" style="margin-top:10px;"
+            onsubmit="return confirm('소속 지사 요금표를 이 법인으로 복사할까요?');">
+        <button class="btn secondary" type="submit">소속 지사 요금표 가져오기</button>
+      </form>
+    <% } %>
+  <% } %>
+</div>
+
+<form id="ddFareForm" method="POST" action="/groups/<%= group.id %>/daily-driver-fare-rules">
+  <div class="card">
+    <div class="section-title">⏱ 시간 구간별 요금</div>
+    <div class="table-wrap">
+    <table>
+      <thead><tr><th>구간</th><th>기준시간(시간)</th><th>기본요금(원)</th><th>시간당 추가요금(원)</th><th>비고</th><th></th></tr></thead>
+      <tbody id="ddTiersBody">
+        <% tiers.forEach(function(t, i){ %>
+          <tr>
+            <td class="tier-label">구간<%= i + 1 %></td>
+            <td><input type="number" name="base_hours" value="<%= t.base_hours %>" min="0" step="0.5"></td>
+            <td><input type="number" name="fare_amount" value="<%= t.fare_amount %>" min="0" step="1000"></td>
+            <td><input type="number" name="extra_per_hour" value="<%= t.extra_per_hour %>" min="0" step="1000"></td>
+            <td><input type="text" name="note" value="<%= t.note || '' %>"></td>
+            <td><button type="button" class="btn small secondary dd-remove-btn">삭제</button></td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+    </div>
+    <button type="button" class="btn small secondary" id="ddAddBtn" style="margin-top:10px;">+ 구간 추가</button>
+  </div>
+</form>
+
+<% if (saved) { %><div class="toast">저장되었습니다.</div><% } %>
+<% if (copied) { %><div class="toast">소속 지사 요금표를 가져왔습니다.</div><% } %>
+<script>
+(function () {
+  var tbody = document.getElementById('ddTiersBody');
+  function renumber() {
+    tbody.querySelectorAll('tr').forEach(function (row, i) { row.querySelector('.tier-label').textContent = '구간' + (i + 1); });
+  }
+  function wireRemove(row) {
+    row.querySelector('.dd-remove-btn').addEventListener('click', function () { row.remove(); renumber(); });
+  }
+  tbody.querySelectorAll('tr').forEach(wireRemove);
+  document.getElementById('ddAddBtn').addEventListener('click', function () {
+    var row = document.createElement('tr');
+    row.innerHTML = '<td class="tier-label"></td>'
+      + '<td><input type="number" name="base_hours" value="4" min="0" step="0.5"></td>'
+      + '<td><input type="number" name="fare_amount" value="0" min="0" step="1000"></td>'
+      + '<td><input type="number" name="extra_per_hour" value="0" min="0" step="1000"></td>'
+      + '<td><input type="text" name="note"></td>'
+      + '<td><button type="button" class="btn small secondary dd-remove-btn">삭제</button></td>';
+    tbody.appendChild(row); wireRemove(row); renumber();
+  });
+})();
+</script>
+<%- include('../partials/footer') %>
