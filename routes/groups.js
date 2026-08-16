@@ -257,9 +257,13 @@ router.get('/:id/accounts', asyncHandler(async (req, res) => {
   if (!group) return res.status(404).send('법인을 찾을 수 없습니다.');
   const [users, branches] = await Promise.all([
     db.all(`
-      SELECT u.*, b.name AS branch_name
+      SELECT u.*, b.name AS branch_name, g.name AS group_name
       FROM users u
       LEFT JOIN branches b ON b.id = u.branch_id
+      -- 화면에 법인을 함께 보여준다. 지금은 아래 WHERE로 이 법인만 걸러지므로 값이 모든 행에서
+      -- 같지만, 화면이 group.name을 그대로 찍게 하면 나중에 이 목록의 범위가 넓어졌을 때
+      -- (예: 소속 없는 계정까지 함께 보기) 틀린 값이 조용히 남는다. 행에서 읽게 둔다.
+      LEFT JOIN groups_tbl g ON g.id = u.group_id
       WHERE u.group_id = ?
       ORDER BY u.status = 'active' DESC, u.id DESC
     `, [req.params.id]),

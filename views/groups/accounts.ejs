@@ -68,13 +68,14 @@
   <div class="section-title">등록된 계정 <%= users.length %>개</div>
   <div class="table-wrap">
   <table>
-    <thead><tr><th>아이디</th><th>이름</th><th>역할</th><th>지사</th><th>연락처</th><th>상태</th><th>관리</th></tr></thead>
+    <thead><tr><th>아이디</th><th>법인</th><th>이름</th><th>역할</th><th>지사</th><th>연락처</th><th>상태</th><th>관리</th></tr></thead>
     <tbody>
       <% const roleLabel = {admin:'관리자', branch_manager:'지사장', client:'클라이언트'}; %>
-      <% if (!users.length) { %><tr><td colspan="7" class="empty">등록된 계정이 없습니다.</td></tr><% } %>
+      <% if (!users.length) { %><tr><td colspan="8" class="empty">등록된 계정이 없습니다.</td></tr><% } %>
       <% users.forEach(function(u){ %>
         <tr>
           <td><%= u.login_id %></td>
+          <td><%= u.group_name || '-' %></td>
           <td><%= u.name %></td>
           <td><%= roleLabel[u.role] || u.role %></td>
           <td><%= u.branch_name || '-' %></td>
