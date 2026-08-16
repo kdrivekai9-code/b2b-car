@@ -6,6 +6,7 @@ const db = require('../db');
 const asyncHandler = require('../middleware/asyncHandler');
 const callmaner = require('../lib/callmaner');
 const callmanerPhotos = require('../lib/callmanerPhotos');
+const photoAvailability = require('../lib/photoAvailability');
 const odometerOcr = require('../lib/odometerOcr');
 const { runKakaoOrderNotifications } = require('../lib/kakaoOrderNotify');
 const { notify } = require('../lib/push');
@@ -310,6 +311,13 @@ async function syncOrdersByConfSlip(branch) {
   }
   return { checked: orders.length, updated };
 }
+
+// 탁송사진이 실제로 열리기 시작한 시각을 재는 크론(30분 간격). 통보를 보내지 않는다 —
+// 지연 분포를 실측하는 것이 목적이다(lib/photoAvailability.js 주석 참고).
+router.get('/cron/photo-availability', checkCronAuth, asyncHandler(async (req, res) => {
+  const result = await photoAvailability.checkPhotoAvailability();
+  res.json(result);
+}));
 
 router.get('/sync', checkCronAuth, asyncHandler(async (req, res) => {
   const branches = await db.all('SELECT * FROM branches WHERE callmaner_enabled = true');

@@ -30,6 +30,10 @@
     {
       "path": "/access-logs/cron/archive",
       "schedule": "20 18 * * *"
+    },
+    {
+      "path": "/callmaner/cron/photo-availability",
+      "schedule": "*/30 * * * *"
     }
   ]
 }
