@@ -165,6 +165,9 @@ function isAgentRequest(text) {
   return /(상담원|상담사|사람 연결|직원 연결)/i.test(String(text || '').trim());
 }
 
+// 배차 지연(요금 인상 제안) 확인 주기. 레거시 위젯과 같은 값으로 둔다.
+const DISPATCH_DELAY_POLL_INTERVAL_MS = 60000;
+
 function looksLikeOrderIntake(text) {
   const t = String(text || '');
   return /\d{2,3}[-\s]?\d{3,4}[-\s]?\d{4}/.test(t)
@@ -326,6 +329,18 @@ export default function AiIntakeClient({
       : []
   );
   const [preOfferState, setPreOfferState] = useState(initialDraftState && initialDraftState.preOfferState ? initialDraftState.preOfferState : null);
+  // 배차 주문 도우미(콜마너 MCP) — 레거시 위젯(public/js/ai-intake.js)에만 있던 것을 옮겼다.
+  // active: 도우미가 방금 되물어서 다음 답도 도우미가 먼저 받아야 하는 상태.
+  // everUsed: 한 번이라도 도우미를 쓴 대화인지(배차 지연 제안 폴링의 조건).
+  const [dispatchAgentActive, setDispatchAgentActive] = useState(
+    !!(initialDraftState && initialDraftState.dispatchAgentActive)
+  );
+  const [dispatchAgentEverUsed, setDispatchAgentEverUsed] = useState(
+    !!(initialDraftState && initialDraftState.dispatchAgentEverUsed)
+  );
+  // 상태 갱신 직후 같은 턴 안에서 값을 읽어야 하는 자리가 있어(폴링 타이머 등) ref로도 들고 있다.
+  const dispatchAgentActiveRef = useRef(dispatchAgentActive);
+  dispatchAgentActiveRef.current = dispatchAgentActive;
 
   const lastSeenIdRef = useRef(maxMessageId(restoredMessages));
   const seenIdsRef = useRef(createSeenIdSet(restoredMessages));
@@ -419,6 +434,29 @@ export default function AiIntakeClient({
     return botSaved;
   }
 
+  // 배차 주문 도우미에게 넘겨본다. 처리했으면 true.
+  //
+  // preloaded: /orders/ai-intake/parse 응답에 이미 실려 온 결과(서버가 의도분류와 함께 미리
+  // 돌린다 — routes/orders.js의 startDispatchProbe 주석). 있으면 요청을 한 번 아낀다.
+  async function tryDispatchAgent(sid, text, preloaded) {
+    if (!sid) return false;
+    const result = preloaded || await fetchJson('/chat/' + sid + '/dispatch-agent', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    }).catch(() => ({ handled: false }));
+
+    if (!result || !result.handled || !result.message) {
+      if (dispatchAgentActiveRef.current) setDispatchAgentActive(false);
+      return false;
+    }
+    // 도우미가 확인/추가정보를 되물었으면 다음 메시지도 도우미가 먼저 받는다.
+    setDispatchAgentActive(!!result.awaitingConfirmation || !!result.expectsReply);
+    setDispatchAgentEverUsed(true);
+    await replyWithMessage(sid, result.message, { needsAgent: false, requestedFeature: null });
+    return true;
+  }
+
   async function replyWithMessage(sid, message, options) {
     const opts = options || {};
     const draftState = opts.draftState || {
@@ -429,6 +467,8 @@ export default function AiIntakeClient({
       pendingDisambiguation,
       disambiguationQueue,
       preOfferState,
+      dispatchAgentActive,
+      dispatchAgentEverUsed,
     };
     const saved = await saveBotTurn(sid, {
       message,
@@ -663,6 +703,14 @@ export default function AiIntakeClient({
       return;
     }
 
+    // 도우미가 방금 되물어본 상태면(확인 질문/후보 선택 등) 이번 답은 의도분류로 보내지 않고
+    // 도우미에게 먼저 넘긴다 — "네", "1번" 같은 짧은 답은 분류기에 넣어봐야 FAQ로 샌다.
+    // 새 오더접수처럼 보이는 메시지는 도우미를 건너뛰고 원래 흐름을 탄다.
+    // (레거시 위젯 public/js/ai-intake.js와 같은 규칙 — 한쪽만 고치면 두 화면이 갈라진다.)
+    if (dispatchAgentActive && phase === 'collecting' && !pendingField && !looksLikeOrderIntake(text)) {
+      if (await tryDispatchAgent(sid, text)) return;
+    }
+
     // 접수 대화 판단을 서버로 옮긴 경로(Stage A, 탁송만) — 기능 플래그가 꺼져 있으면(기본값)
     // 이 분기는 아예 실행되지 않고 지금까지와 완전히 동일하게 동작한다. 이 파일에는 프리미엄/
     // 일일기사 카테고리 자체가 없어(orderCategory 개념이 없다) EJS 위젯과 달리 별도 제외
@@ -702,6 +750,13 @@ export default function AiIntakeClient({
     });
 
     if (isAgentRequest(text) || parseData.intent === 'unsupported') {
+      // 상담원 연결 전에 도우미에게 한 번 넘겨본다 — 주문 조회/변경/취소는 실제 도구로 처리할
+      // 수 있다. 명시적인 "상담원 연결" 요청은 거치지 않고, 되묻는 질문에 답하는 중(pendingField)
+      // 이면 도우미로 새지 않게 한다(그때의 unsupported는 대개 "그 답을 못 알아들은 것"이다).
+      // 서버가 분류와 함께 미리 돌려준 결과가 있으면 그걸 쓴다(요청 한 번 절약).
+      if (!isAgentRequest(text) && !(phase === 'collecting' && pendingField)) {
+        if (await tryDispatchAgent(sid, text, parseData.dispatchAgent)) return;
+      }
       await replyWithMessage(sid, null, {
         needsAgent: true,
         requestedFeature: parseData.requestedFeature || '상담원 연결',
@@ -1145,6 +1200,37 @@ export default function AiIntakeClient({
       setIsSending(false);
     }
   }
+
+  // 배차 지연 확인 — 기사 배정이 안 된 채로 접수 후 일정 시간이 지난 주문이 있으면 서버가
+  // 요금 인상 확인 질문을 만들어 준다(확인 대기 상태도 서버에 저장된다). 고객이 "네"라고 답하면
+  // 위의 dispatchAgentActive 경로로 도우미에게 전달되어 실제 인상이 실행된다.
+  //
+  // 도우미를 한 번이라도 쓴 대화에서만 돌린다 — 모든 FAQ 세션이 1분마다 MCP를 찔러보지 않게.
+  // (레거시 위젯의 pollDispatchDelay와 같은 조건.)
+  useEffect(() => {
+    if (!sessionId || !dispatchAgentEverUsed) return undefined;
+    if (status !== 'bot') return undefined;
+
+    let disposed = false;
+    const timer = setInterval(async () => {
+      if (disposed) return;
+      // 다른 질문/확인을 기다리는 중이거나 처리 중이면 끼어들지 않는다.
+      if (phase !== 'collecting' || pendingField || dispatchAgentActiveRef.current || isSending) return;
+      const result = await fetchJson('/chat/' + sessionId + '/dispatch-delay-check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      }).catch(() => null);
+      if (disposed || !result || !result.offer || !result.message) return;
+      // 응답을 기다리는 동안 상태가 바뀌었으면 버린다.
+      if (dispatchAgentActiveRef.current) return;
+      setDispatchAgentActive(true);
+      await replyWithMessage(sessionId, result.message, { needsAgent: false, requestedFeature: null });
+    }, DISPATCH_DELAY_POLL_INTERVAL_MS);
+
+    return () => { disposed = true; clearInterval(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId, dispatchAgentEverUsed, status, phase, pendingField, isSending]);
 
   useEffect(() => {
     if (!sessionId) return undefined;

@@ -48,6 +48,14 @@ stub('../lib/mcpDispatchAccess', {
     viewerScoped: false,
   }),
   maskPhone: (v) => String(v || ''),
+  // 고정 조회 빠른 경로가 이걸 부른다 — 빠뜨리면 조용히 모델 경로로 되돌아가 검사가 헐거워진다.
+  logToolCall: async () => {},
+  loadOwnedOrders: async () => ({ activeOrders: [], byRcptNo: new Map() }),
+  resolveCid: (ctx, cid) => cid || (ctx && ctx.primaryCid) || null,
+  loadOidsByCallmanerSlips: async () => new Map(),
+  assertOwnedOrder: async () => ({ error: '검사용 스텁' }),
+  normalizeCid: (v) => String(v || ''),
+  isPlausiblePhone: () => true,
 });
 
 const db = require('../db');
@@ -88,6 +96,25 @@ async function pendingOf(sessionId) {
     check('되묻는 중이면 돌리지 않는다', shouldProbeDispatch('내 주문 어떻게 됐어?', 'reserved_date', SID), false);
     check('세션이 없으면 돌리지 않는다', shouldProbeDispatch('내 주문 어떻게 됐어?', null, null), false);
 
+    console.log('[모델을 거치지 않는 고정 조회 — 넓힌 말투]');
+    const fixed = (t) => agent.matchFixedQuery(t);
+    // 새로 인정하는 말투 (기존에는 모델 경로로 새서 3.4초 걸리던 문장들)
+    check('"내 주문 어떻게 됐어?"', fixed('내 주문 어떻게 됐어?'), 'active_list');
+    check('"주문 어떻게 됐나요?"', fixed('주문 어떻게 됐나요?'), 'active_list');
+    check('"제 접수 어떻게 되고 있어요?"', fixed('제 접수 어떻게 되고 있어요?'), 'active_list');
+    check('"배차 잘 진행되고 있나요?"', fixed('배차 잘 진행되고 있나요?'), 'active_list');
+    // 기존에 되던 것 (회귀 확인)
+    check('"주문 내역 알려줘"', fixed('주문 내역 알려줘'), 'active_list');
+    check('"접수 현황 좀 보여줘"', fixed('접수 현황 좀 보여줘'), 'active_list');
+    // 넓혀도 절대 걸리면 안 되는 것 — 금지어가 먼저 걸러낸다
+    check('위치 질문은 제외', fixed('기사님 어디쯤이에요?'), null);
+    check('취소 요청은 제외', fixed('내 주문 취소해줘'), null);
+    check('기간 조회는 제외', fixed('오늘 주문 어떻게 됐어?'), null);
+    check('특정 건 지목은 제외', fixed('2번 주문 어떻게 됐어?'), null);
+    check('요금 질문은 제외', fixed('내 주문 요금 얼마야?'), null);
+    check('명사 하나만은 제외', fixed('주문'), null);
+    check('여러 요청이 섞이면 제외', fixed('주문 어떻게 됐어? 그리고 취소해줘'), null);
+
     console.log('[확인 대기 중이면 투기 실행은 물러난다]');
     // "네" 한마디로 실행될 상태를 미리 만들어둔다.
     const preset = { action: 'confirm', mcpTool: 'call.create', callArgs: { x: 1 }, createdAt: Date.now() };
@@ -120,10 +147,25 @@ async function pendingOf(sessionId) {
     // 아니다. 중요한 건 "투기가 아닐 때는 speculative_* 로 막히지 않는다"는 것.
     check('speculative 사유로 막히지 않는다', /^speculative_/.test(String(out.reason || '')), false);
 
+    console.log('[고정 조회는 모델을 아예 거치지 않는다]');
+    await db.run('UPDATE chat_sessions SET mcp_pending_json = NULL WHERE id = ?', [sessionId]);
+    let modelCalls = 0;
+    const countingTurn = { parts: [], functionCalls: [], text: '모델이 불렸다' };
+    nextTurn = countingTurn;
+    const vertexStub = require('../lib/vertexAi');
+    const realGen = vertexStub.generateWithTools;
+    vertexStub.generateWithTools = async (...args) => { modelCalls += 1; return realGen(...args); };
+    out = await agent.runDispatchAgent({ user: USER, sessionId, text: '내 주문 어떻게 됐어?', history: [], speculative: true });
+    vertexStub.generateWithTools = realGen;
+    check('빠른 경로로 답한다', (out.usedTools || []).join(','), 'get_my_orders(fast)');
+    // 여기가 이번 변경의 값이다 — 모델을 한 번도 부르지 않아야 2.3초가 빠진다.
+    check('모델 호출 0회', modelCalls, 0);
+
     console.log('[조회만 하는 라운드는 투기에서도 그대로 답한다]');
     await db.run('UPDATE chat_sessions SET mcp_pending_json = NULL WHERE id = ?', [sessionId]);
     nextTurn = { parts: [], functionCalls: [], text: '진행 중인 주문이 2건 있습니다.' };
-    out = await agent.runDispatchAgent({ user: USER, sessionId, text: '내 주문 어떻게 됐어?', history: [], speculative: true });
+    // 고정 조회에 안 걸리는 문장이어야 모델 경로를 본다("자세"가 금지어라 빠른 경로로 안 샌다).
+    out = await agent.runDispatchAgent({ user: USER, sessionId, text: '주문 상태 자세히 설명해줘', history: [], speculative: true });
     check('handled=true로 답한다', out.handled, true);
     check('문장을 만든다', out.message, '진행 중인 주문이 2건 있습니다.');
   } finally {
