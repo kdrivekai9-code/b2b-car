@@ -7,6 +7,8 @@
 // 실제 Gemini를 부르지 않고 미들웨어만 떼어내 확인한다(비용·시간 없이 반복 가능).
 process.env.AI_RATE_LIMIT_PER_MINUTE = '3';
 process.env.AI_RATE_LIMIT_PER_HOUR = '100';
+// 설정 캐시를 짧게 해서 저장 직후 반영을 확인할 수 있게 한다.
+process.env.APP_SETTINGS_CACHE_MS = '50';
 delete process.env.AI_RATE_LIMIT_DISABLED;
 process.env.NODE_ENV = 'development'; // 테스트 모드면 미들웨어가 통과만 하므로 끈다
 
@@ -64,6 +66,30 @@ const server = app.listen(0, async () => {
     console.log('[로그인 전이면 IP로 센다]');
     const anon1 = await call(null);
     check('익명 첫 요청은 통과', anon1.status, 200);
+
+    // 화면(접속기록)에서 바꾼 값이 실제로 적용되는지 — 여기가 이번 변경의 핵심이다.
+    // 저장해도 반영이 안 되면 관리자는 바꿨다고 믿는데 실제로는 옛 한도로 도는 상태가 된다.
+    console.log('[화면에서 바꾼 한도가 적용된다]');
+    const appSettings = require('../lib/appSettings');
+    const { KEY_PER_MINUTE } = require('../middleware/aiRateLimit');
+    await appSettings.set(KEY_PER_MINUTE, '1', null);
+    const u3 = 30001;
+    check('바뀐 한도 안에서 1건 통과', (await call(u3)).status, 200);
+    check('2건째는 막힌다(한도 1)', (await call(u3)).status, 429);
+
+    // 0은 "제한 없음" — 사고가 났을 때 배포 없이 즉시 풀 수 있어야 한다.
+    console.log('[0으로 두면 제한이 풀린다]');
+    await appSettings.set(KEY_PER_MINUTE, '0', null);
+    const u4 = 30002;
+    let allOk = true;
+    for (let i = 0; i < 8; i += 1) { if ((await call(u4)).status !== 200) allOk = false; }
+    check('연속 8건 모두 통과', allOk, true);
+
+    // 검사가 만든 설정은 행째로 지운다 — 값만 null로 두면 "설정한 적 없음"과 구분되지 않는
+    // 껍데기 행이 운영 DB에 남는다.
+    const db = require('../db');
+    await db.run('DELETE FROM app_settings WHERE key = ?', [KEY_PER_MINUTE]);
+    await db.pool.end().catch(() => {});
   } finally {
     server.close();
   }

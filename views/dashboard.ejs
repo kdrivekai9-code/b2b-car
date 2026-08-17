@@ -40,6 +40,44 @@
   <div class="kpi"><div class="label">이슈(문의/사고/취소 등)</div><div class="value"><%= issues %>건</div></div>
 </div>
 
+<%# AI 사용량 — ai_call_logs 집계. 지사/법인 스코프가 없다(호출 주체가 시스템이라 나눌 근거가
+    없다) — 기간만 맞춘다. src/app/page.js에도 같은 카드가 있다. %>
+<% if (typeof aiUsage !== 'undefined' && aiUsage && aiUsage.totalCalls > 0) { %>
+<section class="card" style="margin-bottom:12px;">
+  <h2>🤖 AI 사용량 <small class="page-sub" style="font-weight:400;">(챗봇이 Gemini를 부른 횟수)</small></h2>
+  <div class="kpi-grid" style="margin-bottom:12px;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));">
+    <div class="kpi accent"><div class="label">총 호출</div><div class="value"><%= aiUsage.totalCalls %>회</div></div>
+    <div class="kpi"><div class="label">평균 응답</div><div class="value"><%= (aiUsage.avgMs / 1000).toFixed(1) %>초</div></div>
+    <div class="kpi"><div class="label">실패</div><div class="value"><%= aiUsage.totalFailures %>회</div></div>
+    <% if (aiUsage.slowest) { %>
+      <div class="kpi">
+        <div class="label">가장 느렸던 용도</div>
+        <div class="value" style="font-size:16px;"><%= aiUsage.slowest.label %> <%= (aiUsage.slowest.maxMs / 1000).toFixed(1) %>초</div>
+      </div>
+    <% } %>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>용도</th><th style="text-align:right;">호출</th><th style="text-align:right;">평균</th><th style="text-align:right;">최대</th><th style="text-align:right;">실패</th></tr></thead>
+      <tbody>
+        <% aiUsage.byOp.forEach(function (r) { %>
+          <tr>
+            <td><%= r.label %></td>
+            <td style="text-align:right;"><%= r.calls %>회</td>
+            <td style="text-align:right;"><%= (r.avgMs / 1000).toFixed(1) %>초</td>
+            <td style="text-align:right;"><%= (r.maxMs / 1000).toFixed(1) %>초</td>
+            <td style="text-align:right;"><% if (r.failures) { %><span class="badge red"><%= r.failures %></span><% } else { %>-<% } %></td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+  <p class="page-sub" style="margin-bottom:0;">
+    고객이 한 문장을 보내면 보통 2~3회 호출됩니다. 계정당 허용량은 <a href="/access-logs">접속기록</a> 화면에서 조정합니다.
+  </p>
+</section>
+<% } %>
+
 <div class="dashboard-card-grid">
 <section class="card dashboard-analysis-card">
   <h2>⏱ 시간대 분포 <small class="page-sub" style="font-weight:400;">(오더 등록 시각 기준)</small></h2>

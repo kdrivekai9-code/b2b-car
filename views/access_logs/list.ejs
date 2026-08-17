@@ -7,6 +7,41 @@
   <span class="page-heading-meta">총 <%= logs.length %>건</span>
 </div>
 
+
+<% if (error) { %><div class="error-msg"><%= error %></div><% } %>
+<% if (notice) { %><div class="success-msg"><%= notice %></div><% } %>
+
+<%# AI 사용량 제한 — 로그인 차단 기록을 보는 자리와 "얼마나 허용할지" 정하는 자리를 같이 둔다. %>
+<div class="card">
+  <div class="section-title">🤖 AI 사용량 제한</div>
+  <p class="page-sub">
+    챗봇이 Gemini를 부르는 요청(접수 분류·도우미 등)의 계정당 허용량입니다.
+    IP가 아니라 <strong>로그인 계정</strong>으로 셉니다 — 한 사무실에서 여러 명이 써도 서로의 한도를 깎지 않습니다.
+    <strong>0으로 두면 제한하지 않습니다.</strong>
+  </p>
+  <form method="POST" action="/access-logs/ai-rate-limit">
+    <div class="row">
+      <div class="field">
+        <label for="aiPerMinute">분당 한도(계정당)</label>
+        <input id="aiPerMinute" type="number" name="per_minute" value="<%= aiRateLimit.perMinute %>" min="0" step="1" required>
+        <span class="hint">기본 <%= aiRateLimit.defaultPerMinute %></span>
+      </div>
+      <div class="field">
+        <label for="aiPerHour">시간당 한도(계정당)</label>
+        <input id="aiPerHour" type="number" name="per_hour" value="<%= aiRateLimit.perHour %>" min="0" step="1" required>
+        <span class="hint">기본 <%= aiRateLimit.defaultPerHour %></span>
+      </div>
+      <div class="field" style="display:flex;align-items:flex-end;">
+        <button class="btn" type="submit">저장</button>
+      </div>
+    </div>
+    <p class="page-sub" style="margin-bottom:0;">
+      고객이 한 문장을 보내면 이 계열 요청이 2~3번 일어납니다(분류 → 접수턴 → 도우미).
+      바꾼 값은 최대 <%= aiRateLimit.cacheSeconds %>초 뒤부터 적용됩니다.
+    </p>
+  </form>
+</div>
+
 <form class="filters card" method="GET" action="/access-logs">
   <div class="field"><label for="logAccount">계정</label><input id="logAccount" name="account" value="<%= filters.account %>" placeholder="로그인 아이디"></div>
   <div class="field">

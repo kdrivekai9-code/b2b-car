@@ -87,6 +87,48 @@ export default async function DashboardPage({ searchParams }) {
         <div className="kpi"><div className="label">이슈(문의/사고/취소 등)</div><div className="value">{data.issues}건</div></div>
       </div>
 
+      {/* AI 사용량 — ai_call_logs 집계. 지사/법인 스코프가 없다(호출 주체가 시스템이라 나눌
+          근거가 없다) — 기간만 맞춘다. 표가 없으면(마이그레이션 전) 카드 자체를 감춘다.
+          views/dashboard.ejs에도 같은 카드가 있다. */}
+      {data.aiUsage && data.aiUsage.totalCalls > 0 && (
+        <section className="card" style={{ marginBottom: 12 }}>
+          <h2>🤖 AI 사용량 <small className="page-sub" style={{ fontWeight: 400 }}>(챗봇이 Gemini를 부른 횟수)</small></h2>
+          <div className="kpi-grid" style={{ marginBottom: 12, gridTemplateColumns: 'repeat(auto-fit,minmax(120px,1fr))' }}>
+            <div className="kpi accent"><div className="label">총 호출</div><div className="value">{data.aiUsage.totalCalls}회</div></div>
+            <div className="kpi"><div className="label">평균 응답</div><div className="value">{(data.aiUsage.avgMs / 1000).toFixed(1)}초</div></div>
+            <div className="kpi"><div className="label">실패</div><div className="value">{data.aiUsage.totalFailures}회</div></div>
+            {data.aiUsage.slowest && (
+              <div className="kpi">
+                <div className="label">가장 느렸던 용도</div>
+                <div className="value" style={{ fontSize: 16 }}>
+                  {data.aiUsage.slowest.label} {(data.aiUsage.slowest.maxMs / 1000).toFixed(1)}초
+                </div>
+              </div>
+            )}
+          </div>
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>용도</th><th style={{ textAlign: 'right' }}>호출</th><th style={{ textAlign: 'right' }}>평균</th><th style={{ textAlign: 'right' }}>최대</th><th style={{ textAlign: 'right' }}>실패</th></tr></thead>
+              <tbody>
+                {data.aiUsage.byOp.map((r) => (
+                  <tr key={r.op}>
+                    <td>{r.label}</td>
+                    <td style={{ textAlign: 'right' }}>{r.calls}회</td>
+                    <td style={{ textAlign: 'right' }}>{(r.avgMs / 1000).toFixed(1)}초</td>
+                    <td style={{ textAlign: 'right' }}>{(r.maxMs / 1000).toFixed(1)}초</td>
+                    <td style={{ textAlign: 'right' }}>{r.failures ? <span className="badge red">{r.failures}</span> : '-'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="page-sub" style={{ marginBottom: 0 }}>
+            고객이 한 문장을 보내면 보통 2~3회 호출됩니다. 계정당 허용량은
+            <a href="/access-logs"> 접속기록</a> 화면에서 조정합니다.
+          </p>
+        </section>
+      )}
+
       <div className="dashboard-card-grid">
         <section className="card dashboard-analysis-card">
           <h2>⏱ 시간대 분포 <small className="page-sub" style={{ fontWeight: 400 }}>(오더 등록 시각 기준)</small></h2>

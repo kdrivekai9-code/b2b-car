@@ -3,6 +3,25 @@ const db = require('../db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const asyncHandler = require('../middleware/asyncHandler');
 const { archiveOldAccessLogs, purgeArchivedAccessLogs } = require('../lib/accessLogRetention');
+const appSettings = require('../lib/appSettings');
+const {
+  KEY_PER_MINUTE, KEY_PER_HOUR, DEFAULT_PER_MINUTE, DEFAULT_PER_HOUR, MAX_ALLOWED,
+} = require('../middleware/aiRateLimit');
+
+// AI 사용량 제한 설정 — 이 화면에 두는 이유: 로그인 차단 기록(LOGIN_RATE_LIMITED)을 보는 자리와
+// "얼마나 허용할지"를 정하는 자리가 같아야 관리자가 한 화면에서 판단할 수 있다.
+async function loadAiRateLimitSettings() {
+  const [perMinute, perHour] = await Promise.all([
+    appSettings.getNumber(KEY_PER_MINUTE, DEFAULT_PER_MINUTE, { min: 0, max: MAX_ALLOWED }),
+    appSettings.getNumber(KEY_PER_HOUR, DEFAULT_PER_HOUR, { min: 0, max: MAX_ALLOWED }),
+  ]);
+  return {
+    perMinute, perHour,
+    defaultPerMinute: DEFAULT_PER_MINUTE,
+    defaultPerHour: DEFAULT_PER_HOUR,
+    cacheSeconds: Math.round(appSettings.CACHE_TTL_MS / 1000),
+  };
+}
 
 const router = express.Router();
 
@@ -51,7 +70,7 @@ router.get('/data.json', asyncHandler(async (req, res) => {
      LIMIT 1000`,
     params
   );
-  res.json({ currentUser: req.session.user, logs, filters });
+  res.json({ currentUser: req.session.user, logs, filters, aiRateLimit: await loadAiRateLimitSettings() });
 }));
 
 router.get('/', asyncHandler(async (req, res) => {
@@ -89,7 +108,35 @@ router.get('/', asyncHandler(async (req, res) => {
      LIMIT 1000`,
     params
   );
-  res.render('access_logs/list', { title: '접속기록', logs, filters });
+  res.render('access_logs/list', {
+    title: '접속기록', logs, filters,
+    aiRateLimit: await loadAiRateLimitSettings(),
+    notice: req.query.notice || null,
+    error: req.query.error || null,
+  });
+}));
+
+// AI 사용량 제한 저장. 0은 "제한 없음"이다 — 사고가 났을 때 배포 없이 즉시 풀 수 있어야 한다.
+router.post('/ai-rate-limit', asyncHandler(async (req, res) => {
+  const base = '/access-logs';
+  const perMinute = Number(req.body.per_minute);
+  const perHour = Number(req.body.per_hour);
+  const bad = (msg) => res.redirect(base + '?error=' + encodeURIComponent(msg));
+
+  if (!Number.isInteger(perMinute) || perMinute < 0 || perMinute > MAX_ALLOWED) {
+    return bad(`분당 한도는 0~${MAX_ALLOWED} 사이의 정수로 입력해주세요(0은 제한 없음).`);
+  }
+  if (!Number.isInteger(perHour) || perHour < 0 || perHour > MAX_ALLOWED) {
+    return bad(`시간당 한도는 0~${MAX_ALLOWED} 사이의 정수로 입력해주세요(0은 제한 없음).`);
+  }
+  // 시간당이 분당보다 작으면 분당 한도가 아무 의미가 없다 — 관리자가 알아채기 어려운 실수라 막는다.
+  if (perHour !== 0 && perMinute !== 0 && perHour < perMinute) {
+    return bad('시간당 한도는 분당 한도보다 작을 수 없습니다.');
+  }
+
+  await appSettings.set(KEY_PER_MINUTE, perMinute, req.session.user.id);
+  await appSettings.set(KEY_PER_HOUR, perHour, req.session.user.id);
+  res.redirect(base + '?notice=' + encodeURIComponent('AI 사용량 제한을 저장했습니다.'));
 }));
 
 module.exports = router;

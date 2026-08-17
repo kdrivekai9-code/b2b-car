@@ -28,7 +28,7 @@ export default async function AccessLogsPage({ searchParams }) {
   if (res.status === 401) redirect('/login');
   if (!res.ok) throw new Error('접속기록 데이터를 불러오지 못했습니다 (' + res.status + ')');
 
-  const { currentUser, logs, filters } = await res.json();
+  const { currentUser, logs, filters, aiRateLimit } = await res.json();
 
   return (
     <AppShell currentUser={currentUser} activePath="/access-logs">
@@ -38,6 +38,40 @@ export default async function AccessLogsPage({ searchParams }) {
           <p className="page-sub">로그인/로그아웃 등 접속 이벤트 기록입니다.</p>
         </div>
       </div>
+
+      {/* AI 사용량 제한 — 로그인 차단 기록을 보는 자리와 "얼마나 허용할지" 정하는 자리를 같이 둔다.
+          저장은 Express가 처리한다(POST /access-logs/ai-rate-limit) — 순수 HTML form이라
+          이 서버 컴포넌트에 핸들러를 넣을 필요가 없다. EJS 화면(views/access_logs/list.ejs)에도
+          같은 카드가 있다. */}
+      {aiRateLimit && (
+        <div className="card" style={{ marginBottom: 12 }}>
+          <div className="section-title">🤖 AI 사용량 제한</div>
+          <p className="page-sub">
+            챗봇이 Gemini를 부르는 요청(접수 분류·도우미 등)의 계정당 허용량입니다.
+            IP가 아니라 <strong>로그인 계정</strong>으로 셉니다 — 한 사무실에서 여러 명이 써도 서로의 한도를 깎지 않습니다.
+            <strong> 0으로 두면 제한하지 않습니다.</strong>
+          </p>
+          <form method="POST" action="/access-logs/ai-rate-limit">
+            <div className="row" style={{ flexWrap: 'wrap', gap: 8, alignItems: 'flex-end' }}>
+              <div className="field" style={{ minWidth: 160 }}>
+                <label htmlFor="aiPerMinute">분당 한도(계정당)</label>
+                <input id="aiPerMinute" type="number" name="per_minute" defaultValue={aiRateLimit.perMinute} min="0" step="1" required />
+                <span className="hint">기본 {aiRateLimit.defaultPerMinute}</span>
+              </div>
+              <div className="field" style={{ minWidth: 160 }}>
+                <label htmlFor="aiPerHour">시간당 한도(계정당)</label>
+                <input id="aiPerHour" type="number" name="per_hour" defaultValue={aiRateLimit.perHour} min="0" step="1" required />
+                <span className="hint">기본 {aiRateLimit.defaultPerHour}</span>
+              </div>
+              <div className="field"><button className="btn" type="submit">저장</button></div>
+            </div>
+            <p className="page-sub" style={{ marginBottom: 0 }}>
+              고객이 한 문장을 보내면 이 계열 요청이 2~3번 일어납니다(분류 → 접수턴 → 도우미).
+              바꾼 값은 최대 {aiRateLimit.cacheSeconds}초 뒤부터 적용됩니다.
+            </p>
+          </form>
+        </div>
+      )}
 
       <div className="card" style={{ marginBottom: 12 }}>
         <form method="GET">

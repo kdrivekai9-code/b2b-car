@@ -36,6 +36,7 @@ const { sendOrderPhotos, isPhotoRequest, isOdometerRequest, answerOdometer, coun
 // 주소 후보 검색·선택은 웹 접수 화면과 같은 규칙을 쓴다(lib/addressCandidates.js).
 const { searchAddressCandidates, needsDisambiguation, buildCandidateListText, matchCandidateChoice, getClarifyText } = require('../lib/addressCandidates');
 const { getSmalltalkMessage } = require('../lib/smallTalk');
+const { needsHumanByKeyword, judgeNeedsHuman, categoryLabel } = require('../lib/escalationJudge');
 const { buildSuggestion, buildFareSuggestion, buildHoursSuggestion, isHoursQuestion, toIntakeFields, buildIntakeReply } = require('../lib/agentAssist');
 const { runDispatchAgent, loadPending: loadMcpPending } = require('../lib/mcpDispatchAgent');
 const { notify } = require('../lib/push');
@@ -535,6 +536,8 @@ async function tryAnswerPhotoRequest(session, text) {
   if (!order) return false;
 
   const result = await sendOrderPhotos(session, order, {
+    // 원문을 넘겨야 "출발사진"/"도착사진" 중 어느 쪽을 물었는지 고를 수 있다(photoPhaseHint).
+    text,
     // 보낼 사진이 있을 때만 알린다 — 내려받아 다시 올리는 동안 몇 초씩 걸린다.
     onStart: (count) => botSay(session, `사진 ${count}장을 준비하고 있습니다. 잠시만 기다려주세요.`, '사진 전달 대기 안내'),
   }).catch((e) => {
@@ -1450,8 +1453,9 @@ async function registerDispatchOrder(session, parsed, rawText, cache) {
 const SMALL_TALK_RE = /^[\s]*(네+[~\s.!ㅣ]*|넵+[~\s.!]*|예[.,\s]*|응+[\s.!]*|감사합니다[\s.!~]*|감사해요[\s.!~]*|고맙습니다[\s.!~]*|확인(했|하겠)습니다[\s.!]*|알겠습니다[\s.!]*|수고(하세요|하셨습니다)[\s.!]*|ok|오케이)+$/i;
 
 // 사고·파손·클레임은 봇이 절대 답하지 않는다 — 잘못 응대했을 때의 손해가 자동화 이득보다 크다.
-// (기획서 5.7 인계 규칙. 지연 관련 단어는 "늦어도 3시까지"처럼 정상 요청에도 흔해서 넣지 않았다.)
-const ESCALATION_RE = /(사고|파손|스크래치|기스|찍힘|긁힘|클레임|분실|도난|고장|침수|변상|보상|항의|불만)/;
+// (기획서 5.7 인계 규칙.) 판정 자체는 lib/escalationJudge.js로 옮겼다 — 키워드만으로는 실제
+// 로그의 불만 표현을 거의 못 잡는다는 것이 실측으로 드러나서, 키워드(빠른 확실한 것) +
+// LLM 판정(나머지) 두 단계로 나눴다. 그쪽 파일 머리말에 근거 수치를 적어뒀다.
 
 // 주문 조회/변경/취소(intent: unsupported)를 MCP 배차 도우미로 처리한다.
 // 카카오 고객은 b2b-car 계정이 없는 게 기본값이지만, kakao_consult_accounts에 이 채널(또는 이
@@ -1521,7 +1525,7 @@ async function tryDispatchAgent(session, text) {
 async function processBotTurn(session, text) {
   // 사고·클레임은 어떤 상태에서도 최우선이다 — "네" 확인 대기 중이라도 마찬가지다(아래
   // 확인 대기 체크보다 반드시 먼저 와야 한다).
-  if (ESCALATION_RE.test(text)) {
+  if (needsHumanByKeyword(text)) {
     // 상담원 연결 앞에서는 동의를 요구하지 않는다 — 사람이 붙어서 직접 물어보면 된다.
     // 동의 버튼은 조회·접수 시점에만 쓴다(사용자 확정 규칙).
     return handleUnsupported(session, text, '사고·클레임 문의');
@@ -1602,6 +1606,16 @@ async function processBotTurn(session, text) {
   const knowledgeSearchPromise = searchKnowledgeBase(text, { limit: 1, threshold: 0.7, sessionId: session.id })
     .catch((e) => { console.error('카카오 상담톡 FAQ 사전 검색 실패:', e.message); return []; });
 
+  // "이건 사람이 봐야 하는 대화인가" 판정도 같이 시작해둔다. 맨 앞 키워드 검사를 통과했다는
+  // 것은 명백한 사고 표현이 없었다는 뜻일 뿐이고, 로그의 실제 불만은 대부분 그 단계를 그냥
+  // 지나간다(lib/escalationJudge.js 머리말의 실측). 여기까지 온 발화만 대상이라 접수 폼·
+  // 스몰토크·사진/주행거리 요청에는 호출이 나가지 않는다.
+  //
+  // 분류(classifyAndExtract)와 같이 출발시켜 대기시간이 겹치게 한다 — thinking을 끈 짧은
+  // 판정이라 분류보다 먼저 끝나고, 순차로 붙였을 때처럼 응답이 1초 늦어지지 않는다.
+  const escalationPromise = judgeNeedsHuman(text)
+    .catch((e) => { console.error('카카오 상담톡 인계 판정 실패:', e.message); return null; });
+
   let classified;
   try {
     classified = await classifyAndExtract(intakeText, null, null);
@@ -1618,6 +1632,20 @@ async function processBotTurn(session, text) {
   // 새 접수가 아닌 후속 질문(조회·취소·변경, 맥락 의존 답변)만 도우미로 돌린다.
   const isNewIntakeIntent = classified.intent === 'dispatch_order'
     || classified.intent === 'proxy_order' || classified.intent === 'daily_driver_order';
+
+  // 자동 응대로 넘어가기 직전에 인계 판정을 확인한다. 이 자리인 이유: 아래 경로들(배차 도우미
+  // 이어가기, FAQ 답변, unsupported→도우미)이 전부 봇이 스스로 답해버리는 길이라, 사람이 봐야
+  // 하는 대화는 여기를 지나가면 안 된다.
+  //
+  // 정형 접수 폼은 이 자리에 오지 않는다 — tryHandleIntake가 위에서 이미 끝냈다. 여기 오는
+  // 접수는 폼 파서가 못 읽은 자유 문장이고, 판정 기준에 "접수·변경·취소 요청은 false"라고
+  // 못박아 두었으므로 그런 문장에 true가 나온다면 실제로 불만이 섞여 있다는 뜻이다. 그래서
+  // 접수 의도라고 해서 봐주지 않는다 — 사람이 봐야 하는 것이 새는 쪽이 더 비싸다.
+  const escalation = await escalationPromise;
+  if (escalation && escalation.needsHuman) {
+    return handleUnsupported(session, text, categoryLabel(escalation.category));
+  }
+
   if (isMcpFollowUp(session) && !isNewIntakeIntent) {
     const continued = await tryDispatchAgent(session, text).catch((e) => {
       console.error('카카오 배차 도우미 이어가기 실패:', e.message);

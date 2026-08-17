@@ -134,6 +134,53 @@ async function main() {
       check('"아직 없다"고 알린다', result.message, photos.MESSAGES.noPhotos);
     }
 
+    // 콜마너로 배차되는 거래처는 order_photos가 늘 비어 있다 — 기사가 우리 업로드 페이지를
+    // 쓰지 않기 때문이다. 이 경로가 order_photos만 보던 동안, 그런 거래처는 사진을 갖고
+    // 있으면서도 "아직 없습니다"라고 답했다(상담 로그에서 상담원 발화의 60.5%가 사진 전달인
+    // 거래처가 정확히 그 경우다).
+    const hasCallmanerPhotos = await db.get(
+      "SELECT 1 AS ok FROM information_schema.tables WHERE table_name = 'order_callmaner_photos'"
+    );
+    if (!hasCallmanerPhotos) {
+      console.log('\n[콜마너 탁송사진 폴백] 건너뜀 — 마이그레이션 20260804000000 미적용');
+    } else {
+      console.log('\n[기사 앱 사진이 없고 콜마너 탁송사진만 있을 때]');
+      const put = (phase, seq) => db.run(
+        'INSERT INTO order_callmaner_photos (order_id, phase, seq, url) VALUES (?, ?, ?, ?)',
+        [created.orderId, phase, seq, `https://vault.example/${created.orderId}/${phase}${seq}.jpg`]
+      );
+      for (let i = 1; i <= 2; i += 1) await put('start', i);
+      for (let i = 1; i <= 3; i += 1) await put('end', i);
+      created.callmanerPhotos = true;
+
+      {
+        const stubs = makeStubs();
+        const result = await photos.sendOrderPhotos(session, orderRow, stubs);
+        check('콜마너 사진으로 답한다', result.source, 'callmaner');
+        // 시점을 안 밝히고 물어보는 시점은 대개 차가 도착한 뒤다.
+        check('시점을 안 밝히면 운행후를 고른다', result.phase, 'end');
+        check('세 장을 보낸다', result.sent, 3);
+        check('어느 시점 사진인지 문구에 넣는다', stubs.sent[0].text.includes('운행후 사진'), true);
+      }
+      {
+        // "탁송출발사진좀 확인부탁드립니다" — 실사용 발화는 대부분 시점을 지정한다.
+        const stubs = makeStubs();
+        const result = await photos.sendOrderPhotos(session, orderRow, { ...stubs, text: '탁송 출발사진 좀 확인부탁드립니다' });
+        check('출발사진을 물으면 운행전을 고른다', result.phase, 'start');
+        check('두 장을 보낸다', result.sent, 2);
+        check('운행전이라고 밝힌다', stubs.sent[0].text.includes('운행전 사진'), true);
+      }
+      {
+        // 콜마너 링크는 저장된 뒤 한동안 404다(마이그레이션 20260816010000에서 실측 중).
+        // 그 구간을 "오류"로 알리면 고객은 우리 잘못으로 읽는다.
+        const stubs = makeStubs({ fetchImage: async () => ({ ok: false, error: '사진을 가져오지 못했습니다 (404)' }) });
+        const result = await photos.sendOrderPhotos(session, orderRow, stubs);
+        check('장애가 아니라 준비 중으로 답한다', result.message, photos.MESSAGES.photosNotReady);
+        check('재요청 판정을 탈 수 있게 no_photos로 둔다', result.skipped, 'no_photos');
+        check('발신 시도는 없다', stubs.sent.length, 0);
+      }
+    }
+
     console.log('\n[사진이 있을 때]');
     for (let i = 0; i < 3; i += 1) {
       const row = await db.get(
@@ -146,6 +193,9 @@ async function main() {
       const stubs = makeStubs();
       const result = await photos.sendOrderPhotos(session, orderRow, stubs);
       check('세 장을 보낸다', result.sent, 3);
+      // 둘 다 있으면 기사 앱 쪽을 쓴다 — 우리 버킷에 있어 확실히 열린다. 합치면 같은 차
+      // 사진이 두 벌 나간다.
+      check('기사 앱 사진이 콜마너 사진보다 앞선다', result.source, 'driver');
       check('한 번의 메시지로 보낸다', stubs.sent.length, 1);
       check('업로드된 카카오 URL로 보낸다', stubs.sent[0].urls.every((u) => u.startsWith('https://kakao.example/')), true);
       check('어느 오더인지 문구에 넣는다', stubs.sent[0].text.includes(`${MARK}-oid`), true);
@@ -201,6 +251,14 @@ async function main() {
         [sessionRow.id]
       );
       check('다른 안내는 세지 않는다', await photos.countNoPhotoAnswers(sessionRow.id), 1);
+
+      // "아직 없다"와 "아직 준비 중이다"는 고객에게 같은 상황이다. 한쪽만 세면 콜마너
+      // 거래처에서는 몇 번을 물어도 상담원이 붙지 않는다.
+      await db.run(
+        `INSERT INTO chat_messages (session_id, sender, message) VALUES (?, 'bot', ?)`,
+        [sessionRow.id, photos.MESSAGES.photosNotReady]
+      );
+      check('"준비 중" 안내도 재요청으로 센다', await photos.countNoPhotoAnswers(sessionRow.id), 2);
     }
 
     console.log('\n[사진이 많을 때]');
@@ -241,6 +299,9 @@ async function main() {
   } finally {
     if (created.photoIds.length) {
       await db.run(`DELETE FROM order_photos WHERE id IN (${created.photoIds.map(() => '?').join(',')})`, created.photoIds).catch(() => {});
+    }
+    if (created.callmanerPhotos && created.orderId) {
+      await db.run('DELETE FROM order_callmaner_photos WHERE order_id = ?', [created.orderId]).catch(() => {});
     }
     if (created.orderId) {
       await db.run('DELETE FROM orders WHERE id = ? AND memo_customer = ?', [created.orderId, MARK]).catch(() => {});
