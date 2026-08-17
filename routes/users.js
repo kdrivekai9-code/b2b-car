@@ -1,5 +1,6 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const db = require('../db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const asyncHandler = require('../middleware/asyncHandler');
@@ -99,7 +100,11 @@ router.post('/', asyncHandler(async (req, res) => {
   const trimmedLoginId = String(login_id || '').trim();
   const finalLoginId = trimmedLoginId
     || await ensureUniqueLoginId(phone ? `kakao_${String(phone).replace(/\D/g, '')}` : null);
-  const hash = await bcrypt.hash(password || '1234', 10);
+  // 비밀번호를 비워두고 등록하는 경로가 있다(카카오로만 소통하는 고객 — 위 ensureUniqueLoginId
+  // 주석 참조). 예전에는 그때 '1234'를 넣었는데, 그렇게 만들어진 계정이 실제로 admin 권한을
+  // 가진 채 운영 DB에 남아 있었다(2026-08-17 보안 점검에서 발견). 로그인할 일이 없는 계정이므로
+  // 아무도 모르는 값을 넣는 편이 맞다 — 나중에 로그인이 필요해지면 관리자가 재설정하면 된다.
+  const hash = await bcrypt.hash(password || crypto.randomBytes(24).toString('base64url'), 10);
   await db.run(
     `INSERT INTO users (login_id, password_hash, name, phone, role, branch_id, group_id, grade, status)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active')`,

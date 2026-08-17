@@ -2,6 +2,8 @@ const express = require('express');
 const db = require('../db');
 const { requireAuth, requireRole, scopeFilter, getSessionProblem, keepSessionAlive } = require('../middleware/auth');
 const asyncHandler = require('../middleware/asyncHandler');
+// Gemini를 부르는 경로는 사용량을 제한한다(middleware/aiRateLimit.js의 주석 참조).
+const { aiRateLimit } = require('../middleware/aiRateLimit');
 const { ORDER_STATUSES } = require('../config');
 const { getEffectivePaymentMethods, getEffectiveStatuses, checkOperatingHours, calculateFareWithFerry, calculatePremiumFare } = require('../lib/branchPolicy');
 const { notify } = require('../lib/push');
@@ -410,7 +412,7 @@ router.get('/ai-intake/fields.json', asyncHandler(async (req, res) => {
 // 화면 안의 폴백(buildSummaryTextLocal)으로 넘어간다 — 고객이 확인하는 문구라 네트워크 때문에
 // 접수가 멈추면 안 된다. 그 폴백이 여기와 같은 문구를 내는지는 scripts/check-intake-summary.js가
 // 대조한다.
-router.post('/ai-intake/summary.json', asyncHandler(async (req, res) => {
+router.post('/ai-intake/summary.json', aiRateLimit, asyncHandler(async (req, res) => {
   const b = req.body || {};
   const text = buildSummaryText({
     reservedDate: b.reserved_date,
@@ -682,7 +684,7 @@ function discardDispatchProbe(probe, chatSessionId) {
 // 이 경우 RAG와 의도 분류를 건너뛰고 대화 시작 안내를 반환한다.
 // 하이브리드 챗봇 1단계: 지식검색(FAQ) + 오더접수. Gemini로 의도를 분류해 두 갈래로 라우팅하고,
 // Gemini 호출이 실패하면(쿼터/네트워크 등) 예전 규칙 기반 파서로 대체해 오더접수만이라도 동작하게 한다.
-router.post('/ai-intake/parse', asyncHandler(async (req, res) => {
+router.post('/ai-intake/parse', aiRateLimit, asyncHandler(async (req, res) => {
   const text = (req.body.text || '').trim();
   const pendingField = req.body.pendingField || null;
   // FAQ 검색 문맥 보강에만 쓴다(lib/knowledgeSearch.js) — 이 세션의 chat_messages를 조회할
@@ -869,7 +871,7 @@ router.get('/ai-intake/health', asyncHandler(async (req, res) => {
 
 // 확인/수정/후보선택 단계의 답변 폴백 분류 — 클라이언트가 로컬 키워드로 먼저 판단해보고
 // 애매할 때만("수정할 거 없어", "상담원연결" 같은 예상 못 한 표현 등) 호출한다.
-router.post('/ai-intake/classify-reply', asyncHandler(async (req, res) => {
+router.post('/ai-intake/classify-reply', aiRateLimit, asyncHandler(async (req, res) => {
   const text = (req.body.text || '').trim();
   const phase = req.body.phase || '';
   const candidates = Array.isArray(req.body.candidates) ? req.body.candidates : [];
@@ -934,7 +936,7 @@ router.get('/fare-preview', asyncHandler(async (req, res) => {
 
 // 차종 입력칸 자동완성 — ferry_fare_rules.vehicle_label(쉼표로 구분된 별칭 목록)을 유일한 차종
 // 마스터 데이터로 재사용한다. 1글자부터 부분일치 검색하고, 접두일치를 우선 정렬해 보여준다.
-router.get('/vehicle-type-suggest', asyncHandler(async (req, res) => {
+router.get('/vehicle-type-suggest', aiRateLimit, asyncHandler(async (req, res) => {
   const q = String(req.query.q || '').trim();
   if (!q) return res.json({ suggestions: [] });
 

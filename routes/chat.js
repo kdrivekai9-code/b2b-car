@@ -7,6 +7,8 @@ const express = require('express');
 const db = require('../db');
 const { requireAuth, requireRole, keepSessionAlive } = require('../middleware/auth');
 const asyncHandler = require('../middleware/asyncHandler');
+// Gemini/MCP를 부르는 경로는 사용량을 제한한다(middleware/aiRateLimit.js의 주석 참조).
+const { aiRateLimit } = require('../middleware/aiRateLimit');
 const { notify } = require('../lib/push');
 const { kstNow } = require('../lib/period');
 const { getEffectivePaymentMethods } = require('../lib/branchPolicy');
@@ -443,7 +445,7 @@ router.post('/:sessionId/user-message', asyncHandler(async (req, res) => {
 // 요약)을 웹 로그인 사용자용으로도 제공한다. fallthrough:true로 오면 이 요청은 다루지 않은
 // 것이니(탁송이 아니거나 프리미엄/일일기사 등) 클라이언트는 기존 로컬 판단 경로를 그대로
 // 탄다 — dispatch-agent와 같은 안전장치.
-router.post('/:sessionId/intake-turn', asyncHandler(async (req, res) => {
+router.post('/:sessionId/intake-turn', aiRateLimit, asyncHandler(async (req, res) => {
   const session = await loadOwnedSession(req, res);
   if (!session) return;
   const text = (req.body.text || '').trim();
@@ -495,7 +497,7 @@ router.post('/:sessionId/intake-turn', asyncHandler(async (req, res) => {
 // 지금까지 intent:'unsupported'(주문 조회/변경/취소 등)로 분류되면 곧바로 상담원 연결로 넘어갔다.
 // 그 앞단에 이 라우트를 두고, MCP 도구로 실제 처리가 가능한 요청이면 봇이 직접 답한다.
 // handled:false로 돌아오면 클라이언트는 기존 상담원 연결 경로를 그대로 탄다(기능 회귀 없음).
-router.post('/:sessionId/dispatch-agent', asyncHandler(async (req, res) => {
+router.post('/:sessionId/dispatch-agent', aiRateLimit, asyncHandler(async (req, res) => {
   const session = await loadOwnedSession(req, res);
   if (!session) return;
   const text = (req.body.text || '').trim();
