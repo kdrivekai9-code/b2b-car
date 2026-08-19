@@ -1969,6 +1969,9 @@ async function updateOrderWithCallmaner(orderId, branchId) {
       destination_address: order.destination_address, destination_address_detail: order.destination_address_detail,
       fare_amount: order.fare_amount || 0,
       memo_customer: order.memo_customer || '',
+      // 콜마너에는 차량번호 칸이 없어 적요1 맨 앞에 실어 보낸다(lib/callmaner.js memoWithVehicle).
+      // 이 값이 빠지면 차량번호를 고쳐도 콜마너 쪽 적요는 옛 번호로 남는다.
+      vehicle_number: order.vehicle_number,
       order_type: order.order_type,
       reserved_date: order.reserved_date, reserved_time: order.reserved_time,
     };

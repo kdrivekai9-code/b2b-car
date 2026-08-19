@@ -4,22 +4,61 @@ const { requireAuth, requireRole } = require('../middleware/auth');
 const asyncHandler = require('../middleware/asyncHandler');
 const { archiveOldAccessLogs, purgeArchivedAccessLogs } = require('../lib/accessLogRetention');
 const appSettings = require('../lib/appSettings');
+const aiUsageCounter = require('../lib/aiUsageCounter');
 const {
   KEY_PER_MINUTE, KEY_PER_HOUR, DEFAULT_PER_MINUTE, DEFAULT_PER_HOUR, MAX_ALLOWED,
+  NO_LIMIT, BLOCK_EVENT_TYPE,
 } = require('../middleware/aiRateLimit');
 
 // AI 사용량 제한 설정 — 이 화면에 두는 이유: 로그인 차단 기록(LOGIN_RATE_LIMITED)을 보는 자리와
 // "얼마나 허용할지"를 정하는 자리가 같아야 관리자가 한 화면에서 판단할 수 있다.
 async function loadAiRateLimitSettings() {
-  const [perMinute, perHour] = await Promise.all([
+  const [perMinute, perHour, usage, blocks] = await Promise.all([
     appSettings.getNumber(KEY_PER_MINUTE, DEFAULT_PER_MINUTE, { min: 0, max: MAX_ALLOWED }),
     appSettings.getNumber(KEY_PER_HOUR, DEFAULT_PER_HOUR, { min: 0, max: MAX_ALLOWED }),
+    aiUsageCounter.currentUsage({ limit: 10 }),
+    loadRecentBlocks(),
   ]);
+
+  // 남은 양을 서버에서 계산해 내려준다 — 화면마다 다시 계산하면(EJS/Next) 규칙이 갈린다.
+  // 한도가 0(제한 없음)이면 "남은 양"이라는 개념 자체가 없으므로 null이다.
+  const remaining = (limit, used) => (limit === NO_LIMIT ? null : Math.max(0, limit - used));
+  const rows = usage.map((u) => ({
+    ...u,
+    minuteRemaining: remaining(perMinute, u.minute),
+    hourRemaining: remaining(perHour, u.hour),
+    // 어느 한 창이라도 한도에 닿았으면 지금 막히는 중이다.
+    blocked: (perMinute !== NO_LIMIT && u.minute >= perMinute) || (perHour !== NO_LIMIT && u.hour >= perHour),
+  }));
+
   return {
     perMinute, perHour,
     defaultPerMinute: DEFAULT_PER_MINUTE,
     defaultPerHour: DEFAULT_PER_HOUR,
     cacheSeconds: Math.round(appSettings.CACHE_TTL_MS / 1000),
+    usage: rows,
+    blocks,
+    blockEventType: BLOCK_EVENT_TYPE,
+  };
+}
+
+// 차단이 실제로 일어났는지 — 접속기록에 남긴 것을 세어 보여준다(같은 화면 안에서 확인 가능).
+async function loadRecentBlocks() {
+  const row = await db.get(
+    `SELECT COUNT(*) AS total,
+            COUNT(*) FILTER (WHERE created_at > now() - interval '1 hour') AS last_hour,
+            to_char(MAX(created_at) at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') AS last_at
+       FROM access_logs
+      WHERE event_type = ? AND created_at > now() - interval '24 hours'`,
+    [BLOCK_EVENT_TYPE]
+  ).catch((e) => {
+    console.error('AI 차단 기록 조회 실패:', e.message);
+    return null;
+  });
+  return {
+    last24h: row ? Number(row.total) || 0 : 0,
+    lastHour: row ? Number(row.last_hour) || 0 : 0,
+    lastAt: (row && row.last_at) || null,
   };
 }
 

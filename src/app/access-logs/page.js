@@ -70,6 +70,55 @@ export default async function AccessLogsPage({ searchParams }) {
               바꾼 값은 최대 {aiRateLimit.cacheSeconds}초 뒤부터 적용됩니다.
             </p>
           </form>
+
+          {/* 지금 얼마나 쓰고 있는지 / 남은 양 / 실제로 막힌 적이 있는지 */}
+          <div style={{ marginTop: 14, borderTop: '1px solid var(--border,#e5e7eb)', paddingTop: 12 }}>
+            <div className="section-title" style={{ fontSize: 14 }}>📊 현재 사용량</div>
+            {aiRateLimit.blocks.last24h ? (
+              <p className="page-sub" style={{ marginTop: 0 }}>
+                <span className="badge red">차단 발생</span>{' '}
+                최근 24시간 <strong>{aiRateLimit.blocks.last24h}회</strong>(1시간 내 {aiRateLimit.blocks.lastHour}회)
+                {' · 마지막 '}{aiRateLimit.blocks.lastAt}
+                {' — '}<a href={`/access-logs?event_type=${aiRateLimit.blockEventType}`}>차단 기록 보기</a>
+              </p>
+            ) : (
+              <p className="page-sub" style={{ marginTop: 0 }}>최근 24시간 동안 한도로 막힌 요청이 없습니다.</p>
+            )}
+
+            {aiRateLimit.usage.length === 0 ? (
+              <p className="page-sub" style={{ marginBottom: 0 }}>지금 이 시간대에 AI를 쓴 계정이 없습니다.</p>
+            ) : (
+              <>
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>계정</th>
+                        <th style={{ textAlign: 'right' }}>이번 분</th>
+                        <th style={{ textAlign: 'right' }}>분당 남은 양</th>
+                        <th style={{ textAlign: 'right' }}>이번 시간</th>
+                        <th style={{ textAlign: 'right' }}>시간당 남은 양</th>
+                        <th>상태</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {aiRateLimit.usage.map((u) => (
+                        <tr key={u.subject}>
+                          <td>{u.label}</td>
+                          <td style={{ textAlign: 'right' }}>{u.minute}회</td>
+                          <td style={{ textAlign: 'right' }}>{u.minuteRemaining === null ? '제한 없음' : `${u.minuteRemaining}회`}</td>
+                          <td style={{ textAlign: 'right' }}>{u.hour}회</td>
+                          <td style={{ textAlign: 'right' }}>{u.hourRemaining === null ? '제한 없음' : `${u.hourRemaining}회`}</td>
+                          <td>{u.blocked ? <span className="badge red">한도 도달</span> : <span className="badge green">정상</span>}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="page-sub" style={{ marginBottom: 0 }}>이번 분/이번 시간 기준이며, 창이 바뀌면 0부터 다시 셉니다.</p>
+              </>
+            )}
+          </div>
         </div>
       )}
 

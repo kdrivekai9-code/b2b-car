@@ -40,6 +40,53 @@
       바꾼 값은 최대 <%= aiRateLimit.cacheSeconds %>초 뒤부터 적용됩니다.
     </p>
   </form>
+
+  <%# 지금 얼마나 쓰고 있는지 / 남은 양 / 실제로 막힌 적이 있는지 %>
+  <div style="margin-top:14px;border-top:1px solid var(--border,#e5e7eb);padding-top:12px;">
+    <div class="section-title" style="font-size:14px;">📊 현재 사용량</div>
+    <% if (aiRateLimit.blocks.last24h) { %>
+      <p class="page-sub" style="margin-top:0;">
+        <span class="badge red">차단 발생</span>
+        최근 24시간 <strong><%= aiRateLimit.blocks.last24h %>회</strong>(1시간 내 <%= aiRateLimit.blocks.lastHour %>회)
+        · 마지막 <%= aiRateLimit.blocks.lastAt %>
+        — <a href="/access-logs?event_type=<%= aiRateLimit.blockEventType %>">차단 기록 보기</a>
+      </p>
+    <% } else { %>
+      <p class="page-sub" style="margin-top:0;">최근 24시간 동안 한도로 막힌 요청이 없습니다.</p>
+    <% } %>
+
+    <% if (!aiRateLimit.usage.length) { %>
+      <p class="page-sub" style="margin-bottom:0;">지금 이 시간대에 AI를 쓴 계정이 없습니다.</p>
+    <% } else { %>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>계정</th>
+              <th style="text-align:right;">이번 분</th>
+              <th style="text-align:right;">분당 남은 양</th>
+              <th style="text-align:right;">이번 시간</th>
+              <th style="text-align:right;">시간당 남은 양</th>
+              <th>상태</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% aiRateLimit.usage.forEach(function (u) { %>
+              <tr>
+                <td><%= u.label %></td>
+                <td style="text-align:right;"><%= u.minute %>회</td>
+                <td style="text-align:right;"><%= u.minuteRemaining === null ? '제한 없음' : (u.minuteRemaining + '회') %></td>
+                <td style="text-align:right;"><%= u.hour %>회</td>
+                <td style="text-align:right;"><%= u.hourRemaining === null ? '제한 없음' : (u.hourRemaining + '회') %></td>
+                <td><% if (u.blocked) { %><span class="badge red">한도 도달</span><% } else { %><span class="badge green">정상</span><% } %></td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+      <p class="page-sub" style="margin-bottom:0;">이번 분/이번 시간 기준이며, 창이 바뀌면 0부터 다시 셉니다.</p>
+    <% } %>
+  </div>
 </div>
 
 <form class="filters card" method="GET" action="/access-logs">
@@ -48,7 +95,7 @@
     <label for="logEventType">기록 유형</label>
     <select id="logEventType" name="event_type">
       <option value="">전체</option>
-      <% [['LOGIN_SUCCESS','로그인 성공'],['LOGIN_FAILURE','로그인 실패'],['LOGIN_BLOCKED','중복 로그인(기존 세션 로그아웃)'],['LOGIN_RATE_LIMITED','무차별 대입 차단'],['LOGOUT','로그아웃'],['ACCESS','업무 수행']].forEach(function(item){ %>
+      <% [['LOGIN_SUCCESS','로그인 성공'],['LOGIN_FAILURE','로그인 실패'],['LOGIN_BLOCKED','중복 로그인(기존 세션 로그아웃)'],['LOGIN_RATE_LIMITED','무차별 대입 차단'],['AI_RATE_LIMITED','AI 사용량 한도 초과'],['LOGOUT','로그아웃'],['ACCESS','업무 수행']].forEach(function(item){ %>
         <option value="<%= item[0] %>" <%= filters.event_type === item[0] ? 'selected' : '' %>><%= item[1] %></option>
       <% }) %>
     </select>

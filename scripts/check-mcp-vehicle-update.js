@@ -161,9 +161,11 @@ async function orderRow(id) {
     check('차량번호가 바뀐다', after.vehicle_number, '335모6328');
     check('차종도 반영된다', after.vehicle_type, '코란도');
     check('다른 값은 건드리지 않는다', Number(after.fare_amount), 50000);
-    // 차량번호는 콜마너로 나가지 않는 값이라, 두 외부 경로 모두 부를 이유가 없다.
+    // 콜마너 MCP(call.update)에는 차량 칸이 없어 보낼 것이 없다 — 빈 changes로 부르지 않는다.
     check('콜마너 MCP를 부르지 않는다', mcpCalls.map((c) => c.name), []);
-    check('콜마너 OrderModify도 부르지 않는다', callmanerModifyCalls.length, 0);
+    // 반면 자체 연동(OrderModify)은 반드시 나가야 한다. 차량번호를 적요1 맨 앞에 실어
+    // 보내므로, 이걸 건너뛰면 콜마너 적요가 옛 번호로 남는다.
+    check('콜마너 OrderModify는 부른다', callmanerModifyCalls.length, 1);
 
     const history = await db.get(
       `SELECT note FROM order_status_history WHERE order_id = ? ORDER BY id DESC LIMIT 1`,
@@ -185,7 +187,7 @@ async function orderRow(id) {
     check('차량번호가 또 바뀐다', after2.vehicle_number, '111가2222');
     check('요금도 바뀐다', Number(after2.fare_amount), 60000);
     check('이번에는 콜마너 MCP를 부른다', mcpCalls.map((c) => c.name), ['call.update']);
-    check('콜마너 OrderModify도 부른다', callmanerModifyCalls.length, 1);
+    check('콜마너 OrderModify도 다시 부른다', callmanerModifyCalls.length, 2);
   } catch (e) {
     // 여기서 잡아 실패로 세지 않으면, 검사가 중간에 터져도 아래 finally가 "모두 통과"를 찍고
     // 0으로 끝난다(실제로 그렇게 만들었다가 잡았다). 정리는 finally가 그대로 이어서 한다.

@@ -13,7 +13,13 @@ delete process.env.AI_RATE_LIMIT_DISABLED;
 process.env.NODE_ENV = 'development'; // 테스트 모드면 미들웨어가 통과만 하므로 끈다
 
 const express = require('express');
-const { aiRateLimit } = require('../middleware/aiRateLimit');
+const { aiRateLimit, BLOCK_EVENT_TYPE, KEY_PER_MINUTE, KEY_PER_HOUR } = require('../middleware/aiRateLimit');
+const db = require('../db');
+const aiUsageCounter = require('../lib/aiUsageCounter');
+
+// 검사가 쓰는 가짜 계정 id — 실제 사용자와 겹치지 않게 큰 값을 쓴다.
+const SUBJECTS = [];
+function subj(id) { const s = `u:${id}`; if (!SUBJECTS.includes(s)) SUBJECTS.push(s); return s; }
 
 let failures = 0;
 function check(label, actual, expected) {
@@ -32,9 +38,16 @@ app.use((req, res, next) => {
 });
 app.post('/ai', aiRateLimit, (req, res) => res.json({ ok: true }));
 
+let realUserId = null;
+
 const server = app.listen(0, async () => {
   const port = server.address().port;
+  // access_logs.user_id가 users를 참조하므로 실제 계정 id가 필요하다 — 없으면 기록이 FK로
+  // 막혀서 "차단이 남는가"를 확인할 수 없다(헛통과한다).
+  const anyUser = await db.get('SELECT id FROM users ORDER BY id LIMIT 1');
+  realUserId = anyUser ? Number(anyUser.id) : null;
   const call = async (userId) => {
+    if (userId) subj(userId);
     const res = await fetch(`http://127.0.0.1:${port}/ai`, {
       method: 'POST',
       headers: userId ? { 'x-test-user': String(userId) } : {},
@@ -71,7 +84,6 @@ const server = app.listen(0, async () => {
     // 저장해도 반영이 안 되면 관리자는 바꿨다고 믿는데 실제로는 옛 한도로 도는 상태가 된다.
     console.log('[화면에서 바꾼 한도가 적용된다]');
     const appSettings = require('../lib/appSettings');
-    const { KEY_PER_MINUTE } = require('../middleware/aiRateLimit');
     await appSettings.set(KEY_PER_MINUTE, '1', null);
     const u3 = 30001;
     check('바뀐 한도 안에서 1건 통과', (await call(u3)).status, 200);
@@ -85,13 +97,48 @@ const server = app.listen(0, async () => {
     for (let i = 0; i < 8; i += 1) { if ((await call(u4)).status !== 200) allOk = false; }
     check('연속 8건 모두 통과', allOk, true);
 
-    // 검사가 만든 설정은 행째로 지운다 — 값만 null로 두면 "설정한 적 없음"과 구분되지 않는
-    // 껍데기 행이 운영 DB에 남는다.
-    const db = require('../db');
-    await db.run('DELETE FROM app_settings WHERE key = ?', [KEY_PER_MINUTE]);
-    await db.pool.end().catch(() => {});
+    // 사용량이 화면에 보이는 형태로 조회되는지 — 관리자가 "지금 얼마나 쓰고 있는지" 보는 값이다.
+    console.log('[현재 사용량이 조회된다]');
+    await appSettings.set(KEY_PER_MINUTE, '5', null);
+    const u5 = 30003;
+    await call(u5); await call(u5);
+    const usage = await aiUsageCounter.currentUsage({ limit: 50 });
+    const mine = usage.find((r) => r.subject === subj(u5));
+    check('이번 분 사용량이 잡힌다', mine && mine.minute, 2);
+    check('이번 시간 사용량도 잡힌다', mine && mine.hour >= 2, true);
+
+    // 차단이 접속기록에 남아야 관리자가 확인할 수 있다.
+    console.log('[차단이 접속기록에 남는다]');
+    await appSettings.set(KEY_PER_MINUTE, '1', null);
+    const u6 = realUserId;
+    await call(u6);                       // 1회 — 통과
+    const blockedRes = await call(u6);    // 2회 — 차단
+    check('차단된다', blockedRes.status, 429);
+    // 기록은 await하지 않고 남기므로(응답을 늦추지 않으려고) 잠깐 기다린다.
+    await new Promise((r) => setTimeout(r, 400));
+    const logged = await db.get(
+      `SELECT work_detail FROM access_logs
+        WHERE event_type = ? AND created_at > now() - interval '1 minute'
+        ORDER BY id DESC LIMIT 1`,
+      [BLOCK_EVENT_TYPE]
+    );
+    check('접속기록에 차단이 남는다', !!logged, true);
+    check('무엇 때문에 막혔는지 적힌다', /한도 초과/.test(String(logged && logged.work_detail)), true);
   } finally {
     server.close();
+    // 검사가 만든 흔적을 지운다 — 운영 값·기록을 남기면 안 된다.
+    await db.run('DELETE FROM app_settings WHERE key IN (?, ?)', [KEY_PER_MINUTE, KEY_PER_HOUR]).catch(() => {});
+    if (SUBJECTS.length) {
+      const ph = SUBJECTS.map(() => '?').join(',');
+      await db.run(`DELETE FROM ai_rate_usage WHERE subject IN (${ph})`, SUBJECTS).catch(() => {});
+    }
+    // 검사가 남긴 차단 기록만 지운다(방금 것) — 실제 차단 이력은 건드리지 않는다.
+    await db.run(
+      `DELETE FROM access_logs WHERE event_type = ? AND created_at > now() - interval '5 minutes'`,
+      [BLOCK_EVENT_TYPE]
+    ).catch(() => {});
+    if (realUserId) await db.run('DELETE FROM ai_rate_usage WHERE subject = ?', [`u:${realUserId}`]).catch(() => {});
+    await db.pool.end().catch(() => {});
   }
 
   console.log(failures ? `\n${failures}건 실패` : '\n모두 통과');
