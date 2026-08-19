@@ -1969,6 +1969,10 @@ async function updateOrderWithCallmaner(orderId, branchId) {
       destination_address: order.destination_address, destination_address_detail: order.destination_address_detail,
       fare_amount: order.fare_amount || 0,
       memo_customer: order.memo_customer || '',
+      // 적요1에 실을 요약본(100Byte). 없으면 memo_customer를 잘라 쓴다.
+      memo_driver_brief: order.memo_driver_brief || null,
+      // 업체 전달사항 → 적요2. 기사에게는 보이지 않는 칸이다.
+      memo_billing: order.memo_billing || '',
       // 콜마너에는 차량번호 칸이 없어 적요1 맨 앞에 실어 보낸다(lib/callmaner.js memoWithVehicle).
       // 이 값이 빠지면 차량번호를 고쳐도 콜마너 쪽 적요는 옛 번호로 남는다.
       vehicle_number: order.vehicle_number,

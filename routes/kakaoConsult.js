@@ -37,6 +37,7 @@ const { sendOrderPhotos, isPhotoRequest, isOdometerRequest, answerOdometer, coun
 const { searchAddressCandidates, needsDisambiguation, buildCandidateListText, matchCandidateChoice, getClarifyText } = require('../lib/addressCandidates');
 const { getSmalltalkMessage } = require('../lib/smallTalk');
 const { needsHumanByKeyword, judgeNeedsHuman, categoryLabel } = require('../lib/escalationJudge');
+const { splitIntakeMemo } = require('../lib/intakeMemoSplit');
 const { buildSuggestion, buildFareSuggestion, buildHoursSuggestion, isHoursQuestion, toIntakeFields, buildIntakeReply } = require('../lib/agentAssist');
 const { runDispatchAgent, loadPending: loadMcpPending } = require('../lib/mcpDispatchAgent');
 const { notify } = require('../lib/push');
@@ -1315,6 +1316,15 @@ async function completeIntake(session, parsed, rawText, cache) {
   // 탁송 자동 접수는 출발지·도착지 연락처가 필수 — 빠졌으면 등록하지 않고 물어본다(번호 선택지
   // 제공). 다 채워졌으면 false를 돌려주고 그대로 확인 단계로 넘어간다.
   if (await requireContacts(session, parsed, rawText, account)) return true;
+
+  // 요청사항을 기사 몫과 업체 몫으로 나눈다(lib/intakeMemoSplit.js). 여기서 하는 이유는
+  // 두 가지다 — ① 확인 카드에 "메모(기사전달사항)"과 "업체 전달사항"이 나뉘어 보여야 고객이
+  // 잘못 들어간 것을 그 자리에서 고칠 수 있고, ② 결과가 parsed에 실려 pending에 저장되므로
+  // "네" 확인 턴에서 다시 분류하지 않는다(등록 경로는 registerDispatchOrder로 곧장 간다).
+  parsed.memoSplit = await splitIntakeMemo(parsed).catch((e) => {
+    console.error('요청사항 분리 실패 — 전부 기사 전달사항으로 둔다:', e.message);
+    return null;
+  });
 
   // 등록 전 "네" 확인 — 웹 AI 접수(lib/webIntakeTurn.js finishParsed)와 같은 방식이다(사용자
   // 확정 규칙 변경: 예전에는 필드가 차는 즉시 등록하고 사후에 "잘못됐으면 알려주세요"로
