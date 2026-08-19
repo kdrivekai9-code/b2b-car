@@ -1588,6 +1588,18 @@ router.post('/:id', asyncHandler(async (req, res) => {
     req.params.id,
   ]);
 
+  // 기사 전달사항을 사람이 고쳤으면 접수 때 만들어둔 요약은 그 내용이 아니다. 비워서 콜마너가
+  // 새 원문을 잘라 쓰게 한다(lib/callmaner.js memoWithVehicle) — 옛 요약을 그대로 두면 기사
+  // 앱에는 고치기 전 내용이 계속 보인다. 여기서 다시 요약하지 않는 이유는 오더 수정이 모델
+  // 호출을 기다릴 자리가 아니어서다.
+  if ((memo_customer || null) !== order.memo_customer) {
+    await db.run('UPDATE orders SET memo_driver_brief = NULL WHERE id = ?', [req.params.id])
+      .catch((e) => {
+        if (e && e.code === '42703') return; // 마이그레이션 20260819010000 전
+        console.error('기사메모 요약 비우기 실패(무시):', e.message);
+      });
+  }
+
   if (diffs.length > 0) {
     await db.run(`
       INSERT INTO order_status_history (order_id, actor_user_id, old_status, new_status, note)
