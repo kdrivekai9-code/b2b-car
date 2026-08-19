@@ -62,6 +62,13 @@ test.describe('AI 사용량 · 사용량 제한', () => {
     const row = await db.get('SELECT value FROM app_settings WHERE key = ?', [KEY_MIN]);
     expect(row && row.value).toBe('77');
 
+    // 현재 사용량·차단 여부가 같은 화면에서 보여야 한다(사용자 요청) — 설정만 있고 지금 상태를
+    // 못 보면 관리자는 한도를 얼마로 둘지 판단할 근거가 없다.
+    await expect(page.getByText('현재 사용량')).toBeVisible();
+    // 차단이 있었는지 없었는지 둘 중 하나는 반드시 문장으로 나와야 한다.
+    const blockLine = page.getByText(/한도로 막힌 요청이 없습니다|차단 발생/);
+    await expect(blockLine).toBeVisible();
+
     expect(problems, `페이지 오류: ${problems.join(' | ')}`).toEqual([]);
   });
 
