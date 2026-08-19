@@ -46,7 +46,13 @@ stub('../routes/orders', {
 });
 stub('../lib/groupActivityFeed', { recordActivity: async () => {} });
 
-const RCPT_NO = 'e2e-vehicle-check-slip';
+const MARK = 'e2e-mcp-vehicle-check';
+// oid·callmaner_conf_slip에는 unique 제약이 있다. 고정값을 쓰면 앞선 실행이 정리에 실패했을 때
+// 그 뒤로 영영 돌릴 수 없게 된다(실제로 그렇게 막혔다) — 실행마다 다른 값을 쓰고 흔적은
+// MARK(memo_customer)로 찾는다.
+const RUN_ID = `${Date.now().toString(36)}${Math.floor(Math.random() * 1e4)}`;
+const OID = `${MARK}-${RUN_ID}`;
+const RCPT_NO = `e2e-vehicle-check-slip-${RUN_ID}`;
 let ownedOrder = null;
 
 stub('../lib/mcpDispatchAccess', {
@@ -80,7 +86,6 @@ function check(label, actual, expected) {
 }
 
 const USER = { id: -1, branch_id: null, group_id: null, phone: '01000000000', role: 'client' };
-const MARK = 'e2e-mcp-vehicle-check';
 
 // 모델이 update_order를 고른 것으로 꾸민다.
 function toolTurn(args) {
@@ -101,7 +106,7 @@ async function orderRow(id) {
                            callmaner_conf_slip, fare_amount, memo_customer)
        VALUES (?, ?, '접수', '서울 강서구', '경기 성남시', '2026-08-20', '14:00', '코란도', '157서6830', ?, 50000, ?)
        RETURNING id`,
-      [`${MARK}-oid`, branch.id, RCPT_NO, MARK]
+      [OID, branch.id, RCPT_NO, MARK]
     );
     created.orderId = Number(order.id);
 
@@ -126,7 +131,10 @@ async function orderRow(id) {
       check('확인 대기를 만들지 않는다', !!(await agent.loadPending(created.sessionId)), false);
       const before = await orderRow(created.orderId);
       check('차량번호를 건드리지 않는다', before.vehicle_number, '157서6830');
-      check('도구 오류로 모델에게 되돌린다', /형식/.test(JSON.stringify(out || {})), true);
+      // 확인 문구를 만들어서는 안 된다 — 만들면 고객의 "네" 한마디로 틀린 번호가 저장된다.
+      // (실제로는 모델이 도구 오류를 읽고 고객에게 되묻는다. 여기서는 모델을 같은 응답만
+      // 돌려주도록 고정해뒀으므로 도우미가 라운드를 소진하고 물러난다.)
+      check('확인 문구를 만들지 않는다', out.handled, false);
     }
 
     console.log('\n[차량번호만 정정 — 확인 문구]');
@@ -178,14 +186,33 @@ async function orderRow(id) {
     check('요금도 바뀐다', Number(after2.fare_amount), 60000);
     check('이번에는 콜마너 MCP를 부른다', mcpCalls.map((c) => c.name), ['call.update']);
     check('콜마너 OrderModify도 부른다', callmanerModifyCalls.length, 1);
+  } catch (e) {
+    // 여기서 잡아 실패로 세지 않으면, 검사가 중간에 터져도 아래 finally가 "모두 통과"를 찍고
+    // 0으로 끝난다(실제로 그렇게 만들었다가 잡았다). 정리는 finally가 그대로 이어서 한다.
+    failures += 1;
+    console.error('\n검사 도중 오류:', e && e.stack ? e.stack : e);
   } finally {
+    // 정리 실패를 삼키면 검사용 오더가 실서비스 목록에 남는다. 조용히 넘기지 않고 알린다.
+    const cleanupErrors = [];
+    const purge = async (label, sql, params) => {
+      await db.run(sql, params).catch((e) => cleanupErrors.push(`${label}: ${e.message}`));
+    };
     if (created.orderId) {
-      await db.run('DELETE FROM order_status_history WHERE order_id = ?', [created.orderId]).catch(() => {});
-      await db.run('DELETE FROM orders WHERE id = ? AND memo_customer = ?', [created.orderId, MARK]).catch(() => {});
+      await purge('이력', 'DELETE FROM order_status_history WHERE order_id = ?', [created.orderId]);
+      await purge('오더', 'DELETE FROM orders WHERE id = ? AND memo_customer = ?', [created.orderId, MARK]);
     }
     if (created.sessionId) {
-      await db.run('DELETE FROM chat_messages WHERE session_id = ?', [created.sessionId]).catch(() => {});
-      await db.run('DELETE FROM chat_sessions WHERE id = ?', [created.sessionId]).catch(() => {});
+      await purge('대화', 'DELETE FROM chat_messages WHERE session_id = ?', [created.sessionId]);
+      await purge('세션', 'DELETE FROM chat_sessions WHERE id = ?', [created.sessionId]);
+    }
+    // 정말로 지워졌는지 확인한다 — DELETE가 0행을 지워도 오류는 나지 않는다.
+    const leftover = await db.all(
+      'SELECT id FROM orders WHERE memo_customer = ?', [MARK]
+    ).catch(() => []);
+    if (leftover.length) cleanupErrors.push(`오더 ${leftover.map((r) => r.id).join(',')}가 남았습니다`);
+    if (cleanupErrors.length) {
+      failures += 1;
+      console.error(`\n정리 실패 — 직접 지워야 합니다:\n  ${cleanupErrors.join('\n  ')}`);
     }
     console.log(`\n정리: order=${created.orderId}, session=${created.sessionId}`);
     console.log(failures ? `${failures}건 실패` : '모두 통과');
