@@ -14,7 +14,8 @@ const kakaoConsult = require('../lib/kakaoConsult');
 const { classifyAndExtract } = require('../lib/hybridChat');
 const { searchKnowledgeBase } = require('../lib/knowledgeSearch');
 const {
-  parseKakaoIntake, buildParsedFromClassified, buildMissingQuestion, normalizePhone, normalizePlate,
+  parseKakaoIntake, buildParsedFromClassified, buildMissingQuestion, buildNextMissingQuestion,
+  normalizePhone, normalizePlate,
   PREMIUM_DECLINE_RE, PREMIUM_DECLINABLE_FIELD_IDS, premiumOrderTypeToIntentHint, parseTripTypeBareReply,
   buildPremiumParsedFromClassified, isAffirmative, isNegative, FAILURE_MESSAGES, fullAddress,
 } = require('../lib/kakaoIntakeParser');
@@ -1229,12 +1230,16 @@ async function registerPremiumOrder(session, parsed, rawText) {
 // 탁송의 되묻기/askAddressChoiceIfNeeded/completeIntake 흐름과 같은 자리.
 async function advancePremiumIntakeKakao(session, parsed, rawText, cache) {
   if (!parsed.complete) {
+    // 하나씩 묻는다(사용자 확정 규칙). 지금 무엇을 묻는 중인지(asking)를 함께 남겨야 다음
+    // 턴에서 "왕복"/"없어" 같은 맨답을 어느 항목에 대한 답으로 볼지 정확히 알 수 있다 —
+    // 예전에는 missing 목록에서 짐작해야 해서, 답할 수 있는 항목이 둘 이상이면 어긋났다.
     await savePendingIntake(session, rawText, parsed.missing, {
-      category: 'premium_daily', orderType: parsed.orderType, tripType: parsed.tripType, declined: parsed.declined,
+      category: 'premium_daily', orderType: parsed.orderType, tripType: parsed.tripType,
+      declined: parsed.declined, asking: parsed.missing[0] || null,
     });
     await saveIntakeDraft(session, parsed);
     const fields = getDailyDriverFields(parsed.tripType);
-    const question = buildMissingQuestion(parsed.missing, parsed, null, fields);
+    const question = buildNextMissingQuestion(parsed.missing, parsed, null, fields);
     await botSay(session, question, '접수 되묻기(프리미엄/일일기사)');
     return;
   }
@@ -1254,11 +1259,17 @@ async function continuePremiumIntakeKakao(session, pending, text) {
   const missing = pending.missing || [];
   const overrides = { tripType: pending.tripType || null, declined: pending.declined || [] };
 
-  if (missing.includes('trip_type')) {
+  // 이번 답이 어느 항목에 대한 것인지 — 하나씩 묻게 되면서 asking이 그 답을 확정해준다.
+  // asking이 없는 상태(하나씩 묻기 전에 저장된 대화)는 예전처럼 missing에서 짐작한다.
+  const asking = pending.asking || null;
+
+  if (asking ? asking === 'trip_type' : missing.includes('trip_type')) {
     const t = parseTripTypeBareReply(text);
     if (t) overrides.tripType = t;
   }
-  const declinableMissing = missing.find((id) => PREMIUM_DECLINABLE_FIELD_IDS.has(id));
+  const declinableMissing = asking
+    ? (PREMIUM_DECLINABLE_FIELD_IDS.has(asking) ? asking : null)
+    : missing.find((id) => PREMIUM_DECLINABLE_FIELD_IDS.has(id));
   if (declinableMissing && PREMIUM_DECLINE_RE.test(text.trim())) {
     overrides.declined = Array.from(new Set([...overrides.declined, declinableMissing]));
   }
