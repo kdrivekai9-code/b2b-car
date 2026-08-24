@@ -37,7 +37,7 @@ const { sendOrderPhotos, isPhotoRequest, isOdometerRequest, answerOdometer, coun
 // 주소 후보 검색·선택은 웹 접수 화면과 같은 규칙을 쓴다(lib/addressCandidates.js).
 const { searchAddressCandidates, needsDisambiguation, rankByCoverage, buildCandidateListText, matchCandidateChoice, getClarifyText } = require('../lib/addressCandidates');
 const { getSmalltalkMessage } = require('../lib/smallTalk');
-const { needsHumanByKeyword, judgeNeedsHuman, categoryLabel } = require('../lib/escalationJudge');
+const { needsHumanByKeyword, judgeNeedsHuman, categoryLabel, isAgentRequest } = require('../lib/escalationJudge');
 const { splitIntakeMemo } = require('../lib/intakeMemoSplit');
 const { buildSuggestion, buildFareSuggestion, buildHoursSuggestion, isHoursQuestion, toIntakeFields, buildIntakeReply } = require('../lib/agentAssist');
 const { runDispatchAgent, loadPending: loadMcpPending } = require('../lib/mcpDispatchAgent');
@@ -1664,6 +1664,19 @@ async function processBotTurn(session, text) {
     return handleUnsupported(session, text, '사고·클레임 문의');
   }
 
+  // 고객이 대놓고 상담원을 찾으면 되묻지 않고 바로 넘긴다.
+  //
+  // 예전에는 이 자리가 없어서 "상담원호출"이 LLM 분류의 unsupported로 떨어졌고, 그 분기에서
+  // 배차 도우미(MCP)가 먼저 가로채 "상담원에게 연결해드릴까요?"라고 되물었다. 실사용에서
+  // 고객이 "네"라고 답했는데도 인계도 알림도 나가지 않았다(그 "네"는 아래 스몰토크 필터가
+  // 삼켰다 — 도우미가 되물은 질문에는 확인 대기 상태가 저장되지 않기 때문).
+  //
+  // 카카오 "상담원 연결" 버튼(/receive/reference)은 동의 절차 없이 곧바로 인계한다. 같은 뜻을
+  // 타이핑으로 말한 고객만 되묻기에 갇힐 이유가 없어, 여기서도 동의를 청하지 않는다.
+  if (isAgentRequest(text)) {
+    return handleUnsupported(session, text, '상담원 연결');
+  }
+
   // 등록 전 "네" 확인을 기다리는 중이면 스몰토크 필터보다 먼저 처리한다 — SMALL_TALK_RE가
   // "네"/"넵"/"예" 등을 정보량 0인 되받기로 보고 응답 없이 넘기는데, 바로 그 표현이 지금은
   // "맞으면 네" 질문에 대한 실제 답이다. 순서를 바꾸지 않으면 고객이 정확히 요청받은 대로
@@ -1684,6 +1697,22 @@ async function processBotTurn(session, text) {
   if (mcpPending) {
     const handled = await tryDispatchAgent(session, text).catch((e) => {
       console.error('카카오 배차 도우미 확인 처리 실패:', e.message);
+      return false;
+    });
+    if (handled) return;
+  }
+
+  // 배차 도우미가 **되물은** 질문에 대한 "네"/"아니오"도 스몰토크 필터보다 먼저 본다.
+  //
+  // 위 mcpPending은 등록·취소처럼 확인 대기 상태를 저장하는 질문만 잡는다. 도우미가 그냥
+  // 되묻기만 한 경우(예: "상담원에게 연결해드릴까요?")는 저장되는 상태가 없어서, 고객이 정확히
+  // "네"라고 답해도 아래 SMALL_TALK_RE가 삼키고 대화가 그대로 멈췄다(실사용에서 확인).
+  //
+  // 조건을 긍정/부정 답변으로만 좁힌다 — "감사합니다" 같은 되받기까지 도우미로 돌리면 모델
+  // 호출만 늘고 엉뚱한 답이 나온다(위 mcpPending 주석이 isMcpFollowUp을 쓰지 않은 이유).
+  if ((isAffirmative(text) || isNegative(text)) && isMcpFollowUp(session)) {
+    const handled = await tryDispatchAgent(session, text).catch((e) => {
+      console.error('카카오 배차 도우미 되묻기 답변 처리 실패:', e.message);
       return false;
     });
     if (handled) return;
