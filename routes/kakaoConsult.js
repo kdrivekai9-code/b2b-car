@@ -1379,42 +1379,63 @@ function formatDurationText(durationSec) {
   return rest ? `${Math.floor(minutes / 60)}시간 ${rest}분` : `${Math.floor(minutes / 60)}시간`;
 }
 
-// 접수 확인을 보낸 뒤에 이어지는 경로/요금 안내. 웹 챗봇은 브라우저 지도가 경로를 그리면서
-// 같은 값을 얻지만 카카오 고객에게는 그 화면이 없어, 서버가 직접 카카오모빌리티를 호출해
-// 같은 내용을 말로 알려준다(두 채널이 같은 lib/routeFareSearch.js를 쓴다).
-// 이 함수를 부르는 시점에 접수 확인은 이미 발신됐으므로, 여기서 걸리는 시간은 고객이 오더가
-// 접수됐다는 사실을 아는 데 아무 영향을 주지 않는다.
-async function announceRouteFareAfterOrder(session, account, result) {
+// 접수 확인 + 경로/요금 안내.
+//
+// 웹 챗봇은 브라우저 지도가 경로를 그리면서 같은 값을 얻지만 카카오 고객에게는 그 화면이 없어,
+// 서버가 직접 카카오모빌리티를 호출해 같은 내용을 말로 알려준다(두 채널이 같은
+// lib/routeFareSearch.js를 쓴다).
+//
+// 보내는 방식(사용자 확정, 2026-08-24): 조회가 빨리 끝나면 접수 확인 한 통에 합쳐서 보낸다.
+// 예전에는 접수 확인을 먼저 보내고 결과를 뒤에 따로 붙였는데, 실제로는 1초쯤에 끝나는 경우가
+// 대부분이라(실측: 접수 20:15:37 → 요금 20:15:38) 결과가 접수 확인 뒤에 덧붙는 것처럼 보여
+// 혼란스러웠다. 늦을 때만 예전처럼 나눠 보낸다 — 접수됐다는 사실을 조회 때문에 늦게 알려줄
+// 수는 없기 때문이다(그게 애초에 순서를 바꾼 이유다).
+const ROUTE_FARE_MERGE_GRACE_MS = 1500;
+
+function routeResultText(route) {
+  return `경로탐색 결과입니다.\n· 총 거리 ${route.distanceKm.toFixed(1)}km\n· 예상 소요시간 ${formatDurationText(route.durationSec)}`
+    + (route.tollFare ? `\n· 통행료 ${Number(route.tollFare).toLocaleString('ko-KR')}원` : '');
+}
+
+function fareResultText(fare) {
+  return `예상 요금은 약 ${Number(fare).toLocaleString('ko-KR')}원입니다. (등록된 요금표 기준이라 실제 청구액과 다를 수 있습니다)`;
+}
+
+// 합쳐 보낼 때의 꼬리 — 접수 확인 아래에 붙이는 짧은 형태다. 따로 보낼 때의 문장을 그대로
+// 이어붙이면 "경로탐색 결과입니다"가 접수 확인 밑에 오면서 어색해진다.
+function mergedTail(route, fare) {
+  const lines = [];
+  if (route) {
+    lines.push(`· 총 거리 ${route.distanceKm.toFixed(1)}km / 예상 소요시간 ${formatDurationText(route.durationSec)}`);
+    if (route.tollFare) lines.push(`· 통행료 ${Number(route.tollFare).toLocaleString('ko-KR')}원`);
+  }
+  if (fare != null) {
+    lines.push(`· 예상 요금 약 ${Number(fare).toLocaleString('ko-KR')}원 (등록된 요금표 기준이라 실제 청구액과 다를 수 있습니다)`);
+  }
+  return lines.length ? `\n\n${lines.join('\n')}` : '';
+}
+
+async function announceOrderReceiptWithRouteFare(session, account, result) {
+  const receipt = result.message;
   const geo = result.geo || {};
-  if (!geo.origin || !geo.destination) return;
-
   const groupId = account && account.requester_group_id;
-  const settings = await getRouteFareSettings(groupId);
-  if (!settings.route && !settings.fare) return;
+  const settings = geo.origin && geo.destination
+    ? await getRouteFareSettings(groupId)
+    : { route: false, fare: false };
 
-  // 검색이 늦어지면 진행중 안내를 먼저 보낸다 — 접수 확인 뒤 아무 말 없이 몇 초가 흐르면
-  // 고객은 대화가 거기서 끝난 줄 안다. 경로 안내를 끈 법인에는 요금만 기다리는 것이므로
-  // 문구도 그에 맞춘다.
-  let noticePromise = null;
-  const noticeTimer = setTimeout(() => {
-    const noticeText = settings.route ? '경로탐색중......' : '요금검색중......';
-    noticePromise = botSay(session, noticeText, '경로/요금 검색 진행')
-      .catch((e) => console.error('경로/요금 진행 안내 실패:', e.message));
-  }, 1500);
-
-  // 진행중 안내가 아직 발신 중이면 그게 끝난 뒤에 결과를 보낸다 — 안 그러면 "탐색중"이
-  // 결과보다 늦게 도착해 순서가 뒤집혀 보인다.
-  async function sayInOrder(text, label) {
-    clearTimeout(noticeTimer);
-    if (noticePromise) await noticePromise;
-    await botSay(session, text, label);
+  // 조회할 것이 없으면 예전과 같다 — 접수 확인만 보낸다.
+  if (!settings.route && !settings.fare) {
+    await botSay(session, receipt, '접수 확인');
+    return;
   }
 
   const vehicleType = result.created && result.created[0] && result.created[0].vehicle
     ? result.created[0].vehicle.vehicleType
     : null;
 
-  const search = await searchRouteAndFare({
+  // 경로는 요금보다 먼저 나온다(onRoute) — 합쳐 보낼 수 있게 발송하지 않고 담아둔다.
+  let routeSeen = null;
+  const searchPromise = searchRouteAndFare({
     groupId,
     branchId: account.branch_id,
     originLat: geo.origin.lat,
@@ -1422,22 +1443,43 @@ async function announceRouteFareAfterOrder(session, account, result) {
     destinationLat: geo.destination.lat,
     destinationLon: geo.destination.lon,
     vehicleType,
-    onRoute: (route) => sayInOrder(
-      `경로탐색 결과입니다.\n· 총 거리 ${route.distanceKm.toFixed(1)}km\n· 예상 소요시간 ${formatDurationText(route.durationSec)}`
-      + (route.tollFare ? `\n· 통행료 ${Number(route.tollFare).toLocaleString('ko-KR')}원` : ''),
-      '경로탐색 결과'
-    ),
+    onRoute: (route) => { routeSeen = route; },
   }).catch((e) => {
     console.error('카카오 경로/요금 후속 안내 실패:', e.message);
     return null;
   });
 
-  clearTimeout(noticeTimer);
-  if (!search || !search.ok || search.fare == null) return;
-  await sayInOrder(
-    `예상 요금은 약 ${Number(search.fare).toLocaleString('ko-KR')}원입니다. (등록된 요금표 기준이라 실제 청구액과 다를 수 있습니다)`,
-    '요금검색 결과'
-  );
+  // 유예 시간 안에 끝나면 한 통으로 합친다.
+  const TIMED_OUT = Symbol('timeout');
+  let graceTimer = null;
+  const graced = await Promise.race([
+    searchPromise,
+    new Promise((resolve) => { graceTimer = setTimeout(() => resolve(TIMED_OUT), ROUTE_FARE_MERGE_GRACE_MS); }),
+  ]);
+  clearTimeout(graceTimer);
+
+  if (graced !== TIMED_OUT) {
+    const search = graced;
+    const fare = search && search.ok ? search.fare : null;
+    const tailRoute = routeSeen;
+    const tail = mergedTail(tailRoute, fare);
+    await botSay(session, receipt + tail, tail ? '접수 확인(경로·요금 포함)' : '접수 확인');
+    return;
+  }
+
+  // 늦었다 — 접수됐다는 사실을 더 붙잡아 둘 수 없으므로 먼저 알리고, 뒤에 이어진다고 예고한다.
+  const waitingFor = settings.route ? '경로와 예상 요금' : '예상 요금';
+  await botSay(session, `${receipt}\n${waitingFor}을 이어서 알려드릴게요.`, '접수 확인');
+
+  const search = await searchPromise;
+  if (routeSeen) {
+    await botSay(session, routeResultText(routeSeen), '경로탐색 결과')
+      .catch((e) => console.error('경로 안내 발송 실패:', e.message));
+  }
+  if (search && search.ok && search.fare != null) {
+    await botSay(session, fareResultText(search.fare), '요금검색 결과')
+      .catch((e) => console.error('요금 안내 발송 실패:', e.message));
+  }
 }
 
 async function registerDispatchOrder(session, parsed, rawText, cache) {
@@ -1470,9 +1512,9 @@ async function registerDispatchOrder(session, parsed, rawText, cache) {
     // 폼이 채워진 채로 남으면 상담원이 같은 건을 한 번 더 등록할 수 있다.
     await db.run('UPDATE chat_sessions SET draft_json = NULL WHERE id = ?', [session.id])
       .catch((e) => console.error('접수 완료 후 폼 프리필 정리 실패:', e.message));
-    await botSay(session, result.message, '접수 확인');
     broadcastSessionListChangedAsync({ event: 'order_created', sessionId: session.id });
-    await announceRouteFareAfterOrder(session, account, result);
+    // 접수 확인 발송도 이 함수가 맡는다 — 경로/요금이 빨리 오면 한 통으로 합쳐 보내기 때문이다.
+    await announceOrderReceiptWithRouteFare(session, account, result);
     return;
   }
 
@@ -2073,6 +2115,7 @@ module.exports.processBotTurn = processBotTurn;
 // 반복 판정에서 빼야 하는 짧은 답인지 — 이 판정이 헐거우면 고객이 번호로 고른 답에 봇이
 // 침묵한다. DB 없이 확인할 수 있게 노출한다(scripts/check-kakao-repeat-guard.js).
 module.exports.isTooShortForRepeatCheck = isTooShortForRepeatCheck;
-// 접수 확인 뒤 경로/요금 안내의 발신 순서(진행중 안내 → 경로 → 요금)는 카카오 채널 전체를
-// 띄우지 않고는 눈으로 볼 수 없다 — 위 두 개와 같은 이유로 노출한다.
-module.exports.announceRouteFareAfterOrder = announceRouteFareAfterOrder;
+// 접수 확인과 경로/요금을 한 통으로 합칠지, 나눠 보낼지는 카카오 채널 전체를 띄우지 않고는
+// 눈으로 볼 수 없다 — 위 두 개와 같은 이유로 노출한다(scripts/check-kakao-receipt-merge.js).
+module.exports.announceOrderReceiptWithRouteFare = announceOrderReceiptWithRouteFare;
+module.exports.ROUTE_FARE_MERGE_GRACE_MS = ROUTE_FARE_MERGE_GRACE_MS;
