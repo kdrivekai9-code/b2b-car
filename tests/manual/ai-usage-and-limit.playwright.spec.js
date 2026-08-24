@@ -105,6 +105,11 @@ test.describe('AI 사용량 · 사용량 제한', () => {
     await expect(page.getByText('접수 내용 추출').first()).toBeVisible();
     await expect(page.locator('body')).not.toContainText('intake_extract');
 
+    // 시스템 상태 — 조용히 멈춘 기능을 드러내는 자리다(관리자 전용).
+    await expect(page.getByText('시스템 상태')).toBeVisible();
+    await expect(page.getByText('콜마너 동기화')).toBeVisible();
+    await expect(page.getByText('상담원 답변 초안', { exact: false })).toBeVisible();
+
     expect(problems, `페이지 오류: ${problems.join(' | ')}`).toEqual([]);
   });
 

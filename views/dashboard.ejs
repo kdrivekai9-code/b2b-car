@@ -40,6 +40,35 @@
   <div class="kpi"><div class="label">이슈(문의/사고/취소 등)</div><div class="value"><%= issues %>건</div></div>
 </div>
 
+<%# 시스템 상태 — 조용히 멈춘 기능을 드러낸다(lib/systemHealth.js). src/app/page.js에도 같은 카드가 있다. %>
+<% if (typeof systemHealth !== 'undefined' && systemHealth) { %>
+<section class="card" style="margin-bottom:12px;">
+  <h2>🩺 시스템 상태
+    <% if (systemHealth.worst === 'bad') { %><span class="badge red">점검 필요</span>
+    <% } else if (systemHealth.worst === 'warn') { %><span class="badge amber">확인 권장</span>
+    <% } else { %><span class="badge green">정상</span><% } %>
+  </h2>
+  <div class="table-wrap">
+    <table>
+      <tbody>
+        <% systemHealth.items.forEach(function (it) { %>
+          <tr>
+            <td style="width:200px;">
+              <% if (it.level === 'bad') { %><span class="badge red">중단</span>
+              <% } else if (it.level === 'warn') { %><span class="badge amber">확인</span>
+              <% } else { %><span class="badge green">정상</span><% } %>
+              <% if (it.href) { %><a href="<%= it.href %>"><%= it.label %></a><% } else { %><%= it.label %><% } %>
+            </td>
+            <td style="font-weight:600;"><%= it.value %></td>
+            <td class="page-sub"><%= it.hint %></td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+</section>
+<% } %>
+
 <%# AI 사용량 — ai_call_logs 집계. 지사/법인 스코프가 없다(호출 주체가 시스템이라 나눌 근거가
     없다) — 기간만 맞춘다. src/app/page.js에도 같은 카드가 있다. %>
 <% if (typeof aiUsage !== 'undefined' && aiUsage && aiUsage.totalCalls > 0) { %>

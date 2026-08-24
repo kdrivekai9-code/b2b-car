@@ -3,6 +3,7 @@ const db = require('../db');
 const { requireAuth, scopeFilter } = require('../middleware/auth');
 const asyncHandler = require('../middleware/asyncHandler');
 const { ORDER_STATUSES } = require('../config');
+const { collectSystemHealth } = require('../lib/systemHealth');
 const { periodRange, previousPeriod, PRESET_LABELS } = require('../lib/period');
 
 const router = express.Router();
@@ -100,7 +101,7 @@ async function fetchAiUsage(from, to) {
   };
 }
 
-async function buildDashboardData(scope, query) {
+async function buildDashboardData(scope, query, options = {}) {
   const preset = query.period || 'all';
   const { from, to } = periodRange(preset, query.from, query.to);
   const prevRange = previousPeriod(from, to);
@@ -114,6 +115,13 @@ async function buildDashboardData(scope, query) {
     (from && to) ? fetchOrdersInRange(scope, prevRange.from, prevRange.to) : Promise.resolve([]),
     fetchAiUsage(from, to),
   ]);
+
+  // 시스템 상태는 관리자에게만 보여준다 — 고객사·지사 사용자가 볼 값이 아니고, 볼 수 있어도
+  // 할 수 있는 일이 없다. 조회도 그때만 한다.
+  const systemHealth = options.isAdmin ? await collectSystemHealth().catch((e) => {
+    console.error('시스템 상태 조회 실패:', e.message);
+    return null;
+  }) : null;
 
   const counts = {};
   ORDER_STATUSES.forEach((s) => { counts[s] = 0; });
@@ -202,6 +210,7 @@ async function buildDashboardData(scope, query) {
     heatmap, heatmapMax, DOW_LABELS,
     branchCompare, statusMatrix, groupCompare,
     aiUsage,
+    systemHealth,
     showBranchSections: currentUserIsMultiBranch(scope, branches),
     period: { preset, from, to, label: PRESET_LABELS[preset] || '전체 기간' },
   };
@@ -212,14 +221,14 @@ function currentUserIsMultiBranch(scope, branches) {
 }
 
 router.get('/', asyncHandler(async (req, res) => {
-  const data = await buildDashboardData(scopeFilter(req), req.query);
+  const data = await buildDashboardData(scopeFilter(req), req.query, { isAdmin: req.session.user.role === 'admin' });
   res.render('dashboard', data);
 }));
 
 // Next.js Stage 1 프리뷰(app/page.js)가 fetch()로 호출하는 JSON 버전 — 같은 requireAuth
 // (router.use 위쪽에 이미 적용됨)와 같은 scopeFilter/쿼리/집계를 그대로 재사용한다.
 router.get('/dashboard/data.json', asyncHandler(async (req, res) => {
-  const data = await buildDashboardData(scopeFilter(req), req.query);
+  const data = await buildDashboardData(scopeFilter(req), req.query, { isAdmin: req.session.user.role === 'admin' });
   res.json({ ...data, currentUser: req.session.user });
 }));
 

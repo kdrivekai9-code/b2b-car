@@ -87,6 +87,39 @@ export default async function DashboardPage({ searchParams }) {
         <div className="kpi"><div className="label">이슈(문의/사고/취소 등)</div><div className="value">{data.issues}건</div></div>
       </div>
 
+      {/* 시스템 상태 — 조용히 멈춘 기능을 드러낸다(lib/systemHealth.js).
+          2026-08-24에 콜마너 동기화 7일 정지, 상담원 초안 16일 정지가 한꺼번에 발견됐다.
+          둘 다 로그에만 한 줄씩 남고 화면에는 아무 표시가 없어서 아무도 몰랐다.
+          views/dashboard.ejs에도 같은 카드가 있다. */}
+      {data.systemHealth && (
+        <section className="card" style={{ marginBottom: 12 }}>
+          <h2>
+            🩺 시스템 상태{' '}
+            {data.systemHealth.worst === 'bad' && <span className="badge red">점검 필요</span>}
+            {data.systemHealth.worst === 'warn' && <span className="badge amber">확인 권장</span>}
+            {data.systemHealth.worst === 'ok' && <span className="badge green">정상</span>}
+          </h2>
+          <div className="table-wrap">
+            <table>
+              <tbody>
+                {data.systemHealth.items.map((it) => (
+                  <tr key={it.key}>
+                    <td style={{ width: 200 }}>
+                      {it.level === 'bad' && <span className="badge red">중단</span>}
+                      {it.level === 'warn' && <span className="badge amber">확인</span>}
+                      {it.level === 'ok' && <span className="badge green">정상</span>}
+                      {' '}{it.href ? <a href={it.href}>{it.label}</a> : it.label}
+                    </td>
+                    <td style={{ fontWeight: 600 }}>{it.value}</td>
+                    <td className="page-sub">{it.hint}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
       {/* AI 사용량 — ai_call_logs 집계. 지사/법인 스코프가 없다(호출 주체가 시스템이라 나눌
           근거가 없다) — 기간만 맞춘다. 표가 없으면(마이그레이션 전) 카드 자체를 감춘다.
           views/dashboard.ejs에도 같은 카드가 있다. */}
