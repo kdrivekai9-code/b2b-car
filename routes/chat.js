@@ -99,7 +99,11 @@ function createSuggestionAsync(session, text, userMessageId) {
     // 되묻기가 진행 중이던 세션이면 앞 원문에 이어붙여 판단한다 — buildSuggestion은 넘겨받은
     // 메시지 하나만 보므로, 이어주지 않으면 "12가3456"처럼 앞 질문의 답인 조각에는 초안이
     // 아예 만들어지지 않는다(카카오에서 실제로 그 구간에서 접수가 멈췄다).
-    const pending = await loadPendingIntake(session).catch(() => null);
+    // loadPendingIntake는 동기 함수다(lib/intakeSlotState.js) — 여기에 .catch를 붙이면
+    // 반환값이 null이든 객체든 "catch가 없다"로 매번 예외가 났다. 바깥 try가 그걸 삼켜서
+    // console.error 한 줄만 남고 초안은 한 번도 만들어지지 않았다(2026-08-08 이후 0건,
+    // 16일간 아무도 몰랐다). 예외를 던지지 않는 함수라 감쌀 것도 없다.
+    const pending = loadPendingIntake(session);
     const merged = pending && pending.raw && pending.category !== 'premium_daily'
       ? `${pending.raw}\n${text}`
       : text;

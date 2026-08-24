@@ -283,7 +283,11 @@ async function createAgentSuggestion(session, text) {
     //
     // 이어붙이면 폼이 완성되어 kind:'intake' 초안이 만들어지고, 상담원이 그걸 채택하면 봇이
     // 이어받아 실제 접수까지 진행한다(routes/chat.js의 intake 채택 경로).
-    const pending = await loadPendingIntake(session).catch(() => null);
+    // loadPendingIntake는 동기 함수다(lib/intakeSlotState.js) — 여기에 .catch를 붙이면
+    // 반환값이 null이든 객체든 "catch가 없다"로 매번 예외가 났다. 바깥 try가 그걸 삼켜서
+    // console.error 한 줄만 남고 초안은 한 번도 만들어지지 않았다(2026-08-08 이후 0건,
+    // 16일간 아무도 몰랐다). 예외를 던지지 않는 함수라 감쌀 것도 없다.
+    const pending = loadPendingIntake(session);
     const merged = pending && pending.raw && pending.category !== 'premium_daily'
       ? `${pending.raw}\n${text}`
       : text;
@@ -2147,6 +2151,9 @@ module.exports.isTooShortForRepeatCheck = isTooShortForRepeatCheck;
 // 접수 확인과 경로/요금을 한 통으로 합칠지, 나눠 보낼지는 카카오 채널 전체를 띄우지 않고는
 // 눈으로 볼 수 없다 — 위 두 개와 같은 이유로 노출한다(scripts/check-kakao-receipt-merge.js).
 module.exports.announceOrderReceiptWithRouteFare = announceOrderReceiptWithRouteFare;
+// 상담원 응대 중 초안 생성 — 실패가 console.error로만 남아 화면에는 아무 표시가 없다.
+// 실제로 16일간 초안이 0건이었는데 아무도 몰랐다(2026-08-24 발견). 검사에서 직접 부를 수 있게 노출한다.
+module.exports.createAgentSuggestion = createAgentSuggestion;
 module.exports.ROUTE_FARE_MERGE_GRACE_MS = ROUTE_FARE_MERGE_GRACE_MS;
 // 인계 안내를 반복하지 않는 판정과 그 조용한 갱신 — 위와 같은 이유로 노출한다. 안내 발송은
 // 실제 카카오 발신을 타므로 검사에서 부를 수 없어, 판정과 DB 갱신만 떼어 본다
