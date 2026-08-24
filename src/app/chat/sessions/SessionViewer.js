@@ -112,7 +112,15 @@ function MessageBubble({ message }) {
 // 봇이 만든 답변 초안 — 고객 말풍선 바로 아래에, 아직 나가지 않았다는 게 한눈에 보이는
 // 점선 말풍선으로 그린다. 상담원이 그대로 승인하거나 고쳐서 승인할 수 있고, 무시해도 된다.
 // 여기 있는 동안에는 고객에게 전혀 보이지 않는다(chat_messages에 저장되지 않는다).
-const SUGGESTION_KIND_LABEL = { intake: '접수 내용 파싱', faq: '지식베이스 답변' };
+const SUGGESTION_KIND_LABEL = {
+  intake: '접수 내용 파싱',
+  faq: '지식베이스 답변',
+  fare: '요금 계산',
+  hours: '운영시간 안내',
+  dispatch: '주문 조회',
+  // 채택하면 봇이 이어받아 확인을 다시 받고 실행한다 — 문구만 나가는 초안이 아니라는 표시.
+  dispatch_action: '주문 변경·취소(봇이 이어서 실행)',
+};
 
 function SuggestionBubble({ suggestion, text, onChange, onApprove, onDismiss, disabled }) {
   return (

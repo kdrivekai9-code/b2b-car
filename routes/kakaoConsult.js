@@ -267,23 +267,28 @@ async function findOrCreateKakaoSession(keys) {
 
 // 상담원 응대 중인 세션의 답변 초안 만들기 — 웹 위젯(routes/chat.js createSuggestionAsync)과
 // 같은 규칙이다. 초안이 없다고 상담이 막히면 안 되므로 실패는 로그만 남긴다.
-// 배차 도우미(조회·취소 등) 초안. 상담원이 채택하면 그대로 고객에게 나간다.
+// 배차 도우미 초안 — 조회뿐 아니라 수정·취소·요금인상까지, 봇이 할 수 있는 것은 전부 만든다.
 //
-// 반드시 speculative로 돌린다 — 변경 도구를 고르면 실행하지 않고 물러나고, 확인 대기 상태도
-// 저장하지 않는다. 채택될지 모르는 초안이 고객의 다음 "네"를 소비해버리면 안 되기 때문이다.
+// draftMode로 돌린다(lib/mcpDispatchAgent.js). 변경 도구를 만나도 물러나지 않고 확인 문구를
+//만들어 주되, **어떤 대기 상태도 저장하지 않는다** — 채택되지도 않은 초안이 고객의 다음 "네"를
+// 소비해버리면 안 되기 때문이다.
+//
+// 그래서 변경 계열 초안(mutating)은 종류를 따로 둔다. 상담원이 채택하면 문구만 내보내는 게
+// 아니라 봇에게 응대를 넘겨(routes/chat.js) 봇의 정식 경로가 확인을 다시 받고 실행하게 한다 —
+// 접수 초안(kind:'intake')이 이미 같은 방식으로 돈다.
 async function buildDispatchSuggestion(session, text) {
   const prep = await prepareDispatchRun(session, text).catch(() => null);
   if (!prep) return null;
   const result = await runDispatchAgent({
     user: prep.user, sessionId: session.id, text, history: prep.history,
     viewerCid: prep.viewerCid, requesterGroupId: prep.requesterGroupId,
-    speculative: true,
+    draftMode: true,
   }).catch((e) => {
-    console.error('상담원 도우미 배차 조회 초안 실패:', e.message);
+    console.error('상담원 도우미 배차 초안 실패:', e.message);
     return null;
   });
   if (!result || !result.handled || !result.message) return null;
-  return { kind: 'dispatch', text: result.message, intake: null };
+  return { kind: result.mutating ? 'dispatch_action' : 'dispatch', text: result.message, intake: null };
 }
 
 async function createAgentSuggestion(session, text) {
@@ -313,16 +318,18 @@ async function createAgentSuggestion(session, text) {
 
     let suggestion = await buildSuggestion(merged, { branchId: account && account.branch_id, sessionId: session.id });
 
-    // 주문 조회·취소 같은 배차 도우미 용건은 buildSuggestion이 다루지 않는다(접수·요금·
+    // 주문 조회·수정·취소 같은 배차 도우미 용건은 buildSuggestion이 다루지 않는다(접수·요금·
     // 운영시간·FAQ만 본다). 그래서 상담원 응대 중에 "배차가 되었나요?" 같은 질문이 오면 초안이
     // 아예 안 만들어졌고, 초안이 없으면 30초 자동 발송도 돌지 않아 봇이 통째로 침묵했다
     // (실사용 2026-08-24: 상담원이 인사만 하고 자리를 비운 사이 고객 질문이 그대로 방치됐다).
     //
-    // 봇 응대 경로가 쓰는 그 도우미를 그대로 돌려 초안으로 만든다. speculative로 돌리는 것이
-    // 핵심이다 — 이 실행은 "상담원이 채택할지 모르는 초안"이라 등록·취소 같은 변경이나 확인
-    // 대기 저장이 일어나면 안 된다(lib/mcpDispatchAgent.js의 투기 실행 안전장치).
-    if (!suggestion) {
-      suggestion = await buildDispatchSuggestion(session, text);
+    // 순서: 지식베이스(FAQ)보다 배차 도우미를 먼저 본다(사용자 확정 규칙). FAQ는 "비슷한 질문에
+    // 미리 적어둔 답"이라 실제 주문 상태를 모르는데, 임계값만 넘으면 초안이 되어버려 정작 조회로
+    // 답할 수 있는 질문을 가로챈다(실측: "오늘 탁송예약건 조회좀"이 엉뚱한 FAQ로 잡혔다).
+    // 접수·요금·운영시간 초안은 우리 데이터로 계산한 확정 답이라 그대로 앞에 둔다.
+    if (!suggestion || suggestion.kind === 'faq') {
+      const dispatch = await buildDispatchSuggestion(session, text);
+      if (dispatch) suggestion = dispatch;
     }
     if (!suggestion) return;
 

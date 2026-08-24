@@ -1447,7 +1447,11 @@ async function autoSendPendingSuggestions() {
     try {
       const session = await db.get('SELECT * FROM chat_sessions WHERE id = ?', [row.session_id]);
 
-      if (row.kind === 'intake') {
+      // dispatch_action(주문 수정·취소·요금인상 초안)도 접수와 같은 방식으로 봇에게 넘긴다.
+      // 초안 문구("…변경할까요?")를 상담원 이름으로 대신 보내면 약속만 나가고 아무것도 실행되지
+      // 않는다 — 그 초안을 만든 실행은 확인 대기 상태를 일부러 저장하지 않았기 때문이다
+      // (lib/mcpDispatchAgent.js draftMode). 봇이 이어받아 정식 경로에서 확인을 다시 받고 실행한다.
+      if (row.kind === 'intake' || row.kind === 'dispatch_action') {
         // 접수 건은 봇에게 응대를 넘긴다. 초안 문구("접수하겠습니다…")를 대신 보내면 약속만
         // 나가고 오더는 만들어지지 않는다 — 봇이 이어받아 실제 접수 경로를 태우게 한다.
         await deliverBotMessage(session, BOT_HANDOVER_NOTICE);

@@ -76,15 +76,27 @@ const SESSION = { id: 1, status: 'agent_active', external_phone: '01000000000', 
     check('종류가 dispatch', s && s.kind === 'dispatch', s && s.kind);
     check('도우미 답변을 그대로 담는다', s && s.text === dispatchResult.message, s && s.text);
     // 핵심 안전장치 — 채택될지 모르는 초안이 상태를 건드리면 안 된다.
-    check('투기 실행으로 돌린다(speculative)', dispatchArgs && dispatchArgs.speculative === true,
-      JSON.stringify(dispatchArgs && { speculative: dispatchArgs.speculative }));
+    check('초안 모드로 돌린다(draftMode)', dispatchArgs && dispatchArgs.draftMode === true,
+      JSON.stringify(dispatchArgs && { draftMode: dispatchArgs.draftMode }));
     check('세션을 그대로 넘긴다', dispatchArgs && dispatchArgs.sessionId === SESSION.id);
+  }
+
+  console.log('\n[수정·취소도 초안이 만들어진다 — 종류를 따로 둔다]');
+  {
+    // 변경 계열은 문구만 내보내면 약속만 나가고 아무것도 실행되지 않는다(초안 실행은 확인 대기를
+    // 일부러 저장하지 않는다). 채택하면 봇이 이어받도록 kind로 구분한다.
+    dispatchResult = { handled: true, message: '아래 주문을 취소할까요?\n▪ 접수번호 OID1459', mutating: true };
+    const s = await kakao.buildDispatchSuggestion(SESSION, '주문 취소해줘');
+    check('초안을 만든다', !!s, JSON.stringify(s));
+    check('종류가 dispatch_action', s && s.kind === 'dispatch_action', s && s.kind);
+    check('여전히 투기가 아니라 초안 모드', dispatchArgs && dispatchArgs.draftMode === true);
+    dispatchResult = { handled: true, message: '진행 중인 주문 1건입니다.' };
   }
 
   console.log('\n[도우미가 처리하지 못하면 초안을 만들지 않는다]');
   {
-    // 투기 실행이 변경 도구를 만나 물러난 경우 등 — 빈 초안은 상담원 화면의 소음이다.
-    dispatchResult = { handled: false, reason: 'speculative_mutation' };
+    // 빈 초안은 상담원 화면의 소음이다.
+    dispatchResult = { handled: false, reason: 'draft_pending' };
     const s = await kakao.buildDispatchSuggestion(SESSION, '주문 취소해줘');
     check('초안 없음', s === null, JSON.stringify(s));
     dispatchResult = { handled: true, message: '진행 중인 주문 1건입니다.' };

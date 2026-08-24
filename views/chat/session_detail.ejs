@@ -391,7 +391,12 @@ function parseAttachments(msg) {
       });
   }
 
-  var SUGGESTION_KIND_LABEL = { intake: '접수 내용 파싱', faq: '지식베이스 답변' };
+  // Next.js 상담 화면(src/app/chat/sessions/SessionViewer.js)과 같은 목록을 쓴다 —
+  // 두 화면이 다른 라벨을 쓰면 어느 화면으로 보느냐에 따라 초안 성격이 달라 보인다.
+  var SUGGESTION_KIND_LABEL = {
+    intake: '접수 내용 파싱', faq: '지식베이스 답변', fare: '요금 계산', hours: '운영시간 안내',
+    dispatch: '주문 조회', dispatch_action: '주문 변경·취소(봇이 이어서 실행)',
+  };
 
   function renderSuggestion(s) {
     clearSuggestion();
