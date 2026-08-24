@@ -35,7 +35,7 @@ const { runKakaoOrderNotifications } = require('../lib/kakaoOrderNotify');
 const kakaoOrderPhotos = require('../lib/kakaoOrderPhotos');
 const { sendOrderPhotos, isPhotoRequest, isOdometerRequest, answerOdometer, countNoPhotoAnswers } = kakaoOrderPhotos;
 // 주소 후보 검색·선택은 웹 접수 화면과 같은 규칙을 쓴다(lib/addressCandidates.js).
-const { searchAddressCandidates, needsDisambiguation, buildCandidateListText, matchCandidateChoice, getClarifyText } = require('../lib/addressCandidates');
+const { searchAddressCandidates, needsDisambiguation, rankByCoverage, buildCandidateListText, matchCandidateChoice, getClarifyText } = require('../lib/addressCandidates');
 const { getSmalltalkMessage } = require('../lib/smallTalk');
 const { needsHumanByKeyword, judgeNeedsHuman, categoryLabel } = require('../lib/escalationJudge');
 const { splitIntakeMemo } = require('../lib/intakeMemoSplit');
@@ -794,7 +794,9 @@ async function askAddressChoiceIfNeeded(session, parsed, mergedRaw, cache, extra
   for (let i = 0; i < sides.length; i += 1) {
     const side = sides[i];
     if (!side.query) continue;
-    const candidates = results[i];
+    // 물어볼 때는 질문을 잘 덮는 후보를 1번에 올린다 — 고객은 대개 "1"이라고 답하므로,
+    // 카카오가 준 순서 그대로 두면 엉뚱한 곳이 1번이 되어 잘못 확정될 수 있다.
+    const candidates = rankByCoverage(side.query, results[i]);
     if (!needsDisambiguation(side.query, candidates)) continue;
 
     await savePendingAddressChoice(session, {

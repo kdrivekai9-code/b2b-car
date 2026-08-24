@@ -53,12 +53,56 @@ function main() {
     ['서울 동작구 남부순환로 2089', CANDIDATES, false, '전체 주소면 첫 결과를 쓴다'],
     ['사당역', [CANDIDATES[0]], false, '후보가 하나면 물어볼 게 없다'],
     ['사당역', [], false, '후보가 없으면 기존 경로로'],
+    // 실사용 사고(2026-08-24): "강남역5번출구"에 카카오가 강남역·역삼역·신논현역 5번출구를 함께
+    // 돌려줬다. 2·3번은 "강남역"이 아예 없고 "5번출구"만 겹친 것인데, 개수만 세서 되물었다.
+    // 질문을 온전히 덮는 후보가 하나뿐이고 그게 첫 후보면 묻지 않는다.
+    [
+      '강남역5번출구',
+      [
+        { label: '강남역 신분당선 5번출구 (서울 서초구 서초동 1374)' },
+        { label: '역삼역 2호선 5번출구 (서울 강남구 역삼동 804)' },
+        { label: '신논현역 9호선 5번출구 (서울 강남구 역삼동 808-5)' },
+      ],
+      false,
+      '다른 역이 섞여 나와도 질문과 맞는 곳이 하나면 묻지 않는다',
+    ],
+    // 반대로 단독 최다가 첫 후보가 아니면 물어봐야 한다 — 묻지 않고 넘기면 이후 주소 확정은
+    // geocodeAddress의 첫 결과(=엉뚱한 역)로 조용히 굳는다.
+    [
+      '역삼역5번출구',
+      [
+        { label: '강남역 신분당선 5번출구 (서울 서초구 서초동 1374)' },
+        { label: '역삼역 2호선 5번출구 (서울 강남구 역삼동 804)' },
+      ],
+      true,
+      '맞는 후보가 1번이 아니면 물어본다',
+    ],
+    // 같은 상호의 본점/주차장처럼 진짜 갈리는 경우는 그대로 물어봐야 한다.
+    [
+      '사당역탐앤탐스',
+      [
+        { label: '탐앤탐스 사당역점 (서울 서초구 방배천로2길 10)' },
+        { label: '탐앤탐스 사당역점 주차장 (서울 서초구 방배천로2길 10)' },
+      ],
+      true,
+      '본점/주차장처럼 진짜 갈리면 물어본다',
+    ],
   ];
   disambigCases.forEach(([q, list, expected, why]) => {
     const got = server.needsDisambiguation(q, list);
     if (got !== expected) ok = false;
     console.log(`  ${got === expected ? 'OK  ' : '실패'} ${why} (${got})`);
   });
+
+  console.log('\n[물어볼 때 1번이 가장 그럴듯한 후보여야 한다]');
+  // 고객은 대개 "1"이라고 답한다 — 카카오가 준 순서 그대로 두면 엉뚱한 곳이 1번이 된다.
+  const ranked = server.rankByCoverage('역삼역5번출구', [
+    { label: '강남역 신분당선 5번출구 (서울 서초구 서초동 1374)' },
+    { label: '역삼역 2호선 5번출구 (서울 강남구 역삼동 804)' },
+  ]);
+  const rankOk = ranked[0].label.startsWith('역삼역');
+  if (!rankOk) ok = false;
+  console.log(`  ${rankOk ? 'OK  ' : '실패'} 1번 = ${ranked[0].label.slice(0, 20)}`);
 
   console.log('\n[후보 목록 문구]');
   console.log(server.buildCandidateListText('출발지', CANDIDATES).split('\n').map((l) => '  ' + l).join('\n'));
