@@ -7,7 +7,7 @@ const {
   NOTIFY_PHOTO_EVENTS, DISPATCH_CALL_TYPES, parseCallTypes, buildEventRows,
 } = require('../lib/customerNotifySettings');
 const { ORDER_STATUSES } = require('../config');
-const { getEffectivePaymentMethods, getEffectiveStatuses } = require('../lib/branchPolicy');
+const { getEffectivePaymentMethods, getEffectiveStatuses, DEFAULT_AGENT_IDLE_RELEASE_MINUTES } = require('../lib/branchPolicy');
 // 고객 통보 설정 화면이 "어떤 사건이 있고 기본값이 무엇인지"를 통보 모듈에서 그대로 가져온다 —
 // 화면에만 따로 목록을 적어두면 사건이 하나 늘 때 설정에서 빠진 채로 남는다.
 const kakaoOrderNotify = require('../lib/kakaoOrderNotify');
@@ -573,9 +573,10 @@ async function loadCustomerNotificationPage(branchId) {
   return { branch, branches, events, variables: kakaoOrderNotify.TEMPLATE_VARIABLES };
 }
 
-// 상담원 상태로 붙잡힌 세션을 봇으로 되돌리기까지의 유휴 시간. 비워두면 기본값(30분)을 쓰고,
+// 상담원 상태로 붙잡힌 세션을 봇으로 되돌리기까지의 유휴 시간. 비워두면 기본값을 쓰고,
 // 0이면 그 지사는 자동 복귀를 하지 않는다(상담원이 직접 종료할 때까지 붙잡아 두는 운영).
-const DEFAULT_AGENT_IDLE_RELEASE_MINUTES = 30;
+// 기본값은 lib/branchPolicy.js가 갖고 있다 — 이 화면이 안내하는 값과 실제 판정값(routes/chat.js)이
+// 갈리지 않게 하려면 한 곳에서 와야 한다(예전에는 두 파일이 각자 30을 들고 있었다).
 
 router.get('/:id/customer-notifications', asyncHandler(async (req, res) => {
   const { branch, branches, events, variables } = await loadCustomerNotificationPage(req.params.id);
@@ -628,8 +629,14 @@ router.post('/:id/customer-notifications', asyncHandler(async (req, res) => {
   }
 
   // 유휴 복귀 시간도 이 화면에서 함께 저장한다 — 같은 상담 흐름 설정이라 화면을 나눌 이유가 없다.
-  const idleMinutes = Number(req.body.agent_idle_release_minutes);
-  if (!Number.isInteger(idleMinutes) || idleMinutes < 0 || idleMinutes > 1440) {
+  //
+  // 빈 값은 NULL(=기본값을 따름)로 저장한다. 예전에는 Number('')가 0이 되는 바람에 빈 값이
+  // "자동 복귀 끔"으로 저장됐다 — 그러면 그 지사 세션은 상담원이 직접 종료할 때까지 무한히
+  // 붙잡힌다. "설정 안 함"과 "일부러 끔"은 결과가 정반대라 반드시 구분해야 한다.
+  // (화면 입력에는 required가 걸려 있지만 그건 브라우저측 검증일 뿐이라 API 호출은 그냥 통과한다.)
+  const idleRaw = String(req.body.agent_idle_release_minutes ?? '').trim();
+  const idleMinutes = idleRaw === '' ? null : Number(idleRaw);
+  if (idleMinutes !== null && (!Number.isInteger(idleMinutes) || idleMinutes < 0 || idleMinutes > 1440)) {
     return res.redirect(base + '?error=' + encodeURIComponent('봇 응대 복귀 시간은 0~1440분 사이로 입력해주세요.'));
   }
   await db.run('UPDATE branches SET agent_idle_release_minutes = ? WHERE id = ?', [idleMinutes, req.params.id])

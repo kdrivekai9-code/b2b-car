@@ -11,7 +11,7 @@ const asyncHandler = require('../middleware/asyncHandler');
 const { aiRateLimit } = require('../middleware/aiRateLimit');
 const { notify } = require('../lib/push');
 const { kstNow } = require('../lib/period');
-const { getEffectivePaymentMethods } = require('../lib/branchPolicy');
+const { getEffectivePaymentMethods, DEFAULT_AGENT_IDLE_RELEASE_MINUTES } = require('../lib/branchPolicy');
 const { runDispatchAgent, checkDispatchDelay } = require('../lib/mcpDispatchAgent');
 const { buildSuggestion, toIntakeFields } = require('../lib/agentAssist');
 const { loadPendingIntake } = require('../lib/intakeSlotState');
@@ -1262,13 +1262,15 @@ router.post('/sessions/:id/suggestions/:sid/approve', requireRole('admin'), asyn
 const AUTO_SEND_DELAY_SECONDS = 30;
 
 // 상담원 상태로 붙잡혀 있는 세션을 봇으로 되돌리기까지의 기본 유휴 시간(분).
-// 지사가 branches.agent_idle_release_minutes로 따로 정하면 그 값이 우선한다.
 //
 // 고객이 상담원 연결을 한 번 요청하면 그 뒤로 세션이 계속 needs_agent/agent_active로 남았다.
 // 자동 개입(autoSendPendingSuggestions)은 "초안이 대기 중일 때"만 도는데, 고객이 말을 멈추면
 // 초안도 안 생기니 아무것도 세션을 되돌리지 않는다(실사용 지적 — 하루 넘게 상담원 상태로 남은
 // 세션이 있었다). 그러면 한참 뒤 고객이 다시 말을 걸어도 봇이 답하지 않고 계속 사람을 기다린다.
-const AGENT_IDLE_RELEASE_MINUTES = 30;
+//
+// 기본값과 그 근거는 lib/branchPolicy.js에 모아뒀다 — 설정 화면(routes/branches.js)이 안내하는
+// 기본값과 여기 판정값이 갈리지 않게 하기 위해서다(예전에는 두 파일이 각자 30을 들고 있었다).
+const AGENT_IDLE_RELEASE_MINUTES = DEFAULT_AGENT_IDLE_RELEASE_MINUTES;
 
 // 오래 조용한 상담 세션을 봇 응대로 되돌린다.
 //
