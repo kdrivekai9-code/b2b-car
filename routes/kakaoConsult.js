@@ -21,7 +21,7 @@ const {
 } = require('../lib/kakaoIntakeParser');
 const {
   loadPendingIntake, savePendingIntake, savePendingState, clearPendingIntake, wasPendingIntakeExpired,
-  INTAKE_EXPIRED_NOTICE,
+  INTAKE_EXPIRED_NOTICE, looksSelfContained,
 } = require('../lib/intakeSlotState');
 const { findIntakeAccount, resolveIntakeContext, findAccountByPhone, linkUserKeyToAccount, createOrdersFromIntake } = require('../lib/kakaoIntakeService');
 const { createPremiumOrderFromIntake, buildPremiumPreviewMessage } = require('../lib/webPremiumIntakeService');
@@ -954,8 +954,14 @@ async function tryHandleIntake(session, text) {
       // 만료 사실을 알려 처음부터 다시 받는다 — 사용자 지적대로 "끊겼으면 끊겼다"고 답해야 한다.
       if (wasPendingIntakeExpired(session)) {
         await clearPendingIntake(session);
-        await botSay(session, INTAKE_EXPIRED_NOTICE, '접수 시간초과 안내');
-        return true;
+        // 다만 이번 메시지가 그 자체로 완결된 새 요청이면 안내를 내지 않는다. 안내를 내고
+        // true를 돌려주면 이 턴이 거기서 끝나 요청이 통째로 삼켜진다 — 실사용 사고:
+        // "내일오후3시에 사당역탐앤탐스에서 강남역5번출구로 탁송예약"에 만료 안내만 나갔다.
+        // 상태는 위에서 이미 지웠으므로, 그대로 새 요청으로 흘려보내면 된다.
+        if (!looksSelfContained(text)) {
+          await botSay(session, INTAKE_EXPIRED_NOTICE, '접수 시간초과 안내');
+          return true;
+        }
       }
       return false;
     }
