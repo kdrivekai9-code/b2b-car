@@ -335,7 +335,18 @@ async function insertMessage(sessionId, sender, message) {
   return inserted;
 }
 
-async function markNeedsAgent(session, lastUserMessage, requestedFeature) {
+// options.silent — 이미 상담 대기 중인 세션에서 다시 불렸을 때. 상태는 그대로 두고 알림만
+// 생략한다. 사유(requested_feature)도 덮어쓰지 않는다: 처음 인계된 이유("사고·클레임 문의")가
+// 뒤이은 평범한 질문의 사유로 갈아치워지면, 상담원이 목록에서 왜 불려온 건지 알 수 없게 된다.
+//
+// 푸시를 다시 보내지 않는 이유: 상담원은 이미 이 세션으로 호출됐다. 고객이 기다리며 두세 번
+// 더 말할 때마다 🔔이 울리면 알림이 소음이 되고, 정작 새로 들어온 다른 세션의 호출이 묻힌다.
+// 새 메시지 자체는 수신 핸들러가 이미 브로드캐스트해서 상담원 화면에 바로 뜬다.
+async function markNeedsAgent(session, lastUserMessage, requestedFeature, options = {}) {
+  if (options.silent) {
+    broadcastSessionListChangedAsync({ event: 'needs_agent_update', sessionId: session.id });
+    return;
+  }
   await db.run(
     `UPDATE chat_sessions SET status = 'needs_agent', requested_feature = ?,
      updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') WHERE id = ?`,
@@ -651,10 +662,25 @@ async function ensurePersonalConsent(session, purpose, rawText) {
   return true;
 }
 
+// 이미 상담 대기 중(needs_agent)인 세션인가. 상담원이 실제로 들어오기 전까지는 봇이 계속
+// 응대하는데(사용자 확정 규칙 — 사람이 오기 전 공백을 봇이 메운다), 그 사이 봇이 다시 인계
+// 판단을 하면 같은 안내가 반복된다. 특히 사고·클레임은 봇이 답하지 않는 유형이라 고객이
+// 이어서 말할 때마다 "상담원을 연결해드릴게요"만 두세 번 나갔다.
+//
+// 안내를 한 번만 내보내는 기준으로 status를 쓴다 — handleUnsupported/handleOrderIntake는
+// 안내와 markNeedsAgent를 항상 쌍으로 실행하므로, needs_agent라는 것은 곧 "이미 안내했다"는 뜻이다.
+function isAlreadyWaitingForAgent(session) {
+  // 불리언으로 고정한다 — 호출부가 markNeedsAgent의 silent 옵션으로 그대로 넘기므로,
+  // null/undefined가 새어 나가면 "조용히 넘길지"의 판단이 값에 따라 흔들린다.
+  return !!session && session.status === 'needs_agent';
+}
+
 async function handleUnsupported(session, text, requestedFeature) {
-  const notice = '상담원을 연결해드릴게요. 잠시만 기다려주세요.';
-  await botSay(session, notice, '상담원 연결 안내');
-  await markNeedsAgent(session, text, requestedFeature);
+  const alreadyWaiting = isAlreadyWaitingForAgent(session);
+  if (!alreadyWaiting) {
+    await botSay(session, '상담원을 연결해드릴게요. 잠시만 기다려주세요.', '상담원 연결 안내');
+  }
+  await markNeedsAgent(session, text, requestedFeature, { silent: alreadyWaiting });
 }
 
 
@@ -663,9 +689,12 @@ async function handleUnsupported(session, text, requestedFeature) {
 // 추출된다("탁송 상담톡 챗봇 고도화 기획서" 2.1). 그래서 LLM 분류보다 **먼저** 폼 파서를 태운다 —
 // 더 빠르고, 더 정확하고, 실패하면 그때 LLM 경로로 떨어뜨리면 되기 때문이다.
 async function handleOrderIntake(session, text, requestedFeature) {
-  const notice = '신규 접수는 상담원 연결을 통해 도와드릴게요. 잠시만 기다려주세요.';
-  await botSay(session, notice, '신규접수 안내');
-  await markNeedsAgent(session, text, requestedFeature || '신규 오더 접수');
+  // 안내 반복을 막는 기준은 handleUnsupported와 같다(그쪽 주석 참고).
+  const alreadyWaiting = isAlreadyWaitingForAgent(session);
+  if (!alreadyWaiting) {
+    await botSay(session, '신규 접수는 상담원 연결을 통해 도와드릴게요. 잠시만 기다려주세요.', '신규접수 안내');
+  }
+  await markNeedsAgent(session, text, requestedFeature || '신규 오더 접수', { silent: alreadyWaiting });
 }
 
 // 파싱된 접수 내용을 상담관리 카드의 "접수 마무리" 폼이 프리필하도록 draft_json.fields에 저장한다.
@@ -2119,3 +2148,8 @@ module.exports.isTooShortForRepeatCheck = isTooShortForRepeatCheck;
 // 눈으로 볼 수 없다 — 위 두 개와 같은 이유로 노출한다(scripts/check-kakao-receipt-merge.js).
 module.exports.announceOrderReceiptWithRouteFare = announceOrderReceiptWithRouteFare;
 module.exports.ROUTE_FARE_MERGE_GRACE_MS = ROUTE_FARE_MERGE_GRACE_MS;
+// 인계 안내를 반복하지 않는 판정과 그 조용한 갱신 — 위와 같은 이유로 노출한다. 안내 발송은
+// 실제 카카오 발신을 타므로 검사에서 부를 수 없어, 판정과 DB 갱신만 떼어 본다
+// (scripts/check-agent-handoff-notice.js).
+module.exports.isAlreadyWaitingForAgent = isAlreadyWaitingForAgent;
+module.exports.markNeedsAgent = markNeedsAgent;
