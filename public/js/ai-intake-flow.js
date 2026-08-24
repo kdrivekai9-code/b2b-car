@@ -227,7 +227,7 @@
   function getDailyDriverFields(tripType) {
     var fields = [
       { id: 'trip_type', label: '이용 형태(왕복/편도)', question: '이용 형태를 선택해 주세요.\n1. 왕복  2. 편도' },
-      { id: 'reserved_date', label: '예약일시', type: 'datetime', question: '예약시간을 말씀해주세요? (예: 내일 오후 3시 출발)' },
+      { id: 'reserved_date', label: '예약일시', type: 'datetime', question: '예약시간을 말씀해주세요? (예: 즉시, 내일 오후 3시)' },
       { id: 'origin_address', label: '출발지 주소', type: 'address', kind: 'origin', question: '출발지 주소를 알려주세요?' },
       { id: 'origin_contact', label: '출발지 연락처', type: 'phone', question: '출발지 담당자 연락처를 알려주세요? (예: 010-1234-5678)' },
       { id: 'vehicle_number', label: '차량번호', type: 'vehicle', question: '차량번호를 알려주세요? (모르시면 "없어"라고 답해주세요)' },

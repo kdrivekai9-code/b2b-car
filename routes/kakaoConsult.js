@@ -16,7 +16,7 @@ const { searchKnowledgeBase } = require('../lib/knowledgeSearch');
 const {
   parseKakaoIntake, buildParsedFromClassified, buildMissingQuestion, buildNextMissingQuestion,
   normalizePhone, normalizePlate,
-  PREMIUM_DECLINE_RE, PREMIUM_DECLINABLE_FIELD_IDS, premiumOrderTypeToIntentHint, parseTripTypeBareReply,
+  PREMIUM_DECLINE_RE, PREMIUM_DECLINABLE_FIELD_IDS, IMMEDIATE_WORDING_RE, premiumOrderTypeToIntentHint, parseTripTypeBareReply,
   buildPremiumParsedFromClassified, isAffirmative, isNegative, FAILURE_MESSAGES, fullAddress,
 } = require('../lib/kakaoIntakeParser');
 const {
@@ -1294,6 +1294,9 @@ async function advancePremiumIntakeKakao(session, parsed, rawText, cache) {
     await savePendingIntake(session, rawText, parsed.missing, {
       category: 'premium_daily', orderType: parsed.orderType, tripType: parsed.tripType,
       declined: parsed.declined, asking: parsed.missing[0] || null,
+      // 즉시 선택도 다음 턴까지 이어져야 한다 — 안 그러면 다음 답에서 다시 "모름"으로 돌아가
+      // 예약시간을 또 묻는다(declined와 같은 이유로 저장한다).
+      immediate: !!(parsed.when && parsed.when.immediate),
     });
     await saveIntakeDraft(session, parsed);
     const fields = getDailyDriverFields(parsed.tripType);
@@ -1303,7 +1306,10 @@ async function advancePremiumIntakeKakao(session, parsed, rawText, cache) {
   }
   await saveIntakeDraft(session, parsed);
   const geoCache = cache || new Map();
-  const extra = { category: 'premium_daily', orderType: parsed.orderType, tripType: parsed.tripType, declined: parsed.declined };
+  const extra = {
+    category: 'premium_daily', orderType: parsed.orderType, tripType: parsed.tripType,
+    declined: parsed.declined, immediate: !!(parsed.when && parsed.when.immediate),
+  };
   if (await askAddressChoiceIfNeeded(session, parsed, rawText, geoCache, extra)) return;
   await completePremiumIntake(session, parsed, rawText, geoCache);
 }
@@ -1315,7 +1321,7 @@ async function advancePremiumIntakeKakao(session, parsed, rawText, cache) {
 async function continuePremiumIntakeKakao(session, pending, text) {
   const mergedRaw = `${pending.raw}\n${text}`;
   const missing = pending.missing || [];
-  const overrides = { tripType: pending.tripType || null, declined: pending.declined || [] };
+  const overrides = { tripType: pending.tripType || null, declined: pending.declined || [], immediate: !!pending.immediate };
 
   // 이번 답이 어느 항목에 대한 것인지 — 하나씩 묻게 되면서 asking이 그 답을 확정해준다.
   // asking이 없는 상태(하나씩 묻기 전에 저장된 대화)는 예전처럼 missing에서 짐작한다.
@@ -1330,6 +1336,12 @@ async function continuePremiumIntakeKakao(session, pending, text) {
     : missing.find((id) => PREMIUM_DECLINABLE_FIELD_IDS.has(id));
   if (declinableMissing && PREMIUM_DECLINE_RE.test(text.trim())) {
     overrides.declined = Array.from(new Set([...overrides.declined, declinableMissing]));
+  }
+  // 예약일시를 묻는 중에 "즉시"라고 답하면 그게 답이다 — Gemini는 "즉시"에서 날짜를 못 뽑으니
+  // 이 지름길이 없으면 같은 질문이 무한히 반복된다(실사용 2026-08-24). 없어→declined와 같다.
+  if ((asking ? asking === 'reserved_date' : missing.includes('reserved_date'))
+    && IMMEDIATE_WORDING_RE.test(text.trim())) {
+    overrides.immediate = true;
   }
 
   let classified;
