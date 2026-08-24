@@ -267,6 +267,25 @@ async function findOrCreateKakaoSession(keys) {
 
 // 상담원 응대 중인 세션의 답변 초안 만들기 — 웹 위젯(routes/chat.js createSuggestionAsync)과
 // 같은 규칙이다. 초안이 없다고 상담이 막히면 안 되므로 실패는 로그만 남긴다.
+// 배차 도우미(조회·취소 등) 초안. 상담원이 채택하면 그대로 고객에게 나간다.
+//
+// 반드시 speculative로 돌린다 — 변경 도구를 고르면 실행하지 않고 물러나고, 확인 대기 상태도
+// 저장하지 않는다. 채택될지 모르는 초안이 고객의 다음 "네"를 소비해버리면 안 되기 때문이다.
+async function buildDispatchSuggestion(session, text) {
+  const prep = await prepareDispatchRun(session, text).catch(() => null);
+  if (!prep) return null;
+  const result = await runDispatchAgent({
+    user: prep.user, sessionId: session.id, text, history: prep.history,
+    viewerCid: prep.viewerCid, requesterGroupId: prep.requesterGroupId,
+    speculative: true,
+  }).catch((e) => {
+    console.error('상담원 도우미 배차 조회 초안 실패:', e.message);
+    return null;
+  });
+  if (!result || !result.handled || !result.message) return null;
+  return { kind: 'dispatch', text: result.message, intake: null };
+}
+
 async function createAgentSuggestion(session, text) {
   try {
     // 요금 초안은 지사 요금표로 계산한다 — 매핑이 없으면 기본 요금표 지사로 폴백한다.
@@ -292,7 +311,19 @@ async function createAgentSuggestion(session, text) {
       ? `${pending.raw}\n${text}`
       : text;
 
-    const suggestion = await buildSuggestion(merged, { branchId: account && account.branch_id, sessionId: session.id });
+    let suggestion = await buildSuggestion(merged, { branchId: account && account.branch_id, sessionId: session.id });
+
+    // 주문 조회·취소 같은 배차 도우미 용건은 buildSuggestion이 다루지 않는다(접수·요금·
+    // 운영시간·FAQ만 본다). 그래서 상담원 응대 중에 "배차가 되었나요?" 같은 질문이 오면 초안이
+    // 아예 안 만들어졌고, 초안이 없으면 30초 자동 발송도 돌지 않아 봇이 통째로 침묵했다
+    // (실사용 2026-08-24: 상담원이 인사만 하고 자리를 비운 사이 고객 질문이 그대로 방치됐다).
+    //
+    // 봇 응대 경로가 쓰는 그 도우미를 그대로 돌려 초안으로 만든다. speculative로 돌리는 것이
+    // 핵심이다 — 이 실행은 "상담원이 채택할지 모르는 초안"이라 등록·취소 같은 변경이나 확인
+    // 대기 저장이 일어나면 안 된다(lib/mcpDispatchAgent.js의 투기 실행 안전장치).
+    if (!suggestion) {
+      suggestion = await buildDispatchSuggestion(session, text);
+    }
     if (!suggestion) return;
 
     const lastUserMessage = await db.get(
@@ -1595,13 +1626,18 @@ const SMALL_TALK_RE = /^[\s]*(네+[~\s.!ㅣ]*|넵+[~\s.!]*|예[.,\s]*|응+[\s.!]
 // 고객)의 담당 계정이 매핑돼 있으면 그 계정 자격으로 조회할 수 있다 — 접수 자동화가 이미 같은
 // 매핑으로 오더를 만들고 있으므로(lib/kakaoIntakeService.js) 조회 권한도 같은 기준을 따른다.
 // 매핑이 없으면(익명 채널) 예전처럼 상담원에게 넘긴다.
-async function tryDispatchAgent(session, text) {
+// 도우미를 돌릴 준비물(누구 자격으로, 어디까지 볼지, 앞 대화). 돌릴 수 없으면 null.
+//
+// 봇 응대(tryDispatchAgent)와 상담원 도우미 초안(createAgentSuggestion)이 같은 것을 쓴다 —
+// 조회 범위 판정은 "남의 주문이 보이면 안 된다"가 걸린 부분이라 두 곳에 따로 두면 한쪽만
+// 고쳐질 위험이 크다.
+async function prepareDispatchRun(session, text) {
   const account = await resolveIntakeContextCached(session).catch(() => null);
-  if (!account || !account.user_id) return false;
+  if (!account || !account.user_id) return null;
 
   const user = await db.get('SELECT id, name, phone, role, branch_id, group_id FROM users WHERE id = ?', [account.user_id])
     .catch(() => null);
-  if (!user) return false;
+  if (!user) return null;
   // 매핑에 지사가 지정돼 있으면 그쪽을 우선한다(계정의 소속 지사와 다를 수 있다).
   if (account.branch_id) user.branch_id = account.branch_id;
 
@@ -1619,7 +1655,7 @@ async function tryDispatchAgent(session, text) {
   const isSharedChannelMapping = !account.external_user_key && account.matched_by !== 'user_phone';
   const scopeToViewer = account.matched_by === 'order_contact'
     || (isSharedChannelMapping && account.matched_by !== 'user_phone');
-  if (scopeToViewer && !viewerPhone) return false; // 신원 미확인 — 조회하지 않고 상담원으로
+  if (scopeToViewer && !viewerPhone) return null; // 신원 미확인 — 조회하지 않고 상담원으로
   const viewerCid = scopeToViewer ? viewerPhone : null;
 
   const history = await db.all(
@@ -1633,6 +1669,15 @@ async function tryDispatchAgent(session, text) {
     history.pop();
   }
 
+  // 담당 계정을 여러 법인 매핑이 함께 쓸 수 있어(카카오 채널 매핑에서 실제로 가능하다), 법인이
+  // 확정된 매핑이면 조회도 그 법인 오더로 좁힌다 — created_by만으로는 법인 경계가 없었다.
+  return { user, history, viewerCid, requesterGroupId: account.requester_group_id || null };
+}
+
+async function tryDispatchAgent(session, text) {
+  const prep = await prepareDispatchRun(session, text);
+  if (!prep) return false;
+
   // 조회는 LLM과 콜마너를 왕복해서 몇 초씩 걸린다. 그동안 아무 말이 없으면 고객은 못 알아들은
   // 줄 알고 다음 질문을 덧붙이는데, 그러면 새 질문으로 다시 분류돼 앞 조회가 헛돈다(실사용에서
   // 실제로 그랬다). 먼저 기다려달라고 알린다.
@@ -1641,11 +1686,9 @@ async function tryDispatchAgent(session, text) {
   // 남고 결과가 새 말풍선으로 온다. 웹 위젯처럼 점이 깜빡이는 표시를 쓸 방법은 없다.
   await botSay(session, '요청하신 내용을 확인하고 있습니다. 잠시만 기다려주세요.', '조회 대기 안내');
 
-  // 담당 계정을 여러 법인 매핑이 함께 쓸 수 있어(카카오 채널 매핑에서 실제로 가능하다), 법인이
-  // 확정된 매핑이면 조회도 그 법인 오더로 좁힌다 — created_by만으로는 법인 경계가 없었다.
   const result = await runDispatchAgent({
-    user, sessionId: session.id, text, history, viewerCid,
-    requesterGroupId: account.requester_group_id || null,
+    user: prep.user, sessionId: session.id, text, history: prep.history,
+    viewerCid: prep.viewerCid, requesterGroupId: prep.requesterGroupId,
   });
   if (!result || !result.handled || !result.message) return false;
 
@@ -2201,3 +2244,6 @@ module.exports.ROUTE_FARE_MERGE_GRACE_MS = ROUTE_FARE_MERGE_GRACE_MS;
 // (scripts/check-agent-handoff-notice.js).
 module.exports.isAlreadyWaitingForAgent = isAlreadyWaitingForAgent;
 module.exports.markNeedsAgent = markNeedsAgent;
+// 상담원 응대 중 조회 질문의 답변 초안 — 투기 실행으로 도는지(상태를 건드리지 않는지)가
+// 이 기능의 안전장치라 검사에서 직접 확인한다(scripts/check-agent-lookup-suggestion.js).
+module.exports.buildDispatchSuggestion = buildDispatchSuggestion;
