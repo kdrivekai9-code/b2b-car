@@ -14,6 +14,7 @@ const { kstNow } = require('../lib/period');
 const { getEffectivePaymentMethods } = require('../lib/branchPolicy');
 const { runDispatchAgent, checkDispatchDelay } = require('../lib/mcpDispatchAgent');
 const { buildSuggestion, toIntakeFields } = require('../lib/agentAssist');
+const { loadPendingIntake } = require('../lib/intakeSlotState');
 const { runWebIntakeTurn } = require('../lib/webIntakeTurn');
 const kakaoConsult = require('../lib/kakaoConsult');
 const { describeMappedAccount } = require('../lib/kakaoIntakeService');
@@ -95,7 +96,15 @@ function createSuggestionAsync(session, text, userMessageId) {
     const owner = session.user_id
       ? await db.get('SELECT branch_id FROM users WHERE id = ?', [session.user_id]).catch(() => null)
       : null;
-    const suggestion = await buildSuggestion(text, { branchId: owner && owner.branch_id, sessionId: session.id });
+    // 되묻기가 진행 중이던 세션이면 앞 원문에 이어붙여 판단한다 — buildSuggestion은 넘겨받은
+    // 메시지 하나만 보므로, 이어주지 않으면 "12가3456"처럼 앞 질문의 답인 조각에는 초안이
+    // 아예 만들어지지 않는다(카카오에서 실제로 그 구간에서 접수가 멈췄다).
+    const pending = await loadPendingIntake(session).catch(() => null);
+    const merged = pending && pending.raw && pending.category !== 'premium_daily'
+      ? `${pending.raw}\n${text}`
+      : text;
+
+    const suggestion = await buildSuggestion(merged, { branchId: owner && owner.branch_id, sessionId: session.id });
     if (!suggestion) return; // 확신이 없으면 제안하지 않는다(소음 방지)
 
     // 같은 세션에 쌓인 이전 대기 제안은 닫는다 — 고객이 새 메시지를 보냈으면 직전 초안은 낡았다.

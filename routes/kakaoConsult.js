@@ -271,7 +271,24 @@ async function createAgentSuggestion(session, text) {
   try {
     // 요금 초안은 지사 요금표로 계산한다 — 매핑이 없으면 기본 요금표 지사로 폴백한다.
     const account = await resolveIntakeContextCached(session).catch(() => null);
-    const suggestion = await buildSuggestion(text, { branchId: account && account.branch_id, sessionId: session.id });
+
+    // 되묻기가 진행 중이던 세션이면 앞 원문에 이어붙여 판단한다 — 봇 경로(tryHandleIntake)가
+    // 하는 것과 같다.
+    //
+    // 왜 필요한가: buildSuggestion은 넘겨받은 메시지 하나만 본다. 그래서 봇이 출발·도착·일시를
+    // 이미 확보하고 차량번호만 물어본 상태에서 상담원이 한 마디 끼어들면(그 순간 세션이
+    // agent_active가 되어 봇이 멈춘다), 그 뒤 고객이 보낸 "48조9416" 같은 조각은 그것만으로는
+    // 접수로 읽히지 않아 초안이 아예 만들어지지 않았다. 실사용에서 확보된 접수가 그 자리에서
+    // 흔적 없이 멈췄다 — 고객은 답을 보냈는데 아무 응답도 없고, 상담원 화면에도 뜨지 않는다.
+    //
+    // 이어붙이면 폼이 완성되어 kind:'intake' 초안이 만들어지고, 상담원이 그걸 채택하면 봇이
+    // 이어받아 실제 접수까지 진행한다(routes/chat.js의 intake 채택 경로).
+    const pending = await loadPendingIntake(session).catch(() => null);
+    const merged = pending && pending.raw && pending.category !== 'premium_daily'
+      ? `${pending.raw}\n${text}`
+      : text;
+
+    const suggestion = await buildSuggestion(merged, { branchId: account && account.branch_id, sessionId: session.id });
     if (!suggestion) return;
 
     const lastUserMessage = await db.get(
