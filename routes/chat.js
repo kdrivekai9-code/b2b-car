@@ -1158,6 +1158,29 @@ async function deliverAgentReply(session, agentUser, text) {
   return inserted;
 }
 
+// 상담원이 답을 "쓰고 있다"는 신호. 자동 발송(autoSendPendingSuggestions)이 이 시각을 보고
+// 초안을 건너뛴다 — 상담원이 작성 중일 때 봇이 먼저 나가면 같은 질문에 답이 두 번 가고,
+// 카카오는 발송 취소가 안 된다(마이그레이션 20260808020000의 원래 의도).
+//
+// 이 엔드포인트가 없어서 그 안전장치가 여태 한 번도 작동하지 않았다 — agent_typing_at을 읽는
+// 곳만 있고 쓰는 곳이 없어 값이 늘 NULL이었다(실측: 값이 있는 세션 1건, 그마저 종료된 세션).
+//
+// 담당자 검사를 하지 않는 이유: 이 신호는 "누가 쓰는지"가 아니라 "사람이 쓰고 있다"만 알리면
+// 되고, 담당이 아닌 상담원이 먼저 타이핑하는 상황에서도 중복 발송은 똑같이 막아야 한다.
+router.post('/sessions/:id/typing', requireRole('admin'), asyncHandler(async (req, res) => {
+  await db.run(
+    `UPDATE chat_sessions
+        SET agent_typing_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS')
+      WHERE id = ? AND status = 'agent_active'`,
+    [req.params.id]
+  ).catch((e) => {
+    // 컬럼이 없는 DB(마이그레이션 전)에서도 상담 자체가 막히면 안 된다 — 신호만 못 남긴다.
+    if (!e || e.code !== '42703') throw e;
+    console.error('상담원 타이핑 신호 저장 실패(마이그레이션 미적용):', e.message);
+  });
+  res.json({ ok: true });
+}));
+
 router.post('/sessions/:id/reply', requireRole('admin'), asyncHandler(async (req, res) => {
   const existing = await db.get(
     `SELECT id, assigned_agent_id, channel, kakao_service_key, kakao_user_key, kakao_event_key
@@ -1260,6 +1283,15 @@ router.post('/sessions/:id/suggestions/:sid/approve', requireRole('admin'), asyn
 //   · 상담원이 타이핑을 시작하면 발송하지 않는다 — 답이 두 번 나가는 걸 막는다. 카카오는
 //     발송 취소가 안 되므로 이 판단은 되돌릴 수 없다.
 const AUTO_SEND_DELAY_SECONDS = 30;
+
+// 타이핑 신호를 언제까지 "지금 쓰고 있는 중"으로 볼지.
+//
+// 신호가 있으면 자동 발송을 건너뛰는데, 유효기간이 없으면 상담원이 몇 글자 쓰다 그만둔 순간
+// 그 초안이 영구히 묶인다 — 고객은 답을 받지 못하고, 다음 메시지가 오거나 유휴 복귀(10분)가
+// 돌 때까지 아무 일도 일어나지 않는다. 화면은 타이핑 중 몇 초마다 신호를 갱신하므로
+// (views/chat/session_detail.ejs, src/app/chat/sessions/SessionViewer.js), 이 시간만큼 갱신이
+//끊겼으면 작성을 포기한 것으로 본다.
+const AGENT_TYPING_STALE_SECONDS = 60;
 
 // 상담원 상태로 붙잡혀 있는 세션을 봇으로 되돌리기까지의 기본 유휴 시간(분).
 //
@@ -1380,7 +1412,11 @@ async function loadAutoSendTargets() {
        -- 초안이 뜬 지 충분히 지났고
        AND g.created_at <= to_char((now() at time zone 'Asia/Seoul') - interval '${AUTO_SEND_DELAY_SECONDS} seconds', 'YYYY-MM-DD HH24:MI:SS')
        -- 그 사이 상담원이 타이핑하지 않았고
-       AND (s.agent_typing_at IS NULL OR s.agent_typing_at < g.created_at)
+       AND (s.agent_typing_at IS NULL
+           OR s.agent_typing_at < g.created_at
+           OR s.agent_typing_at < to_char(
+                (now() at time zone 'Asia/Seoul') - interval '${AGENT_TYPING_STALE_SECONDS} seconds',
+                'YYYY-MM-DD HH24:MI:SS'))
      ORDER BY g.id`;
   try {
     return await db.all(sql);

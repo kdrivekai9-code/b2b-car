@@ -540,6 +540,32 @@ function parseAttachments(msg) {
     replyError.style.display = '';
   }
 
+  // "지금 답을 쓰고 있다"를 서버에 알린다 — 그동안 AI 초안 자동 발송을 건너뛴다(그게 없으면
+  // 작성 중에 봇이 먼저 나가 같은 질문에 답이 두 번 간다. 카카오는 발송 취소가 안 된다).
+  //
+  // 타이핑마다 보내지 않고 최소 간격을 둔다. 서버는 마지막 시각만 쓰므로 더 자주 보낼 이유가
+  // 없고, 긴 답을 쓰는 동안 요청이 수백 번 나가면 그게 더 문제다. 신호가 이 간격보다 오래
+  // 끊기면 서버가 "작성을 포기한 것"으로 보고 초안을 보낸다(AGENT_TYPING_STALE_SECONDS).
+  // Next.js 상담 화면(src/app/chat/sessions/SessionViewer.js notifyTyping)과 같은 간격을 쓴다 —
+  // 두 화면이 다르게 굴면 어느 화면으로 응대했는지에 따라 결과가 갈린다.
+  var TYPING_PING_INTERVAL_MS = 5000;
+  var lastTypingPingAt = 0;
+  function pingTyping() {
+    var now = Date.now();
+    if (now - lastTypingPingAt < TYPING_PING_INTERVAL_MS) return;
+    lastTypingPingAt = now;
+    // 실패는 삼킨다 — 신호가 못 갔다고 상담원 입력을 막을 이유가 없다(최악의 경우 예전처럼
+    // 초안이 자동 발송될 뿐이다).
+    fetch('/chat/sessions/<%= session.id %>/typing', {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+    }).catch(function () {});
+  }
+  replyText.addEventListener('input', function () {
+    // 빈 칸으로 지운 것은 작성 중이 아니다 — 지우고 손을 뗀 상담원 때문에 초안이 묶이면 안 된다.
+    if (replyText.value.trim()) pingTyping();
+  });
+
   function sendAgentReply() {
     var text = replyText.value.trim();
     if (!text || isSendingReply) return;
