@@ -327,7 +327,26 @@ router.get('/sync', checkCronAuth, asyncHandler(async (req, res) => {
     try {
       const stateRow = await db.get('SELECT last_up_date FROM callmaner_sync_state WHERE branch_id = ?', [branch.id]);
       const lastUpDate = (stateRow && stateRow.last_up_date) || '0';
-      const { orderList, lastUpDate: nextLastUpDate } = await callmaner.orderAllStatus(branch, lastUpDate);
+
+      // 이 호출이 실패해도 아래 단건조회는 반드시 돌아야 한다.
+      //
+      // 실제로 멈췄다(2026-08-24 발견): 저장된 커서가 하루를 넘기자 콜마너가 "날짜는 최대
+      // 전날까지 가능합니다"로 거부했고, 던져진 예외가 같은 try를 빠져나가면서 아래
+      // syncOrdersByConfSlip까지 건너뛰었다. 배차·운행시작·완료 감지와 통보가 7일간 전부
+      // 멈춰 있었는데, 로그에는 매분 같은 오류 한 줄만 남아 있었다.
+      //
+      // 애초에 이 호출은 우리 접수건을 돌려주지 않는다(아래 주석) — 실제 감지는 단건조회가
+      // 한다. 그러니 이쪽 실패는 기록만 하고 넘어가는 것이 맞다.
+      const allStatus = await callmaner.orderAllStatus(branch, lastUpDate).catch((e) => {
+        logIntegrationErrorAsync({
+          source: 'callmaner', operation: 'order_all_status', refType: 'branch', refId: branch.id,
+          message: e.message, context: { lastUpDate },
+        });
+        console.error(`전체 상태조회 실패(단건조회로 계속) (branch ${branch.id}):`, e.message);
+        return null;
+      });
+      const orderList = (allStatus && allStatus.orderList) || [];
+      const nextLastUpDate = (allStatus && allStatus.lastUpDate) || lastUpDate;
 
       let updated = 0;
       for (const item of orderList) {
