@@ -1063,6 +1063,48 @@
     window.__aiIntakeRouteMeta = meta || { hasFerryLeg: false, ferryLegs: [], ferrySegments: null };
   }
   setAiRouteMeta({ hasFerryLeg: false, ferryLegs: [], ferrySegments: null });
+
+  // 경로탐색이 실패한 이유를 남긴다.
+  //
+  // 왜 필요한가(2026-08-25 실사용): 사당역→서귀포시청 요금문의에서 "거리 계산을 완료하지
+  // 못했습니다. 주소를 조금 더 상세히 입력해주세요"가 나갔다. 주소는 둘 다 정상 확정됐고 서버
+  // 경로탐색도 멀쩡했다(직접 호출해 571.8km 확인) — 즉 안내 자체가 틀린 말이었고, 고객은 고칠
+  // 것이 없는 주소를 고치려 들었다.
+  //
+  // 원인을 찾을 수 없었던 이유는 이 아래 두 갈래가 실패를 통째로 삼켰기 때문이다. 응답이
+  // ok가 아니면 null로 바꿔 그냥 return하고, 예외는 빈 .catch()가 먹었다. 그래서 화면에는
+  // 직선거리 임시값만 남고 챗봇은 20초를 기다리다 포기하는데, 왜 그랬는지는 아무 데도 안 남았다.
+  //
+  // 이제 사유를 여기 담아두고 챗봇(ai-intake.js)이 그대로 읽어 고객에게 맞는 말을 하게 한다.
+  // 새 요청이 시작되면 지운다 — 지난 실패가 다음 안내에 묻으면 안 된다.
+  function setRouteError(stage, detail) {
+    window.__aiIntakeRouteError = detail ? { stage: stage, detail: detail } : null;
+    if (detail) console.error('[경로탐색 실패] ' + stage + ': ' + detail);
+  }
+  setRouteError(null, null);
+
+  // 실패 응답 본문에서 사람이 읽을 수 있는 사유를 뽑는다. 서버(routes/kakao.js)는 실패 시
+  // { error, detail }을 주는데, 본문이 비었거나 JSON이 아닐 수도 있어 상태코드까지 함께 남긴다.
+  function describeFailedResponse(res) {
+    return res.text().catch(function () { return ''; }).then(function (body) {
+      var reason = '';
+      try {
+        var parsed = JSON.parse(body);
+        reason = parsed && (parsed.error || parsed.detail) ? String(parsed.error || parsed.detail) : '';
+      } catch (e) {
+        reason = String(body || '').slice(0, 200);
+      }
+      return 'HTTP ' + res.status + (reason ? ' · ' + reason : '');
+    });
+  }
+
+  // fetch → (ok면 JSON, 아니면 사유를 담은 예외). 아래 두 갈래가 같은 규칙을 쓰도록 한 곳에 둔다.
+  function fetchDirections(url) {
+    return fetch(url).then(function (res) {
+      if (res.ok) return res.json();
+      return describeFailedResponse(res).then(function (why) { throw new Error(why); });
+    });
+  }
   if (routePrioritySelect) {
     routePrioritySelect.addEventListener('change', function () {
       routePriorityTouchedByUser = true;
@@ -1113,23 +1155,30 @@
     }
     var departureTime = buildDepartureTimeParam();
     if (departureTime) params.set('departure_time', departureTime);
-    fetch('/kakao/directions?' + params.toString())
-      .then(function (res) { return res.ok ? res.json() : null; })
+    setRouteError(null, null);
+    fetchDirections('/kakao/directions?' + params.toString())
       .then(function (data) {
-        if (!data || requestId !== directionsRequestId) return; // 오래된 응답 또는 실패 시 직선거리 fallback 유지
+        if (requestId !== directionsRequestId) return; // 오래된 응답 — 새 요청이 이미 돌고 있다
         setAiRouteMeta({ hasFerryLeg: !!data.hasFerryLeg, ferryLegs: Array.isArray(data.ferryLegs) ? data.ferryLegs : [], ferrySegments: data.ferrySegments || null });
         if (data.path && data.path.length > 1) {
           drawPolyline(data.path.map(function (c) { return new kakao.maps.LatLng(c[0], c[1]); }));
         }
-        var kmSegments = data.segments.map(function (s) { return s.distance / 1000; });
+        // segments가 비어 오는 경우가 있어(경로는 나왔는데 구간 분해가 없는 응답) 그대로
+        // .map을 부르면 여기서 예외가 나고, 아래 총거리 표시까지 통째로 못 간다 — 구간별
+        // 표시는 부가정보이므로 없으면 없는 대로 두고 총거리는 반드시 그린다.
+        var kmSegments = Array.isArray(data.segments)
+          ? data.segments.map(function (s) { return s.distance / 1000; })
+          : [];
         renderDistanceRows(points, kmSegments);
         renderRouteSummary(data.totalDistance / 1000, data.totalDuration, data.tollFare, {
           mode: data.usedFuture ? 'future' : 'current',
         });
       })
-      .catch(function () {
+      .catch(function (e) {
+        if (requestId !== directionsRequestId) return;
         setAiRouteMeta({ hasFerryLeg: false, ferryLegs: [], ferrySegments: null });
-        /* 직선거리 fallback 유지 */
+        setRouteError('경로탐색', (e && e.message) || '알 수 없는 오류');
+        /* 화면은 직선거리 fallback 유지 — 사유는 위에 남겨 챗봇이 읽는다 */
       });
   }
 
@@ -1153,14 +1202,14 @@
     legBParams.set('destination', coord(destination));
     legBParams.set('priority', 'RECOMMEND');
 
+    setRouteError(null, null);
     Promise.all([
-      fetch('/kakao/directions?' + legAParams.toString()).then(function (res) { return res.ok ? res.json() : null; }),
-      fetch('/kakao/directions?' + legBParams.toString()).then(function (res) { return res.ok ? res.json() : null; }),
+      fetchDirections('/kakao/directions?' + legAParams.toString()),
+      fetchDirections('/kakao/directions?' + legBParams.toString()),
     ]).then(function (results) {
       if (requestId !== directionsRequestId) return;
       var legA = results[0];
       var legB = results[1];
-      if (!legA || !legB) { setAiRouteMeta({ hasFerryLeg: false, ferryLegs: [], ferrySegments: null }); return; }
 
       var ferryDistanceM = haversineKm(
         [SAMCHEONPO_PORT_LATLNG.lat, SAMCHEONPO_PORT_LATLNG.lng],
@@ -1197,9 +1246,11 @@
       renderRouteSummary(totalRoadKm, totalDuration, (legA.tollFare || 0) + (legB.tollFare || 0), {
         mode: (legA.usedFuture || legB.usedFuture) ? 'future' : 'current',
       });
-    }).catch(function () {
+    }).catch(function (e) {
+      if (requestId !== directionsRequestId) return;
       setAiRouteMeta({ hasFerryLeg: false, ferryLegs: [], ferrySegments: null });
-      /* 직선거리 fallback 유지 */
+      setRouteError('삼천포-제주 경로탐색', (e && e.message) || '알 수 없는 오류');
+      /* 화면은 직선거리 fallback 유지 — 사유는 위에 남겨 챗봇이 읽는다 */
     });
   }
 

@@ -6,6 +6,7 @@ const asyncHandler = require('../middleware/asyncHandler');
 const { generateJson } = require('../lib/vertexAi');
 const { abbreviateSido, formatSigugun } = require('../lib/kakaoRegion');
 const { getKakaoDirections } = require('../lib/routeFareSearch');
+const { logIntegrationErrorAsync } = require('../lib/integrationLog');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -179,6 +180,17 @@ router.get('/directions', asyncHandler(async (req, res) => {
     departureTime: departure_time,
   });
   if (!result.ok) {
+    // 실패를 남긴다. 브라우저가 이 실패를 조용히 삼키던 시절(2026-08-25 사당역→서귀포시청
+    // 요금문의)에는 서버에도 아무 기록이 없어서, 고객이 "거리 계산을 완료하지 못했습니다"를
+    // 받은 뒤 왜 그랬는지 확인할 방법이 전혀 없었다. 화면을 열지 않고도 원인을 보려면
+    // 여기 남아 있어야 한다(통합 오류 로그 · 시스템 상태 패널에서 함께 보인다).
+    logIntegrationErrorAsync({
+      source: 'kakao_mobility',
+      operation: 'directions',
+      errorCode: String(result.status || ''),
+      message: String(result.error || '경로탐색 실패'),
+      context: { origin, destination, waypoints, priority, avoid, departure_time, detail: result.detail },
+    });
     return res.status(result.status).json({ error: result.error, detail: result.detail });
   }
   const { ok, ...payload } = result;

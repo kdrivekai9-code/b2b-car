@@ -1112,7 +1112,7 @@
       return waitForFinalRouteDistance(20000).then(function (km) {
         if (!Number.isFinite(km) || km <= 0) {
           clearFareProgressLine();
-          var failText = '경유지 포함 거리 계산을 완료하지 못했습니다. 경유지 주소를 조금 더 상세히 알려주시면 다시 계산해드리겠습니다.';
+          var failText = routeFailureText('경유지 포함 거리 계산');
           addBubble(failText, 'bot');
           logBotMessage({ logText: failText, needsAgent: false, requestedFeature: null });
           pendingFareWaypointRoute = route;
@@ -1358,6 +1358,29 @@
   function isRouteDistanceFinal() {
     return window.__aiIntakeRouteFinal === true;
   }
+
+  // 거리 계산이 안 끝났을 때 고객에게 할 말.
+  //
+  // 예전에는 무조건 "주소를 조금 더 상세히 입력해주세요"였다. 2026-08-25 사당역→서귀포시청
+  // 요금문의에서 주소가 둘 다 정상 확정됐는데도 이 말이 나갔고(서버 경로탐색은 멀쩡했다),
+  // 고객은 고칠 것이 없는 주소를 고치려 들었다. 주소 탓으로 돌리는 건 그 원인일 때만 맞다.
+  //
+  // order-form.js가 실패 사유를 window.__aiIntakeRouteError에 남긴다 — 있으면 그대로 밝힌다.
+  // 상담 로그에 그 문장이 남으므로, 같은 일이 또 나면 화면을 열지 않고도 원인을 볼 수 있다
+  // (이번에 그게 없어서 원인을 못 찾았다).
+  function routeFailureText(what) {
+    var subject = what || '거리 계산';
+    var err = window.__aiIntakeRouteError || null;
+    if (err && err.detail) {
+      return subject + '을(를) 완료하지 못했습니다. (' + err.stage + ': ' + err.detail + ') '
+        + '잠시 후 다시 시도해주시거나 상담원 연결을 요청해주세요.';
+    }
+    // 사유가 안 남았으면 아직 응답을 못 받은 것이다 — 주소 탓으로 단정하지 않는다.
+    return subject + '이(가) 시간 안에 끝나지 않았습니다. 잠시 후 다시 시도해주시거나 상담원 연결을 요청해주세요.';
+  }
+  // 이 문장이 고객에게 그대로 나가는 말이라, 검사에서 문장 자체를 확인할 수 있어야 한다
+  // (tests/manual/route-failure-message.playwright.spec.js).
+  window.__aiIntakeRouteFailureText = routeFailureText;
 
   function waitForFinalRouteDistance(timeoutMs) {
     var maxMs = Number(timeoutMs || 12000);
@@ -1816,12 +1839,9 @@
           .then(function (km) {
             if (!Number.isFinite(km) || km <= 0) {
               clearFareProgressLine();
-              addBubble('거리 계산을 완료하지 못했습니다. 주소를 조금 더 상세히 입력해주시면 다시 계산해드리겠습니다.', 'bot');
-              logBotMessage({
-                logText: '거리 계산을 완료하지 못했습니다. 주소를 조금 더 상세히 입력해주시면 다시 계산해드리겠습니다.',
-                needsAgent: false,
-                requestedFeature: null,
-              });
+              var failText = routeFailureText('거리 계산');
+              addBubble(failText, 'bot');
+              logBotMessage({ logText: failText, needsAgent: false, requestedFeature: null });
               return { halted: true };
             }
 

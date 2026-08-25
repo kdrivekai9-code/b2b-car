@@ -29,6 +29,31 @@ function haversineKm(a, b) {
   return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
 }
 
+// 경로탐색 실패를 조용히 삼키지 않는다.
+//
+// 예전에는 응답이 ok가 아니면 null로 바꿔 그냥 return하고 예외는 빈 .catch()가 먹었다. 화면에는
+// 직선거리 임시값만 남는데 왜 그런지는 아무 데도 안 남아서, 실제 사고(2026-08-25 사당역→
+// 서귀포시청 요금문의)에서 원인을 찾을 수 없었다. 같은 규칙을 public/js/order-form.js에도 뒀다.
+async function fetchDirections(url) {
+  const res = await fetch(url);
+  if (res.ok) return res.json();
+  const body = await res.text().catch(() => '');
+  let reason = '';
+  try {
+    const parsed = JSON.parse(body);
+    reason = parsed && (parsed.error || parsed.detail) ? String(parsed.error || parsed.detail) : '';
+  } catch (_e) {
+    reason = String(body || '').slice(0, 200);
+  }
+  throw new Error('HTTP ' + res.status + (reason ? ' · ' + reason : ''));
+}
+
+function reportRouteError(stage, error) {
+  const detail = (error && error.message) || '알 수 없는 오류';
+  window.__aiIntakeRouteError = { stage, detail };
+  console.error('[경로탐색 실패] ' + stage + ': ' + detail);
+}
+
 function formatDuration(seconds) {
   const totalMin = Math.round(seconds / 60);
   const h = Math.floor(totalMin / 60);
@@ -182,10 +207,9 @@ export default function RouteMap({ points, originAddress, destinationAddress, on
       const legBParams = new URLSearchParams({ origin: `${JEJU_PORT.lng},${JEJU_PORT.lat}`, destination: coord(destination), priority: 'RECOMMEND' });
 
       Promise.all([
-        fetch('/kakao/directions?' + legAParams.toString()).then((r) => (r.ok ? r.json() : null)),
-        fetch('/kakao/directions?' + legBParams.toString()).then((r) => (r.ok ? r.json() : null)),
+        fetchDirections('/kakao/directions?' + legAParams.toString()),
+        fetchDirections('/kakao/directions?' + legBParams.toString()),
       ]).then(([legA, legB]) => {
-        if (!legA || !legB) return; // 직선거리 fallback 유지
         const totalRoadKm = (legA.totalDistance + legB.totalDistance) / 1000;
         const totalDuration = legA.totalDuration + SAMCHEONPO_JEJU_FERRY_DURATION_S + legB.totalDuration;
         let fullPath = [];
@@ -200,7 +224,7 @@ export default function RouteMap({ points, originAddress, destinationAddress, on
           ferryDistanceM, ferryDurationS: SAMCHEONPO_JEJU_FERRY_DURATION_S,
           afterDistanceM: legB.totalDistance, afterDurationS: legB.totalDuration,
         });
-      }).catch(() => {});
+      }).catch((e) => reportRouteError('삼천포-제주 경로탐색', e));
       return;
     }
 
@@ -211,14 +235,12 @@ export default function RouteMap({ points, originAddress, destinationAddress, on
     const params = new URLSearchParams({ origin: coord(resolvedPoints[0]), destination: coord(resolvedPoints[resolvedPoints.length - 1]), priority: apiPriority });
     if (isFreeRoute) params.set('avoid', 'toll');
     if (resolvedPoints.length > 2) params.set('waypoints', resolvedPoints.slice(1, -1).map(coord).join('|'));
-    fetch('/kakao/directions?' + params.toString())
-      .then((r) => (r.ok ? r.json() : null))
+    fetchDirections('/kakao/directions?' + params.toString())
       .then((data) => {
-        if (!data) return; // 직선거리 fallback 유지
         const path = data.path ? data.path.map((c) => new kakao.maps.LatLng(c[0], c[1])) : [];
         applyFinal(data.totalDistance / 1000, data.totalDuration, data.tollFare, !!data.hasFerryLeg, path, data.ferrySegments || null);
       })
-      .catch(() => {});
+      .catch((e) => reportRouteError('경로탐색', e));
     // portalTarget: #orderMap이 도킹 슬롯으로 포탈된 직후 map 인스턴스가 막 생겼을 수 있으니
     // (위 map-생성 effect 주석 참고) 이 effect도 그 시점에 한 번 더 재시도되어야 한다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
