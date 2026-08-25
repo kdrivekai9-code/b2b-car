@@ -4,6 +4,9 @@ const { requireAuth, requireRole } = require('../middleware/auth');
 const asyncHandler = require('../middleware/asyncHandler');
 const bcrypt = require('bcryptjs');
 const kakaoOrderNotify = require('../lib/kakaoOrderNotify');
+// 오지요금 상·하한은 계산 쪽과 한 곳에서 가져온다 — 화면 입력 제한과 실제 적용 범위가 갈리면
+// 관리자가 넣은 값이 조용히 다른 금액으로 적용된다.
+const { REMOTE_AREA_FEE_MIN, REMOTE_AREA_FEE_MAX } = require('../lib/branchPolicy');
 // 지사 화면과 같은 표시 규칙을 쓴다 — 복사하면 갈라진다.
 const {
   NOTIFY_PHOTO_EVENTS, DISPATCH_CALL_TYPES, parseCallTypes, buildEventRows,
@@ -382,6 +385,8 @@ router.get('/:id/fare-rules', asyncHandler(async (req, res) => {
     saved: req.query.saved === '1',
     copied: req.query.copied === '1',
     error: req.query.error || null,
+    remoteAreaFeeMin: REMOTE_AREA_FEE_MIN,
+    remoteAreaFeeMax: REMOTE_AREA_FEE_MAX,
   });
 }));
 
@@ -471,11 +476,20 @@ router.post('/:id/fare-rules', asyncHandler(async (req, res) => {
     round_trip_ratio, wait_threshold_min, wait_fee, cancel_before_fee, cancel_after_fee,
     fare_table_enabled, fare_visible_to_client, fare_editable_by_client,
   } = req.body;
+
+  // 오지요금 — 0(안 받음)이거나 상·하한 사이여야 한다. 그 사이가 아닌 값(예: 500원)을 그대로
+  // 저장하면 계산 쪽이 하한으로 끌어올려 적용해, 관리자가 넣은 금액과 실제 청구액이 갈린다.
+  const remoteAreaFee = Number(req.body.remote_area_fee) || 0;
+  if (remoteAreaFee !== 0 && (remoteAreaFee < REMOTE_AREA_FEE_MIN || remoteAreaFee > REMOTE_AREA_FEE_MAX)) {
+    return res.redirect('/groups/' + req.params.id + '/fare-rules?error='
+      + encodeURIComponent(`오지요금은 0(안 받음) 또는 ${REMOTE_AREA_FEE_MIN.toLocaleString('ko-KR')}~${REMOTE_AREA_FEE_MAX.toLocaleString('ko-KR')}원 사이로 입력해주세요.`));
+  }
+
   await db.run(
     `INSERT INTO group_fare_extra_settings (group_id, round_trip_ratio, wait_threshold_min, wait_fee,
                                             cancel_before_fee, cancel_after_fee, fare_table_enabled,
-                                            fare_visible_to_client, fare_editable_by_client)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                            fare_visible_to_client, fare_editable_by_client, remote_area_fee)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (group_id) DO UPDATE SET
        round_trip_ratio = excluded.round_trip_ratio,
        wait_threshold_min = excluded.wait_threshold_min,
@@ -484,11 +498,35 @@ router.post('/:id/fare-rules', asyncHandler(async (req, res) => {
        cancel_after_fee = excluded.cancel_after_fee,
        fare_table_enabled = excluded.fare_table_enabled,
        fare_visible_to_client = excluded.fare_visible_to_client,
-       fare_editable_by_client = excluded.fare_editable_by_client`,
+       fare_editable_by_client = excluded.fare_editable_by_client,
+       remote_area_fee = excluded.remote_area_fee`,
     [req.params.id, Number(round_trip_ratio) || 180, Number(wait_threshold_min) || 15,
       Number(wait_fee) || 0, Number(cancel_before_fee) || 0, Number(cancel_after_fee) || 0,
-      fare_table_enabled ? 1 : 0, fare_visible_to_client ? 1 : 0, fare_editable_by_client ? 1 : 0]
-  );
+      fare_table_enabled ? 1 : 0, fare_visible_to_client ? 1 : 0, fare_editable_by_client ? 1 : 0,
+      remoteAreaFee]
+  ).catch(async (e) => {
+    // 마이그레이션(20260825020000) 전이면 컬럼이 없다 — 오지요금만 빼고 나머지는 저장한다.
+    if (!e || e.code !== '42703') throw e;
+    console.error('오지요금 저장 실패(마이그레이션 미적용):', e.message);
+    await db.run(
+      `INSERT INTO group_fare_extra_settings (group_id, round_trip_ratio, wait_threshold_min, wait_fee,
+                                              cancel_before_fee, cancel_after_fee, fare_table_enabled,
+                                              fare_visible_to_client, fare_editable_by_client)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (group_id) DO UPDATE SET
+         round_trip_ratio = excluded.round_trip_ratio,
+         wait_threshold_min = excluded.wait_threshold_min,
+         wait_fee = excluded.wait_fee,
+         cancel_before_fee = excluded.cancel_before_fee,
+         cancel_after_fee = excluded.cancel_after_fee,
+         fare_table_enabled = excluded.fare_table_enabled,
+         fare_visible_to_client = excluded.fare_visible_to_client,
+         fare_editable_by_client = excluded.fare_editable_by_client`,
+      [req.params.id, Number(round_trip_ratio) || 180, Number(wait_threshold_min) || 15,
+        Number(wait_fee) || 0, Number(cancel_before_fee) || 0, Number(cancel_after_fee) || 0,
+        fare_table_enabled ? 1 : 0, fare_visible_to_client ? 1 : 0, fare_editable_by_client ? 1 : 0]
+    );
+  });
   res.redirect('/groups/' + req.params.id + '/fare-rules?saved=1');
 }));
 

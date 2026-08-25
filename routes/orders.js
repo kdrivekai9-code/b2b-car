@@ -918,6 +918,9 @@ router.get('/fare-preview', asyncHandler(async (req, res) => {
   const result = await calculateFareWithFerry(branchId, distanceKm, {
     vehicleType: req.query.vehicle_type || req.query.vehicleType || '',
     originAddress: req.query.origin_address || req.query.originAddress || '',
+    // 오지요금 판정용 — 오더 등록 화면은 주소만 알고 행정지명은 모른다. 주소에서 "…리"를 찾는다
+    // (lib/branchPolicy.js isRemoteArea). 행정지명을 아는 경로(요금문의)는 그쪽을 넘긴다.
+    destinationAddress: req.query.destination_address || req.query.destinationAddress || '',
     hasFerryLeg: req.query.has_ferry_leg === '1' || req.query.has_ferry_leg === 'true',
     reservedDate: req.query.reserved_date || null,
     reservedTime: req.query.reserved_time || null,
