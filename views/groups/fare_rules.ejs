@@ -78,8 +78,9 @@
       <div class="field"><label>대기요금(원)</label><input type="number" name="wait_fee" value="<%= extra.wait_fee || 0 %>" min="0"></div>
     </div>
     <div class="row">
-      <div class="field"><label>도착 전 취소요금(원)</label><input type="number" name="cancel_before_fee" value="<%= extra.cancel_before_fee || 0 %>" min="0"></div>
-      <div class="field"><label>도착 후 취소요금(원)</label><input type="number" name="cancel_after_fee" value="<%= extra.cancel_after_fee || 0 %>" min="0"></div>
+      <%# 취소요금은 1,000원 단위로 받는다(사용자 확정) — 지사 화면(views/branches/fare_rules.ejs)도 같다. %>
+      <div class="field"><label>도착 전 취소요금(원)</label><input type="number" name="cancel_before_fee" value="<%= extra.cancel_before_fee || 0 %>" min="0" step="1000"></div>
+      <div class="field"><label>도착 후 취소요금(원)</label><input type="number" name="cancel_after_fee" value="<%= extra.cancel_after_fee || 0 %>" min="0" step="1000"></div>
     </div>
     <div class="row">
       <%# 오지요금 — 행정지명이 "리"로 끝나는 곳을 오가는 구간에 정액을 더한다. %>
