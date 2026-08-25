@@ -816,3 +816,23 @@ textarea.single-line-textarea{min-height:36px;height:36px;padding:8px 10px;resiz
 /* 연동 오류 현황 — 헤더의 기간 선택 폼 */
 .inline-filter-form{display:inline-flex;align-items:center;gap:8px;margin-right:8px;}
 .inline-filter-form select{min-height:38px;}
+
+/* 오더 리스트 — 상태가 바뀐 행을 3초간 그 상태의 색으로 깜빡인다(사용자 요청).
+   노란 배경(order-row-updated)만으로는 "무언가 바뀌었다"까지만 알 수 있고, 무엇으로 바뀌었는지는
+   행을 읽어야 안다. 상태색으로 깜빡이면 목록을 훑는 중에도 눈에 걸린다.
+   길이는 0.5초 × 6회 = 3초로, OrderListTable.js의 STATUS_FLASH_MS와 맞춰야 한다. */
+@keyframes orderStatusFlash { 0%, 100% { background: transparent; } 50% { background: var(--flash-bg, #fff3c4); } }
+tr.order-row-status-flash td { animation: orderStatusFlash .5s ease-in-out 6; }
+tr.order-flash-gray   td { --flash-bg:#eef0f4; }
+tr.order-flash-blue   td { --flash-bg:#e7f0fb; }
+tr.order-flash-amber  td { --flash-bg:#fef3e2; }
+tr.order-flash-purple td { --flash-bg:#f3e8fd; }
+tr.order-flash-red    td { --flash-bg:#fde8e8; }
+tr.order-flash-green  td { --flash-bg:#e6f7ec; }
+tr.order-flash-teal   td { --flash-bg:#dcf5f1; }
+tr.order-flash-dark   td { --flash-bg:#eceef1; }
+tr.order-flash-indigo td { --flash-bg:#e7e9fd; }
+/* 깜빡임을 불편해하는 사용자를 위해 — 색은 그대로 두되 점멸만 없앤다(정보는 잃지 않는다). */
+@media (prefers-reduced-motion: reduce) {
+  tr.order-row-status-flash td { animation: none; background: var(--flash-bg, #fff3c4); }
+}

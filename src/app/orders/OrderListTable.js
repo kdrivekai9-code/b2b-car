@@ -48,6 +48,9 @@ const WIDTH_KEY = 'orderList.widths.v1';
 const DENSITY_KEY = 'orderList.density.v1';
 // 새로 등록/변경된 오더 행을 강조해서 보여주는 시간(사용자 확정 사항: 5초)
 const HIGHLIGHT_MS = 5000;
+// 상태변경 깜빡임 3초(사용자 지정). CSS 애니메이션(0.5초 × 6회)과 같은 길이라, 여기만 바꾸면
+// 색이 남은 채로 멈추거나 먼저 꺼진다 — public/css/style.css의 order-row-status-flash도 같이 본다.
+const STATUS_FLASH_MS = 3000;
 
 function loadColumnState() {
   let saved = null;
@@ -117,6 +120,9 @@ export default function OrderListTable({ orders, filters, statusSummary }) {
   // seenRef: 직전에 화면에 있던 오더의 id -> updated_at 스냅샷. null이면 아직 최초 렌더 전.
   const seenRef = useRef(null);
   const highlightTimersRef = useRef(new Map());
+  // 상태가 바뀐 행을 잠깐 깜빡이는 데 쓴다(id → 상태색 클래스).
+  const [statusFlash, setStatusFlash] = useState(new Map());
+  const statusFlashTimersRef = useRef(new Map());
   const [highlightIds, setHighlightIds] = useState(() => new Set());
 
   // localStorage는 클라이언트에만 있으므로 마운트 후에 불러온다 — legacy도 서버 렌더 HTML이
@@ -159,14 +165,46 @@ export default function OrderListTable({ orders, filters, statusSummary }) {
   // 비교해서 새 id이거나 updated_at이 달라진 행만 고른다. 최초 렌더는 전체가 "새 것"이 되어버리니
   // 스냅샷만 기록하고 강조하지 않는다.
   useEffect(() => {
-    const snapshot = new Map(orders.map((o) => [o.id, o.updated_at || '']));
+    const snapshot = new Map(orders.map((o) => [o.id, { at: o.updated_at || '', status: o.status || '' }]));
     if (seenRef.current === null) {
       seenRef.current = snapshot;
       return;
     }
     const prev = seenRef.current;
-    const changedIds = orders.filter((o) => prev.get(o.id) !== (o.updated_at || '')).map((o) => o.id);
+    const changedIds = orders.filter((o) => {
+      const before = prev.get(o.id);
+      return !before || before.at !== (o.updated_at || '');
+    }).map((o) => o.id);
+
+    // 상태가 바뀐 행은 따로 골라 상태색으로 깜빡인다(사용자 요청) — 그냥 노란 배경만으로는
+    // "무언가 바뀌었다"까지만 알 수 있고 무엇으로 바뀌었는지는 행을 읽어야 안다.
+    // 새로 들어온 오더는 제외한다 — 그건 "변경"이 아니라 등장이고, 이미 노란 배경으로 보인다.
+    const statusChanged = orders.filter((o) => {
+      const before = prev.get(o.id);
+      return before && before.status !== (o.status || '');
+    });
     seenRef.current = snapshot;
+
+    if (statusChanged.length) {
+      setStatusFlash((cur) => {
+        const next = new Map(cur);
+        statusChanged.forEach((o) => next.set(o.id, STATUS_COLORS[o.status] || 'gray'));
+        return next;
+      });
+      const flashTimers = statusFlashTimersRef.current;
+      statusChanged.forEach((o) => {
+        clearTimeout(flashTimers.get(o.id));
+        flashTimers.set(o.id, setTimeout(() => {
+          setStatusFlash((cur) => {
+            const next = new Map(cur);
+            next.delete(o.id);
+            return next;
+          });
+          flashTimers.delete(o.id);
+        }, STATUS_FLASH_MS));
+      });
+    }
+
     if (changedIds.length === 0) return;
 
     setHighlightIds((cur) => {
@@ -191,9 +229,12 @@ export default function OrderListTable({ orders, filters, statusSummary }) {
   // 언마운트 시 남아있는 강조 타이머 정리
   useEffect(() => {
     const timers = highlightTimersRef.current;
+    const flashTimers = statusFlashTimersRef.current;
     return () => {
       timers.forEach((t) => clearTimeout(t));
       timers.clear();
+      flashTimers.forEach((t) => clearTimeout(t));
+      flashTimers.clear();
     };
   }, []);
 
@@ -357,7 +398,9 @@ export default function OrderListTable({ orders, filters, statusSummary }) {
             {sortedOrders.map((o) => (
               <tr key={o.id}
                 data-clickable="1"
-                className={highlightIds.has(o.id) ? 'order-row-updated' : undefined}
+                className={statusFlash.has(o.id)
+                  ? `order-row-status-flash order-flash-${statusFlash.get(o.id)}`
+                  : (highlightIds.has(o.id) ? 'order-row-updated' : undefined)}
                 onClick={(e) => handleRowClick(e, o.id)}>
                 {activeColumns.map((key) => {
                   const value = cellValue(o, key);
