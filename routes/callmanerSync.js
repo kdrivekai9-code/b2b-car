@@ -35,16 +35,23 @@ async function tryUpdateDriverColumns(sqlWithDriver, paramsWithDriver, sqlWithou
 
 // OrderAllStatus의 wk_name("사번*이름")을 분리해 우리쪽 배정 기사(drivers 테이블)와는 별개인
 // "콜마너 배정 기사" 이름/사번을 저장한다. 실제 연락처(가상번호)는 이 폴링 응답에 없으므로,
-// 상태가 배차(status_code=02)로 갓 바뀌었고 아직 연락처를 못 받은 경우에만 별도 API
-// (기사연락처조회/WkContactSearch)를 호출해 채운다 — 매 폴링(1분)마다 부르면 불필요한 호출이
-// 쌓이므로 "아직 없을 때"로만 제한한다.
+// 기사 이름·사번은 조회 응답의 wk_info에서 바로 나오고, 연락처만 별도 API(기사연락처조회/
+// WkContactSearch)를 한 번 더 불러야 채워진다.
+//
+// 예전에는 그 호출 조건이 "상태가 배차(status_code=02)일 때"였다. 그런데 예약 건은 기사가
+// 배정돼도 콜마너 상태가 계속 '예약'이라 이 조건에 영영 들어오지 않았다 — 실측 OID1455는
+// 기사 이름(채정식)은 저장됐는데 연락처가 null로 남았고, 그래서 "기사님 연락처요"에 답할 수도,
+// 배차 통보에 기사 줄을 넣을 수도 없었다.
+//
+// 조건을 "기사가 배정됐는데 번호가 없을 때"로 바꾼다. 상태 표기가 무엇이든 기사 정보가 들어온
+// 이상 번호도 있어야 한다. 번호를 받으면 phone이 채워져 다음 폴링부터는 부르지 않는다.
 async function syncDriverInfo(branch, order, item, statusCode) {
   const parsed = callmaner.parseDriverNameField(item.wk_name);
   let name = parsed.name || null;
   let sabun = parsed.sabun || null;
   let phone = order.callmaner_driver_phone || null;
 
-  const needsContact = statusCode === '02' && !order.callmaner_driver_phone;
+  const needsContact = !!(name || sabun || statusCode === '02') && !phone;
   if (needsContact) {
     try {
       const contact = await callmaner.wkContactSearch(branch, item.conf_slip);
@@ -111,10 +118,33 @@ const STARTED_LOCAL_STATUS = '운행시작';
 // 콜마너 baecha_status: 0 배차상태아님 / 1 기사도착 / 2 운행시작 (정의서 "오더상세조회").
 const BAECHA_STATUS_DRIVING = '2';
 
+// 아직 기사가 붙기 전 단계들. 여기 있는 동안 기사 정보가 들어오면 배차된 것으로 본다.
+// 완료·취소·문의는 넣지 않는다 — 종료된 건을 기사배정으로 되돌리면 통보까지 다시 나간다.
+const PRE_DISPATCH_LOCAL_STATUSES = new Set(['접수', '대기', '예약']);
+
+// 콜마너가 기사를 붙였는지 — wk_info("사번*이름")에 값이 있으면 배정된 것이다.
+function hasDriverAssigned(info) {
+  const parsed = callmaner.parseDriverNameField(info && info.wkInfo);
+  return !!(parsed && (parsed.name || parsed.sabun));
+}
+
 // 콜마너 상태 + 배차이후상태를 로컬 상태 하나로 합친다. 콜마너는 기사가 출발한 뒤에도 계속
 // status='배차'를 주고, 출발 여부는 baecha_status로만 구분된다.
 function resolveLocalStatus(info) {
-  const mapped = callmaner.STATUS_TEXT_TO_LOCAL_STATUS[info.status];
+  let mapped = callmaner.STATUS_TEXT_TO_LOCAL_STATUS[info.status];
+
+  // 예약 건은 기사가 배정돼도 콜마너 status가 계속 '예약'이다(실측 OID1455 — status "예약",
+  // wk_info "T11111*채정식", baecha_status "3"). 그래서 status 문자열만 보면 배차를 영영 못
+  // 알아챈다. 실제로 그 오더는 기사가 붙은 뒤에도 로컬 상태가 '예약'에 머물렀고, 상태 전이가
+  // 없으니 배차완료 통보도 나가지 않아 **고객이 기사 배정 사실 자체를 안내받지 못했다.**
+  //
+  // 배차 여부는 wk_info(기사 정보)로 판단한다. baecha_status는 쓰지 않는다 — 정의서에 정의된
+  // 값이 0(배차상태아님)/1(기사도착)/2(운행시작)뿐인데 실서버가 문서에 없는 3을 준다. 뜻을
+  // 모르는 값으로 운행 단계를 정하면 "기사도착"과 헷갈릴 수 있어, 확실한 신호만 쓴다.
+  if (PRE_DISPATCH_LOCAL_STATUSES.has(mapped) && hasDriverAssigned(info)) {
+    mapped = DISPATCHED_LOCAL_STATUS;
+  }
+
   if (mapped === DISPATCHED_LOCAL_STATUS && String(info.baechaStatus || '') === BAECHA_STATUS_DRIVING) {
     return STARTED_LOCAL_STATUS;
   }
@@ -243,7 +273,8 @@ async function syncOrdersByConfSlip(branch) {
     // 기사 정보도 여기서 맞춘다. 예전에는 전체조회(OrderAllStatus) 경로에만 있었는데, 그 경로가
     // 사실상 죽어 있어(위 주석) 실제로는 대부분의 오더가 기사 이름·연락처 없이 남았다. 그 탓에
     // "기사님 연락처요"에 답하지 못했고, 배차 통보 문구의 기사 줄도 비어서 통째로 빠졌다.
-    // OrderInfo는 wk_info("사번*이름")를 주고, 연락처는 배차 상태일 때 WkContactSearch로 채운다.
+    // OrderInfo는 wk_info("사번*이름")를 주고, 연락처는 WkContactSearch로 채운다 — 기사가
+    // 배정됐는데 번호가 없으면 상태 표기와 무관하게 부른다(syncDriverInfo 주석 참고).
     await syncDriverInfo(
       branch,
       order,
