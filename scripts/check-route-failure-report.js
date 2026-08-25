@@ -80,6 +80,35 @@ function read(rel) {
     check('기록 후에도 실패 응답을 그대로 돌려준다',
       /logIntegrationErrorAsync\([\s\S]{0,600}?return res\.status\(result\.status\)\.json/.test(kakaoRoute), true);
 
+    console.log('[무료도로로 경로가 없으면 조건을 풀고 다시 묻는다]');
+    // 진짜 원인이 여기였다(통합 오류 로그 422 "경로를 찾을 수 없습니다"로 잡혔다).
+    // 탁송은 경로탐색 기본값이 무료도로라 avoid=toll이 붙는데, 제주는 톨게이트를 피하면
+    // 카카오가 경로를 못 준다. 그래서 제주행 탁송 요금문의가 계속 실패해왔다.
+    const sadang = '126.98155858357366,37.47656223234824';
+    const seogwipo = '126.55956346690888,33.254064625579836';
+    const jejuFree = await getKakaoDirections({
+      origin: sadang, destination: seogwipo, priority: 'RECOMMEND', waypoints: [], avoid: 'toll',
+    });
+    check('제주행 무료도로도 결과가 나온다', jejuFree.ok, true);
+    // 조용히 바꾸면 안 된다 — 탁송은 톨비를 고객이 내는 경우가 많다. 바꿨다는 사실이 올라와야
+    // 화면과 챗봇이 밝힐 수 있다.
+    check('회피조건을 푼 사실을 알려준다', jejuFree.avoidDropped, 'toll');
+    check('도선 구간은 그대로 잡는다', jejuFree.hasFerryLeg, true);
+
+    // 무료도로로 되는 경로까지 유료로 바꿔버리면 안 된다 — 그건 요금을 올리는 변경이다.
+    const busanFree = await getKakaoDirections({
+      origin: sadang, destination: '129.0403,35.1151', priority: 'RECOMMEND', waypoints: [], avoid: 'toll',
+    });
+    check('육지 장거리는 무료도로 그대로', busanFree.ok, true);
+    check('멀쩡한 무료도로 경로는 건드리지 않는다', busanFree.avoidDropped, undefined);
+    check('무료도로라 톨비 0원', Number(busanFree.tollFare) || 0, 0);
+
+    console.log('[바뀐 사실이 화면과 챗봇에 나온다]');
+    check('오더폼이 avoidDropped를 받아 담는다', /avoidDropped: data\.avoidDropped/.test(orderForm), true);
+    check('오더폼이 그 사실을 표시한다', /무료도로만으로는 경로가 없어/.test(orderForm), true);
+    check('챗봇이 거리 안내에 붙인다', /무료도로만으로는 경로가 없어/.test(intake), true);
+    check('통행료가 별도임을 밝힌다', /통행료는 별도입니다/.test(intake), true);
+
     console.log('[사고가 난 그 경로는 실제로 계산된다 — 서버는 문제가 아니었다]');
     // 전사에 나온 장소 그대로. 이게 실패하면 원인이 서버로 옮겨간 것이니 바로 알아야 한다.
     const jeju = await getKakaoDirections({

@@ -1846,6 +1846,13 @@
             }
 
             var distanceDoneText = '거리 계산이 완료되었습니다. 예상 거리 ' + km.toFixed(1) + 'km 입니다.';
+            // 무료도로로는 경로가 없어 유료도로 포함으로 계산된 경우(제주행이 그렇다) 그 사실을
+            // 붙인다. 탁송은 기본이 무료도로이고 톨비를 고객이 내는 경우가 많아, 조용히 바꾸면
+            // 나중에 청구 단계에서 다투게 된다.
+            var droppedMeta = window.__aiIntakeRouteMeta || null;
+            if (droppedMeta && droppedMeta.avoidDropped) {
+              distanceDoneText += ' (무료도로만으로는 경로가 없어 유료도로를 포함해 계산했습니다 — 통행료는 별도입니다.)';
+            }
             addBubble(distanceDoneText, 'bot');
             logBotMessage({ logText: distanceDoneText, needsAgent: false, requestedFeature: null });
 

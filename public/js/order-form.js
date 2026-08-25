@@ -870,6 +870,12 @@
       } else {
         basisEl.textContent = '소요시간 기준: 직선거리 임시값 (도로 경로 탐색 중)';
       }
+      // 무료도로를 골랐는데 그 조건으로는 경로가 없어 유료도로 포함으로 계산된 경우.
+      // 표시하지 않으면 "무료도로로 골랐는데 왜 톨비가 있지?"가 된다.
+      var droppedMeta = window.__aiIntakeRouteMeta || null;
+      if (droppedMeta && droppedMeta.avoidDropped) {
+        basisEl.textContent += ' · 무료도로만으로는 경로가 없어 유료도로 포함으로 계산했습니다';
+      }
     }
     lastRouteKm = totalKm;
     updateFarePreview(totalKm);
@@ -1159,7 +1165,14 @@
     fetchDirections('/kakao/directions?' + params.toString())
       .then(function (data) {
         if (requestId !== directionsRequestId) return; // 오래된 응답 — 새 요청이 이미 돌고 있다
-        setAiRouteMeta({ hasFerryLeg: !!data.hasFerryLeg, ferryLegs: Array.isArray(data.ferryLegs) ? data.ferryLegs : [], ferrySegments: data.ferrySegments || null });
+        setAiRouteMeta({
+          hasFerryLeg: !!data.hasFerryLeg,
+          ferryLegs: Array.isArray(data.ferryLegs) ? data.ferryLegs : [],
+          ferrySegments: data.ferrySegments || null,
+          // 무료도로로는 경로가 없어 서버가 회피조건을 풀고 다시 물은 경우(제주행이 그렇다).
+          // 탁송은 톨비를 고객이 내는 경우가 많아 조용히 넘어가면 안 된다.
+          avoidDropped: data.avoidDropped || null,
+        });
         if (data.path && data.path.length > 1) {
           drawPolyline(data.path.map(function (c) { return new kakao.maps.LatLng(c[0], c[1]); }));
         }
