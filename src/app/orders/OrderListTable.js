@@ -36,12 +36,13 @@ const COLUMN_LABELS = {
   oid: 'OID', branch: '지사', group: '요청 법인', group_phone: '대표번호',
   origin: '출발지', waypoints: '경유지', destination: '도착지', vehicle: '차량번호',
   driver: '기사정보', reserved_at: '예약일시', payment_method: '결제방식',
-  fare: '요금', status: '상태', voc: 'VOC', photo: '사진', created_at: '등록일시',
+  // 요금은 둘이다 — 고객에게 청구하는 계약 요금과, 콜마너에 거는 배차 요금(관리자만 본다).
+  fare: '요금', dispatch_fare: '배차 요금', status: '상태', voc: 'VOC', photo: '사진', created_at: '등록일시',
 };
 const ALWAYS_VISIBLE = ['oid'];
-const DEFAULT_ORDER = ['oid', 'branch', 'group', 'group_phone', 'origin', 'waypoints', 'destination', 'vehicle', 'driver', 'reserved_at', 'payment_method', 'fare', 'status', 'voc', 'photo', 'created_at'];
+const DEFAULT_ORDER = ['oid', 'branch', 'group', 'group_phone', 'origin', 'waypoints', 'destination', 'vehicle', 'driver', 'reserved_at', 'payment_method', 'fare', 'dispatch_fare', 'status', 'voc', 'photo', 'created_at'];
 const DEFAULT_VISIBLE = ['oid', 'branch', 'group', 'group_phone', 'origin', 'destination', 'vehicle', 'reserved_at', 'payment_method', 'fare', 'status', 'created_at'];
-const NUMERIC_COLUMNS = ['oid', 'fare', 'photo'];
+const NUMERIC_COLUMNS = ['oid', 'fare', 'dispatch_fare', 'photo'];
 
 const STORAGE_KEY = 'orderList.columns.v1';
 const WIDTH_KEY = 'orderList.widths.v1';
@@ -89,6 +90,9 @@ function cellValue(o, key) {
     case 'reserved_at': return `${o.reserved_date} ${o.reserved_time}`;
     case 'payment_method': return o.payment_method_name || '-';
     case 'fare': return formatMoney(o.fare_amount);
+    // 배차 요금은 요금표를 등록한 지사에서만 채워진다 — 없으면 0원이 아니라 "-"다.
+    // 0원으로 보이면 "무료로 배차를 걸었다"로 읽힌다.
+    case 'dispatch_fare': return o.dispatch_fare_amount == null ? '-' : formatMoney(o.dispatch_fare_amount);
     case 'status': return o.status;
     case 'voc': return [o.voc_accident_note ? '사고' : null, o.voc_fine_note ? '과태료' : null, o.voc_claim_note ? '클레임' : null].filter(Boolean).join(', ') || '-';
     case 'photo': return Number(o.photo_count) > 0 ? `📷 ${o.photo_count}` : '-';

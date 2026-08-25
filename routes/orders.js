@@ -1988,6 +1988,9 @@ async function updateOrderWithCallmaner(orderId, branchId) {
       // 콜마너에는 차량번호 칸이 없어 적요1 맨 앞에 실어 보낸다(lib/callmaner.js memoWithVehicle).
       // 이 값이 빠지면 차량번호를 고쳐도 콜마너 쪽 적요는 옛 번호로 남는다.
       vehicle_number: order.vehicle_number,
+      // 우편발송 요청 건이면 인수증 업로드 링크를 적요1에 함께 싣는다(lib/callmaner.js memoWithVehicle).
+      postal_requested: order.postal_requested,
+      receipt_upload_token: order.receipt_upload_token,
       order_type: order.order_type,
       reserved_date: order.reserved_date, reserved_time: order.reserved_time,
     };

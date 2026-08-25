@@ -1,0 +1,108 @@
+<%- include('../partials/header') %>
+<div class="page-head-row">
+  <div>
+    <h1 class="page-title"><%= group.name %> · 정산내역</h1>
+    <%# 목록에 찍는 날짜는 예약일이지만, 어느 달로 묶이는지는 완료일이 정한다.
+        말일에 예약해 다음 달 새벽에 끝난 건이 어느 정산서에 들어갔는지 못 찾는 일이 없도록
+        그 기준을 화면에 밝혀 둔다. %>
+    <p class="page-sub">완료된 오더를 <b>완료일 기준</b>으로 묶었습니다. 금액은 업체별 계약 요금입니다(배차 요금 아님).</p>
+  </div>
+  <div class="page-head-actions">
+    <a class="btn secondary" href="/groups">법인 목록으로</a>
+  </div>
+</div>
+<%- include('../partials/group_tabs', { group: group, groups: groups, active: 'settlement' }) %>
+
+<div class="card">
+  <form method="GET" action="/groups/<%= group.id %>/settlement" class="filter-row" style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
+    <div class="field" style="margin:0;">
+      <label for="month">정산월</label>
+      <%# month 입력은 브라우저마다 지원이 갈려서, 실적이 있는 달은 목록으로도 고를 수 있게 둔다. %>
+      <input type="month" id="month" name="month" value="<%= month %>">
+    </div>
+    <% if (months.length) { %>
+      <div class="field" style="margin:0;">
+        <label for="monthPick">실적이 있는 달</label>
+        <select id="monthPick">
+          <option value="">선택</option>
+          <% months.forEach(function (m) { %>
+            <option value="<%= m %>" <%= m === month ? 'selected' : '' %>><%= m %></option>
+          <% }) %>
+        </select>
+      </div>
+    <% } %>
+    <button class="btn" type="submit">조회</button>
+  </form>
+</div>
+
+<div class="card">
+  <div class="section-title">📄 <%= month %> 완료 내역 (<%= summary.count %>건)</div>
+  <% if (!items.length) { %>
+    <p class="page-sub" style="margin:0;">이 달에 완료된 오더가 없습니다.</p>
+  <% } else { %>
+    <div class="table-wrap">
+      <table class="table settlement-table">
+        <thead>
+          <tr>
+            <th style="width:46px;">#</th>
+            <th style="width:120px;">예약일</th>
+            <th>출발지</th>
+            <th>도착지</th>
+            <th style="width:130px;text-align:right;">요금</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% items.forEach(function (r, i) { %>
+            <tr>
+              <td><%= i + 1 %></td>
+              <td>
+                <%= r.reserved_date || '-' %>
+                <% if (r.reserved_time) { %><span class="muted"><%= String(r.reserved_time).slice(0, 5) %></span><% } %>
+              </td>
+              <td><%= [r.origin_address, r.origin_address_detail].filter(Boolean).join(' ') || '-' %></td>
+              <td><%= [r.destination_address, r.destination_address_detail].filter(Boolean).join(' ') || '-' %></td>
+              <td style="text-align:right;">
+                <%= formatMoney(r.total) %>
+                <%# 도선료는 탁송료와 별개로 청구하는 실비다. 합계에는 들어가 있으니 내역에서도 보여야
+                    "요금표와 금액이 다르다"는 문의가 나오지 않는다. %>
+                <% if (r.ferry > 0) { %><br><span class="muted">도선료 <%= formatMoney(r.ferry) %> 포함</span><% } %>
+              </td>
+            </tr>
+          <% }) %>
+        </tbody>
+        <tfoot>
+          <tr>
+            <th colspan="4" style="text-align:right;">합계</th>
+            <th style="text-align:right;"><%= formatMoney(summary.total) %></th>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  <% } %>
+</div>
+
+<div class="card">
+  <div class="section-title">💰 금액 통계</div>
+  <div class="stat-row" style="display:flex;gap:24px;flex-wrap:wrap;">
+    <div><div class="page-sub" style="margin:0;">완료 건수</div><b><%= summary.count.toLocaleString('ko-KR') %>건</b></div>
+    <div><div class="page-sub" style="margin:0;">탁송료</div><b><%= formatMoney(summary.fare) %></b></div>
+    <div><div class="page-sub" style="margin:0;">도선료</div><b><%= formatMoney(summary.ferry) %></b></div>
+    <div><div class="page-sub" style="margin:0;">합계</div><b><%= formatMoney(summary.total) %></b></div>
+    <div>
+      <div class="page-sub" style="margin:0;">건당 평균</div>
+      <b><%= formatMoney(summary.count ? Math.round(summary.total / summary.count) : 0) %></b>
+    </div>
+  </div>
+</div>
+
+<script>
+  var pick = document.getElementById('monthPick');
+  if (pick) {
+    pick.addEventListener('change', function () {
+      if (!this.value) return;
+      document.getElementById('month').value = this.value;
+      this.form.submit();
+    });
+  }
+</script>
+<%- include('../partials/footer') %>

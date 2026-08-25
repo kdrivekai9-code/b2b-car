@@ -734,4 +734,50 @@ router.get('/:id/premium-fare-rules/data.json', asyncHandler(async (req, res) =>
   res.json({ currentUser: req.session.user, branch, tiers });
 }));
 
+// ---------------- 배차 요금 (지사) ----------------
+// 콜마너에 거는 금액이다 — 고객에게 청구하는 계약 요금(위 탁송 요금)과 별개다.
+// 거래처와 무관한 값이라 법인별로 나누지 않고 지사별로만 둔다.
+router.get('/:id/dispatch-fare-rules', asyncHandler(async (req, res) => {
+  const [branch, tiers, branches] = await Promise.all([
+    db.get('SELECT * FROM branches WHERE id = ?', [req.params.id]),
+    db.all('SELECT * FROM branch_dispatch_fare_rules WHERE branch_id = ? ORDER BY tier_seq', [req.params.id]),
+    db.all('SELECT id, name FROM branches ORDER BY id'),
+  ]);
+  if (!branch) return res.status(404).send('지사를 찾을 수 없습니다.');
+  res.render('branches/dispatch_fare_rules', {
+    title: '배차 요금 - ' + branch.name,
+    branch, tiers, branches,
+    saved: req.query.saved === '1',
+  });
+}));
+
+router.post('/:id/dispatch-fare-rules', asyncHandler(async (req, res) => {
+  const b = (v) => [].concat(v || []);
+  const baseDist = b(req.body.base_distance_km);
+  const baseFare = b(req.body.base_fare);
+  const surUnit = b(req.body.surcharge_unit_km);
+  const surFare = b(req.body.surcharge_fare);
+  const maxDist = b(req.body.max_distance_km);
+  const maxFare = b(req.body.max_fare);
+  const roundUnit = b(req.body.round_unit);
+  const roundMethod = b(req.body.round_method);
+
+  await db.run('DELETE FROM branch_dispatch_fare_rules WHERE branch_id = ?', [req.params.id]);
+  for (let i = 0; i < baseDist.length; i++) {
+    if (baseDist[i] === '' && baseFare[i] === '') continue;
+    await db.run(`
+      INSERT INTO branch_dispatch_fare_rules (branch_id, tier_seq, base_distance_km, base_fare,
+        surcharge_unit_km, surcharge_fare, max_distance_km, max_fare, round_unit, round_method)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+      req.params.id, i + 1,
+      Number(baseDist[i]) || 0, Number(baseFare[i]) || 0,
+      Number(surUnit[i]) || 1, Number(surFare[i]) || 0,
+      maxDist[i] ? Number(maxDist[i]) : null, maxFare[i] ? Number(maxFare[i]) : null,
+      Number(roundUnit[i]) || 1000, roundMethod[i] || 'round',
+    ]);
+  }
+  res.redirect('/branches/' + req.params.id + '/dispatch-fare-rules?saved=1');
+}));
+
 module.exports = router;

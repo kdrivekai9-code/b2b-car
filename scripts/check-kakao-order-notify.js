@@ -114,7 +114,12 @@ check(
   msg('cancelled', full),
   '[OID1234] 오더가 취소되었습니다. 문의사항은 상담원에게 말씀해주세요.'
 );
-check('사건 다섯 가지 모두 기본 문구가 있다', Object.keys(DEFAULT_EVENT_SETTINGS).length, 5);
+// 사건이 늘면 설정 화면(지사·법인)에도 자동으로 따라 나와야 한다 — 화면이 별도 목록을 들고
+// 있으면 새 사건이 설정에서 빠진 채로 남는다. 개수를 못박아 그 연결이 끊기면 여기서 걸린다.
+check('사건 여섯 가지 모두 기본 문구가 있다', Object.keys(DEFAULT_EVENT_SETTINGS).length, 6);
+check('영수증 업로드 사건이 있다', !!DEFAULT_EVENT_SETTINGS.receipt_uploaded, true);
+// 인수증 사진이 곧 통보의 내용이라 사진 첨부를 기본으로 켠다(다른 사건은 지사가 켜는 선택).
+check('영수증 통보는 사진을 함께 보낸다', DEFAULT_EVENT_SETTINGS.receipt_uploaded.attachPhotos, true);
 // 지연은 관리자가 화면에서 정하는 값이고 여기 값은 "아무것도 설정 안 했을 때의 출발점"이다.
 // 한때 이 값을 2분으로 올리고 마이그레이션으로 저장된 행까지 바꿔, 관리자가 설정한 적 없는
 // 값이 조용히 바뀐 적이 있다. 기본값을 함부로 움직이지 않도록 못박아 둔다.

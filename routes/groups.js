@@ -687,4 +687,82 @@ router.post('/:id/dispatch-delay/delete', asyncHandler(async (req, res) => {
     + encodeURIComponent('설정을 삭제했습니다. 이 법인에는 배차지연 선제 안내가 나가지 않습니다.'));
 }));
 
+// ---------------- 월별 정산내역 ----------------
+// 완료된 오더를 **완료일** 기준으로 묶는다(사용자 확정). 완료 시각은 orders에 컬럼이 없어
+// order_status_history에서 '완료'로 바뀐 시각을 쓴다 — 같은 오더가 여러 번 완료로 기록될 수
+// 있어(콜마너 흔들림) 가장 마지막 것을 본다.
+//
+// 요금은 계약 요금(fare_amount)이다 — 고객에게 청구하는 값이라 정산의 근거가 된다.
+// 배차 요금(dispatch_fare_amount)은 콜마너에 거는 원가라 여기 넣지 않는다.
+function settlementMonth(raw) {
+  const m = /^(\d{4})-(\d{2})$/.exec(String(raw || '').trim());
+  if (m) return `${m[1]}-${m[2]}`;
+  // 기본값은 이번 달(KST) — 서버가 UTC로 돌아서 그냥 new Date()를 쓰면 월초·월말에 한 달이 밀린다.
+  const kst = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  return `${kst.getUTCFullYear()}-${String(kst.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+// created_at은 text(KST 문자열)다 — timestamptz로 캐스팅해 비교하면 다른 곳에서 겪었던 타입
+// 충돌이 그대로 재현되므로 앞 7글자('YYYY-MM')를 문자열로 자른다.
+async function loadSettlement(groupId, month) {
+  // 조회 실패를 .catch로 삼켜 빈 목록을 돌려주면 "이 달은 실적이 없다"로 읽힌다 — 정산 화면에서
+  // 그건 그냥 오류보다 나쁘다. 던져서 오류 화면이 뜨게 둔다.
+  const rows = await db.all(`
+    SELECT o.id, o.oid, o.reserved_date, o.reserved_time,
+           o.origin_address, o.origin_address_detail,
+           o.destination_address, o.destination_address_detail,
+           o.fare_amount, o.ferry_fare_amount,
+           h.completed_at
+      FROM orders o
+      JOIN (
+        SELECT order_id, MAX(created_at) AS completed_at
+          FROM order_status_history
+         WHERE new_status = '완료'
+         GROUP BY order_id
+      ) h ON h.order_id = o.id
+     WHERE o.requester_group_id = ?
+       AND o.status = '완료'
+       AND SUBSTRING(h.completed_at, 1, 7) = ?
+     ORDER BY h.completed_at ASC, o.id ASC
+  `, [groupId, month]);
+
+  // 도선료는 탁송료와 별개로 청구되는 실비다 — 합계에서 빠지면 정산서와 맞지 않는다.
+  const items = rows.map((r) => {
+    const fare = Number(r.fare_amount) || 0;
+    const ferry = Number(r.ferry_fare_amount) || 0;
+    return { ...r, fare, ferry, total: fare + ferry };
+  });
+  const summary = {
+    count: items.length,
+    fare: items.reduce((s, r) => s + r.fare, 0),
+    ferry: items.reduce((s, r) => s + r.ferry, 0),
+    total: items.reduce((s, r) => s + r.total, 0),
+  };
+
+  // 고를 수 있는 달 — 이 법인에 완료 오더가 있는 달만 보여준다. 빈 달을 늘어놓을 이유가 없다.
+  const months = await db.all(`
+    SELECT DISTINCT SUBSTRING(h.created_at, 1, 7) AS month
+      FROM orders o
+      JOIN order_status_history h ON h.order_id = o.id AND h.new_status = '완료'
+     WHERE o.requester_group_id = ? AND o.status = '완료'
+     ORDER BY 1 DESC
+  `, [groupId]);
+
+  return { items, summary, months: months.map((m) => m.month).filter(Boolean) };
+}
+
+router.get('/:id/settlement', asyncHandler(async (req, res) => {
+  const { group, groups } = await loadGroupWithSiblings(req.params.id);
+  if (!group) return res.status(404).send('법인을 찾을 수 없습니다.');
+  const month = settlementMonth(req.query.month);
+  const { items, summary, months } = await loadSettlement(req.params.id, month);
+
+  res.render('groups/settlement', {
+    title: '정산내역 - ' + group.name,
+    group, groups, month, items, summary, months,
+  });
+}));
+
 module.exports = router;
+module.exports.settlementMonth = settlementMonth;
+module.exports.loadSettlement = loadSettlement;

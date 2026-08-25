@@ -8,6 +8,8 @@
     // (프리미엄(대리)은 요금 체계가 따로 나오면 그때 별도 표를 만든다).
     { key: 'fare', label: '탁송 요금', path: 'fare-rules' },
     { key: 'premium_fare', label: '일일기사 요금', path: 'premium-fare-rules' },
+    // 콜마너에 거는 금액 — 고객 청구액(탁송 요금)과 별개다. 거래처와 무관해 지사별로만 둔다.
+    { key: 'dispatch_fare', label: '배차 요금', path: 'dispatch-fare-rules' },
     { key: 'status', label: '오더 상태 설정', path: 'order-status' },
     { key: 'photo', label: '사진 업로드 안내', path: 'photo-settings' },
     { key: 'extra', label: '추가기능', path: 'extra-settings' },

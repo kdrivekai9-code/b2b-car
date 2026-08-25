@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title><%= title %> · B2B-CAR</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="upload-wrap">
+  <div class="upload-card">
+    <h1>📮 영수증 업로드</h1>
+    <% if (!order) { %>
+      <p class="error-msg">잘못된 링크이거나 만료된 오더입니다.</p>
+    <% } else { %>
+      <p class="upload-order-oid">오더번호 <b><%= order.oid %></b></p>
+      <div class="upload-guide-text">
+        서류를 등기(우편)로 발송하신 뒤, <b>등기번호</b>와 <b>인수증 사진</b>을 올려주세요.<br>
+        둘 중 하나만 올리셔도 됩니다. 나중에 나머지를 추가로 올릴 수 있습니다.
+      </div>
+
+      <% if (error) { %><p class="error-msg"><%= error %></p><% } %>
+      <% if (message) { %><p class="upload-done-msg"><%= message %></p><% } %>
+
+      <form method="POST" action="/r/<%= order.receipt_upload_token %>" enctype="multipart/form-data" class="upload-form">
+        <label class="upload-odometer">
+          등기번호
+          <input type="text" name="tracking_no" inputmode="numeric" placeholder="예: 1234567890123" autocomplete="off">
+        </label>
+        <input type="file" name="receipt" accept="image/*" capture="environment">
+        <button type="submit" class="btn">등록</button>
+      </form>
+
+      <% if (receipts && receipts.length) { %>
+        <h2 class="upload-photos-title">올린 내역 (<%= receipts.length %>건)</h2>
+        <ul class="upload-receipt-list">
+          <% receipts.forEach(function (r) { %>
+            <li>
+              <% if (r.tracking_no) { %><b>등기번호 <%= r.tracking_no %></b><% } else { %><b>사진만 등록</b><% } %>
+              <% if (r.url) { %><br><img src="<%= r.url %>" alt="인수증" class="upload-guide-image"><% } %>
+            </li>
+          <% }); %>
+        </ul>
+      <% } %>
+    <% } %>
+  </div>
+</div>
+</body>
+</html>
