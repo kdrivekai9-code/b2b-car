@@ -63,6 +63,10 @@ stub('../lib/mcpDispatchClient', {
   baseUrl: () => 'https://stub.invalid',
 });
 
+// 우리 DB가 아는 값. 콜마너 MCP 프록시가 뒤처질 때 이쪽이 옳다 — 우리 sync는 콜마너
+// 단건조회(OrderInfo)를 직접 읽고, 고객에게 나간 통보도 이 값으로 만들어졌다.
+let ourRows = new Map();
+
 stub('../lib/mcpDispatchAccess', {
   loadDispatchContext: async () => ({
     userId: -1, userName: '검사용', branchId: null, branchName: null,
@@ -74,7 +78,7 @@ stub('../lib/mcpDispatchAccess', {
   logToolCall: async () => {},
   loadOwnedOrders: async () => ({ activeOrders: [], byRcptNo: new Map() }),
   resolveCid: (ctx, cid) => cid || (ctx && ctx.primaryCid) || null,
-  loadOidsByCallmanerSlips: async () => new Map(),
+  loadOidsByCallmanerSlips: async () => ourRows,
   assertOwnedOrder: async () => ({ error: '검사용 스텁' }),
   normalizeCid: (v) => String(v || ''),
   isPlausiblePhone: () => true,
@@ -127,6 +131,39 @@ const HALLUCINATED = '접수번호 180862604\n상태: 대기 (기사 배정됨)\
     // 모델이 쓴 문장이 그대로 나가지 않았다는 확인.
     check('모델 문장을 쓰지 않는다', msg !== HALLUCINATED, msg);
     check('서버 포맷터 형식이다(번호 매김)', /^1\. 접수번호 /m.test(msg), msg);
+  }
+
+  console.log('\n[MCP가 뒤처져도 우리 DB 값으로 답한다]');
+  {
+    // 실측(2026-08-25): 콜마너 단건조회는 wk_info "T11111*채정식"(기사 배정)인데 MCP는
+    // st:"scheduled", driver.matched:false를 줬다. 우리 DB는 '기사배정'이고 배차 통보까지 나갔다.
+    ourRows = new Map([['180862604', {
+      oid: 'OID1455', callmaner_conf_slip: '180862604', status: '기사배정',
+      callmaner_driver_name: '채정식', callmaner_driver_phone: '05083224305',
+      origin_address: '서울 서초구 방배천로2길 10', destination_address: '서울 서초구 서초동 1374',
+    }]]);
+    turnQueue = [TOOL_TURN, { parts: [], functionCalls: [], text: HALLUCINATED }];
+    const out = await agent.runDispatchAgent({ user: USER, sessionId: null, text: '오늘 예약건 보여줘', history: [] });
+    const msg = String(out.message || '');
+    const statusLine = msg.split('\n').find((l) => l.trim().startsWith('상태:')) || '';
+    check('우리 상태(기사배정)로 답한다', /기사배정/.test(statusLine), statusLine);
+    check('"기사 미배정"이라고 하지 않는다', !/기사 미배정/.test(statusLine), statusLine);
+    check('배차 지연으로 몰지 않는다', !/지연/.test(msg) || /지연되고 있는 주문은 없습니다/.test(msg), msg);
+  }
+
+  console.log('\n[우리가 완료로 아는 건은 진행 중 목록에서 뺀다]');
+  {
+    // 실측: 운행완료 통보까지 보낸 OID1459가 MCP 목록에 남아 "예약 (기사 미배정)"으로 보였다.
+    ourRows = new Map([['180862604', {
+      oid: 'OID1455', callmaner_conf_slip: '180862604', status: '완료',
+      callmaner_driver_name: '채정식', callmaner_driver_phone: '05083224305',
+    }]]);
+    turnQueue = [TOOL_TURN, { parts: [], functionCalls: [], text: HALLUCINATED }];
+    const out = await agent.runDispatchAgent({ user: USER, sessionId: null, text: '오늘 예약건 보여줘', history: [] });
+    const msg = String(out.message || '');
+    check('목록에서 빠진다', !/180862604/.test(msg), msg);
+    check('없다고 알린다', /주문이 없습니다/.test(msg), msg);
+    ourRows = new Map();
   }
 
   console.log('\n[조회 말고 다른 도구가 섞이면 모델이 쓴다]');

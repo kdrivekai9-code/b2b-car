@@ -31,13 +31,16 @@ const sandbox = {
   access: { maskPhone: (v) => String(v || '') },
   formatDateTime: (v) => (v ? String(v) : null),
   evaluateDispatchDelay: () => ({ 지연: false, 사유: '테스트' }),
+  // summarizeOrders가 쓰는 헬퍼 — 우리 오더가 매칭되면 기사 배정 여부를 우리 DB 값으로 본다
+  // (콜마너 MCP 프록시가 뒤처지는 것이 실측돼서 그렇게 바뀌었다). 실제 모듈 것을 그대로 떼어 쓴다.
+  hasOurDriver: new Function(`${extract('hasOurDriver')}; return hasOurDriver;`)(),
 };
 
 // eslint-disable-next-line no-new-func
 const summarizeOrders = new Function(
-  'ORDER_STATE_LABELS', 'access', 'formatDateTime', 'evaluateDispatchDelay', 'joinAddress',
+  'ORDER_STATE_LABELS', 'access', 'formatDateTime', 'evaluateDispatchDelay', 'joinAddress', 'hasOurDriver',
   `${extract('summarizeOrders')}; return summarizeOrders;`
-)(sandbox.ORDER_STATE_LABELS, sandbox.access, sandbox.formatDateTime, sandbox.evaluateDispatchDelay, joinAddress);
+)(sandbox.ORDER_STATE_LABELS, sandbox.access, sandbox.formatDateTime, sandbox.evaluateDispatchDelay, joinAddress, sandbox.hasOurDriver);
 
 let failed = 0;
 function check(label, actual, expected) {
