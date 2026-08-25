@@ -550,6 +550,19 @@ async function tryAnswerFaq(session, text, knowledgeSearchPromise) {
 // 창을 짧게 둔다 — 오래 두면 한참 뒤의 새 접수까지 도우미로 흘러간다.
 const MCP_FOLLOWUP_WINDOW_MS = 10 * 60 * 1000;
 
+// 이번 발화가 "새 접수"의 알맹이를 갖고 있는지 — 의도 라벨만으로는 가를 수 없다.
+//
+// 접수를 시키는 말(예약해줘/접수해줘/불러줘)이 있거나, 주소·차량번호처럼 새 오더에만 나오는
+// 값이 잡혔을 때만 새 접수로 본다. 시각만 달랑 답한 문장("정오 12시")은 도우미가 방금 물어본
+// 것에 대한 답이지 새 접수가 아니다.
+const INTAKE_COMMAND_RE = /(접수|예약)\s*(해\s*주|해줘|해주세요|할게|하겠|부탁)|불러\s*주|호출\s*해/;
+
+function hasIntakeSubstance(classified, text) {
+  const c = classified || {};
+  return !!(c.originAddress || c.destinationAddress || c.originVehicleNumber
+    || INTAKE_COMMAND_RE.test(String(text || '')));
+}
+
 async function markMcpTurn(session) {
   await db.run(
     `UPDATE chat_sessions SET mcp_last_turn_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') WHERE id = ?`,
@@ -1845,6 +1858,18 @@ async function processBotTurn(session, text) {
   const isNewIntakeIntent = classified.intent === 'dispatch_order'
     || classified.intent === 'proxy_order' || classified.intent === 'daily_driver_order';
 
+  // 다만 "의도 라벨"만으로 가르면 도우미가 방금 던진 질문의 답까지 새 접수로 끌려간다.
+  //
+  // 실사용 사고(2026-08-25): 도우미가 예약 변경 중에 "오전 12시는 자정을 의미합니다. 오늘
+  // 자정으로 변경하시겠습니까?"라고 되물었는데, 고객이 "정오 12시"라고 답하자 그 한마디가
+  // dispatch_order로 분류돼 접수 파서로 갔다 — 봇이 출발지·도착지·차량번호를 처음부터 다시
+  // 물었다. 변경하려던 오더는 그대로 남았다.
+  //
+  // 그래서 "새 접수처럼 읽힌다"에 실질을 요구한다: 접수를 시키는 말(예약해줘/접수해줘/불러줘)이
+  // 있거나, 주소·차량번호처럼 새 오더에만 나오는 알맹이가 있어야 한다. 시각만 달랑 답한 문장은
+  // 도우미 대화의 연장으로 본다.
+  const startsNewIntake = isNewIntakeIntent && hasIntakeSubstance(classified, text);
+
   // 자동 응대로 넘어가기 직전에 인계 판정을 확인한다. 이 자리인 이유: 아래 경로들(배차 도우미
   // 이어가기, FAQ 답변, unsupported→도우미)이 전부 봇이 스스로 답해버리는 길이라, 사람이 봐야
   // 하는 대화는 여기를 지나가면 안 된다.
@@ -1858,7 +1883,7 @@ async function processBotTurn(session, text) {
     return handleUnsupported(session, text, categoryLabel(escalation.category));
   }
 
-  if (isMcpFollowUp(session) && !isNewIntakeIntent) {
+  if (isMcpFollowUp(session) && !startsNewIntake) {
     const continued = await tryDispatchAgent(session, text).catch((e) => {
       console.error('카카오 배차 도우미 이어가기 실패:', e.message);
       return false;
@@ -2245,6 +2270,9 @@ module.exports.announceOrderReceiptWithRouteFare = announceOrderReceiptWithRoute
 // 상담원 응대 중 초안 생성 — 실패가 console.error로만 남아 화면에는 아무 표시가 없다.
 // 실제로 16일간 초안이 0건이었는데 아무도 몰랐다(2026-08-24 발견). 검사에서 직접 부를 수 있게 노출한다.
 module.exports.createAgentSuggestion = createAgentSuggestion;
+// 도우미 대화 중의 답을 새 접수로 오인하는지 — 분류 결과만 있으면 판정할 수 있어 노출한다
+// (scripts/check-mcp-followup-guard.js).
+module.exports.hasIntakeSubstance = hasIntakeSubstance;
 module.exports.ROUTE_FARE_MERGE_GRACE_MS = ROUTE_FARE_MERGE_GRACE_MS;
 // 인계 안내를 반복하지 않는 판정과 그 조용한 갱신 — 위와 같은 이유로 노출한다. 안내 발송은
 // 실제 카카오 발신을 타므로 검사에서 부를 수 없어, 판정과 DB 갱신만 떼어 본다
