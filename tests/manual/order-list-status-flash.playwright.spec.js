@@ -20,7 +20,19 @@ const PASSWORD = process.env.E2E_PASSWORD || 'Admin!2345';
 const MARK = 'e2e-flash';
 let orderId = null;
 
+// 검사용 오더를 지운다. 상태를 바꾸면 order_status_history에 이력이 남고, 그게 참조하고 있어
+// 오더만 지우면 외래키에 막힌다 — 원래 정리가 매번 조용히 실패해서 다음 실행이 oid 중복으로
+// 시작조차 못 했다(실제로 그렇게 깨졌다). 이력을 먼저 지운다.
+async function removeTestOrders() {
+  const rows = await db.all('SELECT id FROM orders WHERE oid LIKE ?', [`${MARK}%`]).catch(() => []);
+  for (const r of rows) {
+    await db.run('DELETE FROM order_status_history WHERE order_id = ?', [r.id]).catch(() => {});
+    await db.run('DELETE FROM orders WHERE id = ?', [r.id]).catch(() => {});
+  }
+}
+
 test.beforeAll(async () => {
+  await removeTestOrders();
   const branch = await db.get('SELECT id FROM branches ORDER BY id LIMIT 1');
   const row = await db.get(
     `INSERT INTO orders (oid, branch_id, status, memo_customer, origin_address, destination_address, reserved_date, reserved_time)
@@ -31,7 +43,7 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
-  if (orderId) await db.run('DELETE FROM orders WHERE id = ?', [orderId]).catch(() => {});
+  await removeTestOrders();
   await db.pool.end().catch(() => {});
 });
 
