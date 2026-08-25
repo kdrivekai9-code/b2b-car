@@ -7,11 +7,11 @@
     oid: 'OID', branch: '지사', group: '요청 법인', group_phone: '대표번호',
     origin: '출발지', waypoints: '경유지', destination: '도착지', vehicle: '차량번호',
     driver: '기사정보', reserved_at: '예약일시', payment_method: '결제방식',
-    fare: '요금', status: '상태', voc: 'VOC', photo: '사진', created_at: '등록일시',
+    fare: '요금', dispatch_fare: '배차 요금', status: '상태', voc: 'VOC', photo: '사진', created_at: '등록일시',
   };
   var ALWAYS_VISIBLE = ['oid'];
-  var DEFAULT_ORDER = ['oid', 'branch', 'group', 'group_phone', 'origin', 'waypoints', 'destination', 'vehicle', 'driver', 'reserved_at', 'payment_method', 'fare', 'status', 'voc', 'photo', 'created_at'];
-  var DEFAULT_VISIBLE = ['oid', 'branch', 'group', 'group_phone', 'origin', 'destination', 'vehicle', 'reserved_at', 'payment_method', 'fare', 'status', 'created_at'];
+  var DEFAULT_ORDER = ['oid', 'branch', 'group', 'group_phone', 'origin', 'waypoints', 'destination', 'vehicle', 'driver', 'reserved_at', 'payment_method', 'fare', 'dispatch_fare', 'status', 'voc', 'photo', 'created_at'];
+  var DEFAULT_VISIBLE = ['oid', 'branch', 'group', 'group_phone', 'origin', 'destination', 'vehicle', 'reserved_at', 'payment_method', 'fare', 'dispatch_fare', 'status', 'created_at'];
 
   var STORAGE_KEY = 'orderList.columns.v1';
   var WIDTH_KEY = 'orderList.widths.v1';
@@ -28,9 +28,13 @@
       var i = saved[listKey].indexOf('uid');
       if (i !== -1) saved[listKey][i] = 'oid';
     });
-    // 새로 추가된 컬럼(과거 저장값에 없던 키)은 목록 끝에 자동 포함시킨다.
+    // 새로 추가된 컬럼(과거 저장값에 없던 키)은 목록 끝에 자동 포함시킨다. 기본 표시 컬럼이면
+    // 켠 채로 넣는다 — 안 그러면 컬럼을 추가해도 설정을 저장한 적 있는 사람에게는 영영 안 보인다
+    // (배차 요금이 그랬다). 사용자가 직접 끈 컬럼은 saved.order에 남아 있어 되살아나지 않는다.
     DEFAULT_ORDER.forEach(function (key) {
-      if (saved.order.indexOf(key) === -1) saved.order.push(key);
+      if (saved.order.indexOf(key) !== -1) return;
+      saved.order.push(key);
+      if (DEFAULT_VISIBLE.indexOf(key) !== -1 && saved.visible.indexOf(key) === -1) saved.visible.push(key);
     });
     return saved;
   }
@@ -161,7 +165,7 @@
   }
 
   // ---------- 헤더 클릭으로 오름차순/내림차순 정렬 ----------
-  var NUMERIC_COLUMNS = ['oid', 'fare', 'photo'];
+  var NUMERIC_COLUMNS = ['oid', 'fare', 'dispatch_fare', 'photo'];
   var sortState = { key: null, dir: null };
 
   function extractSortValue(td, key) {

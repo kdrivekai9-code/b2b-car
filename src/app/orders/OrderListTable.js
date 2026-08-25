@@ -41,7 +41,7 @@ const COLUMN_LABELS = {
 };
 const ALWAYS_VISIBLE = ['oid'];
 const DEFAULT_ORDER = ['oid', 'branch', 'group', 'group_phone', 'origin', 'waypoints', 'destination', 'vehicle', 'driver', 'reserved_at', 'payment_method', 'fare', 'dispatch_fare', 'status', 'voc', 'photo', 'created_at'];
-const DEFAULT_VISIBLE = ['oid', 'branch', 'group', 'group_phone', 'origin', 'destination', 'vehicle', 'reserved_at', 'payment_method', 'fare', 'status', 'created_at'];
+const DEFAULT_VISIBLE = ['oid', 'branch', 'group', 'group_phone', 'origin', 'destination', 'vehicle', 'reserved_at', 'payment_method', 'fare', 'dispatch_fare', 'status', 'created_at'];
 const NUMERIC_COLUMNS = ['oid', 'fare', 'dispatch_fare', 'photo'];
 
 const STORAGE_KEY = 'orderList.columns.v1';
@@ -64,7 +64,13 @@ function loadColumnState() {
     if (i !== -1) saved[listKey][i] = 'oid';
   });
   DEFAULT_ORDER.forEach((key) => {
-    if (saved.order.indexOf(key) === -1) saved.order.push(key);
+    // 이 사람이 설정을 저장한 뒤에 새로 생긴 컬럼만 걸린다 — 저장된 순서에 아예 없다는 뜻이다.
+    // 기본 표시 컬럼이면 켜준 채로 넣는다. 컬럼을 추가해도 저장된 설정이 있는 사람에게는
+    // 영영 안 보이던 문제(배차 요금이 그랬다)를 여기서 막는다. 반대로 사용자가 직접 끈 컬럼은
+    // saved.order에 남아 있어 여기 걸리지 않으므로 되살아나지 않는다.
+    if (saved.order.indexOf(key) !== -1) return;
+    saved.order.push(key);
+    if (DEFAULT_VISIBLE.indexOf(key) !== -1 && saved.visible.indexOf(key) === -1) saved.visible.push(key);
   });
   return saved;
 }

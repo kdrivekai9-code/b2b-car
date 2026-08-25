@@ -85,6 +85,7 @@
         <th data-column="reserved_at">예약일시</th>
         <th data-column="payment_method">결제방식</th>
         <th data-column="fare">요금</th>
+        <th data-column="dispatch_fare">배차 요금</th>
         <th data-column="status">상태</th>
         <th data-column="voc">VOC</th>
         <th data-column="photo">사진</th>
@@ -120,6 +121,9 @@
           <td data-column="reserved_at" data-label="예약일시" title="<%= o.reserved_date %> <%= o.reserved_time %>"><%= o.reserved_date %> <%= o.reserved_time %></td>
           <td data-column="payment_method" data-label="결제방식" title="<%= o.payment_method_name || '-' %>"><%= o.payment_method_name || '-' %></td>
           <td data-column="fare" data-label="요금"><%= formatMoney(o.fare_amount) %></td>
+          <%# 배차 요금이 없는 오더(요금표 미등록 지사, 콜마너 미등록)는 0원이 아니라 미정이다.
+              0원으로 찍으면 "무료 배차"로 읽힌다. %>
+          <td data-column="dispatch_fare" data-label="배차 요금"><%= o.dispatch_fare_amount == null ? '-' : formatMoney(o.dispatch_fare_amount) %></td>
           <td data-column="status" data-label="상태"><span class="badge <%= statusColor(o.status) %>"><%= o.status %></span></td>
           <%
             var vocLabels = [o.voc_accident_note ? '사고' : null, o.voc_fine_note ? '과태료' : null, o.voc_claim_note ? '클레임' : null].filter(Boolean).join(', ') || '-';
