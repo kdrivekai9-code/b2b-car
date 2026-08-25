@@ -36,7 +36,7 @@
 </div>
 
 <div class="card">
-  <div class="section-title">📄 <%= month %> 완료 내역 (<%= summary.count %>건)</div>
+  <div class="section-title">📄 <%= month %> 운행요금 (<%= summary.count %>건)</div>
   <% if (!items.length) { %>
     <p class="page-sub" style="margin:0;">이 달에 완료된 오더가 없습니다.</p>
   <% } else { %>
@@ -82,14 +82,92 @@
 </div>
 
 <div class="card">
+  <div class="section-title">🧾 기타 정산 내역 · 별도 청구 (<%= extraSummary.count %>건)</div>
+  <%# 실비가 어느 달로 묶이는지는 오더를 따라간다. 목록의 '일자'는 실제 발생일이라 월말 오더의
+      톨게이트비가 다음 달 날짜로 찍힐 수 있는데, 그걸 보고 "잘못 들어왔다"고 읽지 않도록 밝힌다. %>
+  <p class="page-sub">
+    주유비 · 주차요금 · 톨게이트비 중 <b>별도 청구</b>로 표시된 것만 모았습니다.
+    해당 오더가 완료된 달의 정산에 들어가며, 일자는 실제 발생일입니다.
+  </p>
+  <% if (!extras.length) { %>
+    <p class="page-sub" style="margin:0;">이 달에 별도 청구할 기타 정산 내역이 없습니다.</p>
+  <% } else { %>
+    <div class="table-wrap">
+      <table class="table extra-charge-table">
+        <thead>
+          <tr>
+            <th style="width:120px;">일자</th>
+            <th style="width:130px;">차량번호</th>
+            <th>출발지</th>
+            <th style="width:110px;">항목</th>
+            <th style="width:120px;text-align:right;">금액</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% extras.forEach(function (r) { %>
+            <tr>
+              <td><%= r.charged_on || '-' %></td>
+              <td><%= r.vehicle_number || '-' %></td>
+              <td>
+                <%= [r.origin_address, r.origin_address_detail].filter(Boolean).join(' ') || '-' %>
+                <%# 같은 차량·같은 날 실비가 여러 건이면 어느 오더 것인지 구분이 안 된다. %>
+                <span class="muted"><%= r.oid %></span>
+                <% if (r.note) { %><br><span class="muted"><%= r.note %></span><% } %>
+              </td>
+              <td><%= r.charge_type %></td>
+              <td style="text-align:right;"><%= formatMoney(r.amount) %></td>
+            </tr>
+          <% }) %>
+        </tbody>
+        <tfoot>
+          <tr>
+            <th colspan="4" style="text-align:right;">합계</th>
+            <th style="text-align:right;"><%= formatMoney(extraSummary.total) %></th>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+
+    <div class="section-title" style="margin-top:16px;">항목별 합계표</div>
+    <div class="table-wrap">
+      <table class="table extra-charge-summary-table">
+        <thead>
+          <tr><th style="width:140px;">항목</th><th style="width:100px;text-align:right;">건수</th><th style="text-align:right;">금액</th></tr>
+        </thead>
+        <tbody>
+          <%# 건수가 0인 항목도 줄을 남긴다 — 빠진 항목이 있는지 표에서 바로 보이게 한다. %>
+          <% extraChargeTypes.forEach(function (t) { %>
+            <tr>
+              <td><%= t %></td>
+              <td style="text-align:right;"><%= (extraSummary.byType[t] || {}).count || 0 %>건</td>
+              <td style="text-align:right;"><%= formatMoney((extraSummary.byType[t] || {}).amount || 0) %></td>
+            </tr>
+          <% }) %>
+        </tbody>
+        <tfoot>
+          <tr>
+            <th>합계</th>
+            <th style="text-align:right;"><%= extraSummary.count %>건</th>
+            <th style="text-align:right;"><%= formatMoney(extraSummary.total) %></th>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  <% } %>
+</div>
+
+<div class="card">
   <div class="section-title">💰 금액 통계</div>
   <div class="stat-row" style="display:flex;gap:24px;flex-wrap:wrap;">
     <div><div class="page-sub" style="margin:0;">완료 건수</div><b><%= summary.count.toLocaleString('ko-KR') %>건</b></div>
     <div><div class="page-sub" style="margin:0;">탁송료</div><b><%= formatMoney(summary.fare) %></b></div>
     <div><div class="page-sub" style="margin:0;">도선료</div><b><%= formatMoney(summary.ferry) %></b></div>
-    <div><div class="page-sub" style="margin:0;">합계</div><b><%= formatMoney(summary.total) %></b></div>
+    <div><div class="page-sub" style="margin:0;">운행요금 합계</div><b><%= formatMoney(summary.total) %></b></div>
+    <div><div class="page-sub" style="margin:0;">기타 정산(별도 청구)</div><b><%= formatMoney(extraSummary.total) %></b></div>
+    <%# 청구서에 찍힐 금액이라 다른 숫자보다 눈에 띄어야 한다. %>
+    <div><div class="page-sub" style="margin:0;">총 청구액</div><b style="font-size:18px;"><%= formatMoney(grandTotal) %></b></div>
     <div>
-      <div class="page-sub" style="margin:0;">건당 평균</div>
+      <div class="page-sub" style="margin:0;">건당 평균(운행요금)</div>
       <b><%= formatMoney(summary.count ? Math.round(summary.total / summary.count) : 0) %></b>
     </div>
   </div>

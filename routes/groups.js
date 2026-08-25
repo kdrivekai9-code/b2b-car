@@ -4,6 +4,8 @@ const { requireAuth, requireRole } = require('../middleware/auth');
 const asyncHandler = require('../middleware/asyncHandler');
 const bcrypt = require('bcryptjs');
 const kakaoOrderNotify = require('../lib/kakaoOrderNotify');
+// 기타 정산 내역(주유비·주차요금·톨게이트). 항목 정의를 오더상세 입력화면과 공유한다.
+const extraCharges = require('../lib/extraCharges');
 // 오지요금 상·하한은 계산 쪽과 한 곳에서 가져온다 — 화면 입력 제한과 실제 적용 범위가 갈리면
 // 관리자가 넣은 값이 조용히 다른 금액으로 적용된다.
 const { REMOTE_AREA_FEE_MIN, REMOTE_AREA_FEE_MAX } = require('../lib/branchPolicy');
@@ -746,7 +748,7 @@ async function loadSettlement(groupId, month) {
   // 조회 실패를 .catch로 삼켜 빈 목록을 돌려주면 "이 달은 실적이 없다"로 읽힌다 — 정산 화면에서
   // 그건 그냥 오류보다 나쁘다. 던져서 오류 화면이 뜨게 둔다.
   const rows = await db.all(`
-    SELECT o.id, o.oid, o.reserved_date, o.reserved_time,
+    SELECT o.id, o.oid, o.reserved_date, o.reserved_time, o.vehicle_number,
            o.origin_address, o.origin_address_detail,
            o.destination_address, o.destination_address_detail,
            o.fare_amount, o.ferry_fare_amount,
@@ -777,6 +779,34 @@ async function loadSettlement(groupId, month) {
     total: items.reduce((s, r) => s + r.total, 0),
   };
 
+  // 기타 정산 내역 — 운행요금과 별도로 청구하는 실비(주유비 · 주차요금 · 톨게이트).
+  //
+  // 어느 달에 넣을지는 **오더를 따라간다**(발생일자가 아니라). 실비 일자로 묶으면 월말 오더의
+  // 톨게이트비만 다음 달 정산서로 넘어가서, 운행요금과 실비가 서로 다른 청구서에 실린다.
+  // 목록의 '일자' 칸은 실제 발생일(charged_on)을 그대로 보여준다.
+  //
+  // billable = false는 거래처에 청구하지 않고 지사가 부담하는 실비다 — 기록은 남기되 여기엔
+  // 올리지 않는다("별도 청구 항목만", 사용자 지시).
+  const extraRows = items.length ? await db.all(`
+    SELECT e.id, e.order_id, e.charge_type, e.amount, e.charged_on, e.note,
+           o.oid, o.reserved_date, o.vehicle_number,
+           o.origin_address, o.origin_address_detail
+      FROM order_extra_charges e
+      JOIN orders o ON o.id = e.order_id
+     WHERE e.billable = true
+       AND e.order_id IN (${items.map(() => '?').join(',')})
+     ORDER BY COALESCE(e.charged_on, o.reserved_date), e.id
+  `, items.map((r) => r.id)) : [];
+
+  const extras = extraRows.map((r) => ({
+    ...r,
+    amount: Number(r.amount) || 0,
+    // 일자를 안 넣은 줄은 오더 예약일로 본다 — 저장할 때도 같은 규칙을 쓰지만(lib/extraCharges.js),
+    // 그 규칙이 생기기 전에 들어간 줄이 빈 칸으로 남지 않도록 여기서도 받아준다.
+    charged_on: r.charged_on || r.reserved_date || null,
+  }));
+  const extraSummary = extraCharges.summarize(extras);
+
   // 고를 수 있는 달 — 이 법인에 완료 오더가 있는 달만 보여준다. 빈 달을 늘어놓을 이유가 없다.
   const months = await db.all(`
     SELECT DISTINCT SUBSTRING(h.created_at, 1, 7) AS month
@@ -786,18 +816,26 @@ async function loadSettlement(groupId, month) {
      ORDER BY 1 DESC
   `, [groupId]);
 
-  return { items, summary, months: months.map((m) => m.month).filter(Boolean) };
+  return {
+    items, summary, extras, extraSummary,
+    // 거래처에 실제로 청구할 금액 — 운행요금과 실비를 더한 값이다. 화면에서 다시 더하면
+    // 목록과 통계가 갈릴 수 있어 여기서 한 번만 계산한다.
+    grandTotal: summary.total + extraSummary.total,
+    months: months.map((m) => m.month).filter(Boolean),
+  };
 }
 
 router.get('/:id/settlement', asyncHandler(async (req, res) => {
   const { group, groups } = await loadGroupWithSiblings(req.params.id);
   if (!group) return res.status(404).send('법인을 찾을 수 없습니다.');
   const month = settlementMonth(req.query.month);
-  const { items, summary, months } = await loadSettlement(req.params.id, month);
+  const data = await loadSettlement(req.params.id, month);
 
   res.render('groups/settlement', {
     title: '정산내역 - ' + group.name,
-    group, groups, month, items, summary, months,
+    group, groups, month,
+    extraChargeTypes: extraCharges.EXTRA_CHARGE_TYPES,
+    ...data,
   });
 }));
 

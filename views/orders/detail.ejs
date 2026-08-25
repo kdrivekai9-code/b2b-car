@@ -160,6 +160,91 @@
     </div>
 
     <% if (currentUser.role !== 'client') { %>
+    <%# 기타 정산 내역 — 운행요금과 별도로 거래처에 청구하는 실비다. 고객이 자기 오더의
+        청구액을 바꿀 수 있으면 정산이 성립하지 않아 고객에게는 아예 보이지 않는다. %>
+    <div class="card">
+      <h2>기타 정산 내역</h2>
+      <p class="page-sub" style="margin:0 0 10px;">
+        주유비 · 주차요금 · 톨게이트비를 넣으면 <b>법인 정산내역</b>에 이 오더가 완료된 달로 잡힙니다.
+        <b>별도 청구</b>를 끄면 기록만 남고 정산서에는 올라가지 않습니다.
+      </p>
+      <form method="POST" action="/orders/<%= order.id %>/extra-charges" id="extraChargeForm">
+        <div class="table-wrap">
+          <table id="extraChargeTable">
+            <thead>
+              <tr>
+                <th style="width:140px;">일자</th><th style="width:110px;">항목</th>
+                <th style="width:110px;">금액</th><th style="width:80px;">별도청구</th>
+                <th>비고</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="extraChargeBody">
+              <% extraCharges.forEach(function (c, i) { %>
+                <tr>
+                  <td><input type="date" name="extra_charge_date" value="<%= c.charged_on || order.reserved_date || '' %>"></td>
+                  <td>
+                    <select name="extra_charge_type">
+                      <% extraChargeTypes.forEach(function (t) { %>
+                        <option value="<%= t %>" <%= c.charge_type === t ? 'selected' : '' %>><%= t %></option>
+                      <% }) %>
+                    </select>
+                  </td>
+                  <td><input type="number" name="extra_charge_amount" value="<%= c.amount %>" min="0" step="100"></td>
+                  <%# 체크박스는 체크된 것만 올라오므로 값에 행 번호를 실어 어느 줄인지 가린다. %>
+                  <td style="text-align:center;"><input type="checkbox" name="extra_charge_billable" value="<%= i %>" <%= c.billable ? 'checked' : '' %>></td>
+                  <td><input type="text" name="extra_charge_note" value="<%= c.note || '' %>" placeholder="예: 서해대교 통행료"></td>
+                  <td><button type="button" class="btn small secondary extra-charge-remove">삭제</button></td>
+                </tr>
+              <% }) %>
+            </tbody>
+          </table>
+        </div>
+        <div style="margin-top:10px;display:flex;gap:8px;">
+          <button type="button" class="btn small secondary" id="extraChargeAdd">+ 항목 추가</button>
+          <button class="btn" type="submit">저장</button>
+        </div>
+      </form>
+      <script>
+        (function () {
+          var body = document.getElementById('extraChargeBody');
+          var addBtn = document.getElementById('extraChargeAdd');
+          var types = <%- JSON.stringify(extraChargeTypes) %>;
+          var defaultDate = <%- JSON.stringify(order.reserved_date || '') %>;
+
+          // 별도청구 체크박스의 value는 행 번호다 — 행을 지우면 번호가 밀리므로 매번 다시 매긴다.
+          // 이걸 빼먹으면 2번 줄을 지웠을 때 3번 줄의 체크가 엉뚱한 줄에 붙는다.
+          function renumber() {
+            body.querySelectorAll('tr').forEach(function (row, i) {
+              var cb = row.querySelector('input[name="extra_charge_billable"]');
+              if (cb) cb.value = String(i);
+            });
+          }
+          function wireRemove(row) {
+            row.querySelector('.extra-charge-remove').addEventListener('click', function () {
+              row.remove();
+              renumber();
+            });
+          }
+          body.querySelectorAll('tr').forEach(wireRemove);
+
+          addBtn.addEventListener('click', function () {
+            var row = document.createElement('tr');
+            var options = types.map(function (t) { return '<option value="' + t + '">' + t + '</option>'; }).join('');
+            row.innerHTML =
+              '<td><input type="date" name="extra_charge_date" value="' + defaultDate + '"></td>' +
+              '<td><select name="extra_charge_type">' + options + '</select></td>' +
+              '<td><input type="number" name="extra_charge_amount" value="0" min="0" step="100"></td>' +
+              '<td style="text-align:center;"><input type="checkbox" name="extra_charge_billable" value="" checked></td>' +
+              '<td><input type="text" name="extra_charge_note" placeholder="예: 서해대교 통행료"></td>' +
+              '<td><button type="button" class="btn small secondary extra-charge-remove">삭제</button></td>';
+            body.appendChild(row);
+            wireRemove(row);
+            renumber();
+          });
+        })();
+      </script>
+    </div>
+
     <div class="card">
       <h2>담당자</h2>
       <% if (order.status === '오더등록') { %>

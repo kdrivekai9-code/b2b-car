@@ -134,4 +134,71 @@ test.describe('법인관리 · 법인별 설정 화면', () => {
       await wipe();
     }
   });
+
+  // 기타 정산 내역은 오더상세에서 넣고 정산내역에서 청구한다. 두 화면이 따로 놀면(항목 이름이
+  // 갈리거나 '별도 청구'가 안 지켜지거나) 청구서가 틀리므로 한 번에 이어서 본다.
+  test('오더상세에서 넣은 실비가 정산내역에 별도 청구분만 올라온다', async ({ page }) => {
+    test.skip(!groupId, '등록된 법인이 없습니다');
+    const MARK = 'e2e-extra';
+    const wipe = async () => {
+      const rows = await db.all('SELECT id FROM orders WHERE oid LIKE ?', [`${MARK}%`]);
+      for (const r of rows) {
+        await db.run('DELETE FROM order_extra_charges WHERE order_id = ?', [r.id]);
+        await db.run('DELETE FROM order_status_history WHERE order_id = ?', [r.id]);
+        await db.run('DELETE FROM orders WHERE id = ?', [r.id]);
+      }
+    };
+    await wipe();
+
+    const branch = await db.get('SELECT id FROM branches ORDER BY id LIMIT 1');
+    const MONTH = '2019-05';
+    let orderId = null;
+    try {
+      const row = await db.get(
+        `INSERT INTO orders (oid, branch_id, requester_group_id, status, reserved_date, reserved_time,
+                             vehicle_number, origin_address, destination_address, fare_amount, ferry_fare_amount)
+         VALUES (?, ?, ?, '완료', '2019-05-10', '09:00', '99하8877', ?, '검사도착', 100000, 0) RETURNING id`,
+        [`${MARK}-1`, branch.id, groupId, `${MARK}출발지`]
+      );
+      orderId = Number(row.id);
+      await db.run(
+        `INSERT INTO order_status_history (order_id, old_status, new_status, created_at)
+         VALUES (?, '기사배정', '완료', ?)`, [orderId, `${MONTH}-10 18:00:00`]
+      );
+
+      await loginWithRetry(page, { baseUrl: BASE_URL, loginId: LOGIN_ID, password: PASSWORD });
+      await page.goto(`${BASE_URL}/orders/${orderId}`, { waitUntil: 'domcontentloaded' });
+
+      // 두 줄을 넣는다: 청구할 톨게이트비와, 지사가 부담하는 주차요금.
+      await page.locator('#extraChargeAdd').click();
+      await page.locator('#extraChargeAdd').click();
+      const rowAt = (i) => page.locator('#extraChargeBody tr').nth(i);
+      await rowAt(0).locator('select[name="extra_charge_type"]').selectOption('톨게이트');
+      await rowAt(0).locator('input[name="extra_charge_amount"]').fill('4500');
+      await rowAt(1).locator('select[name="extra_charge_type"]').selectOption('주차요금');
+      await rowAt(1).locator('input[name="extra_charge_amount"]').fill('40000');
+      // 두 번째 줄만 별도 청구를 끈다 — 체크박스 값이 행 번호라, 여기가 어긋나면 엉뚱한 줄이 꺼진다.
+      await rowAt(1).locator('input[name="extra_charge_billable"]').uncheck();
+      await page.locator('#extraChargeForm button[type="submit"]').click();
+      await page.waitForURL(new RegExp(`/orders/${orderId}$`), { timeout: 20000 });
+
+      // 저장된 줄이 화면에 다시 보여야 한다 — 안 보이면 관리자는 안 들어간 줄 알고 또 넣는다.
+      await expect(page.locator('#extraChargeBody tr')).toHaveCount(2);
+
+      await page.goto(`${BASE_URL}/groups/${groupId}/settlement?month=${MONTH}`, { waitUntil: 'domcontentloaded' });
+      const extraRows = page.locator('.extra-charge-table tbody tr');
+      await expect(extraRows, '별도 청구 한 건만').toHaveCount(1);
+      await expect(extraRows.first()).toContainText('톨게이트');
+      await expect(extraRows.first()).toContainText('99하8877');
+      await expect(extraRows.first()).toContainText(`${MARK}출발지`);
+      // 지사가 부담하는 실비가 청구서에 오르면 없는 돈을 청구하게 된다.
+      await expect(page.locator('.extra-charge-table')).not.toContainText('주차요금');
+
+      // 합계표와 총 청구액이 목록과 맞아야 한다.
+      await expect(page.locator('.extra-charge-summary-table tfoot')).toContainText('4,500원');
+      await expect(page.getByText('총 청구액').locator('..')).toContainText('104,500원');
+    } finally {
+      await wipe();
+    }
+  });
 });

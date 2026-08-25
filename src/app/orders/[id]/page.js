@@ -5,6 +5,7 @@ import AppShell from '../../_components/AppShell';
 import OrderForm from '../new/OrderForm';
 import OrderDetailAdminPanels from './OrderDetailAdminPanels';
 import OrderVocPanel from './OrderVocPanel';
+import OrderExtraChargesPanel from './OrderExtraChargesPanel';
 import OdometerSummary from './OdometerSummary';
 
 // 오더 상세페이지를 기존 접수폼(OrderForm.js, /orders/new)의 edit 모드로 재사용 —
@@ -128,6 +129,9 @@ export default async function OrderDetailPage({ params }) {
 
       {isAdminOrBranchManager && (
         <div style={{ marginTop: 18 }}>
+          {/* 기타 정산 내역은 거래처에 청구할 금액이라 고객에게는 보이지 않는다 — 서버도
+              같은 기준으로 막는다(POST /:id/extra-charges). */}
+          <OrderExtraChargesPanel data={data} orderId={id} />
           <OrderDetailAdminPanels data={data} orderId={id} />
         </div>
       )}

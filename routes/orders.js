@@ -36,6 +36,8 @@ const { DISPATCH_FIELDS } = require('../lib/intakeFields');
 // 접수 요약 문구는 카카오 상담톡과 같은 모듈이 만든다.
 const { buildSummaryText } = require('../lib/intakeSummary');
 const callmanerPhotos = require('../lib/callmanerPhotos');
+// 기타 정산 내역(주유비·주차요금·톨게이트). 항목 정의를 법인 정산내역 화면과 공유한다.
+const extraCharges = require('../lib/extraCharges');
 const { getRouteFareSettings } = require('../lib/routeFareSearch');
 
 // 폼에서 온 좌표 문자열을 숫자로 — 빈 문자열/미입력/숫자 아님은 전부 null(컬럼이 numeric이라
@@ -1371,6 +1373,8 @@ router.get('/:id/data.json', asyncHandler(async (req, res) => {
   // 콜마너가 만료시키면 썸네일이 깨질 수 있다(화면에서 onerror로 링크만 남긴다).
   const callmanerPhotoRows = canViewPhotos ? await callmanerPhotos.loadPhotos(req.params.id) : [];
   const legs = await buildOrderLegs(req.params.id, order, waypoints);
+  // 기타 정산 내역은 청구 금액이라 고객에게는 내려주지 않는다(입력도 막혀 있다).
+  const extraChargeRows = u.role === 'client' ? [] : await extraCharges.loadForOrder(req.params.id);
 
   res.json({
     ...formInit,
@@ -1394,6 +1398,8 @@ router.get('/:id/data.json', asyncHandler(async (req, res) => {
     },
     rawWaypoints: waypoints,
     history, drivers, photos, callmanerPhotos: callmanerPhotoRows, canViewPhotos, legs,
+    extraCharges: extraChargeRows,
+    extraChargeTypes: extraCharges.EXTRA_CHARGE_TYPES,
     ORDER_STATUSES: statusConfig.map((s) => s.status_code),
     baseUrl: req.protocol + '://' + req.get('host'),
     currentUserRole: u.role,
@@ -1715,6 +1721,23 @@ router.post('/:id/voc', asyncHandler(async (req, res) => {
   res.redirect('/orders/' + req.params.id);
 }));
 
+// 기타 정산 내역(주유비 · 주차요금 · 톨게이트) 저장.
+//
+// VOC와 달리 고객은 손댈 수 없다 — 거래처에 청구할 금액이라 우리 쪽에서만 넣는다. 고객이
+// 자기 오더의 청구액을 바꿀 수 있으면 정산이 성립하지 않는다.
+//
+// 화면이 보낸 줄들로 통째로 갈아끼운다(lib/extraCharges.js replaceForOrder) — 줄마다
+// 수정/삭제 버튼을 따로 두지 않아도 되고, VOC 저장과 같은 방식이라 새로 배울 것이 없다.
+router.post('/:id/extra-charges', asyncHandler(async (req, res) => {
+  if (req.session.user.role === 'client') return res.status(403).render('403', { title: '접근 권한 없음' });
+  const order = await loadOrderForVoc(req, res);
+  if (!order) return;
+
+  const rows = extraCharges.parseRows(req.body, order.reserved_date);
+  await extraCharges.replaceForOrder(order.id, rows, req.session.user.id);
+  res.redirect('/orders/' + req.params.id);
+}));
+
 // AI 챗봇에서 오더를 방금 등록한 직후, 같은 대화창에 추가로 남긴 요청사항/질문을 그 오더에
 // 붙여준다(public/js/ai-intake.js의 appendAdditionalRequestToLastOrder) — 예전에는 이런
 // 후속 메시지가 "새 오더접수"로 다시 분류돼 똑같은 오더가 중복 등록되는 문제가 있었다.
@@ -1809,9 +1832,14 @@ router.get('/:id', asyncHandler(async (req, res) => {
   // 기준) 배차 여부를 뷰에도 넘겨줘야 한다 — data.json(Next.js)은 이미 이 값을 내려주고 있었다.
   order.hasAssignedDriver = hasAssignedDriver(order, legs);
 
+  // 기타 정산 내역은 청구 금액이라 고객에게는 내려주지 않는다(입력도 막혀 있다).
+  const extraChargeRows = req.session.user.role === 'client' ? [] : await extraCharges.loadForOrder(req.params.id);
+
   res.render('orders/detail', {
     title: '오더 상세 - ' + order.oid, order, history, waypoints, drivers, photos,
     callmanerPhotos: callmanerPhotoRows, canViewPhotos, legs,
+    extraCharges: extraChargeRows,
+    extraChargeTypes: extraCharges.EXTRA_CHARGE_TYPES,
     baseUrl: req.protocol + '://' + req.get('host'),
     ORDER_STATUSES: statusConfig.map((s) => s.status_code),
   });
