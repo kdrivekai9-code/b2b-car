@@ -24,12 +24,10 @@
       <button class="btn" type="submit">로그인</button>
     </form>
     <p class="login-session-notice">⚠️ 계속 로그인하시면 기존 세션이 자동 로그아웃됩니다.</p>
-    <div class="hint-box">
-      데모 계정<br>
-      관리자: admin / Admin!2345<br>
-      지사장: seoul_manager / Manager!2345<br>
-      고객사: seoulmotors / Client!2345
-    </div>
+    <%# 여기 있던 "데모 계정" 안내(관리자·지사장·고객사의 아이디와 비밀번호)를 걷어냈다.
+        로그인하지 않은 누구나 보는 화면인데 조건 없이 렌더돼, 프로덕션에도 그대로 노출돼 있었다
+        (2026-08-26 실측: b2bcarkr.vercel.app/login 응답에 포함됨). 개발 편의를 위한 것이었다면
+        .env나 문서에 두어야 하고, 화면에 둘 값이 아니다. %>
   </div>
 </div>
 </body>

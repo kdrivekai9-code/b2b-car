@@ -13,8 +13,8 @@ const { loginWithRetry } = require('./helpers/auth');
 // 이 화면은 Next(3001)에서 뜬다(NEXT_ORDER_DETAIL_EDIT_ENABLED). Express(3000)로 열면
 // 서버 컴포넌트를 타지 않아 이 검사가 무의미해진다.
 const BASE_URL = process.env.E2E_NEXT_BASE_URL || 'http://localhost:3001';
-const LOGIN_ID = process.env.E2E_LOGIN_ID || 'admin';
-const PASSWORD = process.env.E2E_PASSWORD || 'Admin!2345';
+// 계정·비밀번호는 한 곳에서 가져온다 — 값이 없으면 즉시 멈춘다(tests/e2e-credentials.js).
+const { LOGIN_ID, PASSWORD } = require('../e2e-credentials');
 const MARK = 'e2e-detail-photos';
 
 let orderId = null;

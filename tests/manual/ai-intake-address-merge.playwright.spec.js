@@ -5,8 +5,8 @@ const { test, expect } = require('@playwright/test');
 const { loginWithRetry, openAiIntakeWithRetry } = require('./helpers/auth');
 
 const BASE_URL = process.env.E2E_BASE_URL || 'http://127.0.0.1:3000';
-const LOGIN_ID = process.env.E2E_LOGIN_ID || 'admin';
-const PASSWORD = process.env.E2E_PASSWORD || 'Admin!2345';
+// 계정·비밀번호는 한 곳에서 가져온다 — 값이 없으면 즉시 멈춘다(tests/e2e-credentials.js).
+const { LOGIN_ID, PASSWORD } = require('../e2e-credentials');
 
 function placeResult(placeName, roadAddress, lat, lon) {
   return {

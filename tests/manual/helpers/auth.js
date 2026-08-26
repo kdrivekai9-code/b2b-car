@@ -53,10 +53,15 @@ async function tryCachedLogin(page, protectedUrl) {
   }
 }
 
+// 호출부가 계정을 안 넘기면 공용 설정을 쓴다 — 하드코딩된 admin/비밀번호가 기본값이었는데,
+// 그러면 값을 안 넘긴 테스트가 실사용 admin으로 로그인해 단일세션 때문에 그 계정을 쓰던 사람을
+// 로그아웃시켰다(2026-08-25 접속기록: admin LOGIN_BLOCKED 5건).
+const { LOGIN_ID: DEFAULT_LOGIN_ID, PASSWORD: DEFAULT_PASSWORD } = require('../../e2e-credentials');
+
 async function loginWithRetry(page, options = {}) {
   const baseUrl = options.baseUrl || 'http://127.0.0.1:3000';
-  const loginId = options.loginId || 'admin';
-  const password = options.password || 'Admin!2345';
+  const loginId = options.loginId || DEFAULT_LOGIN_ID;
+  const password = options.password || DEFAULT_PASSWORD;
   const attempts = Number(options.attempts || 6);
   const loginUrl = baseUrl + '/login';
   const protectedUrl = baseUrl + '/chat/sessions?view=list';
@@ -99,8 +104,8 @@ async function loginWithRetry(page, options = {}) {
 
 async function openAiIntakeWithRetry(page, options = {}) {
   const baseUrl = options.baseUrl || 'http://127.0.0.1:3000';
-  const loginId = options.loginId || 'admin';
-  const password = options.password || 'Admin!2345';
+  const loginId = options.loginId || DEFAULT_LOGIN_ID;
+  const password = options.password || DEFAULT_PASSWORD;
   const attempts = Number(options.attempts || 3);
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {

@@ -12,8 +12,8 @@ const { loginWithRetry } = require('./helpers/auth');
 // 두 스택 모두 확인하려고 기본값을 나눠 둔다.
 const EXPRESS_URL = process.env.E2E_BASE_URL || 'http://127.0.0.1:3000';
 const NEXT_URL = process.env.E2E_NEXT_BASE_URL || 'http://localhost:3001';
-const LOGIN_ID = process.env.E2E_LOGIN_ID || 'admin';
-const PASSWORD = process.env.E2E_PASSWORD || 'Admin!2345';
+// 계정·비밀번호는 한 곳에서 가져온다 — 값이 없으면 즉시 멈춘다(tests/e2e-credentials.js).
+const { LOGIN_ID, PASSWORD } = require('../e2e-credentials');
 
 const KEY_MIN = 'ai_rate_limit_per_minute';
 const KEY_HOUR = 'ai_rate_limit_per_hour';

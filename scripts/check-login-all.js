@@ -47,17 +47,17 @@ function getAccountsFromEnv() {
     {
       label: 'admin',
       loginId: process.env.LOGIN_ID_ADMIN || 'admin',
-      password: process.env.LOGIN_PASSWORD_ADMIN || 'Admin!2345',
+      password: process.env.LOGIN_PASSWORD_ADMIN || '',
     },
     {
       label: 'branch_manager',
       loginId: process.env.LOGIN_ID_BRANCH_MANAGER || 'seoul_manager',
-      password: process.env.LOGIN_PASSWORD_BRANCH_MANAGER || 'Manager!2345',
+      password: process.env.LOGIN_PASSWORD_BRANCH_MANAGER || '',
     },
     {
       label: 'client',
       loginId: process.env.LOGIN_ID_CLIENT || 'seoulmotors',
-      password: process.env.LOGIN_PASSWORD_CLIENT || 'Client!2345',
+      password: process.env.LOGIN_PASSWORD_CLIENT || '',
     },
   ];
 }

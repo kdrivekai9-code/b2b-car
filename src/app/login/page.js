@@ -35,12 +35,10 @@ export default async function LoginPage({ searchParams }) {
           <button className="btn" type="submit">로그인</button>
         </form>
         <p className="login-session-notice">⚠️ 계속 로그인하시면 기존 세션이 자동 로그아웃됩니다.</p>
-        <div className="hint-box">
-          데모 계정<br />
-          관리자: admin / Admin!2345<br />
-          지사장: seoul_manager / Manager!2345<br />
-          고객사: seoulmotors / Client!2345
-        </div>
+        {/* 여기 있던 "데모 계정" 안내(관리자·지사장·고객사의 아이디와 비밀번호)를 걷어냈다.
+            로그인하지 않은 누구나 보는 화면인데 조건 없이 렌더돼 프로덕션에도 노출돼 있었다.
+            EJS 로그인 화면(views/login.ejs)도 같이 걷어냈다 — 한쪽만 지우면 다른 화면으로
+            그대로 보인다. */}
       </div>
     </div>
   );

@@ -27,7 +27,7 @@ async function main() {
 
   if (!password) {
     console.error('LOGIN_PASSWORD(또는 --password)가 필요합니다.');
-    console.error('예: LOGIN_PASSWORD=\'Admin!2345\' npm run check:login');
+    console.error('예: LOGIN_PASSWORD='<비밀번호>' npm run check:login');
     process.exit(2);
   }
 

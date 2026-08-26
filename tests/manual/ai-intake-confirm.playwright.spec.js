@@ -14,8 +14,8 @@ const { loginWithRetry, openAiIntakeWithRetry } = require('./helpers/auth');
 const BASE_URL = process.env.E2E_BASE_URL || 'http://127.0.0.1:3000';
 // 경기지사(callmaner_enabled=false). 등록 경로만 보려는 테스트라 콜마너로 나가지 않는 지사를 쓴다.
 const NON_CALLMANER_BRANCH_ID = Number(process.env.E2E_NON_CALLMANER_BRANCH_ID || 2);
-const LOGIN_ID = process.env.E2E_LOGIN_ID || 'admin';
-const PASSWORD = process.env.E2E_PASSWORD || 'Admin!2345';
+// 계정·비밀번호는 한 곳에서 가져온다 — 값이 없으면 즉시 멈춘다(tests/e2e-credentials.js).
+const { LOGIN_ID, PASSWORD } = require('../e2e-credentials');
 
 // 한 번에 모든 필드가 채워지는 발화 — 확인 단계까지 최단 경로로 간다.
 const FULL_PARSE = {

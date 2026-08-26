@@ -13,8 +13,8 @@ const { loginWithRetry } = require('./helpers/auth');
 
 // 이 화면은 Next(3001)에서만 이번 코드가 돈다. Express(3000)로 열면 레거시 위젯이라 무의미하다.
 const BASE_URL = process.env.E2E_NEXT_BASE_URL || 'http://localhost:3001';
-const LOGIN_ID = process.env.E2E_LOGIN_ID || 'admin';
-const PASSWORD = process.env.E2E_PASSWORD || 'Admin!2345';
+// 계정·비밀번호는 한 곳에서 가져온다 — 값이 없으면 즉시 멈춘다(tests/e2e-credentials.js).
+const { LOGIN_ID, PASSWORD } = require('../e2e-credentials');
 
 test.describe('Next 챗봇 · 배차 주문 도우미 연결', () => {
   test.describe.configure({ timeout: 180000 });

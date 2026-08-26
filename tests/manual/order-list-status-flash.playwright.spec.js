@@ -20,8 +20,8 @@ const BASE_URL = process.env.E2E_NEXT_BASE_URL || 'http://localhost:3001';
 //
 // 알려진 제약: 여러 스펙을 한 번에 돌리면 같은 계정으로 :3000 · :3001을 오가며 로그인이
 // 반복돼 로그인 시도 제한에 걸린다. 스펙 단위로 돌리는 것을 전제로 한다.
-const LOGIN_ID = process.env.E2E_LOGIN_ID || 'qa_test_bot';
-const PASSWORD = process.env.E2E_PASSWORD || '';
+// 계정·비밀번호는 한 곳에서 가져온다 — 값이 없으면 즉시 멈춘다(tests/e2e-credentials.js).
+const { LOGIN_ID, PASSWORD } = require('../e2e-credentials');
 
 const MARK = 'e2e-flash';
 let orderId = null;

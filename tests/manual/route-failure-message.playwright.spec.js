@@ -18,8 +18,8 @@ const BASE_URL = process.env.E2E_BASE_URL || 'http://127.0.0.1:3000';
 // 로그인 계정: 실사용 admin으로 로그인하면 단일 세션 강제(users.active_session_hash) 때문에
 // 그 계정을 쓰던 사람이 로그아웃된다 — QA 전용 계정을 쓴다. 비밀번호는 .env(E2E_PASSWORD)에서
 // 온다(저장소에 적지 않는다).
-const LOGIN_ID = process.env.E2E_LOGIN_ID || 'qa_test_bot';
-const PASSWORD = process.env.E2E_PASSWORD || '';
+// 계정·비밀번호는 한 곳에서 가져온다 — 값이 없으면 즉시 멈춘다(tests/e2e-credentials.js).
+const { LOGIN_ID, PASSWORD } = require('../e2e-credentials');
 
 test.describe('경로탐색 실패 안내', () => {
   test.describe.configure({ timeout: 240000 });
