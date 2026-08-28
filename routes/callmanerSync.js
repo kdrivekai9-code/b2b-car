@@ -105,7 +105,18 @@ async function syncFare(order, item) {
 // 바뀌지 않았다. 게다가 올바른 번호로 보내도 OrderReceipt로 접수한 건은 목록에 나오지 않고,
 // 나오는 건들조차 status_code가 빈 문자열이라 매핑이 불가능하다(정의서상 필수 항목인데도).
 // OrderHistory는 같은 userHp로 우리 접수건이 정상 조회되고 상태도 한글로 채워져 온다(실측).
-const SYNC_BY_CONF_SLIP_LIMIT = Number(process.env.CALLMANER_SYNC_ORDER_LIMIT || 40);
+// 1분마다 상태를 확인할 오더 수의 상한.
+//
+// 40 → 200으로 올린다(2026-08-29). 40은 근거 없이 보수적으로 잡은 값이었는데, 실제로 재보니
+// 콜마너 단건조회가 **중앙값 14ms · 최대 87ms**로 매우 빠르다. 오더 하나당 조회·기사정보·요금
+// 3회를 잡고 동시 5개로 돌려도:
+//   200건 × 3회 ÷ 5동시 = 120라운드 × 87ms ≒ 10초  (1분 창 안에 넉넉히 들어간다)
+// 콜마너가 지금보다 5배 느려져도 60초 안에 끝난다. 그보다 더 느려지면 아래 백로그 알림
+// (lib/systemAlert.js)이 먼저 알려준다.
+//
+// 왜 상한 자체는 남기나: 없애면 진행 중 오더가 몇 백 건일 때 매분 그만큼 API를 두드리고,
+// 크론 실행이 1분을 넘겨 다음 실행과 겹친다. 상한이 있으면 밀리기는 해도 겹치지는 않는다.
+const SYNC_BY_CONF_SLIP_LIMIT = Number(process.env.CALLMANER_SYNC_ORDER_LIMIT || 200);
 const SYNC_LOOKBACK_DAYS = Number(process.env.CALLMANER_SYNC_LOOKBACK_DAYS || 3);
 const SYNC_CONCURRENCY = Number(process.env.CALLMANER_SYNC_CONCURRENCY || 5);
 const TERMINAL_LOCAL_STATUSES = ['완료', '취소'];

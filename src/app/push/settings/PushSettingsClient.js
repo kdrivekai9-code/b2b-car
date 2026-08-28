@@ -34,11 +34,13 @@ export default function PushSettingsClient({ currentUser, branches }) {
 
       subscribeBtn.addEventListener('click', async () => {
         const notifyAgentCallEl = document.getElementById('notifyAgentCall');
+        const notifySystemAlertEl = document.getElementById('notifySystemAlert');
         const branchScope = document.getElementById('branchScope');
         const prefs = {
           notify_order_events: document.getElementById('notifyOrderEvents').checked,
           notify_driver_assign: document.getElementById('notifyDriverAssign').checked,
           notify_agent_call: notifyAgentCallEl ? notifyAgentCallEl.checked : true,
+          notify_system_alert: notifySystemAlertEl ? notifySystemAlertEl.checked : true,
           branch_id: branchScope ? (branchScope.value || null) : null,
         };
         await window.__push.subscribe(prefs);
@@ -125,6 +127,10 @@ export default function PushSettingsClient({ currentUser, branches }) {
           <div className="field"><label className="checkline"><input type="checkbox" id="notifyDriverAssign" defaultChecked /> 기사 배정 알림</label></div>
           {isAdmin && (
             <div className="field"><label className="checkline"><input type="checkbox" id="notifyAgentCall" defaultChecked /> 상담원 호출 알림 (AI 챗봇)</label></div>
+            {/* 장애 알림은 기본으로 켠다 — 켜야 의미가 있고, 없으면 연동이 멈춰도 아무도 모른다.
+                EJS 화면(views/push_settings.ejs)에도 같은 항목이 있다. 한쪽만 두면 그 화면으로
+                구독한 사람에게는 장애 알림이 안 간다. */}
+            <div className="field"><label className="checkline"><input type="checkbox" id="notifySystemAlert" defaultChecked /> 시스템 장애 알림 (연동 오류 · 동기화 지연)</label></div>
           )}
         </div>
 

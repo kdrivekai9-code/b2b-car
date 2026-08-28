@@ -126,6 +126,37 @@ async function cleanup() {
       originLat: OFFICE.lat, originLon: OFFICE.lon, destinationSido: '서울', destinationSigugun: '강동구',
     }), null);
 
+    console.log('[시군구가 없는 시도 — 세종]');
+    // 세종은 하위 시군구가 없는 단층제라 우리 지오코더가 sigugun을 항상 빈 값으로 준다
+    // (실측: 세종시청·보람동·조치원읍·정부청사 모두 ''). 시군구로만 찾으면 세종 오더는
+    // 어떤 계약표에도 안 걸린다.
+    await db.run(
+      `INSERT INTO group_office_zone_fares (office_id, sido, sigugun, fare, distance_km)
+       VALUES (?, '세종', '세종시', 80000, 128.4)`, [officeId]
+    );
+    const sejong = await ozf.findZoneFare(group.id, {
+      originLat: OFFICE.lat, originLon: OFFICE.lon,
+      destinationSido: '세종', destinationSigugun: '',
+    });
+    check('시군구가 비어도 그 시도의 유일한 지역이면 쓴다', sejong && sejong.fare, 80000);
+
+    // 그 시도에 지역이 둘이면 무엇을 고를지 알 수 없다 — 계약 금액이라 추측하면 안 된다.
+    await db.run(
+      `INSERT INTO group_office_zone_fares (office_id, sido, sigugun, fare)
+       VALUES (?, '세종', '조치원읍', 75000)`, [officeId]
+    );
+    check('둘 이상이면 붙이지 않는다', await ozf.findZoneFare(group.id, {
+      originLat: OFFICE.lat, originLon: OFFICE.lon,
+      destinationSido: '세종', destinationSigugun: '',
+    }), null);
+    await db.run("DELETE FROM group_office_zone_fares WHERE office_id = ? AND sigugun = '조치원읍'", [officeId]);
+
+    // 시도조차 없으면 아무것도 못 한다.
+    check('시도가 없으면 붙이지 않는다', await ozf.findZoneFare(group.id, {
+      originLat: OFFICE.lat, originLon: OFFICE.lon,
+      destinationSido: '', destinationSigugun: '',
+    }), null);
+
     console.log('[거리 기준점 — 시는 시청, 군은 군청, 구는 구청]');
     check('구 → 구청', zoneGeocode.officeNameOf('강남구'), '강남구청');
     check('시 → 시청', zoneGeocode.officeNameOf('수원시'), '수원시청');

@@ -1,0 +1,106 @@
+<%- include('../partials/header') %>
+<div class="page-head-row">
+  <div>
+    <h1 class="page-title">장애 알림</h1>
+    <p class="page-sub">
+      연동 오류가 몰아치거나 콜마너 동기화가 밀리면 <b>웹푸시</b>로 알립니다.
+      로그에 쌓이기만 하고 아무도 모르는 상태를 없애기 위한 장치입니다.
+    </p>
+  </div>
+  <div class="page-head-actions">
+    <a class="btn secondary" href="/alerts/dry-run" target="_blank">지금 걸리는 것 보기</a>
+    <form method="POST" action="/alerts/test" style="display:inline;">
+      <button class="btn" type="submit">테스트 알림 보내기</button>
+    </form>
+  </div>
+</div>
+
+<% if (tested) { %><div class="toast">테스트 알림을 보냈습니다. 폰에 안 오면 <a href="/push/settings">알림 설정</a>을 확인하세요.</div><% } %>
+<% if (migrationMissing) { %>
+  <div class="alert error">알림 표가 아직 없습니다. 마이그레이션(20260829020000)을 실행해주세요.</div>
+<% } %>
+
+<div class="card">
+  <div class="section-title">⚙️ 감시 기준</div>
+  <div class="table-wrap">
+    <table class="table">
+      <tbody>
+        <tr>
+          <td style="width:34%;"><b>연동 오류 급증</b></td>
+          <td><%= cfg.errorWindowMin %>분 안에 같은 곳에서 <b><%= cfg.errorThreshold %>건</b> 이상</td>
+        </tr>
+        <tr>
+          <td><b>동기화 백로그</b></td>
+          <td>
+            진행 중 오더가 1분 배치 상한(<b><%= syncLimit %>건</b>)의 <b><%= cfg.backlogPercent %>%</b> 이상
+            <div class="page-sub">넘치는 만큼 오더 확인이 다음 차례로 밀려 배차 감지·고객 통보가 늦어집니다.</div>
+          </td>
+        </tr>
+        <tr>
+          <td><b>동기화 정지</b></td>
+          <td>
+            진행 중 오더가 있는데 <b><%= cfg.stalledMin %>분</b>간 상태 갱신 0건
+            <div class="page-sub">2026-08-19~24에 7일간 통보가 멈췄던 사고가 이 경우입니다.</div>
+          </td>
+        </tr>
+        <tr>
+          <td><b>재알림 간격</b></td>
+          <td><b><%= cfg.cooldownMin %>분</b> (같은 장애 반복 알림 방지 · 규모가 2배로 뛰면 즉시 재알림)</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="page-sub">
+    값은 앱 설정(<code>alert_error_threshold</code> 등)으로 바꿉니다 — 배포 없이 조정할 수 있어야
+    장애 중에 임계를 낮추거나 시끄러운 알림을 줄일 수 있습니다.
+  </p>
+</div>
+
+<% if (states.length) { %>
+<div class="card">
+  <div class="section-title">🔴 지금 알림 중인 장애 (<%= states.length %>건)</div>
+  <p class="page-sub" style="margin-top:-4px;">해소되면 자동으로 목록에서 사라집니다.</p>
+  <div class="table-wrap">
+    <table class="table">
+      <thead><tr><th style="width:30%;">항목</th><th>내용</th><th style="width:90px;">규모</th><th style="width:80px;">발송</th><th style="width:170px;">마지막 발송</th></tr></thead>
+      <tbody>
+        <% states.forEach(function (s) { %>
+          <tr>
+            <td><code><%= s.alert_key %></code></td>
+            <td><%= s.last_title || '-' %></td>
+            <td><%= s.last_value %></td>
+            <td><%= s.send_count %>회</td>
+            <td class="page-sub"><%= new Date(s.last_sent_at).toLocaleString('ko-KR') %></td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+</div>
+<% } %>
+
+<div class="card">
+  <div class="section-title">📜 발송 이력 (최근 <%= logs.length %>건)</div>
+  <% if (!logs.length) { %>
+    <p class="page-sub">아직 발송된 알림이 없습니다. 장애가 없었다는 뜻입니다 — 정상입니다.</p>
+  <% } else { %>
+    <div class="table-wrap">
+      <table class="table">
+        <thead><tr><th style="width:170px;">시각</th><th style="width:26%;">제목</th><th>내용</th><th style="width:90px;">수신자</th></tr></thead>
+        <tbody>
+          <% logs.forEach(function (l) { %>
+            <tr>
+              <td class="page-sub"><%= new Date(l.created_at).toLocaleString('ko-KR') %></td>
+              <td><%= l.title %></td>
+              <td class="page-sub"><%= l.body %></td>
+              <%# 수신자 0명이면 알림이 아무에게도 안 간 것이다 — 장애보다 이쪽이 더 급하다. %>
+              <td><%= l.sent_to %>명<% if (!l.sent_to) { %> <span class="badge red">수신자 없음</span><% } %></td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    </div>
+  <% } %>
+</div>
+
+<%- include('../partials/footer') %>

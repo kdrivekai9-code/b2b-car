@@ -14,6 +14,7 @@ const dashboardRoutes = require('./routes/dashboard');
 const branchRoutes = require('./routes/branches');
 const groupRoutes = require('./routes/groups');
 const vehicleModelRoutes = require('./routes/vehicleModels');
+const alertRoutes = require('./routes/alerts');
 const userRoutes = require('./routes/users');
 const orderRoutes = require('./routes/orders');
 const favoriteRoutes = require('./routes/favorites');
@@ -165,6 +166,8 @@ app.use('/branches', branchRoutes);
 app.use('/groups', groupRoutes);
 // 차종 마스터 — 수입차/대형·화물/전기차 할증의 판정 근거를 관리한다.
 app.use('/vehicle-models', vehicleModelRoutes);
+// 장애 알림 — 연동 오류 급증·동기화 지연을 웹푸시로 알린다(자체 CRON_SECRET 검증은 라우트 안에서).
+app.use('/alerts', alertRoutes);
 app.use('/users', userRoutes);
 app.use('/orders', orderRoutes);
 app.use('/favorites', favoriteRoutes);
