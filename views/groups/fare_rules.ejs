@@ -35,6 +35,12 @@
 <form id="fareForm" method="POST" action="/groups/<%= group.id %>/fare-rules">
   <div class="card">
     <div class="section-title">📏 거리 구간별 요금 규칙</div>
+    <%# 지점 구간요금이 이 표를 덮는다. 그 사실을 여기서 밝히지 않으면 관리자는 이 표를
+        고쳐놓고 "왜 안 바뀌지"를 겪는다 — 요금이 안 맞는 원인을 찾을 곳이 다른 화면이다. %>
+    <p class="page-sub" style="margin-top:0;">
+      출발지나 도착지가 <a href="/groups/<%= group.id %>/office-fares">지점 구간요금</a>에 등록된 지점이면
+      <b>그 표의 금액이 먼저 적용됩니다.</b> 아래 구간표는 지점에 해당하지 않는 오더에 쓰입니다.
+    </p>
     <div class="table-wrap">
     <table id="fareTiersTable">
       <thead>

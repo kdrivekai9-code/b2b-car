@@ -1,4 +1,4 @@
-// 법인관리 서브메뉴 7개가 실제로 열리는지.
+// 법인관리 서브메뉴 8개가 실제로 열리는지.
 //
 // 왜 필요한가: EJS 화면은 문법이 틀려도 빌드에서 안 잡히고 열 때 500이 난다. 이번에 한 번에
 // 6개를 만들었고 공용 파티셜(group_tabs, customer_notification_events)까지 새로 넣어서,
@@ -31,6 +31,7 @@ const PAGES = [
   { path: 'fare-rules', title: '탁송 요금', mustHave: '거리 구간별 요금 규칙' },
   { path: 'daily-driver-fare-rules', title: '일일기사 요금', mustHave: '시간 구간별 요금' },
   { path: 'premium-fare-rules', title: '프리미엄(대리) 요금', mustHave: '준비 중' },
+  { path: 'office-fares', title: '지점 구간요금', mustHave: '지점 등록' },
   { path: 'settlement', title: '정산내역', mustHave: '금액 통계' },
   { path: 'customer-notifications', title: '고객 통보', mustHave: '상태별 고객 통보' },
   { path: 'dispatch-delay', title: '배차지연 알림', mustHave: '지연 판단과 상향 금액' },
@@ -39,7 +40,7 @@ const PAGES = [
 test.describe('법인관리 · 법인별 설정 화면', () => {
   test.describe.configure({ timeout: 180000 });
 
-  test('일곱 화면이 모두 열리고 탭이 서로를 가리킨다', async ({ page }) => {
+  test('여덟 화면이 모두 열리고 탭이 서로를 가리킨다', async ({ page }) => {
     test.skip(!groupId, '등록된 법인이 없습니다');
     const problems = [];
     page.on('pageerror', (e) => problems.push(e.message));
@@ -173,9 +174,19 @@ test.describe('법인관리 · 법인별 설정 화면', () => {
       await page.locator('#extraChargeAdd').click();
       await page.locator('#extraChargeAdd').click();
       const rowAt = (i) => page.locator('#extraChargeBody tr').nth(i);
-      await rowAt(0).locator('select[name="extra_charge_type"]').selectOption('톨게이트');
+
+      // 선택지는 요금설정에 따라 달라진다 — "기본요금 포함"으로 둔 항목은 이중 청구가 되므로
+      // 빠진다(lib/extraCharges.js billableTypesForOrder). 그래서 항목 이름을 박아두면 안 된다.
+      // 실제로 '톨게이트'를 박아뒀다가, 그 항목이 빠진 법인에서 선택이 영영 안 돼 검사가 멈췄다.
+      const options = await rowAt(0).locator('select[name="extra_charge_type"] option')
+        .evaluateAll((els) => els.map((e) => e.value).filter(Boolean));
+      expect(options.length, '청구 가능한 항목이 최소 2개는 있어야 이 검사가 성립한다')
+        .toBeGreaterThanOrEqual(2);
+      const [typeA, typeB] = options;
+
+      await rowAt(0).locator('select[name="extra_charge_type"]').selectOption(typeA);
       await rowAt(0).locator('input[name="extra_charge_amount"]').fill('4500');
-      await rowAt(1).locator('select[name="extra_charge_type"]').selectOption('주차요금');
+      await rowAt(1).locator('select[name="extra_charge_type"]').selectOption(typeB);
       await rowAt(1).locator('input[name="extra_charge_amount"]').fill('40000');
       // 두 번째 줄만 별도 청구를 끈다 — 체크박스 값이 행 번호라, 여기가 어긋나면 엉뚱한 줄이 꺼진다.
       await rowAt(1).locator('input[name="extra_charge_billable"]').uncheck();
@@ -188,11 +199,11 @@ test.describe('법인관리 · 법인별 설정 화면', () => {
       await page.goto(`${BASE_URL}/groups/${groupId}/settlement?month=${MONTH}`, { waitUntil: 'domcontentloaded' });
       const extraRows = page.locator('.extra-charge-table tbody tr');
       await expect(extraRows, '별도 청구 한 건만').toHaveCount(1);
-      await expect(extraRows.first()).toContainText('톨게이트');
+      await expect(extraRows.first()).toContainText(typeA);
       await expect(extraRows.first()).toContainText('99하8877');
       await expect(extraRows.first()).toContainText(`${MARK}출발지`);
       // 지사가 부담하는 실비가 청구서에 오르면 없는 돈을 청구하게 된다.
-      await expect(page.locator('.extra-charge-table')).not.toContainText('주차요금');
+      await expect(page.locator('.extra-charge-table')).not.toContainText(typeB);
 
       // 합계표와 총 청구액이 목록과 맞아야 한다.
       await expect(page.locator('.extra-charge-summary-table tfoot')).toContainText('4,500원');

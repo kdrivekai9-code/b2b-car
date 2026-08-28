@@ -11,6 +11,12 @@ const extraCharges = require('../lib/extraCharges');
 const { REMOTE_AREA_FEE_MIN, REMOTE_AREA_FEE_MAX } = require('../lib/branchPolicy');
 const fareSurcharge = require('../lib/fareSurcharge');
 const fareSurchargeInput = require('../lib/fareSurchargeInput');
+const multer = require('multer');
+// 지점 구간요금 — 거점↔지역 계약표. 거리 구간표보다 먼저 적용된다.
+const officeZoneFare = require('../lib/officeZoneFare');
+const zoneGeocode = require('../lib/zoneGeocode');
+const { routeDistance } = require('../lib/fareQuote');
+const { lookupRegion } = require('../lib/kakaoRegion');
 // 지사 화면과 같은 표시 규칙을 쓴다 — 복사하면 갈라진다.
 const {
   NOTIFY_PHOTO_EVENTS, DISPATCH_CALL_TYPES, parseCallTypes, buildEventRows,
@@ -884,6 +890,284 @@ router.get('/:id/settlement', asyncHandler(async (req, res) => {
     extraChargeTypes: extraCharges.EXTRA_CHARGE_TYPES,
     ...data,
   });
+}));
+
+// ---------------- 지점 구간요금표 ----------------
+// 계약이 "강남지점 ↔ 서울 강남구 = 20,000원"처럼 표로 맺어지는 경우가 많다(첨부 단가표).
+// 이 표가 있으면 거리 구간표보다 먼저 본다(lib/branchPolicy.js calculateFare).
+//
+// 엑셀 업로드는 메모리에서만 읽는다 — 요금표는 계약 정보라 디스크에 남길 이유가 없다.
+const officeUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+});
+
+async function loadOfficeFarePage(groupId) {
+  const { group, groups } = await loadGroupWithSiblings(groupId);
+  if (!group) return { group: null };
+  const offices = await officeZoneFare.listOffices(groupId);
+  // 지점마다 요금 줄을 따로 읽는다. 한 번에 조인해 가져오면 요금이 하나도 없는 지점이
+  // 목록에서 사라져 "등록은 했는데 안 보인다"가 된다.
+  const zonesByOffice = {};
+  for (const o of offices) zonesByOffice[o.id] = await officeZoneFare.listZoneFares(o.id);
+  return { group, groups, offices, zonesByOffice };
+}
+
+router.get('/:id/office-fares', asyncHandler(async (req, res) => {
+  const page = await loadOfficeFarePage(req.params.id);
+  if (!page.group) return res.status(404).send('법인을 찾을 수 없습니다.');
+  res.render('groups/office_fares', {
+    title: '지점 구간요금 - ' + page.group.name,
+    ...page,
+    saved: req.query.saved || null,
+    error: req.query.error || null,
+    uploadResult: req.query.uploaded ? JSON.parse(decodeURIComponent(req.query.uploaded)) : null,
+  });
+}));
+
+// 지점 등록 — 상호 + 주소(좌표까지). 좌표가 없으면 등록을 막는다: 좌표가 이 기능의 전부다
+// (출발/도착이 그 지점인지 좌표로 판정한다 — lib/officeZoneFare.js).
+router.post('/:id/office-fares/offices', asyncHandler(async (req, res) => {
+  const base = '/groups/' + req.params.id + '/office-fares';
+  const name = String(req.body.name || '').trim();
+  const address = String(req.body.address || '').trim();
+  const lat = Number(req.body.lat);
+  const lon = Number(req.body.lon);
+  if (!name || !address) return res.redirect(base + '?error=' + encodeURIComponent('지점명과 주소를 입력해주세요.'));
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+    return res.redirect(base + '?error=' + encodeURIComponent('주소를 검색해서 좌표를 확정해주세요. 좌표가 없으면 지점을 알아볼 수 없습니다.'));
+  }
+  const region = await lookupRegion(lat, lon).catch(() => null);
+  try {
+    await db.run(
+      `INSERT INTO group_branch_offices (group_id, name, address, address_detail, lat, lon, sido, sigugun, seq)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT MAX(seq) + 1 FROM group_branch_offices WHERE group_id = ?), 1))`,
+      [req.params.id, name, address, String(req.body.address_detail || '').trim() || null,
+        lat, lon, (region && region.sido) || null, (region && region.sigugun) || null, req.params.id]
+    );
+  } catch (e) {
+    if (e && e.code === '23505') return res.redirect(base + '?error=' + encodeURIComponent('같은 이름의 지점이 이미 있습니다.'));
+    throw e;
+  }
+  res.redirect(base + '?saved=' + encodeURIComponent('지점을 등록했습니다.'));
+}));
+
+router.post('/:id/office-fares/offices/:officeId/delete', asyncHandler(async (req, res) => {
+  // 요금 줄은 외래키(on delete cascade)로 함께 지워진다.
+  await db.run('DELETE FROM group_branch_offices WHERE id = ? AND group_id = ?', [req.params.officeId, req.params.id]);
+  res.redirect('/groups/' + req.params.id + '/office-fares?saved=' + encodeURIComponent('지점과 그 요금표를 삭제했습니다.'));
+}));
+
+// 요금 한 줄 등록. 거리는 지역 청사(시청/군청/구청)까지 실제 경로로 계산해 채운다 —
+// 사람이 손으로 넣게 하면 지점마다 기준이 달라진다.
+router.post('/:id/office-fares/zones', asyncHandler(async (req, res) => {
+  const base = '/groups/' + req.params.id + '/office-fares';
+  const officeId = Number(req.body.office_id);
+  const sido = officeZoneFare.normSido(req.body.sido);
+  const sigugun = officeZoneFare.normSigugun(req.body.sigugun);
+  const fare = Math.round(Number(req.body.fare));
+  if (!officeId || !sido || !sigugun) return res.redirect(base + '?error=' + encodeURIComponent('지점과 지역을 모두 선택해주세요.'));
+  if (!Number.isFinite(fare) || fare < 0) return res.redirect(base + '?error=' + encodeURIComponent('요금을 숫자로 입력해주세요.'));
+
+  const office = await db.get('SELECT * FROM group_branch_offices WHERE id = ? AND group_id = ?', [officeId, req.params.id]);
+  if (!office) return res.redirect(base + '?error=' + encodeURIComponent('지점을 찾을 수 없습니다.'));
+
+  const distance = await computeZoneDistance(office, sido, sigugun);
+  await upsertZoneFare(officeId, sido, sigugun, fare, distance);
+  res.redirect(base + '?saved=' + encodeURIComponent(
+    `${office.name} · ${sido} ${sigugun} 요금을 저장했습니다.` + (distance == null ? ' (거리 계산 실패 — 요금은 저장됐습니다)' : ` (거리 ${distance}km)`)
+  ));
+}));
+
+router.post('/:id/office-fares/zones/:zoneId/delete', asyncHandler(async (req, res) => {
+  await db.run(
+    `DELETE FROM group_office_zone_fares WHERE id = ?
+      AND office_id IN (SELECT id FROM group_branch_offices WHERE group_id = ?)`,
+    [req.params.zoneId, req.params.id]
+  );
+  res.redirect('/groups/' + req.params.id + '/office-fares?saved=' + encodeURIComponent('요금 줄을 삭제했습니다.'));
+}));
+
+// 지역 청사까지의 실제 경로 거리(소수점 한 자리). 실패해도 요금 저장은 막지 않는다 —
+// 거리는 안내용이고, 청구 금액은 입력한 요금 그대로다.
+async function computeZoneDistance(office, sido, sigugun) {
+  const center = await zoneGeocode.lookupZoneCenter(sido, sigugun).catch(() => null);
+  if (!center) return null;
+  const route = await routeDistance(
+    { lat: Number(office.lat), lon: Number(office.lon) },
+    { lat: center.lat, lon: center.lon }
+  ).catch(() => null);
+  return route ? zoneGeocode.roundKm(route.distanceKm) : null;
+}
+
+async function upsertZoneFare(officeId, sido, sigugun, fare, distanceKm) {
+  // 재등록·재업로드는 덮어쓴다 — 같은 지역이 두 줄이면 어느 금액을 청구할지 알 수 없다.
+  await db.run(
+    `INSERT INTO group_office_zone_fares (office_id, sido, sigugun, fare, distance_km)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT (office_id, sido, sigugun) DO UPDATE SET
+       fare = excluded.fare,
+       -- 거리 계산이 실패하면(null) 전에 넣어둔 값을 지우지 않는다.
+       distance_km = COALESCE(excluded.distance_km, group_office_zone_fares.distance_km),
+       updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS')`,
+    [officeId, sido, sigugun, fare, distanceKm]
+  );
+}
+
+// ── 엑셀 업로드 ─────────────────────────────────────────────────────────────
+// 첨부한 단가표처럼 지역이 수백 줄이라 손으로 넣을 수 없다. 열 이름으로 읽는다(순서 무관) —
+// 사람이 만든 표는 열 순서가 자주 바뀐다.
+//
+// 거리는 비어 있으면 청사 기준으로 자동 계산한다. 줄마다 카카오 API를 두 번(검색+길찾기)
+// 부르므로 수백 줄이면 오래 걸린다 — 이미 계산해둔 거리가 있으면 그대로 쓴다.
+const OFFICE_SHEET_COLUMNS = {
+  office: ['지점', '지점명', '상호', 'office'],
+  sido: ['시도', '광역시도', '시·도', 'sido'],
+  sigugun: ['시군구', '구분', '시·군·구', '지역', 'sigugun'],
+  fare: ['요금', '금액', 'fare'],
+  distance: ['km', '거리', 'distance'],
+};
+
+function pickColumn(header, keys) {
+  const norm = (v) => String(v || '').replace(/\s+/g, '').toLowerCase();
+  for (let i = 0; i < header.length; i += 1) {
+    const cell = norm(header[i]);
+    if (!cell) continue;
+    if (keys.some((k) => cell === norm(k))) return i;
+  }
+  return -1;
+}
+
+router.post('/:id/office-fares/upload', officeUpload.single('file'), asyncHandler(async (req, res) => {
+  const base = '/groups/' + req.params.id + '/office-fares';
+  if (!req.file || !req.file.buffer || !req.file.buffer.length) {
+    return res.redirect(base + '?error=' + encodeURIComponent('파일을 선택해주세요.'));
+  }
+
+  let rows;
+  try {
+    rows = await readSheetRows(req.file);
+  } catch (e) {
+    console.error('지점 구간요금 업로드 파싱 실패:', e.message);
+    return res.redirect(base + '?error=' + encodeURIComponent('파일을 읽지 못했습니다. 엑셀(.xlsx) 또는 CSV로 저장해서 올려주세요.'));
+  }
+  if (!rows.length) return res.redirect(base + '?error=' + encodeURIComponent('내용이 비어 있습니다.'));
+
+  const header = rows[0];
+  const col = {};
+  Object.entries(OFFICE_SHEET_COLUMNS).forEach(([k, keys]) => { col[k] = pickColumn(header, keys); });
+  if (col.office < 0 || col.sigugun < 0 || col.fare < 0) {
+    return res.redirect(base + '?error=' + encodeURIComponent('첫 줄에 "지점 · 시도 · 시군구 · 요금" 열 이름이 있어야 합니다. 샘플 양식을 받아 확인해주세요.'));
+  }
+
+  const offices = await officeZoneFare.listOffices(req.params.id);
+  const byName = new Map(offices.map((o) => [String(o.name).replace(/\s+/g, '').toLowerCase(), o]));
+
+  const result = { saved: 0, skipped: 0, distanceFilled: 0, errors: [] };
+  // 거리 계산은 줄마다 외부 API를 부른다 — 같은 지역이 여러 지점에 반복되므로 한 번만 부른다.
+  const centerCache = new Map();
+
+  for (let i = 1; i < rows.length; i += 1) {
+    const row = rows[i] || [];
+    const officeName = String(row[col.office] || '').trim();
+    const sigugun = officeZoneFare.normSigugun(row[col.sigugun]);
+    const fareRaw = String(row[col.fare] == null ? '' : row[col.fare]).replace(/[^0-9.-]/g, '');
+    const fare = Math.round(Number(fareRaw));
+    if (!officeName && !sigugun) continue; // 빈 줄
+    const line = i + 1;
+
+    const office = byName.get(officeName.replace(/\s+/g, '').toLowerCase());
+    if (!office) { result.skipped += 1; if (result.errors.length < 20) result.errors.push(`${line}행: 등록되지 않은 지점 "${officeName}"`); continue; }
+    if (!sigugun) { result.skipped += 1; if (result.errors.length < 20) result.errors.push(`${line}행: 시군구가 비어 있습니다`); continue; }
+    if (!Number.isFinite(fare) || fare < 0) { result.skipped += 1; if (result.errors.length < 20) result.errors.push(`${line}행: 요금을 읽지 못했습니다 ("${row[col.fare]}")`); continue; }
+
+    // 시도가 비면 지점의 시도를 쓴다 — 같은 이름의 구가 여러 시도에 있어서(중구 등)
+    // 시도가 없으면 엉뚱한 청사가 잡힌다.
+    const sido = officeZoneFare.normSido(col.sido >= 0 ? row[col.sido] : '') || office.sido || '';
+    if (!sido) { result.skipped += 1; if (result.errors.length < 20) result.errors.push(`${line}행: 시도를 알 수 없습니다`); continue; }
+
+    let distance = col.distance >= 0 ? zoneGeocode.roundKm(String(row[col.distance] || '').replace(/[^0-9.]/g, '')) : null;
+    if (distance == null) {
+      const key = `${office.id}|${sido}|${sigugun}`;
+      if (!centerCache.has(key)) centerCache.set(key, await computeZoneDistance(office, sido, sigugun));
+      distance = centerCache.get(key);
+      if (distance != null) result.distanceFilled += 1;
+    }
+
+    await upsertZoneFare(office.id, sido, sigugun, fare, distance);
+    result.saved += 1;
+  }
+
+  res.redirect(base + '?uploaded=' + encodeURIComponent(JSON.stringify(result)));
+}));
+
+// .xlsx와 .csv를 모두 받는다. 엑셀에서 "CSV UTF-8"로 저장해 올리는 사람이 많다.
+async function readSheetRows(file) {
+  const name = String(file.originalname || '').toLowerCase();
+  if (name.endsWith('.csv') || /text\/csv/.test(String(file.mimetype || ''))) {
+    return parseCsv(file.buffer.toString('utf8'));
+  }
+  const ExcelJS = require('exceljs');
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(file.buffer);
+  const sheet = wb.worksheets[0];
+  if (!sheet) return [];
+  const out = [];
+  sheet.eachRow({ includeEmpty: false }, (row) => {
+    const values = [];
+    // exceljs의 row.values는 1번부터 시작한다(0번은 비어 있다).
+    for (let c = 1; c <= sheet.columnCount; c += 1) {
+      const v = row.getCell(c).value;
+      // 수식 셀은 { formula, result } 형태로 온다 — 사람이 보는 값은 result다.
+      values.push(v && typeof v === 'object' && 'result' in v ? v.result : v);
+    }
+    out.push(values);
+  });
+  return out;
+}
+
+// 따옴표 안의 쉼표·줄바꿈까지 처리하는 최소 CSV 파서. 엑셀이 내보내는 형식을 그대로 받는다.
+function parseCsv(text) {
+  const src = text.replace(/^\uFEFF/, ''); // 엑셀 UTF-8 CSV의 BOM
+  const rows = [];
+  let row = [];
+  let cell = '';
+  let quoted = false;
+  for (let i = 0; i < src.length; i += 1) {
+    const ch = src[i];
+    if (quoted) {
+      if (ch === '"') {
+        if (src[i + 1] === '"') { cell += '"'; i += 1; } else quoted = false;
+      } else cell += ch;
+      continue;
+    }
+    if (ch === '"') { quoted = true; continue; }
+    if (ch === ',') { row.push(cell); cell = ''; continue; }
+    if (ch === '\r') continue;
+    if (ch === '\n') { row.push(cell); rows.push(row); row = []; cell = ''; continue; }
+    cell += ch;
+  }
+  if (cell !== '' || row.length) { row.push(cell); rows.push(row); }
+  return rows.filter((r) => r.some((c) => String(c || '').trim() !== ''));
+}
+
+// 샘플 양식 — 열 이름을 말로 설명하는 것보다 받아서 채우는 편이 확실하다.
+router.get('/:id/office-fares/sample', asyncHandler(async (req, res) => {
+  const offices = await officeZoneFare.listOffices(req.params.id);
+  const example = offices.length ? offices[0].name : '강남지점';
+  const lines = [
+    ['지점', '시도', '시군구', '요금', 'km'],
+    [example, '서울특별시', '강남구', '20000', ''],
+    [example, '서울특별시', '강동구', '30000', ''],
+    [example, '경기도', '수원시', '30000', ''],
+    [example, '경기도', '성남시분당구', '25000', '18.1'],
+    [example, '강원특별자치도', '양평군', '90000', ''],
+  ];
+  // BOM을 붙인다 — 없으면 엑셀이 UTF-8을 못 알아보고 한글이 깨진다.
+  const csv = '\uFEFF' + lines.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\r\n');
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="office-zone-fares-sample.csv"');
+  res.send(csv);
 }));
 
 module.exports = router;

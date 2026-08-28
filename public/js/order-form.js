@@ -932,6 +932,19 @@
     if (Number.isFinite(totalKm)) params.set('distance_km', String(totalKm.toFixed(2)));
     if (vehicleType) params.set('vehicle_type', vehicleType);
     if (originAddressInput && originAddressInput.value.trim()) params.set('origin_address', originAddressInput.value.trim());
+    var destAddressInput = document.getElementById('destination_address');
+    if (destAddressInput && destAddressInput.value.trim()) params.set('destination_address', destAddressInput.value.trim());
+    // 지점 구간요금 판정에 필요한 값 — 좌표로 "출발/도착이 그 지점인가"를 보고, 반대편의
+    // 시도·시군구로 계약표의 지역을 찾는다(lib/officeZoneFare.js). 주소 문자열로 지점을
+    // 판정하면 "서울 강남구"와 "서울특별시 강남구"가 다른 곳이 된다.
+    ['origin', 'destination'].forEach(function (slot) {
+      ['lat', 'lon', 'sido', 'sigugun'].forEach(function (f) {
+        var el = document.getElementById(slot + '_' + f);
+        if (el && String(el.value || '').trim()) params.set(slot + '_' + f, String(el.value).trim());
+      });
+    });
+    var groupSelect = document.querySelector('select[name="requester_group_id"], input[name="requester_group_id"]');
+    if (groupSelect && groupSelect.value) params.set('group_id', groupSelect.value);
     if (fareReservedDate) params.set('reserved_date', fareReservedDate);
     if (fareReservedTime) params.set('reserved_time', fareReservedTime);
     if (routeMeta) {

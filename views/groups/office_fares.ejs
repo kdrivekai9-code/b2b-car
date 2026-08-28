@@ -1,0 +1,232 @@
+<%- include('../partials/header') %>
+<div class="page-head-row">
+  <div>
+    <h1 class="page-title"><%= group.name %> · 지점 구간요금</h1>
+    <%# 이 화면의 요금이 거리 구간표를 덮는다. 그 사실을 여기서 밝히지 않으면 관리자는
+        탁송 요금 화면의 구간표를 고쳐놓고 "왜 안 바뀌지"를 겪는다. %>
+    <p class="page-sub">
+      지점과 지역 사이의 <b>고정 요금표</b>입니다. 출발지 또는 도착지가 등록한 지점이면
+      반대편 지역의 요금을 그대로 청구합니다.
+      <b>이 표가 있으면 「탁송 요금」의 거리 구간별 요금 규칙보다 먼저 적용됩니다.</b>
+    </p>
+  </div>
+  <div class="page-head-actions">
+    <a class="btn secondary" href="/groups/<%= group.id %>/fare-rules">탁송 요금으로</a>
+  </div>
+</div>
+<%- include('../partials/group_tabs', { group: group, groups: groups, active: 'office_fare' }) %>
+
+<% if (error) { %><div class="alert error"><%= error %></div><% } %>
+<% if (saved) { %><div class="alert"><%= saved %></div><% } %>
+<% if (uploadResult) { %>
+  <div class="alert">
+    업로드 완료 — <b><%= uploadResult.saved %>줄 저장</b>,
+    <%= uploadResult.skipped %>줄 건너뜀, 거리 자동계산 <%= uploadResult.distanceFilled %>줄.
+    <% if ((uploadResult.errors || []).length) { %>
+      <%# 건너뛴 줄을 숨기면 "다 올라간 줄" 알고 넘어간다 — 청구 누락으로 이어진다. %>
+      <div style="margin-top:8px;">
+        <b>건너뛴 줄</b>
+        <ul style="margin:4px 0 0 18px;">
+          <% uploadResult.errors.forEach(function (m) { %><li class="page-sub"><%= m %></li><% }) %>
+        </ul>
+      </div>
+    <% } %>
+  </div>
+<% } %>
+
+<div class="card">
+  <div class="section-title">🏢 지점 등록</div>
+  <p class="page-sub">
+    주소는 <b>반드시 검색해서 확정</b>해주세요. 좌표로 "이 오더의 출발/도착이 그 지점인가"를 판정합니다
+    — 주소 글자만으로는 "서울 강남구"와 "서울특별시 강남구"가 다른 곳이 됩니다.
+  </p>
+  <form method="POST" action="/groups/<%= group.id %>/office-fares/offices" id="officeForm">
+    <div class="row" style="align-items:flex-end;">
+      <div class="field" style="flex:1;">
+        <label>지점명(상호)</label>
+        <input type="text" name="name" placeholder="예: 강남지점" required>
+      </div>
+      <div class="field" style="flex:2;">
+        <label>주소</label>
+        <div style="display:flex;gap:6px;">
+          <input type="text" id="officeAddress" name="address" placeholder="상호명 또는 주소로 검색" required readonly>
+          <button type="button" class="btn secondary" id="officeSearchBtn">주소검색</button>
+        </div>
+      </div>
+      <div class="field" style="flex:1;">
+        <label>상세주소</label>
+        <input type="text" name="address_detail" placeholder="동/층/호 (선택)">
+      </div>
+      <div class="field"><button class="btn" type="submit">지점 등록</button></div>
+    </div>
+    <input type="hidden" name="lat" id="officeLat">
+    <input type="hidden" name="lon" id="officeLon">
+    <p class="page-sub" id="officeCoordHint">주소를 검색하면 좌표가 확정됩니다.</p>
+    <div id="officeCandidates" style="display:none;margin-top:8px;"></div>
+  </form>
+</div>
+
+<div class="card">
+  <div class="section-title">💰 요금 등록</div>
+  <% if (!offices.length) { %>
+    <p class="page-sub" style="margin:0;">먼저 지점을 등록해주세요.</p>
+  <% } else { %>
+    <p class="page-sub">
+      거리는 <b>지역 청사 기준</b>으로 자동 계산합니다 — 시는 시청, 군은 군청, 구는 구청.
+      지역은 넓어서 기준을 정해두지 않으면 등록할 때마다 거리가 달라집니다. (소수점 한 자리)
+    </p>
+    <form method="POST" action="/groups/<%= group.id %>/office-fares/zones" class="row" style="align-items:flex-end;">
+      <div class="field" style="flex:1;">
+        <label>지점</label>
+        <select name="office_id" required>
+          <% offices.forEach(function (o) { %><option value="<%= o.id %>"><%= o.name %></option><% }) %>
+        </select>
+      </div>
+      <div class="field" style="flex:1;">
+        <label>시도</label>
+        <select name="sido" required>
+          <option value="">선택</option>
+          <% ['서울특별시','부산광역시','대구광역시','인천광역시','광주광역시','대전광역시','울산광역시','세종특별자치시',
+              '경기도','강원특별자치도','충청북도','충청남도','전북특별자치도','전라남도','경상북도','경상남도','제주특별자치도'].forEach(function (sd) { %>
+            <option value="<%= sd %>"><%= sd %></option>
+          <% }) %>
+        </select>
+      </div>
+      <div class="field" style="flex:1;">
+        <label>시 · 군 · 구</label>
+        <input type="text" name="sigugun" placeholder="예: 강남구 / 수원시 / 양평군" required>
+      </div>
+      <div class="field" style="flex:1;">
+        <label>요금(원)</label>
+        <input type="number" name="fare" min="0" step="1000" required>
+      </div>
+      <div class="field"><button class="btn" type="submit">등록</button></div>
+    </form>
+  <% } %>
+</div>
+
+<div class="card">
+  <div class="section-title">📄 엑셀 업로드</div>
+  <p class="page-sub">
+    첫 줄에 열 이름이 있어야 합니다 — <b>지점 · 시도 · 시군구 · 요금</b> (km는 선택).
+    열 순서는 상관없습니다. 같은 지점·지역이 이미 있으면 <b>덮어씁니다</b>.
+    km를 비워두면 청사 기준으로 자동 계산합니다(줄이 많으면 시간이 걸립니다).
+  </p>
+  <form method="POST" action="/groups/<%= group.id %>/office-fares/upload" enctype="multipart/form-data" class="row" style="align-items:flex-end;">
+    <div class="field" style="flex:2;">
+      <label>파일 (.xlsx 또는 .csv)</label>
+      <input type="file" name="file" accept=".xlsx,.csv" required>
+    </div>
+    <div class="field"><button class="btn" type="submit">업로드</button></div>
+    <div class="field"><a class="btn secondary" href="/groups/<%= group.id %>/office-fares/sample">샘플 양식 받기</a></div>
+  </form>
+  <div class="table-wrap" style="margin-top:10px;">
+    <table class="table">
+      <thead><tr><th>지점</th><th>시도</th><th>시군구</th><th>요금</th><th>km</th></tr></thead>
+      <tbody>
+        <tr><td>강남지점</td><td>서울특별시</td><td>강남구</td><td>20000</td><td class="page-sub">(비움)</td></tr>
+        <tr><td>강남지점</td><td>경기도</td><td>수원시</td><td>30000</td><td class="page-sub">(비움)</td></tr>
+        <tr><td>강남지점</td><td>경기도</td><td>성남시분당구</td><td>25000</td><td>18.1</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<% offices.forEach(function (o) { %>
+  <% const zones = zonesByOffice[o.id] || [] %>
+  <div class="card">
+    <div class="section-title">📋 <%= o.name %> (<%= zones.length %>개 지역)</div>
+    <p class="page-sub">
+      <%= o.address %><%= o.address_detail ? ' ' + o.address_detail : '' %>
+      <% if (o.sido) { %> · <span class="badge gray"><%= o.sido %> <%= o.sigugun %></span><% } %>
+      <form method="POST" action="/groups/<%= group.id %>/office-fares/offices/<%= o.id %>/delete" style="display:inline;margin-left:8px;">
+        <button class="btn small secondary" type="submit" onclick="return confirm('<%= o.name %> 지점과 요금표 <%= zones.length %>줄을 모두 삭제합니다. 계속할까요?')">지점 삭제</button>
+      </form>
+    </p>
+    <% if (!zones.length) { %>
+      <p class="page-sub" style="margin:0;">등록된 지역 요금이 없습니다. 이 지점은 거리 구간표로 계산됩니다.</p>
+    <% } else { %>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th style="width:140px;">시도</th><th>시 · 군 · 구</th><th style="width:120px;text-align:right;">요금</th><th style="width:100px;text-align:right;">km</th><th style="width:70px;"></th></tr></thead>
+          <tbody>
+            <% zones.forEach(function (z) { %>
+              <tr>
+                <td><%= z.sido %></td>
+                <td><%= z.sigugun %></td>
+                <td style="text-align:right;"><%= formatMoney(z.fare) %></td>
+                <%# 거리는 안내용이다. 계산에 실패한 줄도 요금은 살아 있으므로 '-'로 구분해 보여준다. %>
+                <td style="text-align:right;"><%= z.distance_km == null ? '-' : Number(z.distance_km).toFixed(1) %></td>
+                <td>
+                  <form method="POST" action="/groups/<%= group.id %>/office-fares/zones/<%= z.id %>/delete">
+                    <button class="btn small secondary" type="submit">삭제</button>
+                  </form>
+                </td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    <% } %>
+  </div>
+<% }) %>
+
+<script>
+  (function () {
+    var btn = document.getElementById('officeSearchBtn');
+    var addr = document.getElementById('officeAddress');
+    var lat = document.getElementById('officeLat');
+    var lon = document.getElementById('officeLon');
+    var hint = document.getElementById('officeCoordHint');
+    var box = document.getElementById('officeCandidates');
+    if (!btn) return;
+
+    // 좌표가 확정되기 전에는 주소칸을 읽기전용으로 둔다 — 손으로 고치면 글자와 좌표가
+    // 다른 곳을 가리키게 되고, 그러면 지점이 영영 안 잡힌다.
+    function clearCoords() {
+      lat.value = ''; lon.value = '';
+      hint.textContent = '주소를 검색하면 좌표가 확정됩니다.';
+    }
+
+    btn.addEventListener('click', function () {
+      var q = window.prompt('지점 상호명이나 주소를 입력하세요', addr.value || '');
+      if (!q || !q.trim()) return;
+      box.style.display = 'none';
+      box.innerHTML = '';
+      hint.textContent = '검색 중입니다...';
+      fetch('/kakao/search?q=' + encodeURIComponent(q.trim()) + '&mode=plain')
+        .then(function (r) { return r.ok ? r.json() : { documents: [] }; })
+        .then(function (data) {
+          var docs = (data && data.documents) || [];
+          if (!docs.length) { hint.textContent = '검색 결과가 없습니다. 다른 이름으로 시도해주세요.'; return; }
+          hint.textContent = '아래에서 정확한 곳을 선택해주세요.';
+          box.style.display = '';
+          docs.slice(0, 8).forEach(function (d) {
+            var label = (d.place_name ? d.place_name + ' · ' : '') + (d.road_address || d.jibun_address || '');
+            var b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'btn small secondary';
+            b.style.cssText = 'display:block;width:100%;text-align:left;margin-bottom:4px;';
+            b.textContent = label;
+            b.addEventListener('click', function () {
+              addr.value = d.road_address || d.jibun_address || d.place_name || '';
+              lat.value = d.lat; lon.value = d.lon;
+              hint.textContent = '좌표 확정 — ' + addr.value + ' (' + Number(d.lat).toFixed(5) + ', ' + Number(d.lon).toFixed(5) + ')';
+              box.style.display = 'none';
+            });
+            box.appendChild(b);
+          });
+        })
+        .catch(function () { hint.textContent = '주소 검색에 실패했습니다. 잠시 후 다시 시도해주세요.'; });
+    });
+
+    document.getElementById('officeForm').addEventListener('submit', function (e) {
+      if (!lat.value || !lon.value) {
+        e.preventDefault();
+        alert('주소를 검색해서 좌표를 확정해주세요. 좌표가 없으면 지점을 알아볼 수 없습니다.');
+      }
+    });
+    clearCoords();
+  })();
+</script>
+<%- include('../partials/footer') %>

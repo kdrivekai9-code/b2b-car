@@ -917,7 +917,19 @@ router.get('/fare-preview', asyncHandler(async (req, res) => {
   const afterKm = parseFloat(req.query.after_km);
   const beforeMinutes = parseFloat(req.query.before_minutes);
   const afterMinutes = parseFloat(req.query.after_minutes);
+  // 지점 구간요금(lib/officeZoneFare.js)은 법인 계약표라 group_id가 있어야 찾는다.
+  // 화면이 안 넘기면 예전처럼 거리 구간표로만 낸다 — 조용히 다른 금액이 나가지 않는다.
+  const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : undefined; };
   const result = await calculateFareWithFerry(branchId, distanceKm, {
+    groupId: req.query.group_id || req.query.groupId || null,
+    originLat: num(req.query.origin_lat),
+    originLon: num(req.query.origin_lon),
+    originSido: req.query.origin_sido || '',
+    originSigugun: req.query.origin_sigugun || '',
+    destinationLat: num(req.query.destination_lat),
+    destinationLon: num(req.query.destination_lon),
+    destinationSido: req.query.destination_sido || '',
+    destinationSigugun: req.query.destination_sigugun || '',
     vehicleType: req.query.vehicle_type || req.query.vehicleType || '',
     originAddress: req.query.origin_address || req.query.originAddress || '',
     // 오지요금 판정용 — 오더 등록 화면은 주소만 알고 행정지명은 모른다. 주소에서 "…리"를 찾는다
