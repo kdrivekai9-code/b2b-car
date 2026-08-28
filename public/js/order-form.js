@@ -854,9 +854,19 @@
     currentRouteDurationSec = Number.isFinite(totalDurationSec) ? totalDurationSec : null;
     document.getElementById('routeTotalDistance').textContent = totalKm != null ? totalKm.toFixed(1) + 'km' : '-';
     document.getElementById('routeTotalDuration').textContent = totalDurationSec != null ? formatDuration(totalDurationSec) : '-';
-    document.getElementById('routeTollFare').textContent = (tollFare !== null && tollFare !== undefined)
+    // 톨비 표시. 카카오는 요금소별 금액을 주지 않고 합계 하나만 준다(실측) — 그래서 특수구간
+    // (민자 교량 등)은 우리가 등록한 금액을 따로 덧붙여 보여준다. 합쳐 버리면 관리자가
+    // "이 톨비에 서해대교가 들어 있나"를 알 수 없고, 실비 청구 대상인지도 구분이 안 된다.
+    var tollEl = document.getElementById('routeTollFare');
+    var tollText = (tollFare !== null && tollFare !== undefined)
       ? (Number(tollFare) === 0 ? '무료' : Number(tollFare).toLocaleString('ko-KR') + '원')
       : '-';
+    if (lastSpecialTolls && lastSpecialTolls.length) {
+      var sum = lastSpecialTolls.reduce(function (a, t) { return a + (Number(t.amount) || 0); }, 0);
+      tollText += ' · 특수구간 ' + lastSpecialTolls.map(function (t) { return t.name; }).join(', ')
+        + ' +' + sum.toLocaleString('ko-KR') + '원';
+    }
+    tollEl.textContent = tollText;
     // 직선거리 임시값인지 실제 도로 경로 확정값인지는 routeDurationBasis 문구가 있는 form.ejs
     // 화면에서만 사람이 읽을 수 있다 — ai_intake.ejs에는 그 엘리먼트가 없으므로, 어느 화면에서든
     // 챗봇(ai-intake.js)이 최종 확정 여부를 판단할 수 있도록 전역 플래그로도 남겨둔다.
@@ -878,6 +888,8 @@
       }
     }
     lastRouteKm = totalKm;
+    lastTollFare = tollFare;
+    lastRouteTimingMeta = routeTimingMeta;
     updateFarePreview(totalKm);
     updateFerryFareTile(totalKm);
     syncReservationBasisPreview();
@@ -980,6 +992,9 @@
           fareAmountInput.readOnly = false;
           return;
         }
+        lastSpecialTolls = Array.isArray(data.specialTolls) ? data.specialTolls : [];
+        // 톨비 줄을 다시 그린다 — 요금 응답이 경로 응답보다 늦게 오므로 여기서 한 번 더 반영한다.
+        if (lastRouteKm != null) renderRouteSummary(lastRouteKm, currentRouteDurationSec, lastTollFare, lastRouteTimingMeta);
         fareAmountInput.value = data.totalFare != null ? data.totalFare : data.fare;
         if (ferryFareInput) ferryFareInput.value = data.ferryFare != null ? data.ferryFare : 0;
         if (data.ferryNeedVehicleType) {
@@ -1159,6 +1174,10 @@
     applyRoutePriorityDefaultForOrderType('dispatch');
   }
 
+  // 요금 미리보기가 알려준 특수구간(민자 교량 등). 톨비 표시에 덧붙인다.
+  var lastSpecialTolls = [];
+  var lastTollFare = null;
+  var lastRouteTimingMeta = null;
   var directionsRequestId = 0;
   function fetchRealDirections(points, requestId) {
     var coord = function (p) { return p.latlng.getLng() + ',' + p.latlng.getLat(); };
@@ -1185,6 +1204,9 @@
           // 무료도로로는 경로가 없어 서버가 회피조건을 풀고 다시 물은 경우(제주행이 그렇다).
           // 탁송은 톨비를 고객이 내는 경우가 많아 조용히 넘어가면 안 된다.
           avoidDropped: data.avoidDropped || null,
+          // 지나간 요금소 이름. 특수구간(교량 등) 판정에 쓴다 — 카카오는 요금소별 금액을
+          // 주지 않으므로 "지났는지"만 여기서 알고 금액은 우리 표에서 가져온다.
+          tollgates: Array.isArray(data.tollgates) ? data.tollgates : [],
         });
         if (data.path && data.path.length > 1) {
           drawPolyline(data.path.map(function (c) { return new kakao.maps.LatLng(c[0], c[1]); }));

@@ -4,6 +4,21 @@ const db = require('../db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const asyncHandler = require('../middleware/asyncHandler');
 const systemAlert = require('../lib/systemAlert');
+const appSettings = require('../lib/appSettings');
+
+// 화면에서 고칠 수 있는 임계값. lib/systemAlert.js의 SETTINGS와 키·범위가 같아야 한다 —
+// 갈리면 화면에서 저장한 값이 범위 밖이라 조용히 무시된다.
+const SETTING_FIELDS = Object.entries(systemAlert.SETTINGS).map(([name, [key, , min, max]]) => ({
+  name, key, min, max,
+  label: {
+    errorWindowMin: '오류 관측 구간(분)',
+    errorThreshold: '오류 임계(건)',
+    cooldownMin: '재알림 간격(분)',
+    backlogPercent: '백로그 기준(%)',
+    stalledMin: '동기화 정지 기준(분)',
+    timeBudgetThreshold: '시간 초과 임계(회)',
+  }[name] || name,
+}));
 
 const router = express.Router();
 // 크론은 세션 로그인이 없는 서버 대 서버 호출이라, requireAuth보다 **먼저** 마운트해야 한다.
@@ -41,12 +56,34 @@ router.get('/', requireAuth, requireRole('admin'), asyncHandler(async (req, res)
     migrationMissing: logs === null,
     states: states || [],
     cfg,
+    // 화면에서 바로 고칠 수 있도록 키·범위를 함께 넘긴다. 임계는 장애 중에 조정하고 싶은
+    // 값이라(시끄러우면 올리고, 놓쳤으면 내리고) 배포를 기다리게 하면 안 된다.
+    settingFields: SETTING_FIELDS.map((f) => ({ ...f, value: cfg[f.name] })),
     syncLimit: Number(process.env.CALLMANER_SYNC_ORDER_LIMIT || 500),
     tested: req.query.tested === '1',
+    saved: req.query.saved === '1',
+    error: req.query.error || null,
   });
 }));
 
 // 알림이 실제로 내 폰까지 오는지 확인하는 버튼. 장애가 났을 때 처음 시험해보면 늦다.
+// 임계값 저장. 환경변수가 아니라 app_settings(DB)에 넣는다 — 즉시 반영되고 배포가 필요 없다.
+router.post('/settings', requireAuth, requireRole('admin'), asyncHandler(async (req, res) => {
+  for (const f of SETTING_FIELDS) {
+    const raw = String(req.body[f.key] ?? '').trim();
+    if (raw === '') continue;
+    const n = Number(raw);
+    // 범위를 벗어난 값은 저장하지 않고 넘어간다 — appSettings.getNumber가 범위 밖 값을
+    // fallback으로 되돌리므로, 저장해두면 화면에는 내가 넣은 값이 보이는데 실제로는 기본값이
+    // 동작하는 상태가 된다(가장 헷갈리는 실패다).
+    if (!Number.isFinite(n) || n < f.min || n > f.max) {
+      return res.redirect('/alerts?error=' + encodeURIComponent(`${f.label}은(는) ${f.min}~${f.max} 사이여야 합니다.`));
+    }
+    await appSettings.set(f.key, n, req.session.user.id);
+  }
+  res.redirect('/alerts?saved=1');
+}));
+
 router.post('/test', requireAuth, requireRole('admin'), asyncHandler(async (req, res) => {
   const { notify } = require('../lib/push');
   await notify({
