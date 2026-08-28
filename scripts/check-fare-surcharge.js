@@ -68,6 +68,43 @@ check('홈서비스 옵션', sum({ options: { documents: true, predeliveryWash: 
 check('아무것도 해당 없으면 0', sum({ vehicle: {}, destinationDong: '야탑동' }), 0);
 check('금액이 0인 할증은 안 붙는다', fs.computeSurcharges({ ev_fee: 0 }, { vehicle: { isEv: true } }).total, 0);
 
+console.log('\n[대형/화물 — 차종별 금액]');
+const largeExtra = { large_car_fee: 8000 };
+const largeFees = [{ vehicle_model_id: 7, fee: 15000 }, { vehicle_model_id: 9, fee: 0 }];
+const largeSum = (vehicle) => fs.computeSurcharges(largeExtra, { vehicle, largeCarFees: largeFees }).total;
+check('차종별 금액이 있으면 그 금액', largeSum({ isLarge: true, modelId: 7, modelName: '1톤 화물' }), 15000);
+check('없는 차종은 기본 금액', largeSum({ isLarge: true, modelId: 99 }), 8000);
+// 미등록 차종(modelId 없음)은 자동 판정으로 대형만 알 뿐이라 기본 금액을 쓴다.
+check('미등록 차종도 기본 금액', largeSum({ isLarge: true }), 8000);
+// 0은 "이 차종만 대형 할증을 안 받는다" — 기본 금액으로 되돌리면 넣은 의도를 뒤집는다.
+check('차종별 0이면 안 받는다', largeSum({ isLarge: true, modelId: 9 }), 0);
+check('대형이 아니면 아예 안 붙는다', largeSum({ isLarge: false, modelId: 7 }), 0);
+check('차종별 목록이 없어도 기본 금액',
+  fs.computeSurcharges(largeExtra, { vehicle: { isLarge: true, modelId: 7 } }).total, 8000);
+// 판정 근거가 화면·안내에 그대로 나가므로 어느 쪽이 적용됐는지 구분돼야 한다.
+check('근거에 차종명이 남는다',
+  fs.computeSurcharges(largeExtra, { vehicle: { isLarge: true, modelId: 7, modelName: '1톤 화물' }, largeCarFees: largeFees })
+    .items[0].reason, '1톤 화물 차종별 금액');
+check('기본 금액일 때의 근거',
+  fs.computeSurcharges(largeExtra, { vehicle: { isLarge: true } }).items[0].reason, '대형·화물 차종(기본 금액)');
+// 수입 대형차는 두 할증이 함께 붙고, 대형 쪽만 차종별 금액을 따른다.
+check('수입+대형은 차종별 금액과 수입 할증이 함께',
+  fs.computeSurcharges({ imported_car_fee: 10000, large_car_fee: 8000 },
+    { vehicle: { isImported: true, isLarge: true, modelId: 7 }, largeCarFees: largeFees }).total, 25000);
+
+console.log('\n[차종별 금액 입력 파싱]');
+check('빈 차종 줄은 버린다',
+  input.parseLargeCarRows({ large_model_id: ['', '7'], large_model_fee: [5000, 15000] }).length, 1);
+check('같은 차종은 하나만',
+  input.parseLargeCarRows({ large_model_id: ['7', '7'], large_model_fee: [15000, 5000] }).length, 1);
+check('먼저 넣은 금액이 남는다',
+  input.parseLargeCarRows({ large_model_id: ['7', '7'], large_model_fee: [15000, 5000] })[0].fee, 15000);
+check('0도 저장 대상', input.parseLargeCarRows({ large_model_id: ['9'], large_model_fee: [0] })[0].fee, 0);
+check('범위 밖 차종별 금액은 막는다',
+  !!input.findBadFee({ large_model_id: ['7'], large_model_fee: [500] }), true);
+check('차종이 비면 금액을 따지지 않는다',
+  input.findBadFee({ large_model_id: [''], large_model_fee: [500] }), null);
+
 console.log('\n[목적지 장소 할증]');
 const placeRules = [{ keyword: '유원지', fee: 3000 }, { keyword: '전망대', fee: 7000 }];
 const place = (address) => fs.computeSurcharges({}, { destinationAddress: address, placeRules }).items;

@@ -368,6 +368,17 @@ router.post('/:id/accounts/:userId/status', asyncHandler(async (req, res) => {
 // ---------------- 탁송 요금 ----------------
 // 지사 요금표(fare_rules)와 같은 구조·같은 화면 부품을 쓴다. 다른 점은 하나 — 이 표가 비어
 // 있으면 지사 표가 적용된다는 사실을 화면이 밝힌다.
+// 차종별 대형/화물 할증 화면에 필요한 값. 선택지는 "대형/화물"로 등록된 차종만 준다 —
+// 대형이 아닌 차종에 금액을 걸어두면 판정이 false라 영영 적용되지 않는데 화면에는 남는다.
+async function loadLargeCarFeeView(scope, id) {
+  const keyCol = scope === 'group' ? 'group_id' : 'branch_id';
+  const [fees, models] = await Promise.all([
+    db.all(`SELECT vehicle_model_id, fee FROM fare_large_car_fees WHERE ${keyCol} = ? ORDER BY seq, id`, [id]).catch(() => []),
+    db.all('SELECT id, name FROM vehicle_models WHERE is_large ORDER BY name').catch(() => []),
+  ]);
+  return { largeCarFees: fees || [], largeCarModels: models || [] };
+}
+
 async function loadGroupFarePage(groupId) {
   const { group, groups } = await loadGroupWithSiblings(groupId);
   if (!group) return { group: null };
@@ -381,11 +392,13 @@ async function loadGroupFarePage(groupId) {
     db.all('SELECT name, fee FROM fare_special_tolls WHERE group_id = ? ORDER BY seq, id', [groupId]).catch(() => []),
   ]);
   const extra = extraRow || {};
+  const largeCar = await loadLargeCarFeeView('group', groupId);
   return {
     group, groups, tiers, extra, branchTiers, branchExtra: branchExtra || {},
     placeRules: placeRules || [],
     tollRules: tollRules || [],
     extraCostItems: fareSurcharge.extraCostStates(extra),
+    ...largeCar,
   };
 }
 

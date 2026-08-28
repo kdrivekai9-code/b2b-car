@@ -157,6 +157,17 @@ router.post('/:id/operating-hours/exceptions/:exceptionId/delete', asyncHandler(
 
 // ---------------- 탁송 요금 (지사) ----------------
 // 법인 요금표가 없을 때 쓰는 기본값이다(routes/groups.js의 법인 탁송 요금표 참조).
+// 차종별 대형/화물 할증 화면에 필요한 값. 선택지는 "대형/화물"로 등록된 차종만 준다 —
+// 대형이 아닌 차종에 금액을 걸어두면 판정이 false라 영영 적용되지 않는데 화면에는 남는다.
+async function loadLargeCarFeeView(scope, id) {
+  const keyCol = scope === 'group' ? 'group_id' : 'branch_id';
+  const [fees, models] = await Promise.all([
+    db.all(`SELECT vehicle_model_id, fee FROM fare_large_car_fees WHERE ${keyCol} = ? ORDER BY seq, id`, [id]).catch(() => []),
+    db.all('SELECT id, name FROM vehicle_models WHERE is_large ORDER BY name').catch(() => []),
+  ]);
+  return { largeCarFees: fees || [], largeCarModels: models || [] };
+}
+
 router.get('/:id/fare-rules', asyncHandler(async (req, res) => {
   const [branch, tiers, extraRow, branches, placeRules, tollRules] = await Promise.all([
     db.get('SELECT * FROM branches WHERE id = ?', [req.params.id]),
@@ -169,6 +180,7 @@ router.get('/:id/fare-rules', asyncHandler(async (req, res) => {
   ]);
   if (!branch) return res.status(404).send('지사를 찾을 수 없습니다.');
   const extra = extraRow || {};
+  const largeCar = await loadLargeCarFeeView('branch', req.params.id);
   res.render('branches/fare_rules', {
     title: '탁송 요금 - ' + branch.name,
     branch,
@@ -184,6 +196,7 @@ router.get('/:id/fare-rules', asyncHandler(async (req, res) => {
     extraCostItems: fareSurcharge.extraCostStates(extra),
     surchargeMin: fareSurcharge.SURCHARGE_FEE_MIN,
     surchargeMax: fareSurcharge.SURCHARGE_FEE_MAX,
+    ...largeCar,
   });
 }));
 
