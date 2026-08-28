@@ -38,7 +38,10 @@
     <% }) %>
     <div class="kv"><span class="k">도착지</span><span><%= order.destination_address %></span></div>
     <div class="kv"><span class="k">도착지 연락처</span><span><%= order.destination_contact || '-' %></span></div>
-    <div class="kv"><span class="k">차종 / 차량번호</span><span><%= [order.vehicle_type, order.vehicle_number].filter(Boolean).join(' / ') || '-' %></span></div>
+    <div class="kv"><span class="k">차종 / 차량번호</span><span>
+      <%= [order.vehicle_type, order.vehicle_number].filter(Boolean).join(' / ') || '-' %>
+      <%- include('../partials/vehicle_class_badge', { row: order }) %>
+    </span></div>
     <div class="kv"><span class="k">예약일시</span><span><%= order.reserved_date %> <%= order.reserved_time %></span></div>
     <div class="kv"><span class="k">결제방식</span><span><%= order.payment_method_name || '-' %></span></div>
     <div class="kv"><span class="k">요금</span><span><%= formatMoney(order.fare_amount) %></span></div>

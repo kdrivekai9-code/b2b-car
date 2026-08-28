@@ -781,8 +781,13 @@ function settlementMonth(raw) {
 async function loadSettlement(groupId, month) {
   // 조회 실패를 .catch로 삼켜 빈 목록을 돌려주면 "이 달은 실적이 없다"로 읽힌다 — 정산 화면에서
   // 그건 그냥 오류보다 나쁘다. 던져서 오류 화면이 뜨게 둔다.
-  const rows = await db.all(`
+  //
+  // 다만 차종 분류 컬럼만은 예외다. 마이그레이션(20260828040000) 전에는 그 컬럼이 없는데,
+  // 그것 때문에 정산 화면 전체가 안 열리면 배포와 마이그레이션 사이에 정산 업무가 멈춘다.
+  // 분류는 보조 정보라 빠져도 정산 금액에는 영향이 없다 — 그 컬럼만 빼고 다시 조회한다.
+  const SETTLEMENT_SQL = (vehicleCols) => `
     SELECT o.id, o.oid, o.reserved_date, o.reserved_time, o.vehicle_number,
+           ${vehicleCols}
            o.origin_address, o.origin_address_detail,
            o.destination_address, o.destination_address_detail,
            o.fare_amount, o.ferry_fare_amount,
@@ -798,7 +803,15 @@ async function loadSettlement(groupId, month) {
        AND o.status = '완료'
        AND SUBSTRING(h.completed_at, 1, 7) = ?
      ORDER BY h.completed_at ASC, o.id ASC
-  `, [groupId, month]);
+  `;
+  const rows = await db.all(
+    SETTLEMENT_SQL('o.vehicle_type, o.car_type, o.fuel_type, o.vehicle_class_source,'),
+    [groupId, month]
+  ).catch((e) => {
+    if (!e || e.code !== '42703') throw e;
+    console.error('정산: 차종 분류 컬럼 없음 — 그 열을 빼고 조회합니다:', e.message);
+    return db.all(SETTLEMENT_SQL('o.vehicle_type,'), [groupId, month]);
+  });
 
   // 도선료는 탁송료와 별개로 청구되는 실비다 — 합계에서 빠지면 정산서와 맞지 않는다.
   const items = rows.map((r) => {

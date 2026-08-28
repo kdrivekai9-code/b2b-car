@@ -46,6 +46,11 @@ router.get('/', asyncHandler(async (req, res) => {
     // 입력 중인 이름이 어떻게 판정될지 미리 보여준다 — 등록 전에 틀린 걸 알 수 있다.
     preview: req.query.preview ? classifyToFields(req.query.preview) : null,
     previewName: req.query.preview || '',
+    // 이미 자동 인식되는 이름을 등록하려 했을 때의 안내. 사전이 무엇을 어떻게 판정하는지
+    // 보여주고, 그래도 등록할지(=사전을 바로잡으려는 것인지) 사람이 정하게 한다.
+    dup: req.query.dup
+      ? { name: req.query.dup, reason: req.query.dupReason || '', summary: req.query.dupSummary || '' }
+      : null,
     // 코드에 박아둔 자동 판정 사전. 이걸 화면에 안 보여주면 관리자는 등록한 몇 건만 보고
     // "이것만 할증이 붙는다"고 읽는다(실사용 지적 2026-08-28) — 실제로는 등록이 없어도
     // 이 사전으로 판정해서 붙는다. 무엇이 이미 인식되는지 보여야 예외만 등록할 수 있다.
@@ -99,6 +104,27 @@ router.post('/keywords/:id/delete', asyncHandler(async (req, res) => {
 router.post('/', asyncHandler(async (req, res) => {
   const name = String(req.body.name || '').trim();
   if (!name) return res.redirect('/vehicle-models?error=' + encodeURIComponent('차종명을 입력해주세요.'));
+
+  // 이미 자동 인식되는 이름이면 기본적으로 막고 안내한다.
+  //
+  // 왜 막나: 사전이 이미 같은 결과를 내는 이름을 등록하면 하는 일이 없다. 목록만 길어지고,
+  // 나중에 사전을 고쳐도 이 행이 덮어써서 왜 안 바뀌는지 알기 어려워진다.
+  //
+  // 왜 완전히 막지는 않나: 이 화면의 본래 목적이 **사전이 틀렸을 때 바로잡는 것**이다.
+  // 예를 들어 "쉐보레 볼트EV"는 사전이 국산으로 판정하는데, 수입으로 받고 싶으면 등록해서
+  // 고치는 수밖에 없다. 사전에 걸린다는 이유로 무조건 막으면 그 길이 사라진다.
+  // 그래서 판정 결과를 보여주고, 그래도 등록하겠다면 진행한다.
+  const auto = classifyToFields(name, await vehicleModels.loadExtraKeywords());
+  if (!auto.unclassified && req.body.force !== '1') {
+    const params = new URLSearchParams({
+      dup: name,
+      dupReason: auto.reasons.join(', '),
+      dupSummary: `${auto.carType}${auto.fuelType === 'ev' ? ' · EV' : ''}`,
+    });
+    if (req.body.q) params.set('q', req.body.q);
+    return res.redirect('/vehicle-models?' + params.toString());
+  }
+
   try {
     await vehicleModels.createModel(name);
   } catch (e) {

@@ -171,6 +171,18 @@ console.log('\n[국산차가 수입으로 넘어가지 않는다]');
 console.log('\n[픽업 계열은 대형]');
 ['액티언스포츠', '코란도스포츠', '무쏘칸'].forEach((n) => check(`${n} → 대형`, cls(n)[1], true));
 
+console.log('\n[미확인 차종 판별]');
+// car_type만으로는 "확실히 국산"과 "아무것도 안 걸려서 국산으로 떨어짐"이 구분되지 않는다.
+// 뒤쪽은 수입차든 1톤 화물이든 할증이 통째로 빠진 상태라 화면에 드러나야 한다.
+check('사전에 걸리면 미확인 아님', vc.classifyToFields('BMW 520d').unclassified, false);
+check('국산 브랜드도 판정이므로 미확인 아님', vc.classifyToFields('현대 그랜저').unclassified, false);
+check('대형 표기도 미확인 아님', vc.classifyToFields('카니발').unclassified, false);
+check('아무것도 안 걸리면 미확인', vc.classifyToFields('토레스').unclassified, true);
+check('쓰레기 값도 미확인', vc.classifyToFields('번호').unclassified, true);
+check('빈 값도 미확인', vc.classifyToFields('').unclassified, true);
+// 미확인이어도 car_type은 '국산'으로 채워진다 — 그래서 화면이 car_type만 보면 안 된다.
+check('미확인인데 car_type은 국산으로 보인다', vc.classifyToFields('토레스').carType, '국산');
+
 console.log('\n[분류값 car_type / fuel_type]');
 const fields = (n) => { const r = vc.classifyToFields(n); return [r.carType, r.fuelType]; };
 check('BMW 520d', fields('BMW 520d'), ['수입', null]);

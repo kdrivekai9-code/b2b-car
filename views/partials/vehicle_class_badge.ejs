@@ -1,0 +1,14 @@
+<%# 차종 판정 결과 배지. 오더 상세와 법인 정산이 같은 부품을 쓴다.
+    row: orders 행 (vehicle_type / car_type / fuel_type / vehicle_class_source)
+
+    미확인(unknown)만 눈에 띄게 한다. 나머지는 이미 판정이 된 것이라 배지를 달면 화면만
+    시끄러워지고, 정작 손봐야 할 줄이 묻힌다.
+
+    왜 눈에 띄어야 하나: 어느 사전에도 안 걸린 이름은 수입차든 1톤 화물이든 할증이 통째로
+    빠진 채 청구된다. 그런데 car_type은 '국산'으로 채워져 화면상 정상으로 보인다 — 요금이
+    적게 나가는 실패라 아무도 눈치채지 못한다. %>
+<% if (row && row.vehicle_class_source === 'unknown') { %>
+  <span class="badge amber" title="자동 인식 사전에 없는 차종명입니다. 수입차·대형/화물·전기차 할증이 붙지 않았을 수 있습니다. 차종 관리에서 등록하면 이후 접수부터 반영됩니다.">미확인 차종</span>
+<% } else if (row && row.car_type) { %>
+  <span class="badge gray"><%= row.car_type %><%= row.fuel_type === 'ev' ? ' · EV' : '' %></span>
+<% } %>

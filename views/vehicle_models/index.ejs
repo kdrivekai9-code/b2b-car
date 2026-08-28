@@ -14,6 +14,30 @@
 </div>
 
 <% if (error) { %><div class="alert error"><%= error %></div><% } %>
+
+<%# 이미 자동 인식되는 이름을 등록하려 한 경우. 막되, 사전을 바로잡으려는 것이면 진행할 수
+    있어야 한다 — 이 화면의 본래 목적이 그것이다(예: "쉐보레 볼트EV"를 수입으로 받고 싶을 때). %>
+<% if (dup) { %>
+  <div class="alert" style="background:#fef3e2;color:#b45309;border-color:#f5d9a8;">
+    <b><%= dup.name %></b> 은(는) <b>이미 자동 인식 사전에 등록</b>되어 있어 따로 등록하지 않아도 됩니다.
+    <div style="margin-top:6px;">
+      현재 자동 판정 → <b><%= dup.summary %></b>
+      <% if (dup.reason) { %><span class="page-sub">(<%= dup.reason %>)</span><% } %>
+    </div>
+    <div style="margin-top:10px;">
+      <span class="page-sub">
+        자동 판정이 <b>틀려서 바로잡으려는 것</b>이라면 등록하세요. 등록하면 그 값이 사전보다 우선합니다.
+      </span>
+    </div>
+    <form method="POST" action="/vehicle-models" style="margin-top:8px;display:flex;gap:8px;">
+      <input type="hidden" name="name" value="<%= dup.name %>">
+      <input type="hidden" name="q" value="<%= q %>">
+      <input type="hidden" name="force" value="1">
+      <button class="btn small" type="submit">그래도 등록 (판정을 고치겠습니다)</button>
+      <a class="btn small secondary" href="/vehicle-models<%= q ? '?q=' + encodeURIComponent(q) : '' %>">취소</a>
+    </form>
+  </div>
+<% } %>
 <% if (migrationMissing) { %>
   <div class="alert error">차종 테이블이 아직 없습니다. 마이그레이션(20260828010000)을 실행해주세요.</div>
 <% } %>
