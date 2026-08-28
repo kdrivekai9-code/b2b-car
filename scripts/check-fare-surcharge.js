@@ -105,6 +105,18 @@ check('범위 밖 차종별 금액은 막는다',
 check('차종이 비면 금액을 따지지 않는다',
   input.findBadFee({ large_model_id: [''], large_model_fee: [500] }), null);
 
+// 화면이 등록된 대형 차종을 전부 한 줄씩 깔기 때문에 빈 칸이 정상이다. 빈 칸을 0으로 읽으면
+// 관리자가 아무것도 안 건드리고 저장만 눌러도 모든 대형 차종의 할증이 0원이 된다.
+check('빈 칸은 행을 만들지 않는다(기본 금액 사용)',
+  input.parseLargeCarRows({ large_model_id: ['7', '9'], large_model_fee: ['', ''] }).length, 0);
+check('빈 칸과 0을 구분한다',
+  input.parseLargeCarRows({ large_model_id: ['7', '9'], large_model_fee: ['', '0'] })
+    .map((r) => [r.vehicleModelId, r.fee]), [[9, 0]]);
+check('공백만 있어도 빈 칸으로 본다',
+  input.parseLargeCarRows({ large_model_id: ['7'], large_model_fee: ['   '] }).length, 0);
+check('빈 칸은 범위 검사도 하지 않는다',
+  input.findBadFee({ large_model_id: ['7'], large_model_fee: [''] }), null);
+
 console.log('\n[목적지 장소 할증]');
 const placeRules = [{ keyword: '유원지', fee: 3000 }, { keyword: '전망대', fee: 7000 }];
 const place = (address) => fs.computeSurcharges({}, { destinationAddress: address, placeRules }).items;
