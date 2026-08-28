@@ -138,11 +138,67 @@ function isReadOnlySql(sql) {
   return !/\b(insert|update|delete|merge)\b/i.test(s);
 }
 
+// ── 커넥션을 못 얻어 실패한 요청을 DB에 남긴다 ──────────────────────────────
+//
+// 위 30초 타이머(poolWatch)는 오래 사는 로컬 서버에서만 쓸모가 있다. Vercel 함수는 응답을
+// 보내고 나면 이벤트 루프가 얼어붙고 unref된 타이머가 프로세스를 붙잡지도 못해서, 프로덕션
+// 로그에는 거의 안 찍힌다. 게다가 Vercel 런타임 로그는 보존 기간이 짧아 지나간 사고를 되짚을
+// 수도 없다 — 풀 압박을 알 방법이 사실상 없었다.
+//
+// 그래서 타이머가 아니라 **실제로 커넥션을 못 얻어 요청이 죽은 순간**을 남긴다. 진짜 알아야
+// 할 것은 "대기했다"가 아니라 "못 얻어 실패했다"이고, 그건 요청 경로에서 벌어지므로 서버리스
+// 에서도 반드시 실행된다. integration_errors로 보내면 시스템 상태 패널에 그대로 잡힌다.
+//
+// 한계(알고 넣는다): 이 기록도 같은 풀로 INSERT한다. 풀이 오래 막혀 있으면 이 INSERT까지
+// 밀려 실패한다 — 짧은 버스트는 남고 장시간 고갈은 못 남길 수 있다. 그래도 지금(아무것도 안
+// 남음)보다는 낫고, 별도 커넥션을 여는 것은 고갈 중에 연결을 하나 더 만드는 셈이라 안 한다.
+const POOL_REPORT_INTERVAL_MS = 60000;
+let lastPoolReportAt = 0;
+let reportingPool = false;
+
+function isPoolExhaustionError(e) {
+  return !!e && /timeout exceeded when trying to connect/i.test(String((e && e.message) || ''));
+}
+
+function notePoolExhaustion(e, sql) {
+  // 기록하다 또 커넥션을 못 얻으면 이 함수로 되돌아온다 — 재진입을 막지 않으면 무한 재귀다.
+  if (reportingPool) return;
+  const now = Date.now();
+  if (now - lastPoolReportAt < POOL_REPORT_INTERVAL_MS) return;
+  // 시도 **전에** 시각을 찍는다. 풀이 고갈되면 모든 요청이 동시에 여기로 오는데, 성공했을 때만
+  // 갱신하면 그 폭주가 그대로 INSERT 폭주가 되어 고갈을 더 악화시킨다.
+  lastPoolReportAt = now;
+  reportingPool = true;
+
+  // 지연 require — lib/integrationLog가 이 파일을 require한다(순환). 실행 시점에는 양쪽이
+  // 다 로드돼 있어 안전하다.
+  Promise.resolve()
+    .then(() => require('./lib/integrationLog').logIntegrationError({
+      source: 'db_pool',
+      operation: 'acquire',
+      errorCode: e && e.code ? String(e.code) : null,
+      message: String((e && e.message) || '커넥션 획득 실패'),
+      context: {
+        max: pool.options.max,
+        total: pool.totalCount,
+        idle: pool.idleCount,
+        waiting: pool.waitingCount,
+        // 한 건만 남더라도 규모를 알 수 있게 최고수위를 함께 싣는다.
+        waitingHighWater,
+        // 파라미터는 싣지 않는다(개인정보가 들어 있다) — 어느 쿼리였는지만 알면 된다.
+        sql: String(sql || '').replace(/\s+/g, ' ').slice(0, 120),
+      },
+    }))
+    .catch(() => {})
+    .then(() => { reportingPool = false; }, () => { reportingPool = false; });
+}
+
 async function queryWithReadRetry(sql, params) {
   noteWaiting();
   try {
     return await pool.query(sql, params);
   } catch (e) {
+    if (isPoolExhaustionError(e)) notePoolExhaustion(e, sql);
     if (!isDeadConnectionError(e) || !isReadOnlySql(sql)) throw e;
     console.warn(`DB 커넥션이 죽어 읽기를 한 번 재시도한다: ${e.message}`);
     return pool.query(sql, params);
@@ -163,10 +219,17 @@ async function get(sql, params = []) {
 // (SQLite의 info.lastInsertRowid를 사용하던 기존 호출부와의 호환을 위함).
 async function run(sql, params = []) {
   noteWaiting();
-  const { rows, rowCount } = await pool.query(toPgSql(sql), params);
-  return { rowCount, lastInsertRowid: rows[0] ? rows[0].id : undefined };
+  const pgSql = toPgSql(sql);
+  try {
+    const { rows, rowCount } = await pool.query(pgSql, params);
+    return { rowCount, lastInsertRowid: rows[0] ? rows[0].id : undefined };
+  } catch (e) {
+    // 쓰기는 재시도하지 않는다(위 queryWithReadRetry 주석 참고) — 기록만 남기고 그대로 던진다.
+    if (isPoolExhaustionError(e)) notePoolExhaustion(e, pgSql);
+    throw e;
+  }
 }
 
 // isReadOnlySql / isDeadConnectionError는 scripts/check-db-resilience.js가 판정 규칙을 그대로
 // 검사하려고 쓴다 — 재시도해도 되는 문장인지를 가르는 규칙이라, 흉내내면 규칙이 갈라진다.
-module.exports = { pool, all, get, run, isReadOnlySql, isDeadConnectionError };
+module.exports = { pool, all, get, run, isReadOnlySql, isDeadConnectionError, isPoolExhaustionError };
