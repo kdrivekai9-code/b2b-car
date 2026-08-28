@@ -73,7 +73,9 @@ test.describe('차종 관리 · 자동 인식 사전', () => {
   // 코드 사전에 빠진 브랜드를 배포 없이 채울 수 있어야 한다 — 못 채우면 그 차종은 할증이
   // 조용히 빠진 채로 남는다(요금이 적게 나가는 쪽이라 아무도 눈치채지 못한다).
   test('빠진 낱말을 화면에서 더하면 판정에 반영되고, 지우면 되돌아간다', async ({ page }) => {
-    const WORD = 'e2e쿠프라';
+    // 사전에 절대 없는 이름이어야 한다. 처음엔 'e2e쿠프라'였는데 '쿠프라'를 사전에 넣자마자
+    // 아래 "검사 전제"에서 걸렸다 — 표식이 사전 낱말을 품으면 "모르는 이름" 전제가 무너진다.
+    const WORD = 'e2q검사표식';
     const wipe = async () => {
       await db.run('DELETE FROM vehicle_class_keywords WHERE word LIKE ?', [`${WORD}%`]).catch(() => {});
     };

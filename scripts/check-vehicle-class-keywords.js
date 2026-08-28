@@ -12,7 +12,10 @@ const db = require('../db');
 const { classifyVehicleModel, KEYWORD_KINDS, BUILT_IN } = require('../lib/vehicleClass');
 const vehicleModels = require('../lib/vehicleModels');
 
-const MARK = 'chk쿠프라';
+// 사전에 절대 없는 이름이어야 한다. 처음엔 'chk쿠프라'였는데, 이번에 '쿠프라'를 사전에
+// 넣자마자 이 검사가 스스로 깨졌다 — 표식이 사전 낱말을 품고 있으면 "모르는 이름" 전제가
+// 무너진다. 사전에 들어갈 일이 없는 문자열을 쓴다.
+const MARK = 'zzq검사표식';
 let failures = 0;
 function check(label, actual, expected) {
   const ok = JSON.stringify(actual) === JSON.stringify(expected);
@@ -72,6 +75,29 @@ async function cleanup() {
     const merged = classifyVehicleModel('벤츠 E250', { import_brand: [MARK] });
     check('기존 브랜드도 그대로 잡힌다', merged.isImported, true);
     check('코드 사전 배열은 그대로', BUILT_IN.import_brand.includes(MARK), false);
+
+    console.log('[코드 사전에 채워 넣은 누락 — 실측으로 확인한 것들]');
+    // 2026-08-28 실측에서 빠져 있던 것들. 다시 빠지면 그 차종의 할증이 조용히 사라진다.
+    const filled = [
+      ['쿠프라 포맨터', 'isImported'], ['CUPRA 본', 'isImported'],
+      ['DS7 크로스백', 'isImported'], ['DS4', 'isImported'],
+      ['루시드 에어', 'isEv'], ['리비안 R1T', 'isEv'], ['BYD 아토3', 'isEv'],
+      // 'etron'은 원래 있었지만 한글 "이트론"으로 적는 접수가 흔하다.
+      ['아우디 이트론', 'isEv'],
+      ['볼보 EX30', 'isEv'], ['볼보 EX90', 'isEv'],
+    ];
+    filled.forEach(([name, flag]) => {
+      check(`${name} → ${flag === 'isEv' ? '전기' : '수입'}`, classifyVehicleModel(name)[flag], true);
+    });
+
+    console.log('[짧은 낱말이 국산차를 수입으로 만들지 않는다]');
+    // 판정은 "이름에 들어 있기만 하면" 걸린다. 그래서 맨 'ds'·'ex'는 넣지 않고 모델 코드로 넣었다.
+    // 이 줄이 깨지면 국산차에 수입 할증이 붙어 고객에게 더 받는다 — 못 받는 것보다 나쁘다.
+    const domestic = ['그랜저', '쏘나타', '아반떼', '토레스', '싼타페', '팰리세이드', '카니발',
+      '스포티지', '셀토스', 'K5', 'K8', 'G80', '봉고3', '포터2', '레이', '모닝', '트랙스',
+      '코나', '투싼', '스타리아'];
+    check('국산차가 수입으로 잡히지 않는다',
+      domestic.filter((n) => classifyVehicleModel(n).isImported), []);
 
     console.log('[표가 없어도 죽지 않는다]');
     // 마이그레이션 전 환경에서도 코드 사전만으로 접수가 돌아야 한다.
