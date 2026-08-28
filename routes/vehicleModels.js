@@ -4,7 +4,7 @@ const db = require('../db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const asyncHandler = require('../middleware/asyncHandler');
 const vehicleModels = require('../lib/vehicleModels');
-const { classifyVehicleModel } = require('../lib/vehicleClass');
+const { classifyToFields } = require('../lib/vehicleClass');
 
 const router = express.Router();
 router.use(requireAuth, requireRole('admin', 'branch_manager'));
@@ -29,7 +29,7 @@ router.get('/', asyncHandler(async (req, res) => {
     saved: req.query.saved === '1',
     error: req.query.error || null,
     // 입력 중인 이름이 어떻게 판정될지 미리 보여준다 — 등록 전에 틀린 걸 알 수 있다.
-    preview: req.query.preview ? classifyVehicleModel(req.query.preview) : null,
+    preview: req.query.preview ? classifyToFields(req.query.preview) : null,
     previewName: req.query.preview || '',
   });
 }));

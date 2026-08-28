@@ -122,6 +122,25 @@ console.log('\n[국산차가 수입으로 넘어가지 않는다]');
 console.log('\n[픽업 계열은 대형]');
 ['액티언스포츠', '코란도스포츠', '무쏘칸'].forEach((n) => check(`${n} → 대형`, cls(n)[1], true));
 
+console.log('\n[분류값 car_type / fuel_type]');
+const fields = (n) => { const r = vc.classifyToFields(n); return [r.carType, r.fuelType]; };
+check('BMW 520d', fields('BMW 520d'), ['수입', null]);
+check('벤츠 EQS', fields('벤츠 EQS'), ['수입', 'ev']);
+check('아이오닉5 (국산 전기차)', fields('아이오닉5'), ['국산', 'ev']);
+check('카니발', fields('카니발'), ['대형', null]);
+check('1톤 화물', fields('1톤 화물'), ['대형', null]);
+check('그랜저', fields('그랜저'), ['국산', null]);
+check('빈 값도 국산으로 떨어진다', fields(''), ['국산', null]);
+// 우선순위: 수입 → 대형 → 국산. 겹치는 차는 car_type에 하나만 보인다.
+check('수입+대형은 수입으로 보인다', vc.classifyToFields('벤츠 리무진').carType, '수입');
+// **그러나 요금은 boolean이 낸다** — car_type 한 칸으로 계산하면 할증이 하나만 붙는다.
+check('수입+대형은 두 할증이 모두 붙는다',
+  fs.computeSurcharges({ imported_car_fee: 10000, large_car_fee: 8000 },
+    { vehicle: vc.classifyToFields('벤츠 리무진') }).total, 18000);
+check('전기차가 아니면 fuel_type은 null', vc.fuelTypeOf({ isEv: false }), null);
+check('전기차면 ev', vc.fuelTypeOf({ isEv: true }), 'ev');
+check('허용값 목록', [vc.CAR_TYPES, vc.FUEL_TYPES], [['국산', '수입', '대형'], ['ev']]);
+
 console.log('\n[입력 검증]');
 check('범위 밖 금액은 막는다', !!input.findBadFee({ imported_car_fee: 500 }), true);
 check('상한 초과도 막는다', !!input.findBadFee({ ev_fee: 30000 }), true);

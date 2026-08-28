@@ -28,6 +28,8 @@
   <% if (preview) { %>
     <p class="page-sub">
       <b><%= previewName %></b> 자동 판정 →
+      car_type <b><%= preview.carType %></b> ·
+      fuel_type <b><%= preview.fuelType || '-' %></b> ·
       수입 <b><%= preview.isImported ? 'O' : '-' %></b> ·
       대형/화물 <b><%= preview.isLarge ? 'O' : '-' %></b> ·
       전기 <b><%= preview.isEv ? 'O' : '-' %></b>
@@ -53,16 +55,18 @@
         <thead>
           <tr>
             <th>차종명</th>
-            <th style="width:90px;">수입차</th>
-            <th style="width:110px;">대형/화물</th>
-            <th style="width:90px;">전기차</th>
-            <th style="width:24%;">자동 판정 근거</th>
+            <th style="width:90px;">car_type</th>
+            <th style="width:80px;">fuel_type</th>
+            <th style="width:80px;">수입차</th>
+            <th style="width:95px;">대형/화물</th>
+            <th style="width:80px;">전기차</th>
+            <th style="width:20%;">자동 판정 근거</th>
             <th style="width:70px;"></th>
           </tr>
         </thead>
         <tbody>
           <% if (!rows.length) { %>
-            <tr><td colspan="6" class="page-sub">등록된 차종이 없습니다. 위에서 등록해주세요.</td></tr>
+            <tr><td colspan="8" class="page-sub">등록된 차종이 없습니다. 위에서 등록해주세요.</td></tr>
           <% } %>
           <% rows.forEach(function (r) { %>
             <%# 자동 판정과 확정값이 갈린 줄은 사람이 고친 것이다 — 사전을 손볼 단서라 표시해 둔다. %>
@@ -73,6 +77,10 @@
                 <%= r.name %>
                 <% if (edited) { %><span class="page-sub">· 수정됨</span><% } %>
               </td>
+              <%# car_type/fuel_type은 체크박스에서 파생되는 값이라 직접 고치지 않는다 —
+                  따로 손댈 수 있게 하면 목록은 '국산'인데 요금은 수입 할증이 붙는 상태가 생긴다. %>
+              <td><b><%= r.car_type || '-' %></b></td>
+              <td><%= r.fuel_type || '-' %></td>
               <td><input type="checkbox" name="is_imported" value="<%= r.id %>" <%= r.is_imported ? 'checked' : '' %>></td>
               <td><input type="checkbox" name="is_large" value="<%= r.id %>" <%= r.is_large ? 'checked' : '' %>></td>
               <td><input type="checkbox" name="is_ev" value="<%= r.id %>" <%= r.is_ev ? 'checked' : '' %>></td>
