@@ -108,6 +108,20 @@ check('Maserati Levante → 수입만', cls('Maserati Levante'), [true, false, f
 check('르노삼성 SM6 → 국산', cls('르노삼성 SM6'), [false, false, false]);
 check('르노 조에 → 수입+전기', cls('르노 조에'), [true, false, true]);
 
+// 브랜드를 안 적고 모델명만 넣는 경우(접수 화면은 자유 입력이라 흔하다).
+console.log('\n[브랜드 없는 수입 모델명]');
+['캠리', '어코드', '머스탱', '티구안', '골프', '파사트', '익스플로러', '랭글러', '모델3', 'XC60']
+  .forEach((n) => check(`${n} → 수입`, cls(n)[0], true));
+
+// 위 사전이 국산차를 수입으로 만들면 그쪽이 훨씬 나쁘다(물량이 많고, 더 받는 방향으로 틀린다).
+console.log('\n[국산차가 수입으로 넘어가지 않는다]');
+['그랜저', '쏘렌토', '토레스', '싼타페', '아반떼', '기아 카니발', '현대 스타리아', '제네시스 G80']
+  .forEach((n) => check(`${n} → 수입 아님`, cls(n)[0], false));
+
+// 선박요금표가 대형/픽업 급으로 분류하는 차들. 실제 접수 데이터에 "액티언스포츠"가 있었다.
+console.log('\n[픽업 계열은 대형]');
+['액티언스포츠', '코란도스포츠', '무쏘칸'].forEach((n) => check(`${n} → 대형`, cls(n)[1], true));
+
 console.log('\n[입력 검증]');
 check('범위 밖 금액은 막는다', !!input.findBadFee({ imported_car_fee: 500 }), true);
 check('상한 초과도 막는다', !!input.findBadFee({ ev_fee: 30000 }), true);
