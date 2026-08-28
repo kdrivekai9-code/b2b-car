@@ -2,9 +2,13 @@
 <div class="page-head-row">
   <div>
     <h1 class="page-title">차종 관리</h1>
+    <%# 예전 안내문은 "여기 등록된 판정값으로 붙습니다"였는데, 그 말대로 읽으면 등록하지 않은
+        차종에는 할증이 안 붙는 줄 안다(실사용 지적 2026-08-28: "등록화면에 내가 등록한 것밖에
+        안 보인다"). 실제로는 등록이 없으면 아래 내장 사전으로 자동 판정해서 붙는다. %>
     <p class="page-sub">
-      요금설정의 <b>수입차 · 대형/화물 · 전기차 할증</b>이 여기 등록된 판정값으로 붙습니다.
-      차종을 등록하면 이름으로 자동 판정하고, 틀린 줄은 체크를 고쳐 저장하면 그 값이 계속 쓰입니다.
+      요금설정의 <b>수입차 · 대형/화물 · 전기차 할증</b>은 <b>등록하지 않은 차종에도 붙습니다</b> —
+      등록이 없으면 아래 <b>자동 인식 사전</b>으로 그 자리에서 판정합니다.
+      이 목록은 <b>사전이 틀렸을 때 바로잡는 곳</b>입니다. 등록해두면 그 값이 사전보다 우선합니다.
     </p>
   </div>
 </div>
@@ -99,6 +103,60 @@
     <% } %>
   </form>
 </div>
+
+<%# ── 자동 인식 사전 ────────────────────────────────────────────────────────
+    코드(lib/vehicleClass.js)에 박아둔 목록이라 이 화면에서 고칠 수 없다. 그래도 보여주는
+    이유: 무엇이 이미 인식되는지 모르면 관리자는 "등록된 몇 건만 할증이 붙는다"고 오해하고,
+    이미 잡히는 차종을 중복 등록하거나 반대로 새는 차종을 못 찾는다. %>
+<div class="card">
+  <div class="section-title">🔎 자동 인식 사전 — 등록 없이 판정되는 이름</div>
+  <p class="page-sub">
+    아래 낱말이 차종명에 들어 있으면 등록하지 않아도 자동으로 판정합니다.
+    표기가 흔들려도(<code>benz E250</code>, <code>벤츠e클래스</code>) 잡습니다.
+    <b>여기 없는 이름은 국산·일반으로 떨어져 할증이 붙지 않습니다</b> — 그런 차종을 발견하면 위에서 등록해주세요.
+  </p>
+  <div class="field" style="max-width:320px;">
+    <label for="dictFilter">사전 검색</label>
+    <input type="text" id="dictFilter" placeholder="예: 벤츠, tesla, 톤">
+  </div>
+  <% dictionaries.forEach(function (d) { %>
+    <details class="dict-group" data-key="<%= d.key %>" style="margin-top:10px;">
+      <summary><b><%= d.label %></b> <span class="page-sub">(<%= d.words.length %>개)</span></summary>
+      <div class="dict-words" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">
+        <% d.words.forEach(function (w) { %>
+          <span class="badge gray dict-word" style="font-weight:normal;"><%= w %></span>
+        <% }) %>
+      </div>
+    </details>
+  <% }) %>
+  <p class="page-sub" style="margin-top:12px;">
+    이 사전은 코드에 들어 있어 화면에서 고칠 수 없습니다. 빠진 이름이 자주 보이면 사전에 추가하는 편이
+    낫습니다(차종마다 등록하지 않아도 됩니다).
+  </p>
+</div>
+
+<script>
+  (function () {
+    var input = document.getElementById('dictFilter');
+    if (!input) return;
+    var groups = Array.prototype.slice.call(document.querySelectorAll('.dict-group'));
+    input.addEventListener('input', function () {
+      var q = input.value.trim().toLowerCase();
+      groups.forEach(function (g) {
+        var words = Array.prototype.slice.call(g.querySelectorAll('.dict-word'));
+        var hit = 0;
+        words.forEach(function (w) {
+          var match = !q || w.textContent.toLowerCase().indexOf(q) !== -1;
+          w.style.display = match ? '' : 'none';
+          if (match) hit += 1;
+        });
+        // 검색 중에는 걸린 묶음만 펼쳐 보여준다 — 빈 묶음이 남아 있으면 "없음"인지 "안 펼침"인지 헷갈린다.
+        g.style.display = (q && !hit) ? 'none' : '';
+        if (q) g.open = hit > 0;
+      });
+    });
+  })();
+</script>
 
 <% if (saved) { %><div class="toast">저장되었습니다.</div><% } %>
 <%- include('../partials/footer') %>

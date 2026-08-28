@@ -4,7 +4,10 @@ const db = require('../db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const asyncHandler = require('../middleware/asyncHandler');
 const vehicleModels = require('../lib/vehicleModels');
-const { classifyToFields } = require('../lib/vehicleClass');
+const {
+  classifyToFields,
+  IMPORT_BRANDS, IMPORT_MODELS, DOMESTIC_BRANDS, EV_KEYWORDS, LARGE_KEYWORDS,
+} = require('../lib/vehicleClass');
 
 const router = express.Router();
 router.use(requireAuth, requireRole('admin', 'branch_manager'));
@@ -31,6 +34,17 @@ router.get('/', asyncHandler(async (req, res) => {
     // 입력 중인 이름이 어떻게 판정될지 미리 보여준다 — 등록 전에 틀린 걸 알 수 있다.
     preview: req.query.preview ? classifyToFields(req.query.preview) : null,
     previewName: req.query.preview || '',
+    // 코드에 박아둔 자동 판정 사전. 이걸 화면에 안 보여주면 관리자는 등록한 몇 건만 보고
+    // "이것만 할증이 붙는다"고 읽는다(실사용 지적 2026-08-28) — 실제로는 등록이 없어도
+    // 이 사전으로 판정해서 붙는다. 무엇이 이미 인식되는지 보여야 예외만 등록할 수 있다.
+    dictionaries: [
+      { key: 'import_brand', label: '수입 브랜드', words: IMPORT_BRANDS },
+      { key: 'import_model', label: '수입 모델명(브랜드 없이 쓰는 이름)', words: IMPORT_MODELS },
+      { key: 'ev', label: '전기차', words: EV_KEYWORDS },
+      { key: 'large', label: '대형 · 화물', words: LARGE_KEYWORDS },
+      // 국산 사전은 할증을 붙이는 목록이 아니라 수입 판정을 **막는** 목록이다(르노삼성 등).
+      { key: 'domestic', label: '국산(수입 판정에서 제외)', words: DOMESTIC_BRANDS },
+    ],
   });
 }));
 
