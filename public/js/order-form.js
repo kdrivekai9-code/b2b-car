@@ -850,23 +850,32 @@
     document.getElementById('mapDistanceInfo').style.display = '';
   }
 
-  function renderRouteSummary(totalKm, totalDurationSec, tollFare, routeTimingMeta) {
-    currentRouteDurationSec = Number.isFinite(totalDurationSec) ? totalDurationSec : null;
-    document.getElementById('routeTotalDistance').textContent = totalKm != null ? totalKm.toFixed(1) + 'km' : '-';
-    document.getElementById('routeTotalDuration').textContent = totalDurationSec != null ? formatDuration(totalDurationSec) : '-';
-    // 톨비 표시. 카카오는 요금소별 금액을 주지 않고 합계 하나만 준다(실측) — 그래서 특수구간
-    // (민자 교량 등)은 우리가 등록한 금액을 따로 덧붙여 보여준다. 합쳐 버리면 관리자가
-    // "이 톨비에 서해대교가 들어 있나"를 알 수 없고, 실비 청구 대상인지도 구분이 안 된다.
-    var tollEl = document.getElementById('routeTollFare');
-    var tollText = (tollFare !== null && tollFare !== undefined)
+  // 톨비 줄만 그린다. 카카오는 요금소별 금액을 주지 않고 합계 하나만 준다(실측) — 그래서
+  // 특수구간(민자 교량 등)은 우리가 등록한 금액을 따로 덧붙인다. 합쳐 버리면 관리자가
+  // "이 톨비에 서해대교가 들어 있나"를 알 수 없고, 실비 청구 대상인지도 구분이 안 된다.
+  //
+  // renderRouteSummary와 나눠 둔 이유: 특수구간은 요금 응답에만 들어 있어 경로 표시보다 늦게
+  // 온다. 그때 renderRouteSummary를 다시 부르면 그 안에서 updateFarePreview를 부르고, 그것이
+  // 다시 이 갱신을 부르는 무한 호출이 된다.
+  function renderTollFare(tollFare) {
+    var el = document.getElementById('routeTollFare');
+    if (!el) return;
+    var text = (tollFare !== null && tollFare !== undefined)
       ? (Number(tollFare) === 0 ? '무료' : Number(tollFare).toLocaleString('ko-KR') + '원')
       : '-';
     if (lastSpecialTolls && lastSpecialTolls.length) {
       var sum = lastSpecialTolls.reduce(function (a, t) { return a + (Number(t.amount) || 0); }, 0);
-      tollText += ' · 특수구간 ' + lastSpecialTolls.map(function (t) { return t.name; }).join(', ')
+      text += ' · 특수구간 ' + lastSpecialTolls.map(function (t) { return t.name; }).join(', ')
         + ' +' + sum.toLocaleString('ko-KR') + '원';
     }
-    tollEl.textContent = tollText;
+    el.textContent = text;
+  }
+
+  function renderRouteSummary(totalKm, totalDurationSec, tollFare, routeTimingMeta) {
+    currentRouteDurationSec = Number.isFinite(totalDurationSec) ? totalDurationSec : null;
+    document.getElementById('routeTotalDistance').textContent = totalKm != null ? totalKm.toFixed(1) + 'km' : '-';
+    document.getElementById('routeTotalDuration').textContent = totalDurationSec != null ? formatDuration(totalDurationSec) : '-';
+    renderTollFare(tollFare);
     // 직선거리 임시값인지 실제 도로 경로 확정값인지는 routeDurationBasis 문구가 있는 form.ejs
     // 화면에서만 사람이 읽을 수 있다 — ai_intake.ejs에는 그 엘리먼트가 없으므로, 어느 화면에서든
     // 챗봇(ai-intake.js)이 최종 확정 여부를 판단할 수 있도록 전역 플래그로도 남겨둔다.
@@ -992,9 +1001,13 @@
           fareAmountInput.readOnly = false;
           return;
         }
-        lastSpecialTolls = Array.isArray(data.specialTolls) ? data.specialTolls : [];
-        // 톨비 줄을 다시 그린다 — 요금 응답이 경로 응답보다 늦게 오므로 여기서 한 번 더 반영한다.
-        if (lastRouteKm != null) renderRouteSummary(lastRouteKm, currentRouteDurationSec, lastTollFare, lastRouteTimingMeta);
+        // 특수구간은 요금 응답에만 들어 있다(경로 응답에는 없다) — 톨비 줄을 다시 그려야
+        // 화면에 나타난다. 다만 renderRouteSummary가 updateFarePreview를 부르므로 그대로
+        // 다시 부르면 서로를 무한히 호출한다. 톨비 줄만 따로 그린다.
+        var nextTolls = Array.isArray(data.specialTolls) ? data.specialTolls : [];
+        var changed = JSON.stringify(nextTolls) !== JSON.stringify(lastSpecialTolls);
+        lastSpecialTolls = nextTolls;
+        if (changed) renderTollFare(lastTollFare);
         fareAmountInput.value = data.totalFare != null ? data.totalFare : data.fare;
         if (ferryFareInput) ferryFareInput.value = data.ferryFare != null ? data.ferryFare : 0;
         if (data.ferryNeedVehicleType) {
@@ -1095,6 +1108,10 @@
 
   function setAiRouteMeta(meta) {
     window.__aiIntakeRouteMeta = meta || { hasFerryLeg: false, ferryLegs: [], ferrySegments: null };
+    // 지나간 요금소 이름을 폼에 실어 보낸다 — 서버가 특수구간(민자 교량 등)을 다시 판정해
+    // 정산 항목으로 만든다. 금액은 서버가 정하고 여기서는 "어디를 지났는지"만 넘긴다.
+    var gates = document.getElementById('tollgates_json');
+    if (gates) gates.value = JSON.stringify((window.__aiIntakeRouteMeta.tollgates) || []);
   }
   setAiRouteMeta({ hasFerryLeg: false, ferryLegs: [], ferrySegments: null });
 

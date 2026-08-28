@@ -5,7 +5,7 @@ const asyncHandler = require('../middleware/asyncHandler');
 // Gemini를 부르는 경로는 사용량을 제한한다(middleware/aiRateLimit.js의 주석 참조).
 const { aiRateLimit } = require('../middleware/aiRateLimit');
 const { ORDER_STATUSES } = require('../config');
-const { getEffectivePaymentMethods, getEffectiveStatuses, checkOperatingHours, calculateFareWithFerry, calculatePremiumFare } = require('../lib/branchPolicy');
+const { getEffectivePaymentMethods, getEffectiveStatuses, checkOperatingHours, calculateFareWithFerry, calculatePremiumFare, findSpecialTolls } = require('../lib/branchPolicy');
 const { notify } = require('../lib/push');
 const { kstNow } = require('../lib/period');
 const { parseIntakeText } = require('../lib/aiIntakeParser');
@@ -1150,6 +1150,22 @@ router.post('/', asyncHandler(async (req, res) => {
 
   const createdRows = [];
   for (const part of splitPlan.parts) {
+  // 특수구간 통행료(민자 교량 등)를 서버가 다시 판정해 정산 항목으로 남긴다.
+  //
+  // 클라이언트가 보낸 금액을 그대로 쓰지 않는다 — 청구되는 값이다. 경로가 지나간 요금소
+  // 이름(tollgates_json)은 카카오 응답에서 온 사실이라 그대로 받되, 어떤 특수구간에 해당하고
+  // 얼마인지는 우리 표에서 서버가 정한다.
+  let specialTolls = [];
+  try {
+    const tollgates = req.body.tollgates_json ? JSON.parse(req.body.tollgates_json) : [];
+    specialTolls = await findSpecialTolls(
+      requester_group_id || null, branch_id || null,
+      [origin_address, destination_address, Array.isArray(tollgates) ? tollgates : []]
+    );
+  } catch (e) {
+    console.error('특수구간 판정 실패(요금·정산에서 제외):', e.message);
+  }
+
   const created = await createOrder({
     branchId: finalBranch,
     requesterGroupId: finalGroup,
@@ -1167,6 +1183,7 @@ router.post('/', asyncHandler(async (req, res) => {
     paymentMethodId: payment_method_id || null,
     fareAmount: fare_amount,
     ferryFareAmount: ferry_fare_amount,
+    specialTolls,
     orderType: finalOrderType,
     tripType: trip_type || null,
     finalDestinationAddress: final_destination_address || null,
