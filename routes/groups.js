@@ -9,6 +9,8 @@ const extraCharges = require('../lib/extraCharges');
 // 오지요금 상·하한은 계산 쪽과 한 곳에서 가져온다 — 화면 입력 제한과 실제 적용 범위가 갈리면
 // 관리자가 넣은 값이 조용히 다른 금액으로 적용된다.
 const { REMOTE_AREA_FEE_MIN, REMOTE_AREA_FEE_MAX } = require('../lib/branchPolicy');
+const fareSurcharge = require('../lib/fareSurcharge');
+const fareSurchargeInput = require('../lib/fareSurchargeInput');
 // 지사 화면과 같은 표시 규칙을 쓴다 — 복사하면 갈라진다.
 const {
   NOTIFY_PHOTO_EVENTS, DISPATCH_CALL_TYPES, parseCallTypes, buildEventRows,
@@ -369,13 +371,22 @@ router.post('/:id/accounts/:userId/status', asyncHandler(async (req, res) => {
 async function loadGroupFarePage(groupId) {
   const { group, groups } = await loadGroupWithSiblings(groupId);
   if (!group) return { group: null };
-  const [tiers, extraRow, branchTiers, branchExtra] = await Promise.all([
+  const [tiers, extraRow, branchTiers, branchExtra, placeRules, tollRules] = await Promise.all([
     db.all('SELECT * FROM group_fare_rules WHERE group_id = ? ORDER BY tier_seq', [groupId]),
     db.get('SELECT * FROM group_fare_extra_settings WHERE group_id = ?', [groupId]),
     db.all('SELECT * FROM fare_rules WHERE branch_id = ? ORDER BY tier_seq', [group.branch_id]),
     db.get('SELECT * FROM fare_extra_settings WHERE branch_id = ?', [group.branch_id]),
+    // 마이그레이션(20260828010000) 전이면 테이블이 없다 — 화면은 빈 목록으로 뜨고 나머지는 그대로 쓴다.
+    db.all('SELECT keyword, fee FROM fare_place_surcharges WHERE group_id = ? ORDER BY seq, id', [groupId]).catch(() => []),
+    db.all('SELECT name, fee FROM fare_special_tolls WHERE group_id = ? ORDER BY seq, id', [groupId]).catch(() => []),
   ]);
-  return { group, groups, tiers, extra: extraRow || {}, branchTiers, branchExtra: branchExtra || {} };
+  const extra = extraRow || {};
+  return {
+    group, groups, tiers, extra, branchTiers, branchExtra: branchExtra || {},
+    placeRules: placeRules || [],
+    tollRules: tollRules || [],
+    extraCostItems: fareSurcharge.extraCostStates(extra),
+  };
 }
 
 router.get('/:id/fare-rules', asyncHandler(async (req, res) => {
@@ -389,6 +400,8 @@ router.get('/:id/fare-rules', asyncHandler(async (req, res) => {
     error: req.query.error || null,
     remoteAreaFeeMin: REMOTE_AREA_FEE_MIN,
     remoteAreaFeeMax: REMOTE_AREA_FEE_MAX,
+    surchargeMin: fareSurcharge.SURCHARGE_FEE_MIN,
+    surchargeMax: fareSurcharge.SURCHARGE_FEE_MAX,
   });
 }));
 
@@ -479,13 +492,13 @@ router.post('/:id/fare-rules', asyncHandler(async (req, res) => {
     fare_table_enabled, fare_visible_to_client, fare_editable_by_client,
   } = req.body;
 
-  // 오지요금 — 0(안 받음)이거나 상·하한 사이여야 한다. 그 사이가 아닌 값(예: 500원)을 그대로
+  // 할증 금액 — 0(안 받음)이거나 상·하한 사이여야 한다. 그 사이가 아닌 값(예: 500원)을 그대로
   // 저장하면 계산 쪽이 하한으로 끌어올려 적용해, 관리자가 넣은 금액과 실제 청구액이 갈린다.
-  const remoteAreaFee = Number(req.body.remote_area_fee) || 0;
-  if (remoteAreaFee !== 0 && (remoteAreaFee < REMOTE_AREA_FEE_MIN || remoteAreaFee > REMOTE_AREA_FEE_MAX)) {
-    return res.redirect('/groups/' + req.params.id + '/fare-rules?error='
-      + encodeURIComponent(`오지요금은 0(안 받음) 또는 ${REMOTE_AREA_FEE_MIN.toLocaleString('ko-KR')}~${REMOTE_AREA_FEE_MAX.toLocaleString('ko-KR')}원 사이로 입력해주세요.`));
+  const badFee = fareSurchargeInput.findBadFee(req.body);
+  if (badFee) {
+    return res.redirect('/groups/' + req.params.id + '/fare-rules?error=' + encodeURIComponent(badFee));
   }
+  const remoteAreaFee = Number(req.body.remote_area_fee) || 0;
 
   await db.run(
     `INSERT INTO group_fare_extra_settings (group_id, round_trip_ratio, wait_threshold_min, wait_fee,
@@ -529,6 +542,14 @@ router.post('/:id/fare-rules', asyncHandler(async (req, res) => {
         fare_table_enabled ? 1 : 0, fare_visible_to_client ? 1 : 0, fare_editable_by_client ? 1 : 0]
     );
   });
+
+  // 위 upsert가 행을 만든 **뒤**에 돌아야 한다 — UPDATE라 행이 없으면 아무것도 저장되지 않는다.
+  const saved = await fareSurchargeInput.saveSettings('group', req.params.id, req.body);
+  const savedRules = await fareSurchargeInput.saveScopedRules('group', req.params.id, req.body);
+  if (!saved.ok || !savedRules.ok) {
+    return res.redirect('/groups/' + req.params.id + '/fare-rules?error='
+      + encodeURIComponent('할증·부대비용 설정은 저장되지 않았습니다. 마이그레이션(20260828010000)을 먼저 실행해주세요.'));
+  }
   res.redirect('/groups/' + req.params.id + '/fare-rules?saved=1');
 }));
 

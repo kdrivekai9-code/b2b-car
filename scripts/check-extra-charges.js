@@ -40,10 +40,17 @@ async function cleanup() {
       extra_charge_type: ['주유비'], extra_charge_amount: ['0'],
       extra_charge_date: ['2026-07-10'], extra_charge_billable: ['0'], extra_charge_note: [''],
     }, '2026-07-01').length, 0);
+    // 예시로 '세차비'를 쓰고 있었는데 20260828 작업에서 정식 항목이 되었다 — 목록에 정말 없는
+    // 이름으로 바꾼다. 항목이 늘어날 때 여기가 조용히 통과하면 오타가 그대로 저장된다.
     check('모르는 항목은 버린다', extraCharges.parseRows({
-      extra_charge_type: ['세차비'], extra_charge_amount: ['5000'],
+      extra_charge_type: ['식대'], extra_charge_amount: ['5000'],
       extra_charge_date: ['2026-07-10'], extra_charge_billable: ['0'], extra_charge_note: [''],
     }, '2026-07-01').length, 0);
+
+    // 이번에 늘어난 두 항목이 실제로 저장 대상인지 — 요금설정에서 "제외"로 켰는데 저장이 안 되면
+    // 설정만 있고 청구는 못 하는 상태가 된다.
+    check('세차비는 정식 항목', extraCharges.EXTRA_CHARGE_TYPES.includes('세차비'), true);
+    check('특수구간통행료는 정식 항목', extraCharges.EXTRA_CHARGE_TYPES.includes('특수구간통행료'), true);
 
     // 체크박스는 체크된 것만 올라온다 — 값에 행 번호를 실어 어느 줄인지 가린다.
     // 여기가 어긋나면 청구하지 않기로 한 줄이 청구된다.

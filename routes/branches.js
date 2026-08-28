@@ -8,6 +8,9 @@ const {
 } = require('../lib/customerNotifySettings');
 const { ORDER_STATUSES } = require('../config');
 const { getEffectivePaymentMethods, getEffectiveStatuses, DEFAULT_AGENT_IDLE_RELEASE_MINUTES } = require('../lib/branchPolicy');
+// 할증·부대비용 설정은 지사·법인이 같은 화면 부품과 같은 파싱을 쓴다(routes/groups.js도 같다).
+const fareSurcharge = require('../lib/fareSurcharge');
+const fareSurchargeInput = require('../lib/fareSurchargeInput');
 // 고객 통보 설정 화면이 "어떤 사건이 있고 기본값이 무엇인지"를 통보 모듈에서 그대로 가져온다 —
 // 화면에만 따로 목록을 적어두면 사건이 하나 늘 때 설정에서 빠진 채로 남는다.
 const kakaoOrderNotify = require('../lib/kakaoOrderNotify');
@@ -155,11 +158,14 @@ router.post('/:id/operating-hours/exceptions/:exceptionId/delete', asyncHandler(
 // ---------------- 탁송 요금 (지사) ----------------
 // 법인 요금표가 없을 때 쓰는 기본값이다(routes/groups.js의 법인 탁송 요금표 참조).
 router.get('/:id/fare-rules', asyncHandler(async (req, res) => {
-  const [branch, tiers, extraRow, branches] = await Promise.all([
+  const [branch, tiers, extraRow, branches, placeRules, tollRules] = await Promise.all([
     db.get('SELECT * FROM branches WHERE id = ?', [req.params.id]),
     db.all('SELECT * FROM fare_rules WHERE branch_id = ? ORDER BY tier_seq', [req.params.id]),
     db.get('SELECT * FROM fare_extra_settings WHERE branch_id = ?', [req.params.id]),
     db.all('SELECT id, name FROM branches ORDER BY id'),
+    // 마이그레이션(20260828010000) 전이면 테이블이 없다 — 화면은 빈 목록으로 뜬다.
+    db.all('SELECT keyword, fee FROM fare_place_surcharges WHERE branch_id = ? ORDER BY seq, id', [req.params.id]).catch(() => []),
+    db.all('SELECT name, fee FROM fare_special_tolls WHERE branch_id = ? ORDER BY seq, id', [req.params.id]).catch(() => []),
   ]);
   if (!branch) return res.status(404).send('지사를 찾을 수 없습니다.');
   const extra = extraRow || {};
@@ -172,6 +178,12 @@ router.get('/:id/fare-rules', asyncHandler(async (req, res) => {
     saved: req.query.saved === '1',
     copied: req.query.copied === '1',
     copiedFrom: req.query.from || '',
+    error: req.query.error || null,
+    placeRules: placeRules || [],
+    tollRules: tollRules || [],
+    extraCostItems: fareSurcharge.extraCostStates(extra),
+    surchargeMin: fareSurcharge.SURCHARGE_FEE_MIN,
+    surchargeMax: fareSurcharge.SURCHARGE_FEE_MAX,
   });
 }));
 
@@ -285,6 +297,13 @@ router.post('/:id/fare-rules/:tierId/representative', asyncHandler(async (req, r
 }));
 
 router.post('/:id/fare-rules', asyncHandler(async (req, res) => {
+  // 할증 금액이 범위를 벗어나면 저장 전에 되돌린다 — 그대로 두면 계산 쪽이 상·하한으로 끌어
+  // 적용해 관리자가 넣은 금액과 실제 청구액이 갈린다.
+  const badFee = fareSurchargeInput.findBadFee(req.body);
+  if (badFee) {
+    return res.redirect('/branches/' + req.params.id + '/fare-rules?error=' + encodeURIComponent(badFee));
+  }
+
   const b = (v) => [].concat(v || []);
   const baseDist = b(req.body.base_distance_km);
   const baseFare = b(req.body.base_fare);
@@ -359,6 +378,15 @@ router.post('/:id/fare-rules', asyncHandler(async (req, res) => {
     throw e;
   } finally {
     client.release();
+  }
+
+  // 위 트랜잭션이 fare_extra_settings 행을 만든 **뒤**에 돌아야 한다 — UPDATE라 행이 없으면
+  // 아무것도 저장되지 않는다.
+  const savedSurcharge = await fareSurchargeInput.saveSettings('branch', req.params.id, req.body);
+  const savedRules = await fareSurchargeInput.saveScopedRules('branch', req.params.id, req.body);
+  if (!savedSurcharge.ok || !savedRules.ok) {
+    return res.redirect('/branches/' + req.params.id + '/fare-rules?error='
+      + encodeURIComponent('할증·부대비용 설정은 저장되지 않았습니다. 마이그레이션(20260828010000)을 먼저 실행해주세요.'));
   }
 
   res.redirect('/branches/' + req.params.id + '/fare-rules?saved=1');

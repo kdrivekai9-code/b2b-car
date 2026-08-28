@@ -10,6 +10,7 @@
   </div>
 </div>
 <%- include('../partials/branch_tabs', { branch: branch, active: 'fare' }) %>
+<% if (typeof error !== 'undefined' && error) { %><div class="alert error"><%= error %></div><% } %>
 
 <div class="card">
   <div class="section-title">📋 다른 지사 요금표 복사</div>
@@ -89,6 +90,8 @@
       <div class="field"><label class="checkline"><input type="checkbox" name="fare_editable_by_client" value="1" <%= extra.fare_editable_by_client ? 'checked' : '' %>> 고객사(딜러)의 금액 수정 허용</label></div>
     </div>
   </div>
+
+  <%- include('../partials/fare_surcharge_settings') %>
 </form>
 
 <% if (typeof saved !== 'undefined' && saved) { %>

@@ -60,7 +60,8 @@ check('상한 그대로', remoteAreaFeeFor({ remote_area_fee: REMOTE_AREA_FEE_MA
 
 console.log('\n[상·하한]');
 check('하한 1,000원', REMOTE_AREA_FEE_MIN, 1000);
-check('상한 10,000원', REMOTE_AREA_FEE_MAX, 10000);
+// 상한은 20260828 작업에서 10,000 → 20,000으로 넓혔다(할증 전 항목 공통, 사용자 확정).
+check('상한 20,000원', REMOTE_AREA_FEE_MAX, 20000);
 
 console.log(failures ? `\n${failures}건 실패` : '\n모두 통과');
 process.exit(failures ? 1 : 0);

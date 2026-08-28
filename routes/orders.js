@@ -1399,7 +1399,8 @@ router.get('/:id/data.json', asyncHandler(async (req, res) => {
     rawWaypoints: waypoints,
     history, drivers, photos, callmanerPhotos: callmanerPhotoRows, canViewPhotos, legs,
     extraCharges: extraChargeRows,
-    extraChargeTypes: extraCharges.EXTRA_CHARGE_TYPES,
+    // 요금설정에서 "제외(실비 정산)"로 둔 항목만 고를 수 있다 — "포함" 항목을 청구하면 이중 청구다.
+    extraChargeTypes: await extraCharges.billableTypesForOrder(order),
     ORDER_STATUSES: statusConfig.map((s) => s.status_code),
     baseUrl: req.protocol + '://' + req.get('host'),
     currentUserRole: u.role,
@@ -1839,7 +1840,8 @@ router.get('/:id', asyncHandler(async (req, res) => {
     title: '오더 상세 - ' + order.oid, order, history, waypoints, drivers, photos,
     callmanerPhotos: callmanerPhotoRows, canViewPhotos, legs,
     extraCharges: extraChargeRows,
-    extraChargeTypes: extraCharges.EXTRA_CHARGE_TYPES,
+    // 요금설정에서 "제외(실비 정산)"로 둔 항목만 고를 수 있다 — "포함" 항목을 청구하면 이중 청구다.
+    extraChargeTypes: await extraCharges.billableTypesForOrder(order),
     baseUrl: req.protocol + '://' + req.get('host'),
     ORDER_STATUSES: statusConfig.map((s) => s.status_code),
   });

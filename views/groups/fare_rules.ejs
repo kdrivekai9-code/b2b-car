@@ -82,25 +82,16 @@
       <div class="field"><label>도착 전 취소요금(원)</label><input type="number" name="cancel_before_fee" value="<%= extra.cancel_before_fee || 0 %>" min="0" step="1000"></div>
       <div class="field"><label>도착 후 취소요금(원)</label><input type="number" name="cancel_after_fee" value="<%= extra.cancel_after_fee || 0 %>" min="0" step="1000"></div>
     </div>
-    <div class="row">
-      <%# 오지요금 — 행정지명이 "리"로 끝나는 곳을 오가는 구간에 정액을 더한다. %>
-      <div class="field">
-        <label>오지요금(원)</label>
-        <input type="number" name="remote_area_fee" value="<%= extra.remote_area_fee || 0 %>"
-               min="0" max="<%= remoteAreaFeeMax %>" step="1000" placeholder="0">
-        <p class="page-sub">
-          출발지나 도착지의 행정지명이 <b>“리”</b>로 끝나면(법정리) 이 금액을 구간요금에 더합니다.
-          양쪽 다 “리”여도 한 번만 붙습니다. <b>0</b>이면 받지 않습니다.
-          받으려면 <%= remoteAreaFeeMin.toLocaleString('ko-KR') %>~<%= remoteAreaFeeMax.toLocaleString('ko-KR') %>원 사이로 입력하세요.
-        </p>
-      </div>
-    </div>
+    <%# 오지요금은 다른 할증들과 함께 아래 "탁송 특화 할증" 카드로 옮겼다 —
+        같은 성격(구간요금에 더하는 정액)인데 따로 두면 상·하한 규칙이 갈린다. %>
     <div class="row">
       <div class="field"><label class="checkline"><input type="checkbox" name="fare_table_enabled" value="1" <%= extra.fare_table_enabled ? 'checked' : '' %>> 이 요금표 사용 (끄면 소속 지사 요금표를 씁니다)</label></div>
       <div class="field"><label class="checkline"><input type="checkbox" name="fare_visible_to_client" value="1" <%= extra.fare_visible_to_client !== 0 ? 'checked' : '' %>> 고객사(딜러)에게 요금 노출</label></div>
       <div class="field"><label class="checkline"><input type="checkbox" name="fare_editable_by_client" value="1" <%= extra.fare_editable_by_client ? 'checked' : '' %>> 고객사(딜러)의 금액 수정 허용</label></div>
     </div>
   </div>
+
+  <%- include('../partials/fare_surcharge_settings') %>
 </form>
 
 <% if (saved) { %><div class="toast">저장되었습니다.</div><% } %>
