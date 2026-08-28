@@ -21,6 +21,7 @@ const {
 } = require('../lib/kakaoIntakeParser');
 const {
   loadPendingIntake, savePendingIntake, savePendingState, clearPendingIntake, wasPendingIntakeExpired,
+  looksLikeRouteRestart, INTAKE_RESTARTED_NOTICE,
   INTAKE_EXPIRED_NOTICE, looksSelfContained,
 } = require('../lib/intakeSlotState');
 const { findIntakeAccount, resolveIntakeContext, findAccountByPhone, linkUserKeyToAccount, createOrdersFromIntake } = require('../lib/kakaoIntakeService');
@@ -1045,6 +1046,7 @@ async function handleConfirmReply(session, pending, text) {
 async function tryHandleIntake(session, text) {
   let parsed = parseKakaoIntake(text);
   let mergedRaw = text;
+  let restarting = false;
 
   if (!parsed.matched) {
     // 폼이 아니면, 진행 중인 접수의 보충 정보일 수 있다 — 있으면 원문에 이어붙여 재파싱한다.
@@ -1081,17 +1083,33 @@ async function tryHandleIntake(session, text) {
     // 프리미엄/일일기사 대화가 이미 진행 중이면 전용 흐름으로 이어간다 — 탁송 파서를 태우면
     // "1"/"없어" 같은 짧은 답이 엉뚱하게(또는 아예 못) 해석된다.
     if (pending.category === 'premium_daily') return continuePremiumIntakeKakao(session, pending, text);
-    mergedRaw = pending.raw + '\n' + text;
+    // 이번 발화 하나에 출발·도착이 다 들어 있으면 보충이 아니라 다른 오더로 갈아탄 것이다.
+    // 이어붙이면 두 주문이 한 문장이 돼 서로 섞인다(lib/intakeSlotState.js에 실측 사례).
+    restarting = looksLikeRouteRestart(text);
+    mergedRaw = restarting ? text : (pending.raw + '\n' + text);
     parsed = parseKakaoIntake(mergedRaw);
-    if (!parsed.matched) return false;
+    if (!parsed.matched) {
+      // 갈아타기로 판정해 앞 내용을 버렸는데 이번 발화를 접수로 읽지 못했으면, 되묻기 상태에
+      // 옛 경로가 그대로 남는다 — 고객은 바꿨다고 아는데 다음 답변이 옛 경로에 붙는다.
+      // 섞이는 것보다 나쁘므로 지우고 다시 받는다(웹과 같은 처리).
+      if (restarting) {
+        await clearPendingIntake(session);
+        await botSay(session, '앞서 진행하던 접수는 취소했습니다. 새로 접수하실 내용을 "○○에서 ○○까지 탁송" 형태로 알려주시겠어요?', '접수 갈아타기');
+        return true;
+      }
+      return false;
+    }
   }
+
+  // 갈아탄 사실은 알린다 — 조용히 버리면 "아까 말한 건 어디 갔냐"가 된다.
+  const restartNotice = restarting ? INTAKE_RESTARTED_NOTICE + '\n' : '';
 
   if (!parsed.complete) {
     await savePendingIntake(session, mergedRaw, parsed.missing);
     await saveIntakeDraft(session, parsed); // 대화 도중에도 카드 폼에 지금까지 값 반영
     const addressPreview = await previewIntakeAddresses(parsed);
     const question = buildMissingQuestion(parsed.missing, parsed, addressPreview);
-    await botSay(session, question, '접수 되묻기');
+    await botSay(session, restartNotice + question, '접수 되묻기');
     return true;
   }
   await saveIntakeDraft(session, parsed); // 필수 항목이 다 찬 시점의 값도 반영
