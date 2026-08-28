@@ -159,6 +159,8 @@ app.use('/kakao-consult', kakaoConsultRoutes);
 app.use('/chat', chatRoutes.cronRouter);
 // 감사 로그 보관 정책 크론도 같은 이유로 requireAuth보다 먼저 등록한다.
 app.use('/access-logs', accessLogRoutes.cronRouter);
+// 장애 알림 점검 크론도 같은 이유로 먼저 등록한다(화면 라우터는 아래에 따로 둔다).
+app.use('/alerts', alertRoutes.cronRouter);
 
 app.use('/', authRoutes);
 app.use('/', dashboardRoutes);
@@ -167,7 +169,7 @@ app.use('/groups', groupRoutes);
 // 차종 마스터 — 수입차/대형·화물/전기차 할증의 판정 근거를 관리한다.
 app.use('/vehicle-models', vehicleModelRoutes);
 // 장애 알림 — 연동 오류 급증·동기화 지연을 웹푸시로 알린다(자체 CRON_SECRET 검증은 라우트 안에서).
-app.use('/alerts', alertRoutes);
+app.use('/alerts', alertRoutes.router);
 app.use('/users', userRoutes);
 app.use('/orders', orderRoutes);
 app.use('/favorites', favoriteRoutes);

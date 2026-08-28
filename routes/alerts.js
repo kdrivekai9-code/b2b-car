@@ -6,6 +6,10 @@ const asyncHandler = require('../middleware/asyncHandler');
 const systemAlert = require('../lib/systemAlert');
 
 const router = express.Router();
+// 크론은 세션 로그인이 없는 서버 대 서버 호출이라, requireAuth보다 **먼저** 마운트해야 한다.
+// 그래서 라우터를 분리한다 — 한 라우터에 담으면 /alerts 화면까지 인증 없이 열리거나,
+// 반대로 크론이 로그인 화면으로 302된다(실제로 302가 났다).
+const cronRouter = express.Router();
 
 // 크론 인증은 콜마너 동기화(routes/callmanerSync.js)와 같은 방식을 쓴다 — 인증 규칙이 두 벌이면
 // 한쪽만 고쳐져 크론 엔드포인트가 열린 채 남는다.
@@ -18,7 +22,7 @@ function checkCronAuth(req, res, next) {
   return next();
 }
 
-router.get('/cron/check', checkCronAuth, asyncHandler(async (req, res) => {
+cronRouter.get('/cron/check', checkCronAuth, asyncHandler(async (req, res) => {
   const result = await systemAlert.runChecks();
   res.json(result);
 }));
@@ -66,4 +70,4 @@ router.get('/dry-run', requireAuth, requireRole('admin'), asyncHandler(async (re
   res.json({ config: cfg, syncLimit, alerts });
 }));
 
-module.exports = router;
+module.exports = { router, cronRouter };
