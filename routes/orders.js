@@ -1156,14 +1156,29 @@ router.post('/', asyncHandler(async (req, res) => {
   // 이름(tollgates_json)은 카카오 응답에서 온 사실이라 그대로 받되, 어떤 특수구간에 해당하고
   // 얼마인지는 우리 표에서 서버가 정한다.
   let specialTolls = [];
+  let fareSurcharges = [];
   try {
     const tollgates = req.body.tollgates_json ? JSON.parse(req.body.tollgates_json) : [];
     specialTolls = await findSpecialTolls(
       requester_group_id || null, branch_id || null,
       [origin_address, destination_address, Array.isArray(tollgates) ? tollgates : []]
     );
+
+    // 할증 내역도 서버가 다시 계산해 남긴다. 금액(fare_amount)은 화면이 보낸 값을 그대로
+    // 쓰되(관리자가 손으로 고칠 수 있어야 한다), **왜 그 금액인지**는 서버가 판정한 근거를
+    // 남긴다 — 화면이 보낸 설명을 그대로 믿으면 근거가 아니게 된다.
+    const distanceKm = Number(req.body.distance_km);
+    if (Number.isFinite(distanceKm) && distanceKm > 0) {
+      const calc = await calculateFareWithFerry(branch_id || null, distanceKm, {
+        groupId: requester_group_id || null,
+        vehicleType: splitVehicle.vehicleType || null,
+        originAddress: origin_address, destinationAddress: destination_address,
+        reservedDate: reserved_date, reservedTime: reserved_time,
+      });
+      fareSurcharges = (calc && calc.surcharges) || [];
+    }
   } catch (e) {
-    console.error('특수구간 판정 실패(요금·정산에서 제외):', e.message);
+    console.error('할증·특수구간 판정 실패(정산 근거만 비고 접수는 진행):', e.message);
   }
 
   const created = await createOrder({
@@ -1184,6 +1199,7 @@ router.post('/', asyncHandler(async (req, res) => {
     fareAmount: fare_amount,
     ferryFareAmount: ferry_fare_amount,
     specialTolls,
+    fareSurcharges,
     orderType: finalOrderType,
     tripType: trip_type || null,
     finalDestinationAddress: final_destination_address || null,

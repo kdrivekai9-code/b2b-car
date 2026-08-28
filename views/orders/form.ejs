@@ -169,6 +169,9 @@
           <%# 경로가 지나간 요금소 이름. 서버가 이걸로 특수구간(민자 교량 등)을 판정해 정산
               항목을 만든다 — 금액은 서버가 우리 표에서 정한다(클라이언트 값을 믿지 않는다). %>
           <input type="hidden" id="tollgates_json" name="tollgates_json" value="">
+          <%# 서버가 할증 내역을 다시 계산해 정산 근거로 남긴다 — 금액은 위 fare_amount를 쓰고
+              여기 거리는 "왜 그 금액인지"를 판정하는 데만 쓴다. %>
+          <input type="hidden" id="fare_distance_km" name="distance_km" value="">
         </div>
         <p class="fare-calc-hint" id="fareCalcHint">경로 확정 시 지사의 구간요금 설정에 따라 자동 계산됩니다.</p>
       </div>

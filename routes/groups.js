@@ -490,6 +490,15 @@ router.post('/:id/fare-rules', asyncHandler(async (req, res) => {
   const roundUnit = b(req.body.round_unit);
   const roundMethod = b(req.body.round_method);
 
+  // 정산서 할증 표시 방식(사용자 지시: 법인별로 고른다). 총 청구액은 어느 쪽이든 같고
+  // 표시만 달라진다 — 그래서 요금 저장과 같이 두어도 금액에 영향이 없다.
+  const mode = String(req.body.settlement_surcharge_mode || '').trim() === 'itemized' ? 'itemized' : 'included';
+  await db.run('UPDATE groups_tbl SET settlement_surcharge_mode = ? WHERE id = ?', [mode, req.params.id])
+    .catch((e) => {
+      if (e && e.code === '42703') return; // 마이그레이션 20260829020000 전
+      console.error('정산 할증 표시 방식 저장 실패(무시):', e.message);
+    });
+
   await db.run('DELETE FROM group_fare_rules WHERE group_id = ?', [req.params.id]);
   for (let i = 0; i < baseDist.length; i++) {
     if (baseDist[i] === '' && baseFare[i] === '') continue;
@@ -793,6 +802,7 @@ async function loadSettlement(groupId, month) {
   // 분류는 보조 정보라 빠져도 정산 금액에는 영향이 없다 — 그 컬럼만 빼고 다시 조회한다.
   const SETTLEMENT_SQL = (vehicleCols) => `
     SELECT o.id, o.oid, o.reserved_date, o.reserved_time, o.vehicle_number,
+           o.fare_surcharges_json,
            ${vehicleCols}
            o.origin_address, o.origin_address_detail,
            o.destination_address, o.destination_address_detail,
@@ -819,18 +829,51 @@ async function loadSettlement(groupId, month) {
     return db.all(SETTLEMENT_SQL('o.vehicle_type,'), [groupId, month]);
   });
 
+  // 할증을 정산서에 어떻게 보여줄지는 법인이 고른다(사용자 지시).
+  //   included  운행요금 한 줄로 두고 내역만 밝힌다 (기본값 = 지금 동작)
+  //   itemized  운행요금에서 할증을 떼어 별도 줄로 보여준다
+  //
+  // **어느 쪽이든 총 청구액은 같다.** 저장된 금액(fare_amount)은 하나이고 모드는 표시 방식일
+  // 뿐이다. 그래야 모드를 바꿔도 과거 정산서의 총액이 흔들리지 않는다.
+  // 표시 방식은 법인 설정에서 읽는다. loadSettlement는 groupId만 받으므로(호출부가 여럿)
+  // 여기서 직접 조회한다 — 호출부마다 넘기게 하면 한 곳만 빠뜨려도 모드가 조용히 무시된다.
+  const modeRow = await db.get('SELECT settlement_surcharge_mode FROM groups_tbl WHERE id = ?', [groupId])
+    .catch(() => null); // 마이그레이션 전이면 컬럼이 없다 — 기본값(포함)으로 돈다.
+  const surchargeMode = String((modeRow && modeRow.settlement_surcharge_mode) || 'included').trim() === 'itemized'
+    ? 'itemized' : 'included';
+
   // 도선료는 탁송료와 별개로 청구되는 실비다 — 합계에서 빠지면 정산서와 맞지 않는다.
   const items = rows.map((r) => {
     const fare = Number(r.fare_amount) || 0;
     const ferry = Number(r.ferry_fare_amount) || 0;
-    return { ...r, fare, ferry, total: fare + ferry };
+    let surcharges = [];
+    try { surcharges = JSON.parse(r.fare_surcharges_json || '[]') || []; } catch (e) { surcharges = []; }
+    const surchargeTotal = surcharges.reduce((s2, it) => s2 + (Number(it.amount) || 0), 0);
+    return {
+      ...r, fare, ferry, total: fare + ferry,
+      surcharges,
+      surchargeTotal,
+      // 기본요금은 빼서 구한다 — 저장된 청구액에서 역산하므로 합이 항상 맞는다.
+      // 관리자가 요금을 손으로 고쳤어도 그 차이는 기본요금 쪽이 흡수한다(할증은 사실이다).
+      baseFare: fare - surchargeTotal,
+    };
   });
   const summary = {
     count: items.length,
-    fare: items.reduce((s, r) => s + r.fare, 0),
-    ferry: items.reduce((s, r) => s + r.ferry, 0),
-    total: items.reduce((s, r) => s + r.total, 0),
+    fare: items.reduce((s2, r) => s2 + r.fare, 0),
+    ferry: items.reduce((s2, r) => s2 + r.ferry, 0),
+    total: items.reduce((s2, r) => s2 + r.total, 0),
+    surcharge: items.reduce((s2, r) => s2 + r.surchargeTotal, 0),
+    base: items.reduce((s2, r) => s2 + r.baseFare, 0),
   };
+  // 할증을 항목별로 묶은 합계 — itemized 모드에서 별도 줄로 보여준다.
+  const surchargeByLabel = {};
+  items.forEach((r) => r.surcharges.forEach((it) => {
+    const label = String(it.label || it.code || '할증');
+    if (!surchargeByLabel[label]) surchargeByLabel[label] = { count: 0, amount: 0 };
+    surchargeByLabel[label].count += 1;
+    surchargeByLabel[label].amount += Number(it.amount) || 0;
+  }));
 
   // 기타 정산 내역 — 운행요금과 별도로 청구하는 실비(주유비 · 주차요금 · 톨게이트).
   //
@@ -870,7 +913,7 @@ async function loadSettlement(groupId, month) {
   `, [groupId]);
 
   return {
-    items, summary, extras, extraSummary,
+    items, summary, extras, extraSummary, surchargeMode, surchargeByLabel,
     // 거래처에 실제로 청구할 금액 — 운행요금과 실비를 더한 값이다. 화면에서 다시 더하면
     // 목록과 통계가 갈릴 수 있어 여기서 한 번만 계산한다.
     grandTotal: summary.total + extraSummary.total,

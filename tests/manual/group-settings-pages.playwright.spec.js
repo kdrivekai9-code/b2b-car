@@ -207,7 +207,10 @@ test.describe('법인관리 · 법인별 설정 화면', () => {
 
       // 합계표와 총 청구액이 목록과 맞아야 한다.
       await expect(page.locator('.extra-charge-summary-table tfoot')).toContainText('4,500원');
-      await expect(page.getByText('총 청구액').locator('..')).toContainText('104,500원');
+      // 하단 금액 통계 블록을 콕 집는다 — 안내 문구에도 "총 청구액"이라는 말이 들어가서
+      // 그냥 텍스트로 찾으면 두 곳에 걸린다.
+      await expect(page.locator('.stat-row').getByText('총 청구액').locator('..'))
+        .toContainText('104,500원');
     } finally {
       await wipe();
     }

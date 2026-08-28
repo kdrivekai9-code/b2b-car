@@ -897,6 +897,9 @@
       }
     }
     lastRouteKm = totalKm;
+    // 서버가 할증 내역을 다시 계산할 때 쓴다(정산 근거). 금액 자체는 fare_amount가 정한다.
+    var distEl = document.getElementById('fare_distance_km');
+    if (distEl) distEl.value = (totalKm == null ? '' : String(totalKm.toFixed(2)));
     lastTollFare = tollFare;
     lastRouteTimingMeta = routeTimingMeta;
     updateFarePreview(totalKm);

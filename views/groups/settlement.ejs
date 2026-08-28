@@ -5,7 +5,14 @@
     <%# 목록에 찍는 날짜는 예약일이지만, 어느 달로 묶이는지는 완료일이 정한다.
         말일에 예약해 다음 달 새벽에 끝난 건이 어느 정산서에 들어갔는지 못 찾는 일이 없도록
         그 기준을 화면에 밝혀 둔다. %>
-    <p class="page-sub">완료된 오더를 <b>완료일 기준</b>으로 묶었습니다. 금액은 업체별 계약 요금입니다(배차 요금 아님).</p>
+    <p class="page-sub">
+      완료된 오더를 <b>완료일 기준</b>으로 묶었습니다. 금액은 업체별 계약 요금입니다(배차 요금 아님).
+      <%# 어느 모드든 총 청구액은 같다 — 그 사실을 밝히지 않으면 모드를 바꿀 때 금액이
+          달라지는 줄 알고 못 바꾼다. %>
+      할증 표시는 <b><%= surchargeMode === 'itemized' ? '별도 줄(항목별)' : '운행요금 포함' %></b>
+      방식입니다(<a href="/groups/<%= group.id %>/fare-rules">법인 요금설정</a>에서 변경 —
+      <b>총 청구액은 어느 쪽이든 같습니다</b>).
+    </p>
   </div>
   <div class="page-head-actions">
     <a class="btn secondary" href="/groups">법인 목록으로</a>
@@ -67,10 +74,22 @@
               <td><%= [r.origin_address, r.origin_address_detail].filter(Boolean).join(' ') || '-' %></td>
               <td><%= [r.destination_address, r.destination_address_detail].filter(Boolean).join(' ') || '-' %></td>
               <td style="text-align:right;">
-                <%= formatMoney(r.total) %>
+                <%= formatMoney(surchargeMode === 'itemized' ? r.baseFare + r.ferry : r.total) %>
                 <%# 도선료는 탁송료와 별개로 청구하는 실비다. 합계에는 들어가 있으니 내역에서도 보여야
                     "요금표와 금액이 다르다"는 문의가 나오지 않는다. %>
                 <% if (r.ferry > 0) { %><br><span class="muted">도선료 <%= formatMoney(r.ferry) %> 포함</span><% } %>
+                <%# 할증 내역. 포함 방식이면 왜 그 금액인지 밝히고, 별도 줄 방식이면 아래
+                    "할증 내역" 표로 빠졌다는 것을 알린다. %>
+                <% if (r.surchargeTotal > 0) { %>
+                  <br><span class="muted">
+                    <% if (surchargeMode === 'itemized') { %>
+                      할증 <%= formatMoney(r.surchargeTotal) %> 별도
+                    <% } else { %>
+                      기본 <%= formatMoney(r.baseFare) %> +
+                      <%= r.surcharges.map(function (it) { return (it.label || it.code) + ' ' + (Number(it.amount) || 0).toLocaleString('ko-KR'); }).join(' + ') %>
+                    <% } %>
+                  </span>
+                <% } %>
               </td>
             </tr>
           <% }) %>
@@ -78,13 +97,44 @@
         <tfoot>
           <tr>
             <th colspan="5" style="text-align:right;">합계</th>
-            <th style="text-align:right;"><%= formatMoney(summary.total) %></th>
+            <th style="text-align:right;">
+              <%= formatMoney(surchargeMode === 'itemized' ? summary.base + summary.ferry : summary.total) %>
+            </th>
           </tr>
         </tfoot>
       </table>
     </div>
   <% } %>
 </div>
+
+<% if (surchargeMode === 'itemized' && summary.surcharge > 0) { %>
+  <%# 별도 줄 방식에서만 나온다. 포함 방식에서는 위 운행요금에 이미 들어 있어 여기 또 보이면
+      이중으로 읽힌다. %>
+  <div class="card">
+    <div class="section-title">➕ 할증 내역 (운행요금에서 분리)</div>
+    <p class="page-sub">
+      위 운행요금은 할증을 <b>뺀</b> 금액입니다. 아래 할증을 더한 값이 예전과 같은 총액입니다 —
+      <b>청구 금액은 달라지지 않습니다.</b>
+    </p>
+    <div class="table-wrap">
+      <table class="table surcharge-table">
+        <thead><tr><th>항목</th><th style="width:100px;text-align:right;">건수</th><th style="text-align:right;">금액</th></tr></thead>
+        <tbody>
+          <% Object.keys(surchargeByLabel).forEach(function (label) { %>
+            <tr>
+              <td><%= label %></td>
+              <td style="text-align:right;"><%= surchargeByLabel[label].count %>건</td>
+              <td style="text-align:right;"><%= formatMoney(surchargeByLabel[label].amount) %></td>
+            </tr>
+          <% }) %>
+        </tbody>
+        <tfoot>
+          <tr><th>합계</th><th></th><th style="text-align:right;"><%= formatMoney(summary.surcharge) %></th></tr>
+        </tfoot>
+      </table>
+    </div>
+  </div>
+<% } %>
 
 <div class="card">
   <div class="section-title">🧾 기타 정산 내역 · 별도 청구 (<%= extraSummary.count %>건)</div>
@@ -167,7 +217,15 @@
     <div><div class="page-sub" style="margin:0;">완료 건수</div><b><%= summary.count.toLocaleString('ko-KR') %>건</b></div>
     <div><div class="page-sub" style="margin:0;">탁송료</div><b><%= formatMoney(summary.fare) %></b></div>
     <div><div class="page-sub" style="margin:0;">도선료</div><b><%= formatMoney(summary.ferry) %></b></div>
-    <div><div class="page-sub" style="margin:0;">운행요금 합계</div><b><%= formatMoney(summary.total) %></b></div>
+    <% if (surchargeMode === 'itemized') { %>
+      <div><div class="page-sub" style="margin:0;">운행요금(할증 제외)</div><b><%= formatMoney(summary.base + summary.ferry) %></b></div>
+      <div><div class="page-sub" style="margin:0;">할증</div><b><%= formatMoney(summary.surcharge) %></b></div>
+    <% } else { %>
+      <div><div class="page-sub" style="margin:0;">운행요금 합계</div><b><%= formatMoney(summary.total) %></b></div>
+      <% if (summary.surcharge > 0) { %>
+        <div><div class="page-sub" style="margin:0;">└ 그중 할증</div><b><%= formatMoney(summary.surcharge) %></b></div>
+      <% } %>
+    <% } %>
     <div><div class="page-sub" style="margin:0;">기타 정산(별도 청구)</div><b><%= formatMoney(extraSummary.total) %></b></div>
     <%# 청구서에 찍힐 금액이라 다른 숫자보다 눈에 띄어야 한다. %>
     <div><div class="page-sub" style="margin:0;">총 청구액</div><b style="font-size:18px;"><%= formatMoney(grandTotal) %></b></div>
