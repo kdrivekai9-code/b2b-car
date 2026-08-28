@@ -11,13 +11,16 @@
 // 있는 차종을 못 찾는다.
 const { test, expect } = require('@playwright/test');
 const { loginWithRetry } = require('./helpers/auth');
-const { IMPORT_BRANDS, EV_KEYWORDS } = require('../../lib/vehicleClass');
+const db = require('../../db');
+const { IMPORT_BRANDS, EV_KEYWORDS, classifyVehicleModel } = require('../../lib/vehicleClass');
 
 const BASE_URL = process.env.E2E_BASE_URL || 'http://127.0.0.1:3000';
 // 로그인 계정: 실사용 admin으로 로그인하면 단일 세션 강제 때문에 그 계정을 쓰던 사람이
 // 로그아웃된다 — QA 전용 계정을 쓴다. 비밀번호는 .env(E2E_PASSWORD)에서 온다.
 const LOGIN_ID = process.env.E2E_LOGIN_ID || 'qa_test_bot';
 const PASSWORD = process.env.E2E_PASSWORD || '';
+
+test.afterAll(async () => { await db.pool.end().catch(() => {}); });
 
 test.describe('차종 관리 · 자동 인식 사전', () => {
   test.describe.configure({ timeout: 180000 });
@@ -65,5 +68,59 @@ test.describe('차종 관리 · 자동 인식 사전', () => {
     await expect(dict.locator('.dict-group[data-key="large"]').getByText('봉고', { exact: true })).toBeAttached();
 
     expect(problems, `페이지 오류: ${problems.join(' | ')}`).toEqual([]);
+  });
+
+  // 코드 사전에 빠진 브랜드를 배포 없이 채울 수 있어야 한다 — 못 채우면 그 차종은 할증이
+  // 조용히 빠진 채로 남는다(요금이 적게 나가는 쪽이라 아무도 눈치채지 못한다).
+  test('빠진 낱말을 화면에서 더하면 판정에 반영되고, 지우면 되돌아간다', async ({ page }) => {
+    const WORD = 'e2e쿠프라';
+    const wipe = async () => {
+      await db.run('DELETE FROM vehicle_class_keywords WHERE word LIKE ?', [`${WORD}%`]).catch(() => {});
+    };
+    await wipe();
+
+    await loginWithRetry(page, { baseUrl: BASE_URL, loginId: LOGIN_ID, password: PASSWORD });
+    try {
+      await page.goto(`${BASE_URL}/vehicle-models`, { waitUntil: 'domcontentloaded' });
+
+      // 더하기 전에는 아무 할증도 안 붙는 이름이어야 검사가 성립한다.
+      expect(classifyVehicleModel(`${WORD} 포맨터`).isImported, '검사 전제').toBe(false);
+
+      const form = page.locator('form[action="/vehicle-models/keywords"]');
+      await form.locator('select[name="kind"]').selectOption('import_brand');
+      await form.locator('input[name="word"]').fill(WORD);
+      await form.locator('input[name="note"]').fill('e2e');
+      await form.getByRole('button', { name: '추가' }).click();
+      await page.waitForURL(/saved=1/, { timeout: 20000 });
+
+      const saved = await db.get('SELECT kind, word FROM vehicle_class_keywords WHERE word = ?', [WORD]);
+      expect(saved && saved.kind).toBe('import_brand');
+      // 목록에 다시 보여야 관리자가 무엇을 더했는지 안다.
+      await expect(page.getByText(WORD, { exact: true })).toBeVisible();
+
+      // 한 글자는 아무 이름에나 걸려 국산차를 수입으로 만든다 — 막혀야 한다.
+      // 화면에는 minlength가 있어 브라우저가 먼저 막지만, 그건 우회할 수 있으니 **서버가**
+      // 막는지를 본다(화면 검증만 있으면 API로 넣으면 그대로 들어간다).
+      await expect(form.locator('input[name="word"]')).toHaveAttribute('minlength', '2');
+      const rejected = await page.evaluate(async () => {
+        const body = new URLSearchParams({ kind: 'import_brand', word: '가' });
+        const r = await fetch('/vehicle-models/keywords', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: body.toString(),
+        });
+        return r.url;
+      });
+      expect(decodeURIComponent(rejected), '서버가 사유를 밝히며 거절해야 한다').toContain('두 글자 이상');
+      expect(await db.get('SELECT id FROM vehicle_class_keywords WHERE word = ?', ['가'])).toBeFalsy();
+
+      // 지우면 되돌아가야 한다 — 잘못 넣었을 때 되돌릴 길이 없으면 아무도 안 쓴다.
+      const row = page.locator('tr', { hasText: WORD });
+      await row.getByRole('button', { name: '삭제' }).click();
+      await page.waitForURL(/saved=1/, { timeout: 20000 });
+      expect(await db.get('SELECT id FROM vehicle_class_keywords WHERE word = ?', [WORD])).toBeFalsy();
+    } finally {
+      await wipe();
+    }
   });
 });

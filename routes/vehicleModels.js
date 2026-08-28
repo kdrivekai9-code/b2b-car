@@ -5,9 +5,17 @@ const { requireAuth, requireRole } = require('../middleware/auth');
 const asyncHandler = require('../middleware/asyncHandler');
 const vehicleModels = require('../lib/vehicleModels');
 const {
-  classifyToFields,
+  classifyToFields, KEYWORD_KINDS,
   IMPORT_BRANDS, IMPORT_MODELS, DOMESTIC_BRANDS, EV_KEYWORDS, LARGE_KEYWORDS,
 } = require('../lib/vehicleClass');
+
+const KIND_LABELS = {
+  import_brand: '수입 브랜드',
+  import_model: '수입 모델명',
+  ev: '전기차',
+  large: '대형 · 화물',
+  domestic: '국산(수입 판정 제외)',
+};
 
 const router = express.Router();
 router.use(requireAuth, requireRole('admin', 'branch_manager'));
@@ -22,6 +30,10 @@ router.get('/', asyncHandler(async (req, res) => {
       : `SELECT * FROM vehicle_models ORDER BY name LIMIT ${PAGE_SIZE}`,
     q ? [`%${q}%`] : []
   ).catch(() => null);
+
+  const addedKeywords = await db.all(
+    'SELECT * FROM vehicle_class_keywords ORDER BY kind, word'
+  ).catch(() => []);
 
   res.render('vehicle_models/index', {
     title: '차종 관리',
@@ -45,7 +57,43 @@ router.get('/', asyncHandler(async (req, res) => {
       // 국산 사전은 할증을 붙이는 목록이 아니라 수입 판정을 **막는** 목록이다(르노삼성 등).
       { key: 'domestic', label: '국산(수입 판정에서 제외)', words: DOMESTIC_BRANDS },
     ],
+    // 운영자가 더한 낱말. 코드 사전과 따로 보여준다 — 지울 수 있는 것은 이것뿐이라
+    // 섞어 놓으면 "왜 이건 삭제가 안 되지"가 된다.
+    addedKeywords,
+    keywordKinds: KEYWORD_KINDS.map((k) => ({ key: k, label: KIND_LABELS[k] })),
   });
+}));
+
+// 판정 낱말 추가. 코드 사전을 고치는 것이 아니라 **더하는** 것이다 — 배포 없이 빠진 브랜드를
+// 채우기 위한 통로다(빠진 채로 두면 그 차종은 할증이 조용히 빠진다).
+router.post('/keywords', asyncHandler(async (req, res) => {
+  const kind = String(req.body.kind || '').trim();
+  const word = String(req.body.word || '').trim();
+  const back = '/vehicle-models';
+  if (!KEYWORD_KINDS.includes(kind)) return res.redirect(back + '?error=' + encodeURIComponent('분류를 선택해주세요.'));
+  if (!word) return res.redirect(back + '?error=' + encodeURIComponent('낱말을 입력해주세요.'));
+  // 한 글자 낱말은 아무 이름에나 걸린다 — 국산차를 수입으로 만드는 사고가 난다.
+  if (word.length < 2) return res.redirect(back + '?error=' + encodeURIComponent('낱말은 두 글자 이상이어야 합니다. 한 글자는 엉뚱한 차종에 걸립니다.'));
+
+  try {
+    await db.run(
+      'INSERT INTO vehicle_class_keywords (kind, word, note, created_by) VALUES (?, ?, ?, ?)',
+      [kind, word, String(req.body.note || '').trim() || null, req.session.user.id]
+    );
+  } catch (e) {
+    if (e && e.code === '23505') return res.redirect(back + '?error=' + encodeURIComponent('이미 등록된 낱말입니다.'));
+    if (e && e.code === '42P01') return res.redirect(back + '?error=' + encodeURIComponent('낱말 표가 아직 없습니다. 마이그레이션(20260828030000)을 실행해주세요.'));
+    throw e;
+  }
+  vehicleModels.clearKeywordCache();
+  res.redirect(back + '?saved=1');
+}));
+
+router.post('/keywords/:id/delete', asyncHandler(async (req, res) => {
+  // 코드 사전의 낱말은 이 표에 없으므로 여기서 지울 수 없다 — 의도한 것이다(바닥은 배포로만 바뀐다).
+  await db.run('DELETE FROM vehicle_class_keywords WHERE id = ?', [req.params.id]).catch(() => {});
+  vehicleModels.clearKeywordCache();
+  res.redirect('/vehicle-models?saved=1');
 }));
 
 router.post('/', asyncHandler(async (req, res) => {

@@ -130,9 +130,58 @@
     </details>
   <% }) %>
   <p class="page-sub" style="margin-top:12px;">
-    이 사전은 코드에 들어 있어 화면에서 고칠 수 없습니다. 빠진 이름이 자주 보이면 사전에 추가하는 편이
-    낫습니다(차종마다 등록하지 않아도 됩니다).
+    위 목록은 코드에 들어 있어 화면에서 지울 수 없습니다. <b>빠진 이름은 아래에서 더하세요</b> —
+    브랜드를 한 번 더하면 그 브랜드의 <b>모든 모델</b>이 잡힙니다(차종마다 등록하지 않아도 됩니다).
   </p>
+
+  <%# 코드 사전과 따로 둔다. 지울 수 있는 것은 여기 있는 것뿐이라, 섞어 놓으면
+      "왜 이건 삭제가 안 되지"가 된다. %>
+  <div class="section-title" style="font-size:14px;margin-top:16px;">➕ 낱말 추가 (<%= addedKeywords.length %>개 추가됨)</div>
+  <form method="POST" action="/vehicle-models/keywords" class="row" style="align-items:flex-end;">
+    <div class="field">
+      <label>분류</label>
+      <select name="kind" required>
+        <% keywordKinds.forEach(function (k) { %>
+          <option value="<%= k.key %>"><%= k.label %></option>
+        <% }) %>
+      </select>
+    </div>
+    <div class="field" style="flex:1;">
+      <label>낱말</label>
+      <input type="text" name="word" placeholder="예: 쿠프라 / EX30 / 이트론" required minlength="2">
+    </div>
+    <div class="field" style="flex:1;">
+      <label>비고</label>
+      <input type="text" name="note" placeholder="예: 2026년 국내 출시">
+    </div>
+    <div class="field"><button class="btn" type="submit">추가</button></div>
+  </form>
+  <p class="page-sub">
+    차종명에 이 낱말이 <b>들어 있기만 하면</b> 판정됩니다. 그래서 한 글자는 받지 않습니다 —
+    아무 이름에나 걸려 국산차를 수입으로 만듭니다. 추가는 1분 안에 접수에 반영됩니다.
+  </p>
+
+  <% if (addedKeywords.length) { %>
+    <div class="table-wrap" style="margin-top:10px;">
+      <table class="table">
+        <thead><tr><th style="width:160px;">분류</th><th>낱말</th><th>비고</th><th style="width:70px;"></th></tr></thead>
+        <tbody>
+          <% addedKeywords.forEach(function (k) { %>
+            <tr>
+              <td><%= (keywordKinds.find(function (x) { return x.key === k.kind; }) || {}).label || k.kind %></td>
+              <td><b><%= k.word %></b></td>
+              <td class="page-sub"><%= k.note || '-' %></td>
+              <td>
+                <form method="POST" action="/vehicle-models/keywords/<%= k.id %>/delete">
+                  <button class="btn small secondary" type="submit">삭제</button>
+                </form>
+              </td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    </div>
+  <% } %>
 </div>
 
 <script>
