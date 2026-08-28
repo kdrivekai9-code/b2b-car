@@ -58,6 +58,35 @@ const cfg = {
   check('2배 미만이면 안 보낸다', decide(fakePrev(5, 30), 59), false);
   check('줄어들면 안 보낸다', decide(fakePrev(5, 30), 10), false);
 
+  console.log('\n[폴링 순환 — 상한을 넘어도 굶는 오더가 없어야 한다]');
+  // 예전 정렬은 id DESC라 매분 같은 결과를 줬다. 상한을 넘는 순간 뒤로 밀린 오더는 한 번도
+  // 조회되지 않고, 3일이 지나면 조회 대상에서 아예 빠져 영영 미완료로 남았다.
+  // 확인 시각(오래된 순)으로 돌리면 모든 오더가 ceil(N/L)분 안에 한 번은 걸린다.
+  const rotate = (n, limit, rounds) => {
+    // synced[i] = 마지막으로 확인된 회차. -1은 아직 한 번도 확인 안 됨.
+    const synced = Array.from({ length: n }, () => -1);
+    for (let r = 0; r < rounds; r += 1) {
+      const order = synced
+        .map((v, i) => ({ i, v }))
+        .sort((a, b) => (a.v - b.v) || (b.i - a.i))
+        .slice(0, limit);
+      order.forEach(({ i }) => { synced[i] = r; });
+    }
+    return Math.min(...synced);
+  };
+  // 대상 500건 / 상한 200건 → 3회차(ceil(500/200)=3) 안에 전부 한 번은 확인돼야 한다.
+  check('500건을 상한 200으로 3회 돌리면 빠지는 오더 없음', rotate(500, 200, 3) >= 0, true);
+  check('대상이 상한 이하면 매 회차 전부 확인', rotate(150, 200, 1) >= 0, true);
+  // 예전 방식(항상 같은 앞쪽 N건)에서는 뒤쪽이 영원히 -1로 남는다 — 그 대비를 남겨둔다.
+  const starve = (n, limit, rounds) => {
+    const synced = Array.from({ length: n }, () => -1);
+    for (let r = 0; r < rounds; r += 1) {
+      for (let i = 0; i < Math.min(limit, n); i += 1) synced[i] = r; // id DESC 고정 순서
+    }
+    return Math.min(...synced);
+  };
+  check('예전 방식은 100회를 돌려도 굶는 오더가 남는다', starve(500, 200, 100), -1);
+
   console.log('\n[설정 기본값]');
   const loaded = await systemAlert.loadSettings().catch(() => null);
   if (!loaded) {

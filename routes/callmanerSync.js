@@ -187,8 +187,20 @@ async function syncOrdersByConfSlip(branch) {
   // 18:42:30 접수). 그 순간을 잡으면 오더가 실제로는 살아 있는데 우리 화면에는 영영 '취소'로
   // 굳어버린다. 되살아나는 것은 대개 1~2분 안이라 짧은 창만 열어두면 충분하다.
   //
-  // ORDER BY로 진행 중인 오더를 먼저 담는다 — 종료 건이 LIMIT을 차지해 정작 진행 중인 오더가
-  // 밀려나면 안 된다.
+  // ORDER BY 두 단계:
+  //
+  //  1) 진행 중인 오더를 먼저 담는다 — 종료 건이 LIMIT을 차지해 정작 진행 중인 오더가 밀려나면 안 된다.
+  //
+  //  2) 그다음은 **오래 확인 안 된 순서**(callmaner_synced_at ASC)다. 예전에는 id DESC였는데,
+  //     그러면 대상이 LIMIT을 넘는 순간 조용히 굶는 오더가 생긴다. id DESC는 매분 같은 결과를
+  //     주므로 최신 N건만 영원히 확인되고, N번째 뒤로 밀린 오더는 **한 번도** 조회되지 않는다.
+  //     그 상태로 3일이 지나면 조회 대상(created_at 조건)에서 아예 빠져 영영 미완료로 남는다 —
+  //     배차·완료 감지도, 고객 통보도 나가지 않는다. "밀린다"가 아니라 "버려진다"였다.
+  //
+  //     확인 시각순으로 돌리면 대상이 N건이고 상한이 L일 때 모든 오더가 ceil(N/L)분마다 한 번은
+  //     확인된다. 늦어지기는 해도 빠지지는 않는다. 한 번도 확인 안 된 건(NULL)이 가장 먼저다.
+  //
+  // callmaner_synced_at은 text(KST 'YYYY-MM-DD HH24:MI:SS')라 문자열 정렬이 곧 시간순이다.
   const orders = await db.all(
     `SELECT * FROM orders
      WHERE branch_id = ? AND callmaner_conf_slip IS NOT NULL
@@ -197,7 +209,7 @@ async function syncOrdersByConfSlip(branch) {
          status NOT IN (${placeholders})
          OR updated_at >= to_char((now() at time zone 'Asia/Seoul') - interval '${TERMINAL_RECHECK_MINUTES} minutes', 'YYYY-MM-DD HH24:MI:SS')
        )
-     ORDER BY (status IN (${placeholders})) ASC, id DESC
+     ORDER BY (status IN (${placeholders})) ASC, callmaner_synced_at ASC NULLS FIRST, id DESC
      LIMIT ?`,
     [branch.id, ...TERMINAL_LOCAL_STATUSES, ...TERMINAL_LOCAL_STATUSES, SYNC_BY_CONF_SLIP_LIMIT]
   );
@@ -275,9 +287,20 @@ async function syncOrdersByConfSlip(branch) {
   }
 
   let updated = 0;
+  // 이번 회차에 실제로 콜마너 응답을 받은 오더. 아래에서 확인 시각(callmaner_synced_at)을
+  // 한꺼번에 찍는다.
+  //
+  // 왜 필요한가: 이 루프는 "바뀐 게 없으면 continue"라서, 상태가 그대로인 오더는 확인을 하고도
+  // 확인 시각이 갱신되지 않았다. 그러면 위 ORDER BY(오래 확인 안 된 순)가 매분 같은 오더를
+  // 다시 골라 순환이 돌지 않는다 — 상한을 넘는 순간 굶는 오더가 그대로 생긴다.
+  //
+  // 덤으로 '동기화 정지' 알림(lib/systemAlert.js)의 오탐도 사라진다. 지금은 상태가 안 바뀌면
+  // 확인 시각이 멈춰 있어서, 조용한 시간대가 "멈춘 것"으로 보였다.
+  const checkedIds = [];
   for (const order of orders) {
     const info = infoByOrderId.get(order.id);
     if (!info) continue;
+    checkedIds.push(order.id);
 
     // 같은 응답에 요금(price)도 들어 있어 함께 맞춘다 — 요금 동기화는 원래 OrderAllStatus
     // 응답으로만 하고 있었는데 그 경로가 사실상 죽어 있어 한 번도 동작하지 않았다.
@@ -355,6 +378,19 @@ async function syncOrdersByConfSlip(branch) {
       );
     }
   }
+
+  // 확인 시각은 한 문장으로 몰아 찍는다 — 오더마다 UPDATE를 날리면 200건이면 분당 200번,
+  // 하루 28만 번의 쓰기가 된다. 여기서는 분당 한 번이면 충분하다.
+  //
+  // 상태를 바꾼 오더는 위에서 이미 같은 값을 찍었지만 다시 찍어도 무해하다(같은 시각).
+  if (checkedIds.length) {
+    await db.run(
+      `UPDATE orders SET callmaner_synced_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS')
+       WHERE id = ANY(?)`,
+      [checkedIds]
+    ).catch((e) => console.error('확인 시각 갱신 실패(무시):', e.message));
+  }
+
   return { checked: orders.length, updated };
 }
 
