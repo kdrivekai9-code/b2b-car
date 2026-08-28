@@ -17,7 +17,7 @@ function check(label, actual, expected) {
 
 const cfg = {
   errorWindowMin: 10, errorThreshold: 20, cooldownMin: 60,
-  backlogPercent: 80, stalledMin: 15,
+  backlogPercent: 80, stalledMin: 15, timeBudgetThreshold: 3,
 };
 
 (async () => {
@@ -34,11 +34,11 @@ const cfg = {
     if (count < threshold) return null;
     return count > limit ? 'over' : 'near';
   };
-  check('상한의 79%면 조용', backlog(157, 200), null);
-  check('상한의 80%면 경고', backlog(160, 200), 'near');
-  check('상한과 같으면 경고', backlog(200, 200), 'near');
-  check('상한을 넘으면 심각', backlog(201, 200), 'over');
-  check('진행 오더가 없으면 조용', backlog(0, 200), null);
+  check('상한의 79%면 조용', backlog(394, 500), null);
+  check('상한의 80%면 경고', backlog(400, 500), 'near');
+  check('상한과 같으면 경고', backlog(500, 500), 'near');
+  check('상한을 넘으면 심각', backlog(501, 500), 'over');
+  check('진행 오더가 없으면 조용', backlog(0, 500), null);
 
   console.log('\n[쿨다운]');
   const now = Date.now();
@@ -75,8 +75,10 @@ const cfg = {
     return Math.min(...synced);
   };
   // 대상 500건 / 상한 200건 → 3회차(ceil(500/200)=3) 안에 전부 한 번은 확인돼야 한다.
-  check('500건을 상한 200으로 3회 돌리면 빠지는 오더 없음', rotate(500, 200, 3) >= 0, true);
-  check('대상이 상한 이하면 매 회차 전부 확인', rotate(150, 200, 1) >= 0, true);
+  check('1200건을 상한 500으로 3회 돌리면 빠지는 오더 없음', rotate(1200, 500, 3) >= 0, true);
+  check('대상이 상한 이하면 매 회차 전부 확인', rotate(400, 500, 1) >= 0, true);
+  // 시간 예산 때문에 일부를 미뤄도 마찬가지다 — 미뤄진 건이 다음 회차 맨 앞으로 온다.
+  check('상한의 절반만 처리해도 6회 안에 전부', rotate(1200, 250, 5) >= 0, true);
   // 예전 방식(항상 같은 앞쪽 N건)에서는 뒤쪽이 영원히 -1로 남는다 — 그 대비를 남겨둔다.
   const starve = (n, limit, rounds) => {
     const synced = Array.from({ length: n }, () => -1);
@@ -85,7 +87,7 @@ const cfg = {
     }
     return Math.min(...synced);
   };
-  check('예전 방식은 100회를 돌려도 굶는 오더가 남는다', starve(500, 200, 100), -1);
+  check('예전 방식은 100회를 돌려도 굶는 오더가 남는다', starve(1200, 500, 100), -1);
 
   console.log('\n[설정 기본값]');
   const loaded = await systemAlert.loadSettings().catch(() => null);
@@ -101,10 +103,11 @@ const cfg = {
   console.log('\n[현재 상태(참고)]');
   try {
     const cur = await systemAlert.loadSettings();
-    const limit = Number(process.env.CALLMANER_SYNC_ORDER_LIMIT || 200);
+    const limit = Number(process.env.CALLMANER_SYNC_ORDER_LIMIT || 500);
     const found = [
       ...await systemAlert.checkErrorSpikes(cur),
       ...await systemAlert.checkSyncBacklog(cur, limit),
+      ...await systemAlert.checkSyncTimeBudget(cur),
       ...await systemAlert.checkSyncStalled(cur),
     ];
     if (!found.length) console.log('  걸리는 항목 없음 (정상)');

@@ -37,6 +37,13 @@
           </td>
         </tr>
         <tr>
+          <td><b>동기화 시간 초과</b></td>
+          <td>
+            한 회차를 제한 시간 안에 못 끝낸 일이 <%= cfg.errorWindowMin %>분 안에 <b><%= cfg.timeBudgetThreshold %>회</b> 이상
+            <div class="page-sub">건수가 아니라 <b>속도</b> 문제입니다 — 콜마너 응답이 느려지면 오더가 적어도 걸립니다.</div>
+          </td>
+        </tr>
+        <tr>
           <td><b>동기화 정지</b></td>
           <td>
             진행 중 오더가 있는데 <b><%= cfg.stalledMin %>분</b>간 상태 갱신 0건

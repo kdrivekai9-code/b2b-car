@@ -41,7 +41,7 @@ router.get('/', requireAuth, requireRole('admin'), asyncHandler(async (req, res)
     migrationMissing: logs === null,
     states: states || [],
     cfg,
-    syncLimit: Number(process.env.CALLMANER_SYNC_ORDER_LIMIT || 200),
+    syncLimit: Number(process.env.CALLMANER_SYNC_ORDER_LIMIT || 500),
     tested: req.query.tested === '1',
   });
 }));
@@ -61,10 +61,11 @@ router.post('/test', requireAuth, requireRole('admin'), asyncHandler(async (req,
 // 지금 무엇이 걸리는지 즉시 확인(발송 없이). 임계값을 조정할 때 쓴다.
 router.get('/dry-run', requireAuth, requireRole('admin'), asyncHandler(async (req, res) => {
   const cfg = await systemAlert.loadSettings();
-  const syncLimit = Number(process.env.CALLMANER_SYNC_ORDER_LIMIT || 200);
+  const syncLimit = Number(process.env.CALLMANER_SYNC_ORDER_LIMIT || 500);
   const alerts = [
     ...await systemAlert.checkErrorSpikes(cfg),
     ...await systemAlert.checkSyncBacklog(cfg, syncLimit),
+    ...await systemAlert.checkSyncTimeBudget(cfg),
     ...await systemAlert.checkSyncStalled(cfg),
   ];
   res.json({ config: cfg, syncLimit, alerts });

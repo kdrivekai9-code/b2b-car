@@ -107,18 +107,31 @@ async function syncFare(order, item) {
 // OrderHistory는 같은 userHp로 우리 접수건이 정상 조회되고 상태도 한글로 채워져 온다(실측).
 // 1분마다 상태를 확인할 오더 수의 상한.
 //
-// 40 → 200으로 올린다(2026-08-29). 40은 근거 없이 보수적으로 잡은 값이었는데, 실제로 재보니
-// 콜마너 단건조회가 **중앙값 14ms · 최대 87ms**로 매우 빠르다. 오더 하나당 조회·기사정보·요금
-// 3회를 잡고 동시 5개로 돌려도:
-//   200건 × 3회 ÷ 5동시 = 120라운드 × 87ms ≒ 10초  (1분 창 안에 넉넉히 들어간다)
-// 콜마너가 지금보다 5배 느려져도 60초 안에 끝난다. 그보다 더 느려지면 아래 백로그 알림
-// (lib/systemAlert.js)이 먼저 알려준다.
+// 40 → 200 → 500으로 올렸다(2026-08-29). 40은 근거 없이 보수적으로 잡은 값이었는데, 실제로
+// 재보니 콜마너 단건조회가 **중앙값 14ms · 최대 87ms**로 매우 빠르다. 오더 하나당 조회 3회를
+// 잡고 동시 10개로 돌리면:
+//   500건 × 3회 ÷ 10동시 = 150라운드 × 87ms ≒ 13초  (1분 창 안에 넉넉히 들어간다)
 //
-// 왜 상한 자체는 남기나: 없애면 진행 중 오더가 몇 백 건일 때 매분 그만큼 API를 두드리고,
-// 크론 실행이 1분을 넘겨 다음 실행과 겹친다. 상한이 있으면 밀리기는 해도 겹치지는 않는다.
-const SYNC_BY_CONF_SLIP_LIMIT = Number(process.env.CALLMANER_SYNC_ORDER_LIMIT || 200);
+// 왜 상한 자체는 남기나: 없애면 진행 중 오더가 몇 천 건일 때 매분 그만큼 API를 두드린다.
+// 콜마너도 같은 회사 인프라라 우리가 부담을 다 떠넘길 이유가 없다.
+//
+// 상한을 넘겨도 빠지는 오더는 없다 — 위 ORDER BY가 "오래 확인 안 된 순"이라 다음 회차에
+// 맨 앞으로 온다. 대상 N건·상한 L일 때 모든 오더가 ceil(N/L)분 안에 한 번은 확인된다.
+const SYNC_BY_CONF_SLIP_LIMIT = Number(process.env.CALLMANER_SYNC_ORDER_LIMIT || 500);
 const SYNC_LOOKBACK_DAYS = Number(process.env.CALLMANER_SYNC_LOOKBACK_DAYS || 3);
-const SYNC_CONCURRENCY = Number(process.env.CALLMANER_SYNC_CONCURRENCY || 5);
+// 동시 호출 수. 상한을 올릴 때 여기를 같이 올려야 의미가 있다 — 걸리는 시간은
+// (건수 ÷ 동시성) × 응답시간이라, 동시성이 그대로면 상한만 올려도 시간만 길어진다.
+const SYNC_CONCURRENCY = Number(process.env.CALLMANER_SYNC_CONCURRENCY || 10);
+
+// 한 회차에 쓸 수 있는 시간(ms). 이 시간을 넘기면 남은 오더는 건드리지 않고 끝낸다.
+//
+// 왜 건수 상한만으로는 부족한가: 상한은 "콜마너가 지금만큼 빠를 때" 걸리는 시간을 정할 뿐이다.
+// 콜마너가 느려지면 같은 500건이 10초가 아니라 2분이 걸리고, 그러면 1분 주기 크론이 겹쳐
+// 같은 오더를 두 번 조회하며 부하가 배로 뛴다. 시간으로 자르면 얼마나 느려지든 겹치지 않는다.
+//
+// 45초로 둔 이유: 크론 주기가 60초라 여유 15초를 남긴다. 남긴 오더는 버려지는 게 아니라
+// 다음 회차에 **가장 오래 확인 안 된 순서**로 맨 앞에 오므로(위 ORDER BY) 곧바로 처리된다.
+const SYNC_TIME_BUDGET_MS = Number(process.env.CALLMANER_SYNC_TIME_BUDGET_MS || 45000);
 const TERMINAL_LOCAL_STATUSES = ['완료', '취소'];
 // 완료/취소로 기록된 뒤에도 이 시간 동안은 계속 상태를 확인한다. 콜마너가 재배차 직전에 잠깐
 // 주는 '취소'를 우리가 종료로 굳혀버리는 것을 막기 위한 창이다(실측상 1~2분 안에 되살아난다).
@@ -226,9 +239,15 @@ async function syncOrdersByConfSlip(branch) {
     byUserHp.get(hp).push(order);
   });
 
+  // 회차 시작 시각. 아래 조회 루프들이 이 예산을 함께 나눠 쓴다.
+  const startedAt = Date.now();
+  const outOfTime = () => Date.now() - startedAt > SYNC_TIME_BUDGET_MS;
+  let skippedForTime = 0;
+
   const infoBySlip = new Map();
   const userHps = Array.from(byUserHp.keys());
   for (let i = 0; i < userHps.length; i += SYNC_CONCURRENCY) {
+    if (outOfTime()) { skippedForTime += userHps.length - i; break; }
     const chunk = userHps.slice(i, i + SYNC_CONCURRENCY);
     await Promise.all(chunk.map(async (hp) => {
       try {
@@ -250,6 +269,7 @@ async function syncOrdersByConfSlip(branch) {
   });
 
   for (let i = 0; i < missing.length; i += SYNC_CONCURRENCY) {
+    if (outOfTime()) { skippedForTime += missing.length - i; break; }
     const chunk = missing.slice(i, i + SYNC_CONCURRENCY);
     await Promise.all(chunk.map(async (order) => {
       try {
@@ -272,6 +292,9 @@ async function syncOrdersByConfSlip(branch) {
     return info.baechaStatus === undefined; // 단건조회로 이미 받은 건은 값이 있다(빈 문자열 포함)
   });
   for (let i = 0; i < needBaecha.length; i += SYNC_CONCURRENCY) {
+    // 운행시작 보강 조회는 없어도 상태는 '기사배정'으로 남는다(다음 회차에 다시 잡는다).
+    // 시간이 없으면 여기부터 포기하는 것이 맞다.
+    if (outOfTime()) { skippedForTime += needBaecha.length - i; break; }
     const chunk = needBaecha.slice(i, i + SYNC_CONCURRENCY);
     await Promise.all(chunk.map(async (order) => {
       try {
@@ -391,7 +414,16 @@ async function syncOrdersByConfSlip(branch) {
     ).catch((e) => console.error('확인 시각 갱신 실패(무시):', e.message));
   }
 
-  return { checked: orders.length, updated };
+  if (skippedForTime) {
+    // 조용히 넘어가면 안 된다 — 이 값이 계속 잡히면 상한을 낮추거나 콜마너 응답이 느려진 것이다.
+    console.warn(`콜마너 동기화 시간 예산(${SYNC_TIME_BUDGET_MS}ms) 초과 — ${skippedForTime}건은 다음 회차로 미룸`);
+    logIntegrationErrorAsync({
+      source: 'callmaner', operation: 'sync_time_budget', refType: 'branch', refId: branch.id,
+      message: `동기화 시간 예산 초과: ${skippedForTime}건을 다음 회차로 미룸`,
+      context: { budgetMs: SYNC_TIME_BUDGET_MS, elapsedMs: Date.now() - startedAt, limit: SYNC_BY_CONF_SLIP_LIMIT, target: orders.length },
+    });
+  }
+  return { checked: orders.length, updated, skippedForTime, elapsedMs: Date.now() - startedAt };
 }
 
 // 탁송사진이 실제로 열리기 시작한 시각을 재는 크론(30분 간격). 통보를 보내지 않는다 —
