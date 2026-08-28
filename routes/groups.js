@@ -972,8 +972,11 @@ router.post('/:id/office-fares/zones', asyncHandler(async (req, res) => {
   const office = await db.get('SELECT * FROM group_branch_offices WHERE id = ? AND group_id = ?', [officeId, req.params.id]);
   if (!office) return res.redirect(base + '?error=' + encodeURIComponent('지점을 찾을 수 없습니다.'));
 
+  // 적힌 시도를 우리 지오코더가 붙이는 시도로 교정한다 — 안 하면 광주처럼 행정구역이 바뀐
+  // 지역이 영영 안 맞는다(lib/zoneGeocode.js resolveZoneRegion).
+  const resolved = await zoneGeocode.resolveZoneRegion(sido, sigugun);
   const distance = await computeZoneDistance(office, sido, sigugun);
-  await upsertZoneFare(officeId, sido, sigugun, fare, distance);
+  await upsertZoneFare(officeId, resolved.sido || sido, sigugun, fare, distance);
   res.redirect(base + '?saved=' + encodeURIComponent(
     `${office.name} · ${sido} ${sigugun} 요금을 저장했습니다.` + (distance == null ? ' (거리 계산 실패 — 요금은 저장됐습니다)' : ` (거리 ${distance}km)`)
   ));
@@ -1063,9 +1066,10 @@ router.post('/:id/office-fares/upload', officeUpload.single('file'), asyncHandle
   const offices = await officeZoneFare.listOffices(req.params.id);
   const byName = new Map(offices.map((o) => [String(o.name).replace(/\s+/g, '').toLowerCase(), o]));
 
-  const result = { saved: 0, skipped: 0, distanceFilled: 0, errors: [] };
+  const result = { saved: 0, skipped: 0, distanceFilled: 0, regionCorrected: 0, errors: [] };
   // 거리 계산은 줄마다 외부 API를 부른다 — 같은 지역이 여러 지점에 반복되므로 한 번만 부른다.
   const centerCache = new Map();
+  const regionCache = new Map();
 
   for (let i = 1; i < rows.length; i += 1) {
     const row = rows[i] || [];
@@ -1094,7 +1098,13 @@ router.post('/:id/office-fares/upload', officeUpload.single('file'), asyncHandle
       if (distance != null) result.distanceFilled += 1;
     }
 
-    await upsertZoneFare(office.id, sido, sigugun, fare, distance);
+    // 시도 교정(광주→전남 등). 지역마다 외부 조회가 들어가므로 같은 지역은 한 번만 본다.
+    const regionKey = `${sido}|${sigugun}`;
+    if (!regionCache.has(regionKey)) regionCache.set(regionKey, await zoneGeocode.resolveZoneRegion(sido, sigugun));
+    const resolved = regionCache.get(regionKey);
+    if (resolved.corrected) result.regionCorrected += 1;
+
+    await upsertZoneFare(office.id, resolved.sido || sido, sigugun, fare, distance);
     result.saved += 1;
   }
 

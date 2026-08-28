@@ -22,6 +22,13 @@
   <div class="alert">
     업로드 완료 — <b><%= uploadResult.saved %>줄 저장</b>,
     <%= uploadResult.skipped %>줄 건너뜀, 거리 자동계산 <%= uploadResult.distanceFilled %>줄.
+    <%# 시도 교정은 조용히 하면 "내가 적은 것과 다르게 저장됐다"가 된다 — 건수를 밝힌다. %>
+    <% if (uploadResult.regionCorrected) { %>
+      <div style="margin-top:6px;" class="page-sub">
+        시도 표기를 <%= uploadResult.regionCorrected %>줄 교정했습니다 —
+        행정구역이 바뀐 지역(예: 광주광역시 → 전남)은 접수된 오더에 붙는 표기로 맞춰야 매칭됩니다.
+      </div>
+    <% } %>
     <% if ((uploadResult.errors || []).length) { %>
       <%# 건너뛴 줄을 숨기면 "다 올라간 줄" 알고 넘어간다 — 청구 누락으로 이어진다. %>
       <div style="margin-top:8px;">
