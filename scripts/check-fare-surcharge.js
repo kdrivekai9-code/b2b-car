@@ -183,11 +183,24 @@ check('여러 개 걸리면 가장 비싼 것 하나만',
   fs.computeSurcharges({}, { destinationAddress: '유원지 전망대 앞', placeRules }).total, 7000);
 
 console.log('\n[부대비용 포함/제외]');
-check('기본값(단가표) — 톨게이트만 포함', fs.billableChargeTypes({}),
-  ['특수구간통행료', '주차요금', '주유비', '세차비']);
-check('전부 포함이면 청구 항목 없음', fs.billableChargeTypes({
-  toll_normal_included: 1, toll_special_included: 1, parking_included: 1, fuel_included: 1, wash_included: 1,
-}), []);
+// 항목 목록을 여기 적어두지 않는다 — 부대비용이 하나 늘 때마다(실제로 '충전비'가 늘었다)
+// 이 검사가 깨지면서 정작 규칙이 맞는지는 못 보게 된다. 규칙만 확인한다.
+check('기본값(단가표) — 일반 통행료만 포함',
+  fs.billableChargeTypes({}).includes('톨게이트'), false);
+// 도선료는 '제외'인데도 목록에서 빠진다 — 금액이 orders.ferry_fare_amount에서 오므로
+// 정산 입력에서 손으로 또 넣으면 두 번 청구된다(lib/fareSurcharge.js 주석). 의도된 예외다.
+check('기본값 — 도선료를 뺀 나머지는 청구 가능',
+  fs.EXTRA_COST_ITEMS.filter((it) => !it.defaultIncluded && it.chargeType && it.code !== 'ferry')
+    .every((it) => fs.billableChargeTypes({}).includes(it.chargeType)), true);
+check('도선료는 정산 입력 선택지에서 빠진다',
+  fs.billableChargeTypes({}).includes('도선료'), false);
+// 전부 '포함'으로 두면 청구할 항목이 하나도 없어야 한다(이중 청구 방지의 핵심).
+const allIncluded = {};
+fs.EXTRA_COST_ITEMS.forEach((it) => {
+  if (it.settingKey) allIncluded[it.settingKey] = 1;
+  if (it.modeKey) allIncluded[it.modeKey] = 'included';
+});
+check('전부 포함이면 청구 항목 없음', fs.billableChargeTypes(allIncluded), []);
 check('일반 통행료를 제외로 두면 청구 가능', fs.billableChargeTypes({ toll_normal_included: 0 }).includes('톨게이트'), true);
 
 console.log('\n[특수 구간 자동 인식]');

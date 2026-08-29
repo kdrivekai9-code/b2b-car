@@ -23,7 +23,51 @@
     <a class="btn secondary" href="/groups">법인 목록으로</a>
   </div>
 </div>
-<%- include('../partials/group_tabs', { group: group, groups: groups, active: 'settlement' }) %>
+<% if (!(typeof clientView !== 'undefined' && clientView)) { %>
+  <%- include('../partials/group_tabs', { group: group, groups: groups, active: 'settlement' }) %>
+<% } %>
+
+<%# ── 청구 주체별 구분 ──────────────────────────────────────────────────────
+    개인 딜러 중 "별도 정산 청구"로 지정된 사람은 정산서를 따로 받는다. 딜러가 많을 수 있어
+    표로 먼저 보여주고, 각 줄에서 그 딜러만 따로 열 수 있게 한다.
+    딜러 본인이 보는 화면에는 띄우지 않는다 — 자기 것 하나뿐이라 나눌 것이 없다. %>
+<% if (!(typeof meIsDealer !== 'undefined' && meIsDealer) && (settlementGroups || []).length) { %>
+  <div class="card">
+    <div class="section-title">🧾 청구 주체별 구분 (<%= settlementGroups.length %>)</div>
+    <p class="page-sub" style="margin-top:-4px;">
+      「별도 정산 청구」로 지정된 개인 딜러는 정산서를 따로 받습니다.
+      나머지(본사 직원 · 별도청구를 하지 않는 딜러)는 <b>법인 본사</b>에 합쳐집니다.
+    </p>
+    <div class="table-wrap">
+      <table class="table">
+        <thead><tr><th style="width:30%;">청구 주체</th><th style="width:80px;text-align:right;">건수</th><th style="width:140px;text-align:right;">운행요금</th><th style="width:140px;text-align:right;">실비</th><th style="width:150px;text-align:right;">청구 합계</th><th style="width:110px;"></th></tr></thead>
+        <tbody>
+          <% settlementGroups.forEach(function (g) { %>
+            <tr>
+              <td><b><%= g.label %></b><div class="page-sub"><%= g.sub %></div></td>
+              <td style="text-align:right;"><%= g.summary.count %></td>
+              <td style="text-align:right;"><%= formatMoney(g.summary.total) %></td>
+              <td style="text-align:right;"><%= formatMoney(g.extraSummary.total) %></td>
+              <td style="text-align:right;"><b><%= formatMoney(g.grandTotal) %></b></td>
+              <td>
+                <% if (g.key !== 'hq') { %>
+                  <%# 딜러가 많을 수 있으니 그 딜러만 따로 여는 길을 둔다(정산서 전달용). %>
+                  <a class="btn small secondary" href="?month=<%= encodeURIComponent(month) %>&dealer=<%= g.key.replace('dealer:', '') %>">이 딜러만 보기</a>
+                <% } %>
+              </td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    </div>
+    <% if (typeof viewDealerId !== 'undefined' && viewDealerId) { %>
+      <p class="page-sub">
+        지금 <b>딜러 1명</b>의 내역만 보고 있습니다.
+        <a href="?month=<%= encodeURIComponent(month) %>">법인 전체 보기</a>
+      </p>
+    <% } %>
+  </div>
+<% } %>
 
 <%# 방금 바꾼 것이 반영됐는지 알려준다 — 총액이 안 바뀌는 설정이라 화면만 보고는
     적용됐는지 알기 어렵다. %>

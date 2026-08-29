@@ -21,6 +21,8 @@ async function fetchOrdersInRange(scope, from, to) {
   const params = [];
   if (scope.branch_id) { where.push('branch_id = ?'); params.push(scope.branch_id); }
   if (scope.group_id) { where.push('requester_group_id = ?'); params.push(scope.group_id); }
+  // 개인 딜러는 본인 오더만 — 대시보드 숫자도 같이 좁힌다(목록만 막으면 합계로 남의 실적이 보인다).
+  if (scope.created_by) { where.push('created_by = ?'); params.push(scope.created_by); }
   if (from) { where.push('SUBSTRING(created_at,1,10) >= ?'); params.push(from); }
   if (to) { where.push('SUBSTRING(created_at,1,10) <= ?'); params.push(to); }
   const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : '';

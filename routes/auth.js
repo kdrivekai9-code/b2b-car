@@ -73,6 +73,10 @@ router.post('/login', asyncHandler(async (req, res) => {
     branch_id: user.branch_id,
     group_id: user.group_id,
     grade: user.grade,
+    // 법인 계정 구분 — 개인 딜러는 본인 오더만 본다(lib/clientScope.js).
+    // 세션에 실어야 요청마다 users를 다시 읽지 않는다. 구분을 바꾸면 재로그인이 필요하다.
+    client_type: user.client_type || null,
+    separate_settlement: !!user.separate_settlement,
   };
   await writeAccessLog({ ...logBase, userId: user.id, eventType: 'LOGIN_SUCCESS', workDetail: '로그인', subjectInfo: `사용자 ID ${user.id}` });
   res.redirect('/');

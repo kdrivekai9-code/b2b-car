@@ -11,6 +11,9 @@ const extraCharges = require('../lib/extraCharges');
 const { REMOTE_AREA_FEE_MIN, REMOTE_AREA_FEE_MAX } = require('../lib/branchPolicy');
 const fareSurcharge = require('../lib/fareSurcharge');
 const fareSurchargeInput = require('../lib/fareSurchargeInput');
+// 오더구분별 대기·취소요금 — 칸 이름과 저장 규칙을 한 곳에서 가져온다.
+const tripFees = require('../lib/tripFees');
+const clientScope = require('../lib/clientScope');
 const multer = require('multer');
 // 지점 구간요금 — 거점↔지역 계약표. 거리 구간표보다 먼저 적용된다.
 const officeZoneFare = require('../lib/officeZoneFare');
@@ -288,6 +291,7 @@ router.get('/:id/accounts', asyncHandler(async (req, res) => {
     title: '계정정보 - ' + group.name,
     group, groups, users, branches,
     editing: users.find((u) => String(u.id) === String(req.query.edit)) || null,
+    clientTypes: clientScope.CLIENT_TYPES,
     error: req.query.error || null,
     notice: req.query.notice || null,
   });
@@ -315,12 +319,26 @@ router.post('/:id/accounts', asyncHandler(async (req, res) => {
   const duplicate = await db.get('SELECT id FROM users WHERE login_id = ?', [loginId]);
   if (duplicate) return res.redirect(base + '?error=' + encodeURIComponent(`이미 사용 중인 아이디입니다: ${loginId}`));
 
+  // 법인 계정 구분 — 개인 딜러는 본인 오더만 보고, 별도청구를 켜면 정산서도 따로 받는다.
+  const clientType = clientScope.normalizeClientType(req.body.client_type);
+  const separate = clientType === 'dealer' && req.body.separate_settlement === '1';
+
   const hash = await bcrypt.hash(password, 10);
   await db.run(
-    `INSERT INTO users (login_id, password_hash, name, phone, role, branch_id, group_id, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'active')`,
-    [loginId, hash, name, phone, role, branchId, req.params.id]
-  );
+    `INSERT INTO users (login_id, password_hash, name, phone, role, branch_id, group_id, status,
+       client_type, separate_settlement)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
+    [loginId, hash, name, phone, role, branchId, req.params.id, clientType, separate]
+  ).catch(async (e) => {
+    // 마이그레이션(20260830020000) 전이면 컬럼이 없다 — 계정 생성 자체는 막지 않는다.
+    if (!e || e.code !== '42703') throw e;
+    console.error('법인 계정 구분 저장 실패(마이그레이션 미적용):', e.message);
+    await db.run(
+      `INSERT INTO users (login_id, password_hash, name, phone, role, branch_id, group_id, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'active')`,
+      [loginId, hash, name, phone, role, branchId, req.params.id]
+    );
+  });
   res.redirect(base + '?notice=' + encodeURIComponent(`계정 "${name}"(${loginId})을 등록했습니다.`));
 }));
 
@@ -353,6 +371,17 @@ router.post('/:id/accounts/:userId', asyncHandler(async (req, res) => {
       [name, phone, role, branchId, user.id]
     );
   }
+
+  // 구분은 별도 UPDATE로 쓴다 — 위 문에 끼우면 마이그레이션 전 DB에서 문 전체가 실패해
+  // 이름·연락처·비밀번호 변경까지 함께 날아간다.
+  const clientType = clientScope.normalizeClientType(req.body.client_type);
+  const separate = clientType === 'dealer' && req.body.separate_settlement === '1';
+  await db.run('UPDATE users SET client_type=?, separate_settlement=? WHERE id=?',
+    [clientType, separate, user.id])
+    .catch((e) => {
+      if (e && e.code === '42703') return; // 마이그레이션 20260830020000 전
+      console.error('법인 계정 구분 저장 실패(무시):', e.message);
+    });
   res.redirect(base + '?notice=' + encodeURIComponent(`계정 "${name}" 정보를 저장했습니다.`));
 }));
 
@@ -423,6 +452,8 @@ router.get('/:id/fare-rules', asyncHandler(async (req, res) => {
   res.render('groups/fare_rules', {
     title: '탁송 요금 - ' + page.group.name,
     ...page,
+    // 오더구분별 대기·취소요금 칸 정의. 화면에 필드명을 또 적으면 컬럼이 늘 때 한쪽만 바뀐다.
+    orderTypeFeeGroups: tripFees.ORDER_TYPE_FEE_GROUPS,
     saved: req.query.saved === '1',
     copied: req.query.copied === '1',
     error: req.query.error || null,
@@ -485,6 +516,10 @@ router.post('/:id/fare-rules/copy', asyncHandler(async (req, res) => {
   } finally {
     client.release();
   }
+  // 위 복사문이 컬럼을 손으로 나열하는 방식이라 여기서 빠지면 복사한 쪽만 조용히 0원이 된다.
+  // 지사 표(extra)와 법인 표는 칸 이름이 같아 그대로 넘기면 복사가 된다.
+  await tripFees.saveOrderTypeFees(db, 'group_fare_extra_settings', 'group_id', req.params.id, extra)
+    .catch((e) => console.error('오더구분별 요금 복사 실패:', e.message));
   res.redirect(base + '?copied=1');
 }));
 
@@ -581,6 +616,8 @@ router.post('/:id/fare-rules', asyncHandler(async (req, res) => {
   });
 
   // 위 upsert가 행을 만든 **뒤**에 돌아야 한다 — UPDATE라 행이 없으면 아무것도 저장되지 않는다.
+  // 오더구분별 대기·취소요금도 같은 이유로 여기서 저장한다(UPDATE라 행이 만들어진 뒤여야 한다).
+  await tripFees.saveOrderTypeFees(db, 'group_fare_extra_settings', 'group_id', req.params.id, req.body);
   const saved = await fareSurchargeInput.saveSettings('group', req.params.id, req.body);
   const savedRules = await fareSurchargeInput.saveScopedRules('group', req.params.id, req.body);
   if (!saved.ok || !savedRules.ok) {
@@ -802,18 +839,22 @@ function settlementMonth(raw) {
 
 // created_at은 text(KST 문자열)다 — timestamptz로 캐스팅해 비교하면 다른 곳에서 겪었던 타입
 // 충돌이 그대로 재현되므로 앞 7글자('YYYY-MM')를 문자열로 자른다.
-async function loadSettlement(groupId, month) {
+// dealerUserId를 주면 그 딜러가 접수한 건만 본다(딜러 본인 조회).
+async function loadSettlement(groupId, month, dealerUserId = null) {
   // 조회 실패를 .catch로 삼켜 빈 목록을 돌려주면 "이 달은 실적이 없다"로 읽힌다 — 정산 화면에서
   // 그건 그냥 오류보다 나쁘다. 던져서 오류 화면이 뜨게 둔다.
   //
   // 다만 차종 분류 컬럼만은 예외다. 마이그레이션(20260828040000) 전에는 그 컬럼이 없는데,
   // 그것 때문에 정산 화면 전체가 안 열리면 배포와 마이그레이션 사이에 정산 업무가 멈춘다.
   // 분류는 보조 정보라 빠져도 정산 금액에는 영향이 없다 — 그 컬럼만 빼고 다시 조회한다.
-  const SETTLEMENT_SQL = (vehicleCols) => `
+  const SETTLEMENT_SQL = (vehicleCols, dealerCols, onlyMineSql) => `
     SELECT o.id, o.oid, o.reserved_date, o.reserved_time, o.vehicle_number,
            o.fare_surcharges_json, o.wait_fee_amount, o.wait_fee_note,
            o.cancel_fee_amount, o.cancel_fee_note,
            o.settled_at, o.settled_by, su.name AS settled_by_name,
+           -- 누가 접수했는지 — 개인 딜러별로 정산서를 나누려면 이 값이 필요하다.
+           o.created_by, cu.name AS created_by_name, cu.login_id AS created_by_login,
+           ${dealerCols}
            ${vehicleCols}
            o.origin_address, o.origin_address_detail,
            o.destination_address, o.destination_address_detail,
@@ -821,6 +862,7 @@ async function loadSettlement(groupId, month) {
            h.completed_at
       FROM orders o
       LEFT JOIN users su ON su.id = o.settled_by
+      LEFT JOIN users cu ON cu.id = o.created_by
       JOIN (
         -- 어느 달로 묶을지 정하는 시각. 완료 건은 완료 시각, 취소 건은 취소 시각이다 —
         -- 취소 건에는 완료 이력이 없어서 '완료'만 보면 조인에서 통째로 빠진다.
@@ -830,20 +872,41 @@ async function loadSettlement(groupId, month) {
          GROUP BY order_id
       ) h ON h.order_id = o.id
      WHERE o.requester_group_id = ?
+       -- 개인 딜러가 자기 정산서를 볼 때는 본인이 접수한 건만 본다.
+       ${onlyMineSql}
        -- 완료 건이 정산 대상이다. 다만 **취소요금이 붙은 취소 건**은 청구할 금액이 있으므로
        -- 함께 넣는다 — 예전에는 완료만 봐서, 취소요금을 계산해 저장해도 청구할 방법이 없었다.
        AND (o.status = '완료' OR (o.status = '취소' AND COALESCE(o.cancel_fee_amount, 0) > 0))
        AND SUBSTRING(h.completed_at, 1, 7) = ?
      ORDER BY h.completed_at ASC, o.id ASC
   `;
-  const rows = await db.all(
-    SETTLEMENT_SQL('o.vehicle_type, o.car_type, o.fuel_type, o.vehicle_class_source,'),
-    [groupId, month]
-  ).catch((e) => {
-    if (!e || e.code !== '42703') throw e;
-    console.error('정산: 차종 분류 컬럼 없음 — 그 열을 빼고 조회합니다:', e.message);
-    return db.all(SETTLEMENT_SQL('o.vehicle_type,'), [groupId, month]);
-  });
+  // 딜러 본인 조회면 WHERE를 한 겹 더 좁힌다. 조각을 문자열로 끼우되 값은 바인딩한다.
+  const onlyMine = dealerUserId ? 'AND o.created_by = ?' : '';
+  const params = dealerUserId ? [groupId, dealerUserId, month] : [groupId, month];
+
+  // 선택 컬럼이 없는 DB(마이그레이션 전)에서도 정산 화면은 열려야 한다 — 보조 정보 때문에
+  // 정산 업무가 멈추면 안 된다. 차종 분류와 딜러 구분을 각각 빼면서 다시 시도한다.
+  const DEALER_COLS = 'cu.client_type AS created_by_client_type, cu.separate_settlement AS created_by_separate,';
+  const VEHICLE_COLS = 'o.vehicle_type, o.car_type, o.fuel_type, o.vehicle_class_source,';
+  const sqlFor = (vehicleCols, dealerCols) => SETTLEMENT_SQL(vehicleCols, dealerCols, onlyMine);
+
+  let rows = null;
+  // 넓은 것부터 좁혀간다. 한 번에 다 빼면 있는 정보까지 버리게 된다.
+  const attempts = [
+    [VEHICLE_COLS, DEALER_COLS],
+    [VEHICLE_COLS, ''],          // 딜러 구분 컬럼 없음(20260830020000 전)
+    ['o.vehicle_type,', ''],     // 차종 분류도 없음(20260828020000 전)
+  ];
+  for (const [vc, dc] of attempts) {
+    try {
+      rows = await db.all(sqlFor(vc, dc), params);
+      break;
+    } catch (e) {
+      if (!e || e.code !== '42703') throw e;
+      console.error('정산: 선택 컬럼 없음 — 그 열을 빼고 다시 조회합니다:', e.message);
+    }
+  }
+  if (rows === null) throw new Error('정산 조회에 실패했습니다.');
 
   // 할증을 정산서에 어떻게 보여줄지는 법인이 고른다(사용자 지시).
   //   included  운행요금 한 줄로 두고 내역만 밝힌다 (기본값 = 지금 동작)
@@ -999,11 +1062,65 @@ async function loadSettlement(groupId, month) {
      ORDER BY 1 DESC
   `, [groupId]);
 
+  // ── 청구 주체별로 나눈다 ──────────────────────────────────────────────────
+  //
+  // 개인 딜러 중 "별도 정산 청구"로 지정된 사람은 정산서를 따로 받는다. 나머지(본사 직원 +
+  // 별도청구를 안 하는 딜러)는 본사 정산서에 합쳐진다.
+  //
+  // 딜러라고 무조건 나누지 않는다 — 오더는 본인 것만 보되 정산은 본사가 한꺼번에 받는 계약이
+  // 흔하다. 그 둘은 별개라 users.separate_settlement로만 가른다.
+  //
+  // 합계는 여기서 한 번만 낸다. 화면에서 다시 더하면 구분별 합과 총합이 갈릴 수 있는데,
+  // 정산에서 그건 가장 나쁜 종류의 버그다.
+  const sumOf = (rows) => ({
+    count: rows.length,
+    fare: rows.reduce((a, r) => a + r.fare, 0),
+    ferry: rows.reduce((a, r) => a + r.ferry, 0),
+    total: rows.reduce((a, r) => a + r.total, 0),
+  });
+  const extrasOfOrders = (rows) => {
+    const ids = new Set(rows.map((r) => r.id));
+    return extras.filter((e) => ids.has(e.order_id));
+  };
+
+  const separateByUser = new Map();
+  const hqItems = [];
+  items.forEach((r) => {
+    const isSeparateDealer = r.created_by_client_type === 'dealer' && r.created_by_separate === true;
+    if (!isSeparateDealer || !r.created_by) { hqItems.push(r); return; }
+    const key = String(r.created_by);
+    if (!separateByUser.has(key)) {
+      separateByUser.set(key, { userId: r.created_by, name: r.created_by_name || '(이름 없음)', loginId: r.created_by_login || '', rows: [] });
+    }
+    separateByUser.get(key).rows.push(r);
+  });
+
+  const buildGroup = (key, label, sub, rows) => {
+    const ex = extrasOfOrders(rows);
+    const exSum = extraCharges.summarize(ex);
+    const s2 = sumOf(rows);
+    return { key, label, sub, items: rows, summary: s2, extras: ex, extraSummary: exSum, grandTotal: s2.total + exSum.total };
+  };
+
+  const settlementGroups = [];
+  // 본사 묶음은 건이 없어도 보여준다 — 딜러만 나오면 "본사 몫이 0원인지, 화면이 빠뜨린 건지"
+  // 알 수 없다. 다만 딜러가 하나도 없으면 굳이 나눌 이유가 없어 통째로 생략한다.
+  if (separateByUser.size) {
+    settlementGroups.push(buildGroup('hq', '법인 본사', '본사 직원 + 별도청구를 하지 않는 딜러', hqItems));
+    [...separateByUser.values()]
+      .sort((a, b) => a.name.localeCompare(b.name, 'ko'))
+      .forEach((d) => settlementGroups.push(
+        buildGroup(`dealer:${d.userId}`, d.name, `개인 딜러${d.loginId ? ` · ${d.loginId}` : ''}`, d.rows)
+      ));
+  }
+
   return {
     items, summary, extras, extraSummary, surchargeMode, surchargeByLabel,
     // 거래처에 실제로 청구할 금액 — 운행요금과 실비를 더한 값이다. 화면에서 다시 더하면
     // 목록과 통계가 갈릴 수 있어 여기서 한 번만 계산한다.
     grandTotal: summary.total + extraSummary.total,
+    // 별도청구 딜러가 없으면 빈 배열 — 화면은 그때 예전처럼 한 덩어리로만 보여준다.
+    settlementGroups,
     months: months.map((m) => m.month).filter(Boolean),
   };
 }
@@ -1235,13 +1352,25 @@ router.get('/:id/settlement', asyncHandler(async (req, res) => {
   const { group, groups } = await loadGroupWithSiblings(req.params.id);
   if (!group) return res.status(404).send('법인을 찾을 수 없습니다.');
   const month = settlementMonth(req.query.month);
-  const data = await loadSettlement(req.params.id, month);
+
+  // 개인 딜러가 열면 본인이 접수한 건만 본다. 자기 법인이 아니면 아예 막는다 —
+  // 이 화면은 금액이 나오는 곳이라 목록만 좁히는 것으로는 부족하다.
+  const me = req.session.user;
+  const meIsDealer = clientScope.isDealer(me);
+  if (me.role === 'client' && Number(me.group_id) !== Number(req.params.id)) {
+    return res.status(403).render('403', { title: '접근 권한 없음' });
+  }
+  // 관리자·지사장은 특정 딜러만 골라 볼 수 있다(정산서를 딜러별로 끊어 보내는 흐름).
+  const viewDealerId = meIsDealer ? me.id : (Number(req.query.dealer) || null);
+  const data = await loadSettlement(req.params.id, month, viewDealerId);
 
   res.render('groups/settlement', {
     title: '정산내역 - ' + group.name,
     group, groups, month,
     saved: req.query.saved || null,
     extraChargeTypes: extraCharges.EXTRA_CHARGE_TYPES,
+    // 딜러 본인 화면은 구분 표를 보여줄 이유가 없다(자기 것 하나뿐이다).
+    meIsDealer, viewDealerId,
     ...data,
   });
 }));
@@ -1534,6 +1663,47 @@ router.get('/:id/office-fares/sample', asyncHandler(async (req, res) => {
   res.send(csv);
 }));
 
+// ── 법인 계정용 「내 정산내역」 ────────────────────────────────────────────
+//
+// 위 /groups 라우터는 관리자 전용이라(router.use requireRole('admin')) 법인 계정은 그 안의
+// 정산 화면을 열 수 없다. 그래서 같은 데이터를 쓰는 별도 라우터를 둔다.
+//
+// 개인 딜러  → 본인이 접수한 건만
+// 본사 직원  → 법인 전체(소속 딜러 포함)
+const myRouter = express.Router();
+myRouter.use(requireAuth, requireRole('client'));
+
+myRouter.get('/', asyncHandler(async (req, res) => {
+  const me = req.session.user;
+  if (!me.group_id) return res.status(403).render('403', { title: '접근 권한 없음' });
+
+  const group = await db.get(`
+    SELECT g.*, b.name AS branch_name FROM groups_tbl g
+      LEFT JOIN branches b ON b.id = g.branch_id WHERE g.id = ?`, [me.group_id]);
+  if (!group) return res.status(404).send('법인을 찾을 수 없습니다.');
+
+  const month = settlementMonth(req.query.month);
+  const meIsDealer = clientScope.isDealer(me);
+  // 본사 직원이 특정 딜러만 골라 보는 것도 허용한다 — 딜러에게 정산서를 전달할 때 쓴다.
+  const viewDealerId = meIsDealer ? me.id : (Number(req.query.dealer) || null);
+  const data = await loadSettlement(me.group_id, month, viewDealerId);
+
+  res.render('groups/settlement', {
+    title: '정산내역',
+    group,
+    // 법인 전환 선택박스는 띄우지 않는다 — 자기 법인 하나뿐이다.
+    groups: [],
+    month,
+    saved: null,
+    extraChargeTypes: extraCharges.EXTRA_CHARGE_TYPES,
+    meIsDealer, viewDealerId,
+    // 관리자 화면과 같은 뷰를 쓰되, 관리자 전용 동작(정산 확정 등)은 뷰가 role로 가린다.
+    clientView: true,
+    ...data,
+  });
+}));
+
 module.exports = router;
+module.exports.myRouter = myRouter;
 module.exports.settlementMonth = settlementMonth;
 module.exports.loadSettlement = loadSettlement;

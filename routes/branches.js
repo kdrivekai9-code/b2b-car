@@ -11,6 +11,8 @@ const { getEffectivePaymentMethods, getEffectiveStatuses, DEFAULT_AGENT_IDLE_REL
 // 할증·부대비용 설정은 지사·법인이 같은 화면 부품과 같은 파싱을 쓴다(routes/groups.js도 같다).
 const fareSurcharge = require('../lib/fareSurcharge');
 const fareSurchargeInput = require('../lib/fareSurchargeInput');
+// 오더구분별 대기·취소요금 — 칸 이름과 저장 규칙을 한 곳에서 가져온다.
+const tripFees = require('../lib/tripFees');
 // 고객 통보 설정 화면이 "어떤 사건이 있고 기본값이 무엇인지"를 통보 모듈에서 그대로 가져온다 —
 // 화면에만 따로 목록을 적어두면 사건이 하나 늘 때 설정에서 빠진 채로 남는다.
 const kakaoOrderNotify = require('../lib/kakaoOrderNotify');
@@ -198,6 +200,8 @@ router.get('/:id/fare-rules', asyncHandler(async (req, res) => {
     branch,
     tiers,
     extra,
+    // 오더구분별 대기·취소요금 칸 정의. 화면에 필드명을 또 적으면 컬럼이 늘 때 한쪽만 바뀐다.
+    orderTypeFeeGroups: tripFees.ORDER_TYPE_FEE_GROUPS,
     branches,
     saved: req.query.saved === '1',
     copied: req.query.copied === '1',
@@ -305,6 +309,10 @@ router.post('/:id/fare-rules/copy', asyncHandler(async (req, res) => {
     client.release();
   }
 
+  // 위 복사문이 컬럼을 손으로 나열하는 방식이라 여기서 빠지면 복사한 지사만 조용히 0원이 된다.
+  await tripFees.saveOrderTypeFees(db, 'fare_extra_settings', 'branch_id', targetBranchId, sourceExtra)
+    .catch((e) => console.error('오더구분별 요금 복사 실패:', e.message));
+
   res.redirect('/branches/' + targetBranchId + '/fare-rules?copied=1&from=' + encodeURIComponent(sourceBranch.name));
 }));
 
@@ -409,6 +417,8 @@ router.post('/:id/fare-rules', asyncHandler(async (req, res) => {
 
   // 위 트랜잭션이 fare_extra_settings 행을 만든 **뒤**에 돌아야 한다 — UPDATE라 행이 없으면
   // 아무것도 저장되지 않는다.
+  // 오더구분별 대기·취소요금도 같은 이유로 여기서 저장한다(UPDATE라 행이 만들어진 뒤여야 한다).
+  await tripFees.saveOrderTypeFees(db, 'fare_extra_settings', 'branch_id', req.params.id, req.body);
   const savedSurcharge = await fareSurchargeInput.saveSettings('branch', req.params.id, req.body);
   const savedRules = await fareSurchargeInput.saveScopedRules('branch', req.params.id, req.body);
   if (!savedSurcharge.ok || !savedRules.ok) {

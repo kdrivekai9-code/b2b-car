@@ -24,7 +24,13 @@ const MARK = 'zzq부대비용검사';
   try {
     console.log('[항목 정의]');
     const labels = extraCharges.INTAKE_EXTRA_ITEMS.map((it) => it.label);
-    check('접수에서 고를 수 있는 5개', labels, ['주유비', '충전비', '세차비', '주차비', '도선료']);
+    // 뒤 셋(도선료·대기요금·취소요금)은 줄이 아니라 orders 컬럼에 저장된다 — 순서까지 못 박는
+    // 이유는 화면이 "첫 항목"을 기본값으로 쓰기 때문이다(주유비가 앞이라야 자연스럽다).
+    check('접수에서 고를 수 있는 항목', labels,
+      ['주유비', '충전비', '세차비', '주차비', '도선료', '대기요금', '취소요금']);
+    check('orders 컬럼에 저장되는 항목',
+      extraCharges.INTAKE_EXTRA_ITEMS.filter((it) => it.orderColumn).map((it) => it.orderColumn),
+      ['ferry', 'wait', 'cancel']);
     // 충전비는 이번에 추가한 항목이다. 요금설정에 안 뜨면 정산구분을 정할 수 없다.
     check('충전비가 요금설정 항목에도 있다',
       fareSurcharge.EXTRA_COST_ITEMS.some((it) => it.chargeType === '충전비'), true);
@@ -36,6 +42,44 @@ const MARK = 'zzq부대비용검사';
     check('주차비는 선택지 없음', extraCharges.intakeItem('주차요금').options.length, 0);
     // 도선료를 두 줄 만들면 ferry_fare_amount와 합쳐 두 번 청구된다.
     check('도선료는 한 줄만', extraCharges.intakeItem('도선료').single, true);
+
+    console.log('[오더구분별 대기 · 취소요금]');
+    const tripFees = require('../lib/tripFees');
+    // 탁송 기준 값이 시간제 오더에 새어 들어오면 받지 말아야 할 돈을 받는다(사용자 지적).
+    const dispatchOnly = { wait_fee: 10000, wait_threshold_min: 15, cancel_before_fee: 5000, cancel_after_fee: 20000 };
+    check('탁송은 탁송 칸을 읽는다', tripFees.waitFee(dispatchOnly, 40, 'dispatch').amount, 10000);
+    check('프리미엄에 탁송 대기요금이 안 붙는다', tripFees.waitFee(dispatchOnly, 40, 'premium').amount, 0);
+    check('일일기사에 탁송 대기요금이 안 붙는다', tripFees.waitFee(dispatchOnly, 40, 'daily_driver').amount, 0);
+    check('프리미엄에 탁송 취소요금이 안 붙는다',
+      tripFees.cancelFee(dispatchOnly, { previousStatus: '기사배정', orderType: 'premium' }).amount, 0);
+
+    const perType = {
+      ...dispatchOnly,
+      premium_wait_fee: 7000, premium_wait_threshold_min: 30,
+      premium_cancel_before_fee: 3000, premium_cancel_after_fee: 15000,
+      daily_wait_fee: 8000, daily_wait_threshold_min: 60,
+    };
+    check('프리미엄은 자기 칸을 읽는다', tripFees.waitFee(perType, 40, 'premium').amount, 7000);
+    // 기준이 60분인데 40분이면 아직 안 넘었다 — 오더구분마다 기준이 다르다는 것이 요구사항의 핵심이다.
+    check('일일기사는 자기 기준을 쓴다', tripFees.waitFee(perType, 40, 'daily_driver').amount, 0);
+    check('일일기사 기준을 넘으면 붙는다', tripFees.waitFee(perType, 90, 'daily_driver').amount, 8000);
+
+    // 탁송은 배차 기준, 프리미엄/일일기사는 도착 기준(사용자 지시).
+    check('탁송: 기사배정이면 배차 후',
+      tripFees.cancelFee(perType, { previousStatus: '기사배정', orderType: 'dispatch' }),
+      { amount: 20000, note: '배차 후 취소' });
+    // 프리미엄은 기사가 배정돼도 아직 도착 전일 수 있다 — 배정만으로 도착 후 요금을 받으면 과청구다.
+    check('프리미엄: 기사배정은 아직 도착 전',
+      tripFees.cancelFee(perType, { previousStatus: '기사배정', orderType: 'premium' }),
+      { amount: 3000, note: '도착 전 취소' });
+    check('프리미엄: 운행시작이면 도착 후',
+      tripFees.cancelFee(perType, { previousStatus: '운행시작', orderType: 'premium' }),
+      { amount: 15000, note: '도착 후 취소' });
+    // hadDriver(기사 배정됨)도 프리미엄에서는 도착 근거가 못 된다.
+    check('프리미엄: hadDriver로는 도착 후가 안 된다',
+      tripFees.cancelFee(perType, { hadDriver: true, previousStatus: '접수', orderType: 'premium' }).amount, 3000);
+    // 오더구분이 없으면 탁송으로 본다 — 기존 데이터가 그렇다.
+    check('오더구분이 비면 탁송', tripFees.waitFee(dispatchOnly, 40, null).amount, 10000);
 
     console.log('[파싱]');
     const feeExtra = { fuel_mode: 'individual', wash_mode: 'included' };
@@ -66,6 +110,20 @@ const MARK = 'zzq부대비용검사';
     }, {}, null);
     check('포함은 청구하지 않는다', inc.rows[0].billable, false);
 
+    console.log('[대기 · 취소요금을 부대비용에서 직접 입력]');
+    const adminFees = extraCharges.parseIntakeRows({
+      intake_extra_type: ['대기요금', '취소요금'],
+      intake_extra_amount: ['12000', '0'],
+    }, {}, null);
+    // 둘 다 orders 컬럼에 저장된다 — 줄로도 만들면 같은 돈이 두 군데서 집계돼 두 번 청구된다.
+    check('대기·취소요금은 줄을 만들지 않는다', adminFees.rows.length, 0);
+    check('대기요금은 orders 컬럼으로 간다', adminFees.orderFees.wait, { amount: 12000, settleMode: 'monthly' });
+    // 0을 넣었다면 "이 건은 안 받는다"는 관리자의 판단이다 — 무시하면 자동 계산이 다시 붙는다.
+    check('0원도 기록한다', adminFees.orderFees.cancel.amount, 0);
+    const waitItem = extraCharges.intakeItem('대기요금');
+    check('정산구분 칸을 두지 않는다', waitItem.noSettleMode, true);
+    check('한 오더에 하나뿐', waitItem.single, true);
+
     console.log('[저장]');
     const order = await db.get(
       `SELECT id, branch_id, requester_group_id FROM orders
@@ -92,6 +150,17 @@ const MARK = 'zzq부대비용검사';
       check('선택지가 저장된다', fuelRow.option_code, 'full');
       // 청구한 뒤 요금설정이 바뀌어도 이미 접수한 건의 구분이 따라 바뀌면 안 된다.
       check('정산구분이 줄에 박힌다', fuelRow.settle_mode, 'individual');
+
+      await extraCharges.saveOrderFeeFields(orderId, { wait: { amount: 12000 }, cancel: { amount: 0 } });
+      const o = await db.get('SELECT wait_fee_amount, cancel_fee_amount, wait_fee_note FROM orders WHERE id = ?', [orderId]);
+      check('대기요금이 orders에 박힌다', o.wait_fee_amount, 12000);
+      check('왜 그 금액인지 남는다', o.wait_fee_note, '관리자 입력');
+      // null이 아니라 0이라야 applyCancelFee가 덮어쓰지 않는다 — 관리자의 "안 받음"이 유지된다.
+      check('0원도 null이 아니다', o.cancel_fee_amount, 0);
+      const backWith = await extraCharges.loadIntakeRows(orderId);
+      check('수정 화면에 대기요금이 다시 보인다',
+        backWith.some((r) => r.chargeType === '대기요금' && r.amount === 12000), true);
+      await db.run('UPDATE orders SET wait_fee_amount = NULL, cancel_fee_amount = NULL WHERE id = ?', [orderId]);
 
       const rows = await extraCharges.loadIntakeRows(orderId);
       check('수정 화면에는 접수 항목만 돌려준다', rows.length, 2);

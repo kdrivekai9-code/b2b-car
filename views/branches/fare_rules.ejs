@@ -73,16 +73,16 @@
   </div>
 
   <div class="card">
-    <div class="section-title">➕ 부가 요금 / 노출 설정</div>
+    <div class="section-title">➕ 부가 요금 / 노출 설정 <span class="hint">(대기·취소요금은 탁송 전용)</span></div>
     <div class="row">
       <div class="field"><label>왕복 비율(%, 편도 대비)</label><input type="number" name="round_trip_ratio" value="<%= extra.round_trip_ratio || 180 %>" min="0"></div>
-      <div class="field"><label>대기 기준시간(분)</label><input type="number" name="wait_threshold_min" value="<%= extra.wait_threshold_min || 15 %>" min="0"></div>
-      <div class="field"><label>대기요금(원)</label><input type="number" name="wait_fee" value="<%= extra.wait_fee || 0 %>" min="0"></div>
+      <div class="field"><label>대기 기준시간(분) · 탁송</label><input type="number" name="wait_threshold_min" value="<%= extra.wait_threshold_min || 15 %>" min="0"></div>
+      <div class="field"><label>대기요금(원) · 탁송</label><input type="number" name="wait_fee" value="<%= extra.wait_fee || 0 %>" min="0"></div>
     </div>
     <div class="row">
       <%# 취소요금은 1,000원 단위로 받는다(사용자 확정) — 법인 화면(views/groups/fare_rules.ejs)도 같다. %>
-      <div class="field"><label>도착 전 취소요금(원)</label><input type="number" name="cancel_before_fee" value="<%= extra.cancel_before_fee || 0 %>" min="0" step="1000"></div>
-      <div class="field"><label>도착 후 취소요금(원)</label><input type="number" name="cancel_after_fee" value="<%= extra.cancel_after_fee || 0 %>" min="0" step="1000"></div>
+      <div class="field"><label>배차 전 취소요금(원) · 탁송</label><input type="number" name="cancel_before_fee" value="<%= extra.cancel_before_fee || 0 %>" min="0" step="1000"></div>
+      <div class="field"><label>배차 후 취소요금(원) · 탁송</label><input type="number" name="cancel_after_fee" value="<%= extra.cancel_after_fee || 0 %>" min="0" step="1000"></div>
     </div>
     <div class="row">
       <div class="field"><label class="checkline"><input type="checkbox" name="fare_table_enabled" value="1" <%= extra.fare_table_enabled ? 'checked' : '' %>> 이 요금표 사용 (미사용 시 요금을 수동으로 입력)</label></div>
@@ -90,6 +90,8 @@
       <div class="field"><label class="checkline"><input type="checkbox" name="fare_editable_by_client" value="1" <%= extra.fare_editable_by_client ? 'checked' : '' %>> 고객사(딜러)의 금액 수정 허용</label></div>
     </div>
   </div>
+
+  <%- include('../partials/order_type_trip_fees') %>
 
   <%- include('../partials/fare_surcharge_settings') %>
 </form>

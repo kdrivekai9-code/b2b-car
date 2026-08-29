@@ -142,6 +142,7 @@ async function buildInquiriesListData(scope, query) {
 
   if (scope.branch_id) { where.push('i.branch_id = ?'); params.push(scope.branch_id); }
   if (scope.group_id) { where.push('i.requester_group_id = ?'); params.push(scope.group_id); }
+  if (scope.created_by) { where.push('i.created_by = ?'); params.push(scope.created_by); }
   if (query.status) { where.push('i.status = ?'); params.push(query.status); }
   if (query.category) { where.push('i.category = ?'); params.push(query.category); }
   if (query.q) {

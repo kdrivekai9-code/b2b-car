@@ -141,12 +141,20 @@ function requireRole(...roles) {
   };
 }
 
-// client 역할은 자기 그룹으로 스코프 제한, branch_manager는 자기 지사로 제한
+// client 역할은 자기 그룹으로 스코프 제한, branch_manager는 자기 지사로 제한.
+//
+// 개인 딜러는 여기서 한 겹 더 좁힌다 — 같은 법인이라도 **본인이 접수한 오더만** 본다.
+// 판정은 lib/clientScope.js가 갖는다(오더·정산·챗봇이 같은 규칙을 써야 한다).
 function scopeFilter(req) {
   const u = req.session.user;
   if (u.role === 'admin') return {};
   if (u.role === 'branch_manager') return { branch_id: u.branch_id };
-  if (u.role === 'client') return { branch_id: u.branch_id, group_id: u.group_id };
+  if (u.role === 'client') {
+    const scope = { branch_id: u.branch_id, group_id: u.group_id };
+    // 지연 require — clientScope는 미들웨어보다 늦게 로드돼도 되고, 순환을 만들지 않는다.
+    if (require('../lib/clientScope').isDealer(u)) scope.created_by = u.id;
+    return scope;
+  }
   return {};
 }
 

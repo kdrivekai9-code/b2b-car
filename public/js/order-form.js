@@ -362,7 +362,16 @@
         amountEl.readOnly = false;
         amountEl.value = '';
       }
-      if (resetOption) row.querySelector('.xc-mode').value = xcDefaultMode(type);
+      // 대기요금·취소요금은 실비가 아니라 운행요금이라 월/개별로 나눌 것이 없다 —
+      // 고를 것 없는 칸을 그리면 무엇을 고르라는 건지 모른다. 자동 계산 안내를 대신 둔다.
+      var modeEl = row.querySelector('.xc-mode');
+      var hintEl = row.querySelector('.xc-hint');
+      modeEl.style.display = it.noSettleMode ? 'none' : '';
+      modeEl.disabled = !!it.noSettleMode;
+      hintEl.textContent = it.noSettleMode ? (it.hint || '') : '';
+      hintEl.style.display = it.noSettleMode ? '' : 'none';
+      amountEl.placeholder = it.noSettleMode ? '금액 직접 입력' : '금액(선택)';
+      if (resetOption && !it.noSettleMode) modeEl.value = xcDefaultMode(type);
       // 이미 들어간 도선료를 다른 줄에서 또 고르지 못하게 한다.
       var taken = xcTakenSingles(row);
       Array.prototype.forEach.call(row.querySelector('.xc-type').options, function (o) {
@@ -390,6 +399,7 @@
         '<select class="xc-mode" name="intake_extra_mode[]" aria-label="정산구분">' +
           xcModes.map(function (m) { return '<option value="' + m.value + '">' + m.label + '</option>'; }).join('') +
         '</select>' +
+        '<span class="hint xc-hint extra-cost-hint" style="display:none;"></span>' +
         '<input type="hidden" name="intake_extra_id[]" value="">' +
         '<button type="button" class="btn small secondary xc-remove">삭제</button>';
       row.querySelector('.xc-type').value = first.chargeType;

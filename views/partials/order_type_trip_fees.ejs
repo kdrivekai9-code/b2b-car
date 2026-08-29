@@ -1,0 +1,51 @@
+<%
+  // 프리미엄대리 · 일일기사 전용 대기요금 / 취소요금.
+  //
+  // 지사 화면(views/branches/fare_rules.ejs)과 법인 화면(views/groups/fare_rules.ejs)이 같이
+  // 쓴다 — 두 벌로 두면 한쪽 화면에서 저장할 때만 값이 틀리는 버그가 생기고, 그건 화면을
+  // 열어보기 전에는 드러나지 않는다(부대비용 설정 부품과 같은 이유).
+  //
+  // 칸 이름은 lib/tripFees.js의 FEE_KEYS에서 그대로 받는다. 화면에 필드명을 또 적으면
+  // 컬럼이 늘 때 한쪽만 바뀐다.
+%>
+<div class="card">
+  <div class="section-title">⏱ 오더구분별 대기 / 취소 요금</div>
+  <p class="hint" style="margin:0 0 10px;">
+    위 <b>부가 요금</b>의 대기·취소요금은 <b>탁송</b>에만 적용됩니다.
+    프리미엄대리·일일기사는 시간 기반이라 요금 구조가 달라 여기서 따로 정합니다.
+    비워두면 <b>받지 않습니다</b>.
+  </p>
+
+  <% (orderTypeFeeGroups || []).forEach(function (g) { %>
+    <div class="section-title small" style="margin:12px 0 6px;"><%= g.label %></div>
+    <div class="row">
+      <div class="field">
+        <label>대기 기준시간(분)</label>
+        <input type="number" name="<%= g.keys.threshold %>" min="0"
+          placeholder="예: 30"
+          value="<%= extra[g.keys.threshold] != null ? extra[g.keys.threshold] : '' %>">
+      </div>
+      <div class="field">
+        <label>대기요금(원)</label>
+        <%# 기준을 넘으면 정액 1회다(분당 아님) — 설정에 단위가 없으므로 지어내지 않는다. %>
+        <input type="number" name="<%= g.keys.wait %>" min="0" step="1000"
+          placeholder="기준 초과 시 1회"
+          value="<%= extra[g.keys.wait] != null ? extra[g.keys.wait] : '' %>">
+      </div>
+    </div>
+    <div class="row">
+      <%# 탁송은 "배차" 기준이지만 프리미엄/일일기사는 기사가 고객에게 도착했는지가 손실을
+          가른다(사용자 지시). 도착의 판단은 '운행시작' 상태다 — lib/tripFees.js 참조. %>
+      <div class="field">
+        <label>도착 전 취소요금(원)</label>
+        <input type="number" name="<%= g.keys.before %>" min="0" step="1000"
+          value="<%= extra[g.keys.before] != null ? extra[g.keys.before] : '' %>">
+      </div>
+      <div class="field">
+        <label>도착 후 취소요금(원)</label>
+        <input type="number" name="<%= g.keys.after %>" min="0" step="1000"
+          value="<%= extra[g.keys.after] != null ? extra[g.keys.after] : '' %>">
+      </div>
+    </div>
+  <% }) %>
+</div>

@@ -46,6 +46,23 @@
           <% }) %>
         </select>
       </div>
+      <%# 법인 계정 구분 — 개인 딜러는 본인이 접수한 오더만 본다(웹·챗봇·상담톡 모두).
+          별도청구는 딜러일 때만 의미가 있어 아래 스크립트가 켜고 끈다. %>
+      <div class="field">
+        <label>계정 구분</label>
+        <select name="client_type" id="clientTypeSelect">
+          <% (clientTypes || []).forEach(function (t) { %>
+            <option value="<%= t.value %>" <%= editing && editing.client_type === t.value ? 'selected' : '' %>><%= t.label %></option>
+          <% }) %>
+        </select>
+        <span class="hint" id="clientTypeHint"></span>
+      </div>
+      <div class="field" id="separateSettlementField">
+        <label>정산 청구</label>
+        <label class="checkline"><input type="checkbox" name="separate_settlement" value="1"
+          <%= editing && editing.separate_settlement ? 'checked' : '' %>> 이 딜러에게 <b>별도 정산서</b>를 끊습니다</label>
+        <span class="hint">끄면 법인 본사 정산서에 합쳐집니다. 오더 조회 범위와는 별개입니다.</span>
+      </div>
       <div class="field">
         <label>소속 지사</label>
         <select name="branch_id">
@@ -64,20 +81,47 @@
   </form>
 </div>
 
+<script>
+  // 별도청구는 개인 딜러에게만 의미가 있다 — 본사 직원에게 개인 정산서를 끊는 개념은 없다.
+  // 칸을 남겨두면 켜놓고 "왜 안 나뉘지"를 겪는다.
+  (function () {
+    var sel = document.getElementById('clientTypeSelect');
+    var field = document.getElementById('separateSettlementField');
+    var hint = document.getElementById('clientTypeHint');
+    var HINTS = <%- JSON.stringify((clientTypes || []).reduce(function (a, t) { a[t.value] = t.hint; return a; }, {})) %>;
+    function sync() {
+      if (!sel) return;
+      var isDealer = sel.value === 'dealer';
+      if (field) field.style.display = isDealer ? '' : 'none';
+      if (!isDealer && field) { var c = field.querySelector('input'); if (c) c.checked = false; }
+      if (hint) hint.textContent = HINTS[sel.value] || '';
+    }
+    if (sel) { sel.addEventListener('change', sync); sync(); }
+  })();
+</script>
+
 <div class="card">
   <div class="section-title">등록된 계정 <%= users.length %>개</div>
   <div class="table-wrap">
   <table>
-    <thead><tr><th>아이디</th><th>법인</th><th>이름</th><th>역할</th><th>지사</th><th>연락처</th><th>상태</th><th>관리</th></tr></thead>
+    <thead><tr><th>아이디</th><th>법인</th><th>이름</th><th>역할</th><th>구분</th><th>지사</th><th>연락처</th><th>상태</th><th>관리</th></tr></thead>
     <tbody>
       <% const roleLabel = {admin:'관리자', branch_manager:'지사장', client:'클라이언트'}; %>
-      <% if (!users.length) { %><tr><td colspan="8" class="empty">등록된 계정이 없습니다.</td></tr><% } %>
+      <% if (!users.length) { %><tr><td colspan="9" class="empty">등록된 계정이 없습니다.</td></tr><% } %>
       <% users.forEach(function(u){ %>
         <tr>
           <td><%= u.login_id %></td>
           <td><%= u.group_name || '-' %></td>
           <td><%= u.name %></td>
           <td><%= roleLabel[u.role] || u.role %></td>
+          <td>
+            <% if (u.role !== 'client') { %>-
+            <% } else if (u.client_type === 'dealer') { %>
+              <span class="badge blue">개인 딜러</span>
+              <%# 별도청구 여부는 정산서가 몇 장 나오는지를 정한다 — 목록에서 바로 보여야 한다. %>
+              <% if (u.separate_settlement) { %><span class="badge amber">별도 정산</span><% } %>
+            <% } else { %><span class="badge gray">본사 직원</span><% } %>
+          </td>
           <td><%= u.branch_name || '-' %></td>
           <td><%= u.phone || '-' %></td>
           <td><span class="badge <%= u.status === 'active' ? 'green' : 'gray' %>"><%= u.status === 'active' ? '활성' : '비활성' %></span></td>

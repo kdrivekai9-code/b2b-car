@@ -109,17 +109,25 @@ export default function ExtraCostSection({
                 title={ferryEditable ? '경로탐색이 채운 값입니다. 고치면 다시 계산해도 유지됩니다.' : '경로탐색이 자동 계산한 금액입니다.'}
                 onChange={(e) => onFerryAmount(e.target.value)} />
             ) : showAmount ? (
-              <input type="number" min="0" step="100" placeholder="금액(선택)" aria-label={`${it.label} 금액`}
+              <input type="number" min="0" step="100"
+                placeholder={it.noSettleMode ? '금액 직접 입력' : '금액(선택)'}
+                aria-label={`${it.label} 금액`}
                 value={r.amount} onChange={(e) => patch(r.key, { amount: e.target.value })} />
             ) : (
               <span className="hint extra-cost-amount-note">금액은 영수증 확인 후 입력</span>
             )}
 
-            <select aria-label={`${it.label} 정산구분`} value={r.settleMode}
-              title={MODE_HINT[r.settleMode] || ''}
-              onChange={(e) => patch(r.key, { settleMode: e.target.value })}>
-              {modes.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
-            </select>
+            {/* 대기요금·취소요금은 실비가 아니라 운행요금이라 월/개별로 나눌 것이 없다 —
+                고를 것 없는 칸을 그리면 무엇을 고르라는 건지 모른다. 대신 자동 계산 안내를 둔다. */}
+            {it.noSettleMode ? (
+              <span className="hint extra-cost-hint" title={it.hint || ''}>{it.hint}</span>
+            ) : (
+              <select aria-label={`${it.label} 정산구분`} value={r.settleMode}
+                title={MODE_HINT[r.settleMode] || ''}
+                onChange={(e) => patch(r.key, { settleMode: e.target.value })}>
+                {modes.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+              </select>
+            )}
 
             <button type="button" className="btn small secondary" onClick={() => remove(r.key)}>삭제</button>
           </div>

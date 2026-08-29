@@ -88,12 +88,39 @@ test.describe('접수 단계 부대비용', () => {
     await block.getByRole('button', { name: '+ 부대비용 추가' }).click();
     const typeSel = block.locator('.extra-cost-row').first().locator('select').nth(0);
     const labels = await typeSel.locator('option').allInnerTexts();
-    expect(labels).toEqual(['주유비', '충전비', '세차비', '주차비', '도선료']);
+    expect(labels).toEqual(['주유비', '충전비', '세차비', '주차비', '도선료', '대기요금', '취소요금']);
 
     await typeSel.selectOption('충전비');
     const optionLabels = await block.locator('.extra-cost-row').first().locator('select').nth(1)
       .locator('option').allInnerTexts();
     // 충전비는 주유비와 같은 규칙으로 돈다.
     expect(optionLabels).toEqual(['가득(full)', '금액입력']);
+  });
+
+  test('대기요금·취소요금은 금액만 받고 정산구분 칸이 없다', async ({ page }) => {
+    // 실비가 아니라 운행요금이라 월/개별로 나눌 것이 없다 — 고를 것 없는 칸을 그리면
+    // 무엇을 고르라는 건지 모른다. 대신 관리자가 금액을 직접 넣는다(사용자 지시).
+    await page.goto(`${BASE}/orders/new`, { waitUntil: 'domcontentloaded' });
+    const block = page.locator('.extra-cost-block');
+    await block.getByRole('button', { name: '+ 부대비용 추가' }).click();
+    const row = block.locator('.extra-cost-row').first();
+
+    // 주유비일 때는 정산구분 칸이 있다(항목·세부·정산구분 = select 3개).
+    await expect(row.locator('select')).toHaveCount(3);
+
+    await row.locator('select').nth(0).selectOption('대기요금');
+    // 세부 선택지도 정산구분도 없다 — 항목 select 하나만 남는다.
+    await expect(row.locator('select')).toHaveCount(1);
+    await expect(row.locator('input[type="number"]')).toBeVisible();
+    await expect(row.locator('.extra-cost-hint')).toContainText('자동 계산');
+
+    await row.locator('select').nth(0).selectOption('취소요금');
+    await expect(row.locator('select')).toHaveCount(1);
+    await expect(row.locator('input[type="number"]')).toBeVisible();
+
+    // 한 오더에 하나뿐이다 — 두 줄이면 같은 돈이 두 번 들어간다.
+    await block.getByRole('button', { name: '+ 부대비용 추가' }).click();
+    const second = block.locator('.extra-cost-row').nth(1);
+    await expect(second.locator('option[value="취소요금"]')).toBeDisabled();
   });
 });

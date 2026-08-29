@@ -148,6 +148,9 @@ async function buildOrdersListData(scope, query) {
   const paramsNoStatus = [];
   if (scope.branch_id) { whereNoStatus.push('o.branch_id = ?'); paramsNoStatus.push(scope.branch_id); }
   if (scope.group_id) { whereNoStatus.push('o.requester_group_id = ?'); paramsNoStatus.push(scope.group_id); }
+  // 개인 딜러 — 같은 법인이라도 본인이 접수한 오더만. 상태별 집계에도 같이 걸어야 한다.
+  // 여기 빠지면 목록은 가려지는데 "총 12건" 같은 숫자에 남의 오더가 섞인다.
+  if (scope.created_by) { whereNoStatus.push('o.created_by = ?'); paramsNoStatus.push(scope.created_by); }
   if (!scope.branch_id && branch_id) { whereNoStatus.push('o.branch_id = ?'); paramsNoStatus.push(branch_id); }
   if (from) { whereNoStatus.push('o.reserved_date >= ?'); paramsNoStatus.push(from); }
   if (to) { whereNoStatus.push('o.reserved_date <= ?'); paramsNoStatus.push(to); }
@@ -1196,10 +1199,15 @@ router.post('/', asyncHandler(async (req, res) => {
     // 대기요금 — 도착지 대기시간이 요금설정 기준을 넘으면 붙는다. 거리와 무관해 요금 전체를
     // 다시 계산하지 않고 설정만 읽어 판정한다.
     const feeExtra = await branchPolicy.findFareExtra(requester_group_id || null, branch_id || null);
-    waitFee = tripFees.waitFee(feeExtra, destination_wait_minutes);
+    // 오더구분마다 다른 칸을 읽는다(lib/tripFees.js FEE_KEYS) — 탁송 기준 대기요금이
+    // 시간제 오더(프리미엄/일일기사)에 붙으면 받지 말아야 할 돈을 받는다.
+    waitFee = tripFees.waitFee(feeExtra, destination_wait_minutes, finalOrderType);
 
+    // 할증은 탁송 전용이다. 프리미엄/일일기사 요금은 시간 구간표에서 통째로 나오므로
+    // (calculatePremiumFare가 할증을 더하지 않는다) 근거만 남기면 정산서에 없는 할증이
+    // 찍히고 구간요금이 그만큼 깎여 보인다.
     const distanceKm = Number(req.body.distance_km);
-    if (Number.isFinite(distanceKm) && distanceKm > 0) {
+    if (finalOrderType === 'dispatch' && Number.isFinite(distanceKm) && distanceKm > 0) {
       const calc = await calculateFareWithFerry(branch_id || null, distanceKm, {
         groupId: requester_group_id || null,
         vehicleType: splitVehicle.vehicleType || null,
@@ -1283,11 +1291,9 @@ router.post('/', asyncHandler(async (req, res) => {
     const intakeFeeExtra = fareExtra || await branchPolicy.findFareExtra(finalGroup, finalBranch).catch(() => null);
     const parsedIntake = extraCharges.parseIntakeRows(req.body, intakeFeeExtra, effectiveReservedDate);
     if (parsedIntake.rows.length) await extraCharges.saveIntakeRows(newId, parsedIntake, u.id);
-    // 도선료는 줄을 만들지 않는다 — 금액은 이미 ferry_fare_amount로 저장됐고, 여기서는
-    // 화면에서 고른 정산구분만 오더에 박아둔다.
-    if (parsedIntake.ferry) {
-      await db.run('UPDATE orders SET ferry_settle_mode = ? WHERE id = ?', [parsedIntake.ferry.settleMode, newId]);
-    }
+    // 도선료·대기요금·취소요금은 줄이 아니라 orders 컬럼에 저장된다 — 줄로도 만들면 같은 돈이
+    // 두 군데서 집계돼 두 번 청구된다. 관리자가 넣은 값은 자동 계산보다 뒤에 쓰여 이긴다.
+    await extraCharges.saveOrderFeeFields(newId, parsedIntake.orderFees);
   } catch (e) {
     console.error('접수 부대비용 저장 실패(오더 등록은 완료):', e.message);
   }
@@ -1439,6 +1445,8 @@ async function loadOrderForView(req, res) {
   const scope = scopeFilter(req);
   if (scope.branch_id && order.branch_id !== scope.branch_id) { res.status(403); return null; }
   if (scope.group_id && order.requester_group_id !== scope.group_id) { res.status(403); return null; }
+  // 목록만 좁히면 주소창에 id를 넣어 남의 오더를 그대로 열 수 있다 — 상세에서도 막는다.
+  if (scope.created_by && Number(order.created_by) !== Number(scope.created_by)) { res.status(403); return null; }
   return order;
 }
 
@@ -1531,6 +1539,10 @@ async function loadOrderForEdit(req, res) {
   const scope = scopeFilter(req);
   if (scope.branch_id && order.branch_id !== scope.branch_id) { res.status(403).render('403', { title: '접근 권한 없음' }); return null; }
   if (scope.group_id && order.requester_group_id !== scope.group_id) { res.status(403).render('403', { title: '접근 권한 없음' }); return null; }
+  // 개인 딜러는 본인이 접수한 오더만 — 목록·집계와 같은 규칙을 상세에도 건다.
+  if (scope.created_by && Number(order.created_by) !== Number(scope.created_by)) {
+    res.status(403).render('403', { title: '접근 권한 없음' }); return null;
+  }
   return order;
 }
 
@@ -1778,10 +1790,7 @@ router.post('/:id', asyncHandler(async (req, res) => {
       const feeExtra = await branchPolicy.findFareExtra(finalGroup, finalBranch).catch(() => null);
       const parsedIntake = extraCharges.parseIntakeRows(req.body, feeExtra, order.reserved_date);
       await extraCharges.saveIntakeRows(req.params.id, parsedIntake, req.session.user.id);
-      if (parsedIntake.ferry) {
-        await db.run('UPDATE orders SET ferry_settle_mode = ? WHERE id = ?',
-          [parsedIntake.ferry.settleMode, req.params.id]);
-      }
+      await extraCharges.saveOrderFeeFields(req.params.id, parsedIntake.orderFees);
     } catch (e) {
       console.error('접수 부대비용 저장 실패(오더 수정은 완료):', e.message);
     }
