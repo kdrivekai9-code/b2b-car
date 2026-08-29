@@ -32,11 +32,7 @@
     padding: 5px 8px; border: 1px solid #bbb; background: #f2f3f5;
     text-align: left; width: 90px; font-weight: 600; white-space: nowrap;
   }
-  .approval { border-collapse: collapse; }
-  .approval th, .approval td { border: 1px solid #bbb; text-align: center; }
-  .approval th { background: #f2f3f5; padding: 4px; font-weight: 600; font-size: 11px; }
   /* 도장을 찍을 자리 — 비워두는 것이 목적이라 높이를 고정한다. */
-  .approval td { height: 52px; width: 62px; }
   .rows th, .rows td { border: 1px solid #bbb; padding: 5px 7px; }
   .rows th { background: #f2f3f5; font-weight: 600; }
   .rows td.num, .rows th.num { text-align: right; white-space: nowrap; }
@@ -76,26 +72,15 @@
   <h1>정 산 내 역 서</h1>
   <p class="subtitle"><%= month %> (완료일 기준)</p>
 
-  <table style="margin-bottom:14px;">
-    <tr>
-      <td style="width:66%;vertical-align:top;padding:0;">
-        <table class="meta">
-          <tr><th>공급받는자</th><td><b><%= group.name %></b></td></tr>
-          <tr><th>사업자번호</th><td><%= group.business_registration_number || '-' %></td></tr>
-          <tr><th>주소</th><td><%= group.business_address || '-' %></td></tr>
-          <tr><th>담당자</th><td><%= [group.contact_name, group.contact_phone].filter(Boolean).join(' · ') || '-' %></td></tr>
-          <tr><th>공급자</th><td><%= group.branch_name || '-' %><%= group.branch_phone ? ' · ' + group.branch_phone : '' %></td></tr>
-          <tr><th>발행일</th><td><%= issuedOn %><%= issuedBy ? ' · 작성 ' + issuedBy : '' %></td></tr>
-        </table>
-      </td>
-      <td style="vertical-align:top;padding:0 0 0 10px;">
-        <%# 결재란은 비워 둔다 — 인쇄해서 도장을 찍는 용도다. %>
-        <table class="approval">
-          <tr><th rowspan="2" style="width:22px;">결<br>재</th><th>담당</th><th>검토</th><th>승인</th></tr>
-          <tr><td></td><td></td><td></td></tr>
-        </table>
-      </td>
-    </tr>
+  <%# 결재란(담당/검토/승인)은 걷어냈다(사용자 지시). 그래서 정보표가 전체 폭을 쓴다 —
+      2단으로 감싸던 표까지 같이 없앤다. 남겨두면 표가 왼쪽 2/3에만 찍혀 여백이 뜬다. %>
+  <table class="meta" style="margin-bottom:14px;">
+    <tr><th>공급받는자</th><td><b><%= group.name %></b></td></tr>
+    <tr><th>사업자번호</th><td><%= group.business_registration_number || '-' %></td></tr>
+    <tr><th>주소</th><td><%= group.business_address || '-' %></td></tr>
+    <tr><th>담당자</th><td><%= [group.contact_name, group.contact_phone].filter(Boolean).join(' · ') || '-' %></td></tr>
+    <tr><th>공급자</th><td><%= group.branch_name || '-' %><%= group.branch_phone ? ' · ' + group.branch_phone : '' %></td></tr>
+    <tr><th>발행일</th><td><%= issuedOn %><%= issuedBy ? ' · 작성 ' + issuedBy : '' %></td></tr>
   </table>
 
   <div class="section">

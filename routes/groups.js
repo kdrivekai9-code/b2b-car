@@ -935,6 +935,100 @@ async function loadSettlement(groupId, month) {
   };
 }
 
+// 정산내역 엑셀 내려받기.
+//
+// 왜 필요한가: 정산은 결국 거래처와 숫자를 맞추는 일이라, 받는 쪽이 자기 회계 양식에 옮겨
+// 붙일 수 있어야 한다. 인쇄물(PDF)만으로는 숫자를 다시 쳐 넣어야 하고 그 과정에서 틀린다.
+//
+// 화면·인쇄물과 **같은 loadSettlement 결과**를 쓴다. 여기서 다시 더하면 세 곳의 숫자가
+// 갈릴 수 있는데, 정산에서 그건 가장 나쁜 종류의 버그다.
+//
+// exceljs는 이미 요금표 업로드에 쓰고 있어 의존성이 늘지 않는다.
+router.get('/:id/settlement/excel', asyncHandler(async (req, res) => {
+  const group = await db.get(`
+    SELECT g.*, b.name AS branch_name FROM groups_tbl g
+      LEFT JOIN branches b ON b.id = g.branch_id WHERE g.id = ?`, [req.params.id]);
+  if (!group) return res.status(404).send('법인을 찾을 수 없습니다.');
+
+  const month = settlementMonth(req.query.month);
+  const data = await loadSettlement(req.params.id, month);
+  const itemized = data.surchargeMode === 'itemized';
+
+  const ExcelJS = require('exceljs');
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'B2B-CAR';
+
+  // ── 시트 1: 운행요금 ──
+  const ws = wb.addWorksheet('운행요금');
+  ws.addRow([`${group.name} 정산내역`]);
+  ws.addRow([`${month} (완료일 기준)`]);
+  ws.addRow([]);
+  const headerRowIndex = ws.rowCount + 1;
+  // 별도 줄 방식이면 기본요금과 할증을 나눠 보여준다 — 화면과 같은 규칙이다.
+  const head = ['No', '예약일', '차종', '차량번호', '출발지', '도착지'];
+  if (itemized) head.push('기본요금', '할증');
+  else head.push('운행요금');
+  head.push('도선료', '합계', '완료일');
+  ws.addRow(head);
+
+  data.items.forEach((r, i) => {
+    const row = [
+      i + 1,
+      r.reserved_date || '',
+      r.vehicle_type || '',
+      r.vehicle_number || '',
+      [r.origin_address, r.origin_address_detail].filter(Boolean).join(' '),
+      [r.destination_address, r.destination_address_detail].filter(Boolean).join(' '),
+    ];
+    if (itemized) row.push(r.baseFare, r.surchargeTotal);
+    else row.push(r.fare);
+    row.push(r.ferry, r.total, r.completed_at || '');
+    ws.addRow(row);
+  });
+
+  const totalRow = ['', '', '', '', '', '합계'];
+  if (itemized) {
+    totalRow.push(data.summary.base, data.summary.surcharge);
+  } else {
+    totalRow.push(data.summary.fare);
+  }
+  totalRow.push(data.summary.ferry, data.summary.total, '');
+  ws.addRow(totalRow);
+
+  // ── 시트 2: 기타 정산(실비) ──
+  if (data.extras && data.extras.length) {
+    const ws2 = wb.addWorksheet('기타 정산');
+    ws2.addRow(['일자', 'OID', '항목', '금액', '별도청구', '비고']);
+    data.extras.forEach((e) => {
+      ws2.addRow([e.charged_on || '', e.oid || '', e.charge_type || '', Number(e.amount) || 0,
+        e.billable ? 'O' : '', e.note || '']);
+    });
+    ws2.addRow(['', '', '합계', data.extraSummary.total, '', '']);
+    ws2.getRow(1).font = { bold: true };
+    ws2.columns.forEach((c) => { c.width = 16; });
+    ws2.getColumn(6).width = 30;
+  }
+
+  // ── 서식 ──
+  ws.getRow(1).font = { bold: true, size: 14 };
+  ws.getRow(headerRowIndex).font = { bold: true };
+  ws.getRow(ws.rowCount).font = { bold: true };
+  // 금액 칸은 천 단위 구분을 넣는다 — 정산서에서 자릿수를 눈으로 세게 하면 안 된다.
+  // 별도 줄 방식이면 금액 칸이 하나 더 있어(기본요금/할증) 범위가 7~10, 아니면 7~9다.
+  const moneyTo = itemized ? 10 : 9;
+  for (let c = 7; c <= moneyTo; c += 1) ws.getColumn(c).numFmt = '#,##0';
+  ws.columns.forEach((c, i) => { c.width = i >= 4 && i <= 5 ? 34 : 14; });
+
+  // 파일명에 법인명과 월을 넣는다 — 여러 법인 것을 받아두면 파일명만으로 구분돼야 한다.
+  // 한글 파일명은 브라우저마다 깨져서 RFC 5987(filename*)로 준다.
+  const filename = `정산내역_${group.name}_${month}.xlsx`;
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition',
+    `attachment; filename="settlement_${month}.xlsx"; filename*=UTF-8''${encodeURIComponent(filename)}`);
+  await wb.xlsx.write(res);
+  res.end();
+}));
+
 // 정산내역서 출력 — 내부 결재용 서류.
 //
 // 화면(settlement)과 같은 데이터를 쓰되 레이아웃이 다르다: 결재란·공급자/공급받는자·발행일이

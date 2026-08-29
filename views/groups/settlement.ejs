@@ -17,6 +17,10 @@
   <div class="page-head-actions">
     <%# 새 창으로 연다(사용자 지시) — 목록을 보던 화면을 잃지 않고 인쇄만 하고 닫을 수 있어야 한다.
         조회 중인 달을 그대로 넘긴다. 안 넘기면 이번 달이 인쇄돼 엉뚱한 서류가 나간다. %>
+    <%# 엑셀은 인쇄 앞에 둔다(사용자 지시). 조회 중인 달을 그대로 넘긴다 —
+        안 넘기면 이번 달이 받아져 엉뚱한 파일이 나간다(인쇄 버튼과 같은 이유). %>
+    <a class="btn secondary" id="settlementExcelBtn"
+       href="/groups/<%= group.id %>/settlement/excel?month=<%= encodeURIComponent(month) %>">⬇ 엑셀 다운로드</a>
     <button type="button" class="btn" id="settlementPrintBtn">📄 정산내역서 출력</button>
     <a class="btn secondary" href="/groups">법인 목록으로</a>
   </div>
@@ -246,6 +250,16 @@
       var m = (document.getElementById('month') || {}).value || '<%= month %>';
       window.open('/groups/<%= group.id %>/settlement/print?month=' + encodeURIComponent(m),
         'settlementPrint', 'width=900,height=1000,scrollbars=yes');
+    });
+  }
+
+  // 엑셀도 인쇄와 같은 달을 받아야 한다. 월 입력만 바꾸고 조회를 안 누른 상태에서 눌러도
+  // 화면에 보이는 달이 나가도록 누르는 순간 링크를 고쳐 준다(인쇄 버튼과 같은 규칙).
+  var excelBtn = document.getElementById('settlementExcelBtn');
+  if (excelBtn) {
+    excelBtn.addEventListener('click', function () {
+      var m = (document.getElementById('month') || {}).value || '<%= month %>';
+      excelBtn.href = '/groups/<%= group.id %>/settlement/excel?month=' + encodeURIComponent(m);
     });
   }
 
