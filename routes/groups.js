@@ -921,6 +921,33 @@ async function loadSettlement(groupId, month) {
   };
 }
 
+// 정산내역서 출력 — 내부 결재용 서류.
+//
+// 화면(settlement)과 같은 데이터를 쓰되 레이아웃이 다르다: 결재란·공급자/공급받는자·발행일이
+// 있고, 헤더/사이드바 없이 종이 한 장으로 떨어져야 한다. 그래서 공용 레이아웃을 쓰지 않는다.
+//
+// 새 창으로 연다(사용자 지시) — 목록을 보던 화면을 잃지 않고 인쇄만 하고 닫을 수 있어야 한다.
+router.get('/:id/settlement/print', asyncHandler(async (req, res) => {
+  const group = await db.get(`
+    SELECT g.*, b.name AS branch_name, b.main_phone AS branch_phone,
+           b.address AS branch_address, b.contact_name AS branch_contact
+      FROM groups_tbl g LEFT JOIN branches b ON b.id = g.branch_id
+     WHERE g.id = ?`, [req.params.id]);
+  if (!group) return res.status(404).send('법인을 찾을 수 없습니다.');
+  const month = settlementMonth(req.query.month);
+  const data = await loadSettlement(req.params.id, month);
+
+  const now = new Date(Date.now() + 9 * 60 * 60 * 1000); // 발행일은 KST
+  res.render('groups/settlement_print', {
+    group,
+    month,
+    issuedOn: `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-${String(now.getUTCDate()).padStart(2, '0')}`,
+    issuedBy: (req.session.user && req.session.user.name) || '',
+    extraChargeTypes: extraCharges.EXTRA_CHARGE_TYPES,
+    ...data,
+  });
+}));
+
 router.get('/:id/settlement', asyncHandler(async (req, res) => {
   const { group, groups } = await loadGroupWithSiblings(req.params.id);
   if (!group) return res.status(404).send('법인을 찾을 수 없습니다.');
