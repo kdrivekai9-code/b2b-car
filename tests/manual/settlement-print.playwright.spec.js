@@ -147,7 +147,35 @@ test.describe('정산내역서 출력', () => {
     await expect(page.locator('.settlement-table tfoot')).toContainText('97,000원');
     await expect(page.locator('.surcharge-table')).toContainText('수입차 할증');
     // 총 청구액은 그대로.
-    await expect(page.locator('.stat-row').getByText('총 청구액').locator('..')).toContainText('145,000원');
+    // 금액 통계는 두 칸짜리 표다 — 총 청구액 줄(tfoot)을 집는다.
+    await expect(page.locator('.stat-table .stat-total')).toContainText('145,000원');
+  });
+
+  // 금액 통계는 자릿수를 맞춰 읽는 표다 — 가로로 늘어놓으면 숫자가 자리마다 다른 위치에
+  // 찍혀 크기 비교가 안 된다(사용자 지적).
+  test('금액 통계가 표로 나오고 금액이 우측 정렬된다', async ({ page }) => {
+    test.skip(!groupId, '법인이 없습니다');
+    await loginWithRetry(page, { baseUrl: BASE_URL, loginId: LOGIN_ID, password: PASSWORD });
+    await page.goto(`${BASE_URL}/groups/${groupId}/settlement?month=${MONTH}`, { waitUntil: 'domcontentloaded' });
+
+    const table = page.locator('.stat-table');
+    await expect(table).toHaveCount(1);
+    // 항목명 + 금액 두 칸.
+    await expect(table.locator('tbody tr').first().locator('th, td')).toHaveCount(2);
+
+    const style = await table.locator('tbody tr').first().locator('td').evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return { align: cs.textAlign, border: cs.borderTopWidth, pad: cs.paddingTop };
+    });
+    expect(style.align, '금액은 우측 정렬').toBe('right');
+    // 테두리가 없으면 어디까지가 한 줄인지 안 보인다.
+    expect(parseFloat(style.border), '테두리선').toBeGreaterThan(0);
+    // 붙어 있으면 읽기 어렵다 — 여백이 있어야 한다.
+    expect(parseFloat(style.pad), '위아래 여백').toBeGreaterThan(4);
+
+    // 총 청구액은 합계 줄에 있고 눈에 띄어야 한다.
+    await expect(table.locator('.stat-total')).toContainText('총 청구액');
+    await expect(table.locator('.stat-total')).toContainText('145,000원');
   });
 
   test('표시 방식을 바꿔도 총 청구액은 같다', async ({ page }) => {

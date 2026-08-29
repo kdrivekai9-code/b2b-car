@@ -213,7 +213,11 @@ test.describe('법인관리 · 지점 구간요금', () => {
       await page.goto(`${BASE_URL}/groups/${groupId}/fare-rules`, { waitUntil: 'domcontentloaded' });
 
       // 거리 구간표보다 **위에** 있어야 한다 — 아래 있으면 구간표만 고치고 왜 안 바뀌는지 찾는다.
-      const officeCard = page.locator('.card', { hasText: '지점 구간요금' }).first();
+      //
+      // 카드를 제목으로 찾지 않는다. 화면에 "지점 구간요금"이라는 말이 들어간 카드가 둘이다
+      // (맨 위 '현재 적용되는 요금표' 순위표에도 나온다) — 제목으로 잡으면 엉뚱한 카드를 집는다.
+      // 체크박스가 있는 카드가 이 검사가 말하는 그 카드다.
+      const officeCard = page.locator('.card:has(input[name="office_fare_enabled"])');
       await expect(officeCard).toBeVisible();
       const officeY = await officeCard.boundingBox();
       const tierY = await page.locator('.card', { hasText: '거리 구간별 요금 규칙' }).first().boundingBox();
@@ -228,10 +232,15 @@ test.describe('법인관리 · 지점 구간요금', () => {
       await page.waitForURL(/saved=1/, { timeout: 30000 });
       expect((await db.get('SELECT office_fare_enabled FROM groups_tbl WHERE id = ?', [groupId])).office_fare_enabled)
         .toBe(false);
-      await expect(page.getByText('적용 꺼짐', { exact: false })).toBeVisible();
+      // 저장 뒤 다시 그려진 화면에도 꺼진 채로 보여야 한다 — 저장은 됐는데 체크가 되살아나면
+      // 관리자는 안 꺼진 줄 알고 다시 누른다.
+      await expect(page.locator('.card:has(input[name="office_fare_enabled"])')
+        .locator('input[type="checkbox"][name="office_fare_enabled"]')).not.toBeChecked();
+      // 꺼진 상태에서 무엇으로 계산되는지 밝혀야 한다(등록 여부에 따라 문구가 갈린다).
+      await expect(page.getByText('거리 구간표로 계산합니다', { exact: false }).first()).toBeVisible();
 
       // 다시 켜면 되돌아온다 — 줄을 지우지 않고 되돌릴 수 있어야 한다.
-      await page.locator('.card', { hasText: '지점 구간요금' }).first()
+      await page.locator('.card:has(input[name="office_fare_enabled"])')
         .locator('input[type="checkbox"][name="office_fare_enabled"]').check();
       await page.locator('button[form="fareForm"]', { hasText: '저장' }).first().click();
       await page.waitForURL(/saved=1/, { timeout: 30000 });

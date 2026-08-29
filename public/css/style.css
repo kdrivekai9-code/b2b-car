@@ -842,3 +842,21 @@ tr.order-flash-indigo td { --flash-bg:#e7e9fd; }
    호버 색이 배경을 덮지 않도록 !important를 쓴다(기존 tr:hover가 더 뒤에 선언돼 있다). */
 .table tr.row-plate-mismatch { background: #fef2f2 !important; box-shadow: inset 3px 0 0 #dc2626; }
 .table tr.row-plate-mismatch:hover { background: #fee2e2 !important; }
+
+/* 정산내역 · 금액 통계 표
+   예전에는 항목을 가로로 늘어놓아 숫자가 자리마다 다른 위치에 찍혔다 — 자릿수가 다르면
+   크기 비교가 안 되고, 항목끼리 붙어 있어 어디까지가 한 항목인지 읽기 어려웠다.
+   두 칸짜리 표로 바꾸고 금액을 우측 정렬해 자릿수를 맞춘다. */
+.stat-table { width: auto; min-width: 340px; margin: 6px 0 4px; border-collapse: collapse; }
+.stat-table th,
+.stat-table td { border: 1px solid var(--border); padding: 9px 14px; }
+.stat-table th { background: #f7f8fa; text-align: left; font-weight: 600; white-space: nowrap; }
+/* 금액은 오른쪽에 붙여 자릿수를 맞춘다. 숫자가 줄바꿈되면 자릿수가 어긋나 보인다. */
+.stat-table td { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; min-width: 130px; }
+.stat-table .muted { font-weight: 400; }
+/* 합계에 이미 포함된 줄 — 더하는 줄이 아니라는 것을 들여쓰기와 색으로 구분한다. */
+.stat-table .stat-sub th,
+.stat-table .stat-sub td { color: var(--muted); padding-top: 6px; padding-bottom: 6px; }
+/* 청구서에 찍힐 금액 — 다른 숫자보다 눈에 띄어야 한다. */
+.stat-table .stat-total th,
+.stat-table .stat-total td { border-top: 2px solid #333; background: #eef3f9; font-size: 16px; font-weight: 800; }

@@ -255,26 +255,32 @@
 
 <div class="card">
   <div class="section-title">💰 금액 통계</div>
-  <div class="stat-row" style="display:flex;gap:24px;flex-wrap:wrap;">
-    <div><div class="page-sub" style="margin:0;">완료 건수</div><b><%= summary.count.toLocaleString('ko-KR') %>건</b></div>
-    <div><div class="page-sub" style="margin:0;">탁송료</div><b><%= formatMoney(summary.fare) %></b></div>
-    <div><div class="page-sub" style="margin:0;">도선료</div><b><%= formatMoney(summary.ferry) %></b></div>
-    <% if (surchargeMode === 'itemized') { %>
-      <div><div class="page-sub" style="margin:0;">운행요금(할증 제외)</div><b><%= formatMoney(summary.base + summary.ferry) %></b></div>
-      <div><div class="page-sub" style="margin:0;">할증</div><b><%= formatMoney(summary.surcharge) %></b></div>
-    <% } else { %>
-      <div><div class="page-sub" style="margin:0;">운행요금 합계</div><b><%= formatMoney(summary.total) %></b></div>
-      <% if (summary.surcharge > 0) { %>
-        <div><div class="page-sub" style="margin:0;">└ 그중 할증</div><b><%= formatMoney(summary.surcharge) %></b></div>
-      <% } %>
-    <% } %>
-    <div><div class="page-sub" style="margin:0;">기타 정산(별도 청구)</div><b><%= formatMoney(extraSummary.total) %></b></div>
-    <%# 청구서에 찍힐 금액이라 다른 숫자보다 눈에 띄어야 한다. %>
-    <div><div class="page-sub" style="margin:0;">총 청구액</div><b style="font-size:18px;"><%= formatMoney(grandTotal) %></b></div>
-    <div>
-      <div class="page-sub" style="margin:0;">건당 평균(운행요금)</div>
-      <b><%= formatMoney(summary.count ? Math.round(summary.total / summary.count) : 0) %></b>
-    </div>
+  <%# 예전에는 항목을 가로로 늘어놓아서 숫자가 자리마다 다른 위치에 찍혔다 — 자릿수가 다르면
+      크기 비교가 안 된다. 표로 바꾸고 금액을 우측 정렬해 자릿수를 맞춘다. %>
+  <div class="table-wrap">
+    <table class="table stat-table">
+      <tbody>
+        <tr><th>완료 건수</th><td><%= summary.count.toLocaleString('ko-KR') %>건</td></tr>
+        <tr><th>탁송료</th><td><%= formatMoney(summary.fare) %></td></tr>
+        <tr><th>도선료</th><td><%= formatMoney(summary.ferry) %></td></tr>
+        <% if (surchargeMode === 'itemized') { %>
+          <tr><th>운행요금 <span class="muted">(할증 제외)</span></th><td><%= formatMoney(summary.base + summary.ferry) %></td></tr>
+          <tr><th>할증</th><td><%= formatMoney(summary.surcharge) %></td></tr>
+        <% } else { %>
+          <tr><th>운행요금 합계</th><td><%= formatMoney(summary.total) %></td></tr>
+          <% if (summary.surcharge > 0) { %>
+            <%# 포함 방식에서는 위 합계 안에 이미 들어 있다 — 더하는 줄이 아니라는 걸 들여쓰기로 보인다. %>
+            <tr class="stat-sub"><th>└ 그중 할증</th><td><%= formatMoney(summary.surcharge) %></td></tr>
+          <% } %>
+        <% } %>
+        <tr><th>기타 정산 <span class="muted">(별도 청구)</span></th><td><%= formatMoney(extraSummary.total) %></td></tr>
+        <tr><th>건당 평균 <span class="muted">(운행요금)</span></th><td><%= formatMoney(summary.count ? Math.round(summary.total / summary.count) : 0) %></td></tr>
+      </tbody>
+      <tfoot>
+        <%# 청구서에 찍힐 금액이라 다른 숫자보다 눈에 띄어야 한다. %>
+        <tr class="stat-total"><th>총 청구액</th><td><%= formatMoney(grandTotal) %></td></tr>
+      </tfoot>
+    </table>
   </div>
 </div>
 

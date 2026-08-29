@@ -74,8 +74,12 @@ test.describe('법인관리 · 법인별 설정 화면', () => {
     test.skip(!empty, '법인 요금표가 비어 있는 법인이 없습니다');
 
     await page.goto(`${BASE_URL}/groups/${empty.id}/fare-rules`, { waitUntil: 'domcontentloaded' });
+    // 문구 자체가 아니라 **무엇이 적용되는지 밝히는가**를 본다. 빈 화면만 보이면 관리자는
+    // 요금이 0원인 줄 안다 — 그게 이 검사가 막으려는 것이다.
+    // (문구는 바뀔 수 있다. 실제로 "탁송 요금표가 적용됩니다" → "소속 지사(…) 표로 계산합니다"로
+    //  바뀌어 한 번 깨졌다.)
     await expect(page.getByText('소속 지사', { exact: false }).first()).toBeVisible();
-    await expect(page.getByText('탁송 요금표가 적용됩니다', { exact: false })).toBeVisible();
+    await expect(page.getByText(/지사.*표로 계산|지사.*요금표가 적용/).first()).toBeVisible();
   });
 
   // 정산내역은 청구 근거라 "열린다"로는 부족하다. 검사용 완료 오더를 넣고, 그 달만 조회했을 때
@@ -208,8 +212,8 @@ test.describe('법인관리 · 법인별 설정 화면', () => {
       await expect(page.locator('.extra-charge-summary-table tfoot')).toContainText('4,500원');
       // 하단 금액 통계 블록을 콕 집는다 — 안내 문구에도 "총 청구액"이라는 말이 들어가서
       // 그냥 텍스트로 찾으면 두 곳에 걸린다.
-      await expect(page.locator('.stat-row').getByText('총 청구액').locator('..'))
-        .toContainText('104,500원');
+      // 금액 통계는 두 칸짜리 표다 — 총 청구액 줄(tfoot)을 집는다.
+      await expect(page.locator('.stat-table .stat-total')).toContainText('104,500원');
     } finally {
       await wipe();
     }
