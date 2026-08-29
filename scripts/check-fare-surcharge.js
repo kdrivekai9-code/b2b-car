@@ -161,6 +161,9 @@ check('실비 — 총액을 모르면 특수교량만이라도',
   (() => { const r = toll(EXC, { specialTolls: sp, tollFare: 0 }); return [r.chargeType, r.amount]; })(),
   ['특수구간통행료', 5500]);
 check('실비 — 둘 다 없으면 청구 없음', toll(EXC, { specialTolls: [], tollFare: 0 }), null);
+// 이름만 등록하고 금액을 안 넣은 상태 — 이름은 걸리는데 청구는 안 된다. 실제로 그 상태가 있었다.
+check('금액 0인 특수구간은 청구되지 않는다',
+  toll(INC, { specialTolls: [{ name: '영종대교', amount: 0 }], tollFare: 12000 }), null);
 // 설정이 비어 있으면(마이그레이션 전) 단가표 기본값 = 일반 통행료 포함이다.
 check('설정이 없으면 포함으로 본다',
   (() => { const r = toll({}, { specialTolls: sp, tollFare: 12000 }); return r.chargeType; })(),

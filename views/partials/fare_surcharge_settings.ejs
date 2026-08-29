@@ -195,9 +195,16 @@
       <thead><tr><th style="width:55%;">구간·교량명</th><th style="width:30%;">기본 통행료(원)</th><th style="width:15%;"></th></tr></thead>
       <tbody>
         <% (tollRules || []).forEach(function (t) { %>
+          <%# 이름만 등록하고 금액이 0이면 이름은 걸리는데 청구 줄이 안 만들어진다 —
+              화면에는 등록돼 있으니 설정한 사람은 청구되는 줄 안다. 실제로 그 상태가 있었다. %>
           <tr>
             <td><input type="text" name="toll_name" value="<%= t.name %>" list="specialTollPresets" placeholder="예: 인천대교"></td>
-            <td><input type="number" name="toll_fee" value="<%= t.fee || 0 %>" min="0" step="100" placeholder="0"></td>
+            <td>
+              <input type="number" name="toll_fee" value="<%= t.fee || 0 %>" min="0" step="100" placeholder="0">
+              <% if (!Number(t.fee)) { %>
+                <div class="page-sub" style="color:#b45309;">금액이 0이라 <b>청구되지 않습니다</b></div>
+              <% } %>
+            </td>
             <td><button type="button" class="btn small secondary remove-row-btn">삭제</button></td>
           </tr>
         <% }) %>
