@@ -74,6 +74,62 @@ console.log('\n[사진 읽기 — 모델 호출을 흉내내서]');
   const bad = await read({ plate: '', confidence: 0.9 });
   check('모델이 못 읽은 건 재시도 대상 아님', !!bad.retryable, false);
 
+  console.log('\n[사진 품질 방어 — 지어낸 답을 막는다]');
+  // 실측(OID1237): 콜마너 사진이 400x300 격자 스크린샷이었는데 모델이 확신도 0.95로
+  // 엉뚱한 번호를 지어냈다(접수 199다9077 / 인식 228오9847). 확신도만으로는 못 막는다.
+  const smallJpeg = Buffer.concat([
+    Buffer.from([0xFF, 0xD8, 0xFF, 0xC0, 0x00, 0x11, 0x08]),
+    Buffer.from([0x01, 0x2C, 0x01, 0x90]), // 300 x 400
+    Buffer.alloc(40),
+  ]);
+  const bigJpeg = Buffer.concat([
+    Buffer.from([0xFF, 0xD8, 0xFF, 0xC0, 0x00, 0x11, 0x08]),
+    Buffer.from([0x04, 0xB0, 0x06, 0x40]), // 1200 x 1600
+    Buffer.alloc(40),
+  ]);
+  check('JPEG 크기를 헤더에서 읽는다', plateOcr.imageSize(smallJpeg), { height: 300, width: 400 });
+
+  let modelCalls = 0;
+  const countingGenerate = async () => { modelCalls += 1; return { plate: '228오9847', confidence: 0.95, imageIssue: 'none' }; };
+  const small = await plateOcr.readPlate('u', {
+    fetchImage: async () => ({ ok: true, buffer: smallJpeg, contentType: 'image/jpeg' }),
+    generate: countingGenerate,
+  });
+  check('작은 사진은 읽지 않는다', small.plate, null);
+  // 돈이 드는 호출이라 "거르되 부르긴 한다"로는 부족하다 — 아예 안 불러야 한다.
+  check('작은 사진은 모델을 부르지도 않는다', modelCalls, 0);
+
+  const bigOk = { fetchImage: async () => ({ ok: true, buffer: bigJpeg, contentType: 'image/jpeg' }) };
+  check('큰 사진은 정상 처리',
+    (await plateOcr.readPlate('u', { ...bigOk, generate: async () => ({ plate: '12가3456', confidence: 0.9, imageIssue: 'none' }) })).plate,
+    '12가3456');
+  // 모델이 사진 문제를 보고하면 번호를 읽었다 해도 버린다.
+  for (const issue of ['collage', 'rotated', 'blurry', 'too_small', 'no_plate']) {
+    check(`사진 문제(${issue})는 버린다`,
+      (await plateOcr.readPlate('u', { ...bigOk, generate: async () => ({ plate: '12가3456', confidence: 0.99, imageIssue: issue }) })).plate,
+      null);
+  }
+
+  console.log('\n[상이는 두 번 읽어 확인한다]');
+  // 지어낸 값은 호출마다 흔들리고, 실제로 읽은 값은 안정적이다.
+  let n = 0;
+  const flaky = { ...bigOk, generate: async () => { n += 1; return { plate: n === 1 ? '34나7890' : '56다1234', confidence: 0.9, imageIssue: 'none' }; } };
+  const unstable = await plateOcr.readPlateConfirmed('u', '12가3456', flaky);
+  check('두 번 읽어 다르면 판정 안 함', unstable.plate, null);
+  check('그래서 상이 알림이 안 나간다', plateOcr.comparePlates('12가3456', unstable.plate), null);
+
+  let m = 0;
+  const stable = { ...bigOk, generate: async () => { m += 1; return { plate: '34나7890', confidence: 0.9, imageIssue: 'none' }; } };
+  const confirmed = await plateOcr.readPlateConfirmed('u', '12가3456', stable);
+  check('두 번 같으면 상이로 확정', plateOcr.comparePlates('12가3456', confirmed.plate), false);
+  check('상이일 때만 두 번 읽는다', m, 2);
+
+  let k = 0;
+  const matching = { ...bigOk, generate: async () => { k += 1; return { plate: '12가3456', confidence: 0.9, imageIssue: 'none' }; } };
+  await plateOcr.readPlateConfirmed('u', '12가3456', matching);
+  // 일치는 헛알림 위험이 없는 방향이라 재확인할 이유가 없다(대부분이 일치라 비용 차이가 크다).
+  check('일치하면 한 번만 읽는다', k, 1);
+
   console.log(failures ? `\n${failures}건 실패` : '\n모두 통과');
   process.exit(failures ? 1 : 0);
 })().catch((e) => { console.error('검사 실패:', e); process.exit(1); });
