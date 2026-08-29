@@ -173,8 +173,22 @@
 
   <div class="section-title" style="font-size:14px;margin-top:18px;">특수 구간(민자 교량 등)</div>
   <p class="page-sub" style="margin-top:-4px;">
-    등록한 이름이 출발지·목적지 주소에 나오면, <b>특수 구간 통행료를 “제외”로 둔 경우에 한해</b>
+    등록한 이름이 경로에 나오면 <b>특수 구간 통행료를 “제외”로 둔 경우에 한해</b>
     실비 항목이 자동으로 잡힙니다. 금액은 기본값이며 실제 영수증 금액으로 고칠 수 있습니다.
+  </p>
+  <%# 이름 프리셋 — 판정이 **부분일치**라 표기가 조금만 달라도 안 걸린다.
+      실측: 카카오는 "영종대교휴게소"처럼 뒤에 말을 붙여 주므로 등록명이 "영종대교"여야 걸리고
+      "영종 대교"처럼 띄면 안 걸린다. 목록에서 고르면 그 오차가 사라진다.
+      금액은 프리셋에 넣지 않는다 — 확인하지 못한 값을 기본값으로 심으면 그대로 청구된다. %>
+  <datalist id="specialTollPresets">
+    <% (specialTollPresets || []).forEach(function (g) { %>
+      <% g.names.forEach(function (n) { %><option value="<%= n %>"><%= g.group %></option><% }) %>
+    <% }) %>
+  </datalist>
+  <p class="page-sub">
+    이름 칸을 누르면 <b>자주 쓰는 구간 목록</b>이 뜹니다(<%= (specialTollPresets || []).reduce(function (a, g) { return a + g.names.length; }, 0) %>곳).
+    판정은 <b>이름이 들어 있는지</b>로 하므로 목록에서 고르면 표기 차이로 빗나가지 않습니다.
+    <b>금액은 계약·영수증 기준으로 직접 넣어주세요</b> — 통행료는 차종·시간대에 따라 달라 미리 채워두지 않았습니다.
   </p>
   <div class="table-wrap">
     <table class="table" id="specialTollTable">
@@ -182,7 +196,7 @@
       <tbody>
         <% (tollRules || []).forEach(function (t) { %>
           <tr>
-            <td><input type="text" name="toll_name" value="<%= t.name %>" placeholder="예: 인천대교"></td>
+            <td><input type="text" name="toll_name" value="<%= t.name %>" list="specialTollPresets" placeholder="예: 인천대교"></td>
             <td><input type="number" name="toll_fee" value="<%= t.fee || 0 %>" min="0" step="100" placeholder="0"></td>
             <td><button type="button" class="btn small secondary remove-row-btn">삭제</button></td>
           </tr>
@@ -203,7 +217,7 @@
       + '<td><input type="number" name="place_fee" value="0" min="0" max="<%= surchargeMax %>" step="1000"></td>'
       + '<td><button type="button" class="btn small secondary remove-row-btn">삭제</button></td>',
     specialTollTable:
-      '<td><input type="text" name="toll_name" placeholder="예: 인천대교"></td>'
+      '<td><input type="text" name="toll_name" list="specialTollPresets" placeholder="예: 인천대교"></td>'
       + '<td><input type="number" name="toll_fee" value="0" min="0" step="100"></td>'
       + '<td><button type="button" class="btn small secondary remove-row-btn">삭제</button></td>',
   };

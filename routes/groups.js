@@ -411,6 +411,7 @@ async function loadGroupFarePage(groupId) {
     placeRules: placeRules || [],
     tollRules: tollRules || [],
     extraCostItems: fareSurcharge.extraCostStates(extra),
+    specialTollPresets: fareSurcharge.SPECIAL_TOLL_PRESETS,
     extraCostModes: fareSurcharge.EXTRA_COST_MODES,
     ...largeCar,
   };

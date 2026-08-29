@@ -117,6 +117,26 @@ check('공백만 있어도 빈 칸으로 본다',
 check('빈 칸은 범위 검사도 하지 않는다',
   input.findBadFee({ large_model_id: ['7'], large_model_fee: [''] }), null);
 
+console.log('\n[특수 구간 이름 프리셋]');
+const presetNames = fs.specialTollPresetNames();
+check('프리셋이 비어 있지 않다', presetNames.length > 0, true);
+// 금액을 넣지 않는 것이 규칙이다 — 확인하지 못한 값을 심으면 그대로 청구된다.
+check('이름만 있고 금액은 없다',
+  fs.SPECIAL_TOLL_PRESETS.every((g) => g.names.every((n) => typeof n === 'string')), true);
+check('중복된 이름이 없다', presetNames.length, new Set(presetNames).size);
+// 판정이 부분일치라 공백이 들어가면 카카오 응답과 안 맞는다.
+check('이름에 공백이 없다', presetNames.filter((n) => /\s/.test(n)), []);
+// 실측: 카카오는 "영종대교휴게소"처럼 뒤에 말을 붙여 준다. 프리셋 이름이 그 안에 들어 있어야 걸린다.
+check('카카오 응답 문자열에서 걸린다',
+  fs.matchSpecialTolls({ toll_normal_included: 0 }, presetNames.map((n) => ({ name: n, fee: 5000 })),
+    ['서울 강남구', '영종대교휴게소', '청라IC']).map((h) => h.name),
+  ['영종대교']);
+// 한 경로에 둘 이상 걸릴 수도 있다(교량을 연달아 지나는 경우) — 그때는 둘 다 나와야 한다.
+check('여러 곳이 걸리면 전부 잡는다',
+  fs.matchSpecialTolls({ toll_normal_included: 0 }, presetNames.map((n) => ({ name: n, fee: 5000 })),
+    ['인천대교 요금소', '영종대교휴게소']).map((h) => h.name).sort(),
+  ['영종대교', '인천대교']);
+
 console.log('\n[통행료(TG) 청구액]');
 // 사용자 확정 규칙:
 //   일반 통행료 '포함' → 특수교량 금액만 (총액을 쓰면 기본요금에 든 일반분까지 이중 청구)
