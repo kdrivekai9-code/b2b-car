@@ -194,6 +194,7 @@ router.get('/:id/fare-rules', asyncHandler(async (req, res) => {
     placeRules: placeRules || [],
     tollRules: tollRules || [],
     extraCostItems: fareSurcharge.extraCostStates(extra),
+    extraCostModes: fareSurcharge.EXTRA_COST_MODES,
     surchargeMin: fareSurcharge.SURCHARGE_FEE_MIN,
     surchargeMax: fareSurcharge.SURCHARGE_FEE_MAX,
     ...largeCar,

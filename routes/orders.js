@@ -36,6 +36,9 @@ const { DISPATCH_FIELDS } = require('../lib/intakeFields');
 // 접수 요약 문구는 카카오 상담톡과 같은 모듈이 만든다.
 const { buildSummaryText } = require('../lib/intakeSummary');
 const callmanerPhotos = require('../lib/callmanerPhotos');
+// 대기·취소요금. 설정만 있고 계산이 없던 것을 채웠다(lib/tripFees.js).
+const tripFees = require('../lib/tripFees');
+const branchPolicy = require('../lib/branchPolicy');
 // 기타 정산 내역(주유비·주차요금·톨게이트). 항목 정의를 법인 정산내역 화면과 공유한다.
 const extraCharges = require('../lib/extraCharges');
 const { getRouteFareSettings } = require('../lib/routeFareSearch');
@@ -1157,6 +1160,7 @@ router.post('/', asyncHandler(async (req, res) => {
   // 얼마인지는 우리 표에서 서버가 정한다.
   let specialTolls = [];
   let fareSurcharges = [];
+  let waitFee = null;
   // 이 오더에 적용되는 요금설정 — 통행료를 특수교량만 청구할지 총액을 청구할지 여기서 갈린다.
   let fareExtra = null;
   try {
@@ -1170,6 +1174,11 @@ router.post('/', asyncHandler(async (req, res) => {
     // 할증 내역도 서버가 다시 계산해 남긴다. 금액(fare_amount)은 화면이 보낸 값을 그대로
     // 쓰되(관리자가 손으로 고칠 수 있어야 한다), **왜 그 금액인지**는 서버가 판정한 근거를
     // 남긴다 — 화면이 보낸 설명을 그대로 믿으면 근거가 아니게 된다.
+    // 대기요금 — 도착지 대기시간이 요금설정 기준을 넘으면 붙는다. 거리와 무관해 요금 전체를
+    // 다시 계산하지 않고 설정만 읽어 판정한다.
+    const feeExtra = await branchPolicy.loadExtraSettings(requester_group_id || null, branch_id || null);
+    waitFee = tripFees.waitFee(feeExtra, destination_wait_minutes);
+
     const distanceKm = Number(req.body.distance_km);
     if (Number.isFinite(distanceKm) && distanceKm > 0) {
       const calc = await calculateFareWithFerry(branch_id || null, distanceKm, {
@@ -1203,6 +1212,7 @@ router.post('/', asyncHandler(async (req, res) => {
     ferryFareAmount: ferry_fare_amount,
     specialTolls,
     fareSurcharges,
+    waitFee,
     // 카카오 경로의 총 통행료와 이 오더에 적용되는 요금설정 — 둘로 통행료 청구액이 정해진다.
     // 금액이지만 클라이언트에서 받는다: 카카오 응답에서 온 사실이라 tollgates_json과 성격이
     // 같고, 서버가 다시 알려면 경로를 한 번 더 조회해야 한다(경유지까지 같은 경로로).
@@ -2169,6 +2179,24 @@ router.post('/:id/status', asyncHandler(async (req, res) => {
     }
     if (!CLIENT_ALLOWED_STATUS_TARGETS.includes(status)) {
       return res.status(403).send('고객 계정은 대기 또는 취소로만 상태를 변경할 수 있습니다.');
+    }
+  }
+
+  // 취소요금 — 배차 뒤 취소면 더 받는다(요금설정 cancel_before_fee / cancel_after_fee).
+  //
+  // 여기서 계산하는 이유: 취소요금은 **취소 시점의 상태**로 갈린다. 나중에 정산 화면에서
+  // 되짚으면 그때는 이미 상태가 '취소'라 배차 전이었는지 후였는지 알 수 없다.
+  // 이미 값이 있으면 덮어쓰지 않는다 — 취소를 되돌렸다가 다시 취소해도 두 번 붙으면 안 된다.
+  if (status === '취소' && order.status !== '취소') {
+    try {
+      const feeExtra = await branchPolicy.loadExtraSettings(order.requester_group_id, order.branch_id);
+      const fee = tripFees.cancelFee(feeExtra, { previousStatus: order.status });
+      if (fee.amount > 0 && order.cancel_fee_amount == null) {
+        await db.run('UPDATE orders SET cancel_fee_amount = ?, cancel_fee_note = ? WHERE id = ?',
+          [fee.amount, fee.note, req.params.id]);
+      }
+    } catch (e) {
+      if (!e || e.code !== '42703') console.error('취소요금 계산 실패(취소는 그대로 진행):', e.message);
     }
   }
 

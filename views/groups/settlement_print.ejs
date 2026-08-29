@@ -8,7 +8,8 @@
   const addr = (a, d) => [a, d].filter(Boolean).join(' ') || '-';
   // 별도 줄 방식이면 운행요금에서 할증을 뺀 금액을 보여준다(총액은 같다).
   const itemized = surchargeMode === 'itemized';
-  const runningTotal = itemized ? (summary.base + summary.ferry) : summary.total;
+  // 도선료는 기타 정산으로 옮겼다(사용자 지시) — 운행요금 소계에서 뺀다. 총 청구액은 그대로다.
+  const runningTotal = itemized ? (summary.base + summary.wait + summary.cancel) : summary.total;
 %><!doctype html>
 <html lang="ko">
 <head>
@@ -111,11 +112,12 @@
               <td><%= addr(r.origin_address, r.origin_address_detail) %></td>
               <td><%= addr(r.destination_address, r.destination_address_detail) %></td>
               <td class="num">
-                <%= money(itemized ? r.baseFare + r.ferry : r.total) %>
-                <% if (r.ferry > 0) { %><br><span class="muted">도선료 <%= money(r.ferry) %> 포함</span><% } %>
+                <%= money(itemized ? r.baseFare + r.waitFee + r.cancelFee : r.total) %>
                 <% if (!itemized && r.surchargeTotal > 0) { %>
                   <br><span class="muted">할증 <%= money(r.surchargeTotal) %> 포함</span>
                 <% } %>
+                <% if (r.waitFee > 0) { %><br><span class="muted">대기요금 <%= money(r.waitFee) %></span><% } %>
+                <% if (r.cancelFee > 0) { %><br><span class="muted">취소요금 <%= money(r.cancelFee) %></span><% } %>
               </td>
             </tr>
           <% }) %>
@@ -173,7 +175,7 @@
                 <span class="muted"><%= r.oid %></span>
                 <% if (r.note) { %><br><span class="muted"><%= r.note %></span><% } %>
               </td>
-              <td><%= r.charge_type %></td>
+              <td>기타정산(<%= r.charge_type %>)</td>
               <td class="num"><%= money(r.amount) %></td>
             </tr>
           <% }) %>

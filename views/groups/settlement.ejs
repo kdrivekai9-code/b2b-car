@@ -84,6 +84,13 @@
   </form>
 </div>
 
+<%# 체크한 줄만 한 번에 정산완료로 바꾼다(사용자 지시). 폼은 표 바깥에 두고 체크박스가
+    form 속성으로 가리킨다 — 표 안에 <form>을 넣으면 브라우저가 표 구조를 깨뜨린다. %>
+<form id="settleForm" method="POST" action="/groups/<%= group.id %>/settlement/settle">
+  <%# 조회 중인 달을 함께 보낸다 — 안 보내면 처리 후 이번 달로 튕겨 보던 정산서를 잃는다. %>
+  <input type="hidden" name="month" value="<%= month %>">
+</form>
+
 <div class="card">
   <div class="section-title">📄 <%= month %> 운행요금 (<%= summary.count %>건)</div>
   <% if (!items.length) { %>
@@ -93,17 +100,21 @@
       <table class="table settlement-table">
         <thead>
           <tr>
+            <%# 체크해서 한 번에 정산완료로 바꾼다(사용자 지시) — 입금관리는 여러 건을 한꺼번에 처리한다. %>
+            <th style="width:34px;"><input type="checkbox" class="settle-all" data-target="order_id"></th>
             <th style="width:46px;">#</th>
             <th style="width:120px;">예약일</th>
             <th style="width:170px;">차종</th>
             <th>출발지</th>
             <th>도착지</th>
             <th style="width:130px;text-align:right;">요금</th>
+            <th style="width:150px;">정산</th>
           </tr>
         </thead>
         <tbody>
           <% items.forEach(function (r, i) { %>
-            <tr>
+            <tr class="<%= r.settled ? 'settled-row' : '' %>">
+              <td><input type="checkbox" name="order_id" value="<%= r.id %>" form="settleForm"></td>
               <td><%= i + 1 %></td>
               <td>
                 <%= r.reserved_date || '-' %>
@@ -116,10 +127,13 @@
               <td><%= [r.origin_address, r.origin_address_detail].filter(Boolean).join(' ') || '-' %></td>
               <td><%= [r.destination_address, r.destination_address_detail].filter(Boolean).join(' ') || '-' %></td>
               <td style="text-align:right;">
-                <%= formatMoney(surchargeMode === 'itemized' ? r.baseFare + r.ferry : r.total) %>
-                <%# 도선료는 탁송료와 별개로 청구하는 실비다. 합계에는 들어가 있으니 내역에서도 보여야
-                    "요금표와 금액이 다르다"는 문의가 나오지 않는다. %>
-                <% if (r.ferry > 0) { %><br><span class="muted">도선료 <%= formatMoney(r.ferry) %> 포함</span><% } %>
+                <%# 운행요금 대분류 아래 서브 항목(구간요금·할증·대기·취소)을 나눠 보여준다
+                    (사용자 지시). 합쳐만 두면 어느 것이 얼마인지 되짚을 수 없다. %>
+                <%= formatMoney(surchargeMode === 'itemized' ? r.baseFare + r.waitFee + r.cancelFee : r.total) %>
+                <%# 도선료는 기타 정산으로 옮겼다(사용자 지시) — 여기서는 있다는 것만 알린다. %>
+                <% if (r.ferry > 0) { %><br><span class="muted">도선료 <%= formatMoney(r.ferry) %>는 기타 정산</span><% } %>
+                <% if (r.waitFee > 0) { %><br><span class="muted">대기요금 <%= formatMoney(r.waitFee) %><%= r.wait_fee_note ? ' · ' + r.wait_fee_note : '' %></span><% } %>
+                <% if (r.cancelFee > 0) { %><br><span class="muted">취소요금 <%= formatMoney(r.cancelFee) %><%= r.cancel_fee_note ? ' · ' + r.cancel_fee_note : '' %></span><% } %>
                 <%# 할증 내역. 포함 방식이면 왜 그 금액인지 밝히고, 별도 줄 방식이면 아래
                     "할증 내역" 표로 빠졌다는 것을 알린다. %>
                 <% if (r.surchargeTotal > 0) { %>
@@ -133,15 +147,25 @@
                   </span>
                 <% } %>
               </td>
+              <td>
+                <% if (r.settled) { %>
+                  <span class="badge green">정산완료</span>
+                  <%# 언제 누가 확정했는지 — 입금 대사에서 문제가 생기면 이걸로 되짚는다. %>
+                  <br><span class="muted"><%= String(r.settled_at).slice(0, 16) %><%= r.settled_by_name ? ' · ' + r.settled_by_name : '' %></span>
+                <% } else { %>
+                  <span class="badge gray">미정산</span>
+                <% } %>
+              </td>
             </tr>
           <% }) %>
         </tbody>
         <tfoot>
           <tr>
-            <th colspan="5" style="text-align:right;">합계</th>
+            <th colspan="6" style="text-align:right;">합계</th>
             <th style="text-align:right;">
-              <%= formatMoney(surchargeMode === 'itemized' ? summary.base + summary.ferry : summary.total) %>
+              <%= formatMoney(surchargeMode === 'itemized' ? summary.base + summary.wait + summary.cancel : summary.total) %>
             </th>
+            <th></th>
           </tr>
         </tfoot>
       </table>
@@ -193,16 +217,26 @@
       <table class="table extra-charge-table">
         <thead>
           <tr>
+            <th style="width:34px;"><input type="checkbox" class="settle-all" data-target="extra_id"></th>
             <th style="width:120px;">일자</th>
             <th style="width:130px;">차량번호</th>
             <th>출발지</th>
-            <th style="width:110px;">항목</th>
+            <th style="width:120px;">항목</th>
+            <th style="width:110px;">정산방식</th>
             <th style="width:120px;text-align:right;">금액</th>
+            <th style="width:150px;">정산</th>
           </tr>
         </thead>
         <tbody>
           <% extras.forEach(function (r) { %>
-            <tr>
+            <tr class="<%= r.settled ? 'settled-row' : '' %>">
+              <td>
+                <%# 도선료 줄은 오더에서 파생된 것이라 따로 확정하지 않는다 — 그 오더를
+                    정산완료하면 함께 완료된다. 체크박스를 주면 눌러도 아무 일이 안 일어난다. %>
+                <% if (!r.derived) { %>
+                  <input type="checkbox" name="extra_id" value="<%= r.id %>" form="settleForm">
+                <% } %>
+              </td>
               <td><%= r.charged_on || '-' %></td>
               <td><%= r.vehicle_number || '-' %></td>
               <td>
@@ -211,15 +245,35 @@
                 <span class="muted"><%= r.oid %></span>
                 <% if (r.note) { %><br><span class="muted"><%= r.note %></span><% } %>
               </td>
-              <td><%= r.charge_type %></td>
+              <td>기타정산(<%= r.charge_type %>)</td>
+              <%# 월정산인지 개별정산인지 구분해서 보여준다(사용자 지시 — 입금관리 목적).
+                  월정산은 이 정산서에 모아 청구하고, 개별정산은 건별로 따로 청구한다. %>
+              <td>
+                <% if (r.settleMode === 'individual') { %>
+                  <span class="badge purple">개별정산</span>
+                <% } else { %>
+                  <span class="badge blue">월정산</span>
+                <% } %>
+              </td>
               <td style="text-align:right;"><%= formatMoney(r.amount) %></td>
+              <td>
+                <% if (r.settled) { %>
+                  <span class="badge green">정산완료</span>
+                  <% if (r.settled_at) { %>
+                    <br><span class="muted"><%= String(r.settled_at).slice(0, 16) %><%= r.settled_by_name ? ' · ' + r.settled_by_name : '' %></span>
+                  <% } %>
+                <% } else { %>
+                  <span class="badge gray">미정산</span>
+                <% } %>
+              </td>
             </tr>
           <% }) %>
         </tbody>
         <tfoot>
           <tr>
-            <th colspan="4" style="text-align:right;">합계</th>
+            <th colspan="6" style="text-align:right;">합계</th>
             <th style="text-align:right;"><%= formatMoney(extraSummary.total) %></th>
+            <th></th>
           </tr>
         </tfoot>
       </table>
@@ -255,25 +309,25 @@
 
 <div class="card">
   <div class="section-title">💰 금액 통계</div>
-  <%# 예전에는 항목을 가로로 늘어놓아서 숫자가 자리마다 다른 위치에 찍혔다 — 자릿수가 다르면
-      크기 비교가 안 된다. 표로 바꾸고 금액을 우측 정렬해 자릿수를 맞춘다. %>
+  <%# 운행요금은 대분류이고 그 아래 서브 항목(구간요금·할증·대기·취소)이 붙는다(사용자 지시).
+      기타 정산은 항목별로 나눠 보여준다 — "기타 120,000원"만으로는 무엇을 청구받는지 모른다. %>
   <div class="table-wrap">
     <table class="table stat-table">
       <tbody>
+        <tr class="stat-group"><th>운행요금</th><td><%= formatMoney(summary.total) %></td></tr>
+        <tr class="stat-sub"><th>└ 구간요금</th><td><%= formatMoney(summary.base) %></td></tr>
+        <tr class="stat-sub"><th>└ 할증요금</th><td><%= formatMoney(summary.surcharge) %></td></tr>
+        <tr class="stat-sub"><th>└ 대기요금</th><td><%= formatMoney(summary.wait) %></td></tr>
+        <tr class="stat-sub"><th>└ 취소요금</th><td><%= formatMoney(summary.cancel) %></td></tr>
+
+        <tr class="stat-group"><th>기타 정산</th><td><%= formatMoney(extraSummary.total) %></td></tr>
+        <% extraChargeTypes.forEach(function (t) { %>
+          <% const v = extraSummary.byType[t] || { count: 0, amount: 0 } %>
+          <%# 건수가 0인 항목도 줄을 남긴다 — 빠진 항목이 있는지 표에서 바로 보인다. %>
+          <tr class="stat-sub"><th>└ 기타정산(<%= t %>)</th><td><%= formatMoney(v.amount) %></td></tr>
+        <% }) %>
+
         <tr><th>완료 건수</th><td><%= summary.count.toLocaleString('ko-KR') %>건</td></tr>
-        <tr><th>탁송료</th><td><%= formatMoney(summary.fare) %></td></tr>
-        <tr><th>도선료</th><td><%= formatMoney(summary.ferry) %></td></tr>
-        <% if (surchargeMode === 'itemized') { %>
-          <tr><th>운행요금 <span class="muted">(할증 제외)</span></th><td><%= formatMoney(summary.base + summary.ferry) %></td></tr>
-          <tr><th>할증</th><td><%= formatMoney(summary.surcharge) %></td></tr>
-        <% } else { %>
-          <tr><th>운행요금 합계</th><td><%= formatMoney(summary.total) %></td></tr>
-          <% if (summary.surcharge > 0) { %>
-            <%# 포함 방식에서는 위 합계 안에 이미 들어 있다 — 더하는 줄이 아니라는 걸 들여쓰기로 보인다. %>
-            <tr class="stat-sub"><th>└ 그중 할증</th><td><%= formatMoney(summary.surcharge) %></td></tr>
-          <% } %>
-        <% } %>
-        <tr><th>기타 정산 <span class="muted">(별도 청구)</span></th><td><%= formatMoney(extraSummary.total) %></td></tr>
         <tr><th>건당 평균 <span class="muted">(운행요금)</span></th><td><%= formatMoney(summary.count ? Math.round(summary.total / summary.count) : 0) %></td></tr>
       </tbody>
       <tfoot>
@@ -282,9 +336,41 @@
       </tfoot>
     </table>
   </div>
+
+  <%# 월정산과 개별정산은 청구 시점이 달라 입금도 따로 들어온다 — 나눠 보여야 대사가 된다. %>
+  <p class="page-sub" style="margin-bottom:0;">
+    기타 정산 내 <b>월정산 <%= formatMoney(extraSummary.byMode.monthly.amount) %></b>(<%= extraSummary.byMode.monthly.count %>건) ·
+    <b>개별정산 <%= formatMoney(extraSummary.byMode.individual.amount) %></b>(<%= extraSummary.byMode.individual.count %>건)
+  </p>
+</div>
+
+<%# 선택한 줄 처리 — 목록 아래에 둔다. 위에 두면 무엇을 고른 뒤 누르는지 순서가 어긋난다. %>
+<div class="card">
+  <div class="section-title">✅ 선택 항목 정산 처리</div>
+  <p class="page-sub">
+    위 목록에서 체크한 줄을 한 번에 바꿉니다. 정산완료로 바꾸면 <b>처리 시각과 담당자 계정</b>이 기록됩니다.
+    운행요금 <b><%= summary.settledCount %>/<%= summary.count %>건</b> ·
+    기타정산 <b><%= extraSummary.settledCount %>/<%= extraSummary.count %>건</b> 완료.
+  </p>
+  <div style="display:flex;gap:8px;">
+    <button class="btn" type="submit" form="settleForm" name="action" value="settle">선택 항목 정산완료</button>
+    <%# 잘못 누른 것을 되돌릴 길이 없으면 아무도 안 쓴다. %>
+    <button class="btn secondary" type="submit" form="settleForm" name="action" value="unsettle">선택 항목 미정산으로</button>
+  </div>
 </div>
 
 <script>
+  // 머리글 체크박스로 그 표의 줄을 한 번에 고른다.
+  document.querySelectorAll('.settle-all').forEach(function (master) {
+    master.addEventListener('change', function () {
+      var table = master.closest('table');
+      if (!table) return;
+      table.querySelectorAll('tbody input[name="' + master.dataset.target + '"]').forEach(function (cb) {
+        cb.checked = master.checked;
+      });
+    });
+  });
+
   var printBtn = document.getElementById('settlementPrintBtn');
   if (printBtn) {
     printBtn.addEventListener('click', function () {

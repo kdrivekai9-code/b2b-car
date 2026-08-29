@@ -860,3 +860,13 @@ tr.order-flash-indigo td { --flash-bg:#e7e9fd; }
 /* 청구서에 찍힐 금액 — 다른 숫자보다 눈에 띄어야 한다. */
 .stat-table .stat-total th,
 .stat-table .stat-total td { border-top: 2px solid #333; background: #eef3f9; font-size: 16px; font-weight: 800; }
+
+/* 금액 통계 — 대분류와 서브 항목
+   운행요금·기타 정산은 대분류이고 그 아래 항목이 붙는다. 들여쓰기와 굵기로 층을 보이지
+   않으면 "└ 구간요금"이 대분류와 같은 무게로 읽혀 합계를 두 번 더하게 된다. */
+.stat-table .stat-group th { background: #eef3f9; font-weight: 800; }
+.stat-table .stat-group td { font-weight: 800; }
+.stat-table .stat-sub th { padding-left: 26px; font-weight: 400; color: var(--muted); }
+/* 정산완료된 줄은 목록에서 한눈에 걸러져야 한다 — 미정산만 골라 처리하는 것이 일상이다. */
+.settlement-table tr.settled-row,
+.extra-charge-table tr.settled-row { background: #f6faf6; }

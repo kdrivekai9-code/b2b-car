@@ -95,10 +95,13 @@ async function makeOrder({ oid, groupId, branchId, status, fare, ferry, dispatch
     check('완료일 오름차순', mine.map((r) => r.completed_at),
       ['2026-07-15 10:00:00', '2026-07-31 23:59:59']);
 
-    console.log('[금액 — 계약 요금 + 도선료]');
-    check('1건차 요금', mine[0] && mine[0].total, 50000);
-    // 도선료는 별도 실비라 합계에 들어가야 한다.
-    check('2건차 요금(도선료 포함)', mine[1] && mine[1].total, 82000);
+    console.log('[금액 — 운행요금에는 도선료가 없다]');
+    // 도선료는 기타 정산으로 옮겼다(사용자 지시 2026-08-29). 금액을 옮긴 것이 아니라 표시
+    // 위치를 바꾼 것이라, 운행요금에서는 빠지고 기타 정산에 같은 금액이 나타난다.
+    check('1건차 운행요금', mine[0] && mine[0].total, 50000);
+    check('2건차 운행요금(도선료 제외)', mine[1] && mine[1].total, 70000);
+    const ferryLine = july.extras.find((e) => e.charge_type === '도선료' && String(e.oid || '').startsWith(MARK));
+    check('도선료가 기타 정산에 있다', ferryLine && ferryLine.amount, 12000);
     // 배차 요금은 콜마너에 거는 원가다. 여기 섞이면 거래처에 원가를 청구하게 된다.
     check('배차 요금이 새어 들어오지 않는다',
       mine.some((r) => r.total === Number(r.dispatch_fare_amount)), false);
@@ -106,9 +109,15 @@ async function makeOrder({ oid, groupId, branchId, status, fare, ferry, dispatch
     console.log('[합계 통계]');
     const sum = (k) => mine.reduce((s, r) => s + r[k], 0);
     check('건수', mine.length, 2);
-    check('탁송료 합계', sum('fare'), 120000);
+    check('구간요금 합계', sum('fare'), 120000);
     check('도선료 합계', sum('ferry'), 12000);
-    check('합계', sum('total'), 132000);
+    // 운행요금 합계에는 도선료가 없다 — 기타 정산으로 나간다.
+    check('운행요금 합계', sum('total'), 120000);
+    // **총 청구액은 그대로다.** 옮겨도 거래처가 내는 돈이 달라지면 안 된다.
+    const myExtraTotal = july.extras
+      .filter((e) => String(e.oid || '').startsWith(MARK))
+      .reduce((a, e) => a + e.amount, 0);
+    check('총 청구액(운행요금 + 기타)', sum('total') + myExtraTotal, 132000);
     // 화면 하단 통계는 이 값을 그대로 쓴다 — 목록과 통계가 어긋나면 정산서를 못 믿는다.
     check('통계가 목록에서 나온다', july.summary.total >= sum('total'), true);
 

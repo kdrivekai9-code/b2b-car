@@ -153,6 +153,26 @@ test.describe('정산내역서 출력', () => {
 
   // 금액 통계는 자릿수를 맞춰 읽는 표다 — 가로로 늘어놓으면 숫자가 자리마다 다른 위치에
   // 찍혀 크기 비교가 안 된다(사용자 지적).
+  // 운행요금은 대분류이고 그 아래 구간요금·할증·대기·취소가 붙는다(사용자 지시). 기타 정산은
+  // 항목별로 나뉜다 — "기타 120,000원"만으로는 무엇을 청구받는지 알 수 없다.
+  test('운행요금 대분류 + 서브 항목, 기타정산 항목별로 나온다', async ({ page }) => {
+    test.skip(!groupId, '법인이 없습니다');
+    await loginWithRetry(page, { baseUrl: BASE_URL, loginId: LOGIN_ID, password: PASSWORD });
+    await page.goto(`${BASE_URL}/groups/${groupId}/settlement?month=${MONTH}`, { waitUntil: 'domcontentloaded' });
+
+    const stat = page.locator('.stat-table');
+    await expect(stat.locator('.stat-group', { hasText: '운행요금' })).toHaveCount(1);
+    for (const sub of ['구간요금', '할증요금', '대기요금', '취소요금']) {
+      await expect(stat.getByText(`└ ${sub}`, { exact: false })).toHaveCount(1);
+    }
+    await expect(stat.locator('.stat-group', { hasText: '기타 정산' })).toHaveCount(1);
+    // 항목별로 나뉘어야 한다.
+    await expect(stat.getByText('기타정산(주유비)', { exact: false })).toHaveCount(1);
+    await expect(stat.getByText('기타정산(도선료)', { exact: false })).toHaveCount(1);
+    // 예전 이름("탁송료")은 무엇을 뜻하는지 알 수 없어 바꿨다.
+    await expect(stat.getByText('탁송료', { exact: true })).toHaveCount(0);
+  });
+
   test('금액 통계가 표로 나오고 금액이 우측 정렬된다', async ({ page }) => {
     test.skip(!groupId, '법인이 없습니다');
     await loginWithRetry(page, { baseUrl: BASE_URL, loginId: LOGIN_ID, password: PASSWORD });
@@ -176,6 +196,40 @@ test.describe('정산내역서 출력', () => {
     // 총 청구액은 합계 줄에 있고 눈에 띄어야 한다.
     await expect(table.locator('.stat-total')).toContainText('총 청구액');
     await expect(table.locator('.stat-total')).toContainText('145,000원');
+  });
+
+  // 입금관리는 목록에서 여러 건을 한꺼번에 처리한다(사용자 지시). 체크 → 일괄 정산완료 →
+  // 처리 시각·담당자 기록까지 이어지는지 본다.
+  test('체크한 줄만 한 번에 정산완료로 바뀌고 시각·담당자가 남는다', async ({ page }) => {
+    test.skip(!groupId, '법인이 없습니다');
+    await db.run('UPDATE orders SET settled_at = NULL, settled_by = NULL WHERE oid LIKE ?', [`${MARK}%`]);
+    await loginWithRetry(page, { baseUrl: BASE_URL, loginId: LOGIN_ID, password: PASSWORD });
+    await page.goto(`${BASE_URL}/groups/${groupId}/settlement?month=${MONTH}`, { waitUntil: 'domcontentloaded' });
+
+    const row = page.locator(`.settlement-table tbody tr:has-text("${MARK}출발지")`);
+    await expect(row).toHaveCount(1);
+    await expect(row).toContainText('미정산');
+
+    await row.locator('input[name="order_id"]').check();
+    await page.locator('button[form="settleForm"][value="settle"]').click();
+    await page.waitForURL(/saved=/, { timeout: 30000 });
+
+    // 조회하던 달이 유지돼야 한다.
+    expect(page.url()).toContain(`month=${MONTH}`);
+
+    const saved = await db.get('SELECT settled_at, settled_by FROM orders WHERE oid = ?', [`${MARK}-1`]);
+    expect(saved.settled_at, '처리 시각이 남아야 한다').toBeTruthy();
+    // 시각만 남기면 "누가 확정했나"를 못 찾는다.
+    expect(saved.settled_by, '담당자 계정이 남아야 한다').toBeTruthy();
+
+    await expect(page.locator(`.settlement-table tbody tr:has-text("${MARK}출발지")`)).toContainText('정산완료');
+
+    // 되돌릴 수 있어야 한다 — 잘못 누른 것을 못 되돌리면 아무도 안 쓴다.
+    await page.locator(`.settlement-table tbody tr:has-text("${MARK}출발지")`)
+      .locator('input[name="order_id"]').check();
+    await page.locator('button[form="settleForm"][value="unsettle"]').click();
+    await page.waitForURL(/saved=/, { timeout: 30000 });
+    expect((await db.get('SELECT settled_at FROM orders WHERE oid = ?', [`${MARK}-1`])).settled_at).toBeFalsy();
   });
 
   test('표시 방식을 바꿔도 총 청구액은 같다', async ({ page }) => {

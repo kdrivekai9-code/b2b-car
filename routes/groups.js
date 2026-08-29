@@ -411,6 +411,7 @@ async function loadGroupFarePage(groupId) {
     placeRules: placeRules || [],
     tollRules: tollRules || [],
     extraCostItems: fareSurcharge.extraCostStates(extra),
+    extraCostModes: fareSurcharge.EXTRA_COST_MODES,
     ...largeCar,
   };
 }
@@ -809,13 +810,16 @@ async function loadSettlement(groupId, month) {
   // 분류는 보조 정보라 빠져도 정산 금액에는 영향이 없다 — 그 컬럼만 빼고 다시 조회한다.
   const SETTLEMENT_SQL = (vehicleCols) => `
     SELECT o.id, o.oid, o.reserved_date, o.reserved_time, o.vehicle_number,
-           o.fare_surcharges_json,
+           o.fare_surcharges_json, o.wait_fee_amount, o.wait_fee_note,
+           o.cancel_fee_amount, o.cancel_fee_note,
+           o.settled_at, o.settled_by, su.name AS settled_by_name,
            ${vehicleCols}
            o.origin_address, o.origin_address_detail,
            o.destination_address, o.destination_address_detail,
            o.fare_amount, o.ferry_fare_amount,
            h.completed_at
       FROM orders o
+      LEFT JOIN users su ON su.id = o.settled_by
       JOIN (
         SELECT order_id, MAX(created_at) AS completed_at
           FROM order_status_history
@@ -856,22 +860,36 @@ async function loadSettlement(groupId, month) {
     let surcharges = [];
     try { surcharges = JSON.parse(r.fare_surcharges_json || '[]') || []; } catch (e) { surcharges = []; }
     const surchargeTotal = surcharges.reduce((s2, it) => s2 + (Number(it.amount) || 0), 0);
+    // 대기·취소요금은 fare_amount에 합치지 않고 따로 저장한다(lib/tripFees.js) — 정산서에서
+    // 구간요금·할증과 나란히 보여야 한다.
+    const waitFee = Number(r.wait_fee_amount) || 0;
+    const cancelFee = Number(r.cancel_fee_amount) || 0;
     return {
-      ...r, fare, ferry, total: fare + ferry,
+      ...r, fare, ferry,
+      // 총액에 대기·취소요금을 더한다. 도선료는 기타 정산으로 옮겨(사용자 지시) 여기서 뺀다 —
+      // 총 청구액에는 아래 extraSummary를 통해 그대로 들어간다.
+      total: fare + waitFee + cancelFee,
       surcharges,
       surchargeTotal,
-      // 기본요금은 빼서 구한다 — 저장된 청구액에서 역산하므로 합이 항상 맞는다.
-      // 관리자가 요금을 손으로 고쳤어도 그 차이는 기본요금 쪽이 흡수한다(할증은 사실이다).
+      waitFee,
+      cancelFee,
+      // 구간요금은 빼서 구한다 — 저장된 청구액에서 역산하므로 합이 항상 맞는다.
+      // 관리자가 요금을 손으로 고쳤어도 그 차이는 구간요금 쪽이 흡수한다(할증은 사실이다).
       baseFare: fare - surchargeTotal,
+      settled: !!r.settled_at,
     };
   });
+  const sum = (key) => items.reduce((acc, r) => acc + (Number(r[key]) || 0), 0);
   const summary = {
     count: items.length,
-    fare: items.reduce((s2, r) => s2 + r.fare, 0),
-    ferry: items.reduce((s2, r) => s2 + r.ferry, 0),
-    total: items.reduce((s2, r) => s2 + r.total, 0),
-    surcharge: items.reduce((s2, r) => s2 + r.surchargeTotal, 0),
-    base: items.reduce((s2, r) => s2 + r.baseFare, 0),
+    fare: sum('fare'),
+    ferry: sum('ferry'),
+    total: sum('total'),
+    surcharge: sum('surchargeTotal'),
+    base: sum('baseFare'),
+    wait: sum('waitFee'),
+    cancel: sum('cancelFee'),
+    settledCount: items.filter((r) => r.settled).length,
   };
   // 할증을 항목별로 묶은 합계 — itemized 모드에서 별도 줄로 보여준다.
   const surchargeByLabel = {};
@@ -892,14 +910,22 @@ async function loadSettlement(groupId, month) {
   // 올리지 않는다("별도 청구 항목만", 사용자 지시).
   const extraRows = items.length ? await db.all(`
     SELECT e.id, e.order_id, e.charge_type, e.amount, e.charged_on, e.note,
+           e.settled_at, e.settled_by, e.settle_mode, eu.name AS settled_by_name,
            o.oid, o.reserved_date, o.vehicle_number,
            o.origin_address, o.origin_address_detail
       FROM order_extra_charges e
       JOIN orders o ON o.id = e.order_id
+      LEFT JOIN users eu ON eu.id = e.settled_by
      WHERE e.billable = true
        AND e.order_id IN (${items.map(() => '?').join(',')})
      ORDER BY COALESCE(e.charged_on, o.reserved_date), e.id
   `, items.map((r) => r.id)) : [];
+
+  // 정산 방식(월/개별)은 요금설정에서 온다. 청구한 뒤 설정이 바뀌어도 이미 청구한 건의 구분이
+  // 따라 바뀌면 안 되므로, 줄에 박아둔 값(settle_mode)이 있으면 그것을 우선한다.
+  const feeExtra = await db.get(
+    'SELECT * FROM group_fare_extra_settings WHERE group_id = ?', [groupId]
+  ).catch(() => null);
 
   const extras = extraRows.map((r) => ({
     ...r,
@@ -907,8 +933,44 @@ async function loadSettlement(groupId, month) {
     // 일자를 안 넣은 줄은 오더 예약일로 본다 — 저장할 때도 같은 규칙을 쓰지만(lib/extraCharges.js),
     // 그 규칙이 생기기 전에 들어간 줄이 빈 칸으로 남지 않도록 여기서도 받아준다.
     charged_on: r.charged_on || r.reserved_date || null,
+    settleMode: r.settle_mode || fareSurcharge.settleModeOf(feeExtra, r.charge_type),
+    settled: !!r.settled_at,
   }));
+
+  // 도선료는 orders.ferry_fare_amount에서 온다. 데이터를 옮기지 않고 정산서에서만 기타 정산으로
+  // 보여준다(사용자 지시) — 옮기면 기존 오더를 모두 손봐야 하고 되돌리기 어렵다.
+  // 정산완료 상태는 그 오더의 상태를 따른다(별도 줄이 아니라 오더의 일부이기 때문).
+  items.filter((r) => r.ferry > 0).forEach((r) => {
+    extras.push({
+      id: `ferry-${r.id}`,
+      order_id: r.id,
+      charge_type: '도선료',
+      amount: r.ferry,
+      charged_on: r.reserved_date || null,
+      note: null,
+      oid: r.oid,
+      vehicle_number: r.vehicle_number,
+      origin_address: r.origin_address,
+      origin_address_detail: r.origin_address_detail,
+      settleMode: fareSurcharge.settleModeOf(feeExtra, '도선료'),
+      settled: r.settled,
+      settled_at: r.settled_at,
+      settled_by_name: r.settled_by_name,
+      // 이 줄은 order_extra_charges 행이 아니다 — 개별 정산완료 처리 대상이 아님을 표시한다.
+      derived: true,
+    });
+  });
+  extras.sort((a, b) => String(a.charged_on || '').localeCompare(String(b.charged_on || '')));
+
   const extraSummary = extraCharges.summarize(extras);
+  // 월정산 / 개별정산으로 갈라 보여준다(사용자 지시 — 입금관리 목적).
+  extraSummary.byMode = { monthly: { count: 0, amount: 0 }, individual: { count: 0, amount: 0 } };
+  extras.forEach((e) => {
+    const bucket = extraSummary.byMode[e.settleMode] || extraSummary.byMode.monthly;
+    bucket.count += 1;
+    bucket.amount += e.amount;
+  });
+  extraSummary.settledCount = extras.filter((e) => e.settled).length;
 
   // 고를 수 있는 달 — 이 법인에 완료 오더가 있는 달만 보여준다. 빈 달을 늘어놓을 이유가 없다.
   const months = await db.all(`
@@ -1020,6 +1082,52 @@ router.get('/:id/settlement/excel', asyncHandler(async (req, res) => {
     `attachment; filename="settlement_${month}.xlsx"; filename*=UTF-8''${encodeURIComponent(filename)}`);
   await wb.xlsx.write(res);
   res.end();
+}));
+
+// 정산완료 처리 — 사용자 확정: "정산완료"와 "결재완료"는 같은 것이다. 상태는 하나만 둔다.
+//
+// 체크한 줄만 한 번에 바꾼다(사용자 지시 — 입금관리는 목록에서 여러 건을 한꺼번에 처리한다).
+// 완료 시각과 처리한 계정을 함께 남긴다 — 시각만 남기면 "누가 확정했나"를 못 찾고, 입금
+// 대사에서 문제가 생겼을 때 되짚을 수 없다.
+router.post('/:id/settlement/settle', asyncHandler(async (req, res) => {
+  const month = settlementMonth(req.body.month);
+  const back = `/groups/${req.params.id}/settlement?month=${encodeURIComponent(month)}`;
+  const arr = (v) => [].concat(v || []).map((x) => Number(x)).filter(Number.isFinite);
+  const orderIds = arr(req.body.order_id);
+  const extraIds = arr(req.body.extra_id);
+  // 되돌리기도 같은 화면에서 한다 — 잘못 누른 것을 되돌릴 길이 없으면 아무도 안 쓴다.
+  const undo = String(req.body.action || '') === 'unsettle';
+  if (!orderIds.length && !extraIds.length) {
+    return res.redirect(back + '&saved=' + encodeURIComponent('선택된 항목이 없습니다.'));
+  }
+
+  const now = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 19).replace('T', ' ');
+  const userId = req.session.user.id;
+  let done = 0;
+
+  // 다른 법인의 줄이 넘어오지 않도록 소속을 함께 확인한다 — id만 믿으면 URL을 손봐 남의
+  // 정산을 확정할 수 있다.
+  if (orderIds.length) {
+    const r = await db.run(
+      `UPDATE orders SET settled_at = ${undo ? 'NULL' : '?'}, settled_by = ${undo ? 'NULL' : '?'}
+        WHERE requester_group_id = ? AND id IN (${orderIds.map(() => '?').join(',')})`,
+      undo ? [req.params.id, ...orderIds] : [now, userId, req.params.id, ...orderIds]
+    );
+    done += r.rowCount || 0;
+  }
+  if (extraIds.length) {
+    const r = await db.run(
+      `UPDATE order_extra_charges SET settled_at = ${undo ? 'NULL' : '?'}, settled_by = ${undo ? 'NULL' : '?'}
+        WHERE id IN (${extraIds.map(() => '?').join(',')})
+          AND order_id IN (SELECT id FROM orders WHERE requester_group_id = ?)`,
+      undo ? [...extraIds, req.params.id] : [now, userId, ...extraIds, req.params.id]
+    );
+    done += r.rowCount || 0;
+  }
+
+  res.redirect(back + '&saved=' + encodeURIComponent(
+    undo ? `${done}건을 미정산으로 되돌렸습니다.` : `${done}건을 정산완료로 변경했습니다. (${now})`
+  ));
 }));
 
 // 정산서 할증 표시 방식 저장. 정산내역 화면 상단에서 바꾼다(사용자 지시) — 이 설정이 바꾸는
