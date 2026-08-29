@@ -41,6 +41,7 @@ const tripFees = require('../lib/tripFees');
 const branchPolicy = require('../lib/branchPolicy');
 // 기타 정산 내역(주유비·주차요금·톨게이트). 항목 정의를 법인 정산내역 화면과 공유한다.
 const extraCharges = require('../lib/extraCharges');
+const fareSurcharge = require('../lib/fareSurcharge');
 const { getRouteFareSettings } = require('../lib/routeFareSearch');
 
 // 폼에서 온 좌표 문자열을 숫자로 — 빈 문자열/미입력/숫자 아님은 전부 null(컬럼이 numeric이라
@@ -287,8 +288,26 @@ async function buildOrderFormInitData(scope, userId) {
   return {
     order: defaultReservedDateTime(), branches, groups, paymentMethods, favorites,
     defaultBranch: scope.branch_id || '', defaultGroup: scope.group_id || '',
+    // 접수 단계 부대비용의 항목·선택지 정의. 정산구분 기본값은 법인/지사마다 다르므로 여기서는
+    // 항목 정의만 내려보내고, 화면이 법인·지사를 고르면 GET /orders/extra-cost-defaults로 받는다.
+    intakeExtra: extraCharges.intakeOptionsFor(null),
   };
 }
+
+// 고른 법인/지사의 요금설정에서 부대비용 정산구분 기본값만 뽑아준다.
+// 화면이 규칙을 다시 구현하면(예: "비면 월정산") 설정을 바꿨을 때 화면만 옛 기본값을 보인다.
+router.get('/extra-cost-defaults', asyncHandler(async (req, res) => {
+  const scope = scopeFilter(req);
+  // client는 자기 법인 밖의 설정을 볼 이유가 없다 — 요청 값이 아니라 세션 값을 쓴다.
+  const groupId = scope.group_id || req.query.group_id || null;
+  const branchId = scope.branch_id || req.query.branch_id || null;
+  const extra = await branchPolicy.findFareExtra(groupId, branchId).catch(() => null);
+  const defaults = {};
+  extraCharges.INTAKE_EXTRA_ITEMS.forEach((it) => {
+    defaults[it.chargeType] = fareSurcharge.settleModeOf(extra, it.chargeType);
+  });
+  res.json({ defaults });
+}));
 
 async function buildAiIntakeInitData(scope, userId) {
   const data = await buildOrderFormInitData(scope, userId);
@@ -1254,6 +1273,25 @@ router.post('/', asyncHandler(async (req, res) => {
   const newId = created.orderId;
   const oid = created.oid;
 
+  // 접수 단계 부대비용(주유/충전/세차/주차/도선료). 나뉜 건이라도 첫 건에만 붙인다 —
+  // "주유 가득"은 차 한 대에 한 번이지 구간마다 한 번이 아니다. 여기서 실패해도 오더 등록은
+  // 되돌리지 않는다(오더가 사라지는 편이 훨씬 나쁘다). 대신 조용히 넘기지 않는다.
+  try {
+    // fareExtra는 요금 계산 경로에서만 채워진다(구간요금표를 안 쓰는 지사는 null). 정산구분
+    // 기본값은 그와 무관하게 필요하므로, 없으면 확정된 법인·지사로 직접 찾는다 — null로 두면
+    // 요금설정에서 "포함"으로 둔 항목이 월정산으로 저장돼 청구되면 안 될 돈이 청구된다.
+    const intakeFeeExtra = fareExtra || await branchPolicy.findFareExtra(finalGroup, finalBranch).catch(() => null);
+    const parsedIntake = extraCharges.parseIntakeRows(req.body, intakeFeeExtra, effectiveReservedDate);
+    if (parsedIntake.rows.length) await extraCharges.saveIntakeRows(newId, parsedIntake, u.id);
+    // 도선료는 줄을 만들지 않는다 — 금액은 이미 ferry_fare_amount로 저장됐고, 여기서는
+    // 화면에서 고른 정산구분만 오더에 박아둔다.
+    if (parsedIntake.ferry) {
+      await db.run('UPDATE orders SET ferry_settle_mode = ? WHERE id = ?', [parsedIntake.ferry.settleMode, newId]);
+    }
+  } catch (e) {
+    console.error('접수 부대비용 저장 실패(오더 등록은 완료):', e.message);
+  }
+
   // 콜마너 오더접수 — 오더 등록(생성) 시점에 바로 나간다(사용자 확정 사항). registerOrderWithCallmaner가
   // 항상 대기(status='5')로 등록하므로(lib/callmaner.js), 담당자가 검토하기 전에 곧바로 배차
   // 대상이 되지는 않는다. await로 기다리는 이유는 POST /:id/status와 동일하다 — 실측 약 1초라
@@ -1465,6 +1503,16 @@ router.get('/:id/data.json', asyncHandler(async (req, res) => {
     extraCharges: extraChargeRows,
     // 요금설정에서 "제외(실비 정산)"로 둔 항목만 고를 수 있다 — "포함" 항목을 청구하면 이중 청구다.
     extraChargeTypes: await extraCharges.billableTypesForOrder(order),
+    // 수정 화면의 부대비용 섹션. 이미 붙어 있는 줄을 그대로 보여줘야 "방금 접수 때 넣은 걸
+    // 왜 못 고치나"가 되지 않는다. 정산구분 기본값은 이 오더의 요금설정에서 뽑는다.
+    intakeExtraRows: u.role === 'client' ? [] : await extraCharges.loadIntakeRows(req.params.id),
+    intakeExtraDefaults: await (async () => {
+      const ex = await branchPolicy.findFareExtra(order.requester_group_id, order.branch_id).catch(() => null);
+      const d = {};
+      extraCharges.INTAKE_EXTRA_ITEMS.forEach((it) => { d[it.chargeType] = fareSurcharge.settleModeOf(ex, it.chargeType); });
+      return d;
+    })(),
+    ferrySettleMode: order.ferry_settle_mode || '',
     ORDER_STATUSES: statusConfig.map((s) => s.status_code),
     baseUrl: req.protocol + '://' + req.get('host'),
     currentUserRole: u.role,
@@ -1722,6 +1770,23 @@ router.post('/:id', asyncHandler(async (req, res) => {
   // 리턴하므로 여기서 분기할 필요 없다.
   await updateOrderWithCallmaner(req.params.id, finalBranch);
 
+  // 접수 부대비용 반영. 도선료 금액은 위 UPDATE에서 ferry_fare_amount로 이미 저장됐다
+  // (경로탐색이 자동으로 채우지만 틀리거나 빠질 수 있어 화면에서 고칠 수 있게 했다) —
+  // 여기서는 정산구분만 따로 박는다. client는 부대비용을 보지도 보내지도 않으므로 건너뛴다.
+  if (req.session.user.role !== 'client') {
+    try {
+      const feeExtra = await branchPolicy.findFareExtra(finalGroup, finalBranch).catch(() => null);
+      const parsedIntake = extraCharges.parseIntakeRows(req.body, feeExtra, order.reserved_date);
+      await extraCharges.saveIntakeRows(req.params.id, parsedIntake, req.session.user.id);
+      if (parsedIntake.ferry) {
+        await db.run('UPDATE orders SET ferry_settle_mode = ? WHERE id = ?',
+          [parsedIntake.ferry.settleMode, req.params.id]);
+      }
+    } catch (e) {
+      console.error('접수 부대비용 저장 실패(오더 수정은 완료):', e.message);
+    }
+  }
+
   broadcastOrderListChangedAsync();
   if (wantsJson) return res.json({ orderId: Number(req.params.id), oid: order.oid, legsReset });
   res.redirect('/orders/' + req.params.id + (legsReset ? '?notice=legs_reset' : ''));
@@ -1799,7 +1864,9 @@ router.post('/:id/extra-charges', asyncHandler(async (req, res) => {
   if (!order) return;
 
   const rows = extraCharges.parseRows(req.body, order.reserved_date);
-  await extraCharges.replaceForOrder(order.id, rows, req.session.user.id);
+  // 정산구분을 줄에 박아둔다 — 청구한 뒤 요금설정이 바뀌어도 이미 청구한 건은 따라 바뀌면 안 된다.
+  const feeExtra = await branchPolicy.findFareExtra(order.requester_group_id, order.branch_id).catch(() => null);
+  await extraCharges.replaceForOrder(order.id, rows, req.session.user.id, feeExtra);
   res.redirect('/orders/' + req.params.id);
 }));
 

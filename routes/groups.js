@@ -922,6 +922,10 @@ async function loadSettlement(groupId, month) {
       JOIN orders o ON o.id = e.order_id
       LEFT JOIN users eu ON eu.id = e.settled_by
      WHERE e.billable = true
+       -- 접수 때 "주유 가득"으로 잡아둔 줄은 금액을 아직 모른다(amount 0). 0원 줄이 정산서에
+       -- 올라가면 받는 쪽이 무엇을 청구받는지 알 수 없다 — 영수증이 들어와 금액이 채워지면
+       -- 그때 자동으로 나타난다.
+       AND e.amount > 0
        AND e.order_id IN (${items.map(() => '?').join(',')})
      ORDER BY COALESCE(e.charged_on, o.reserved_date), e.id
   `, items.map((r) => r.id)) : [];

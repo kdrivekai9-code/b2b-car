@@ -295,6 +295,152 @@
     else { destContact.readOnly = false; }
   }
 
+  // ---------- 접수 단계 부대비용 ----------
+  // Next 폼(src/app/orders/new/ExtraCostSection.js)과 같은 규칙이다 — 항목을 바꾸면 확장
+  // 선택지도 갈아끼우고, 도선료는 한 줄만, 금액칸은 '금액입력'을 골랐을 때만 뜬다.
+  // 규칙을 다르게 만들면 플래그를 되돌렸을 때 저장 결과가 달라진다.
+  var extraCostBlock = document.getElementById('extraCostBlock');
+  if (extraCostBlock) {
+    var xcConfig = {};
+    try { xcConfig = JSON.parse(extraCostBlock.getAttribute('data-config')) || {}; } catch (e) { xcConfig = {}; }
+    var xcItems = xcConfig.items || [];
+    var xcModes = xcConfig.modes || [];
+    var xcRowsEl = document.getElementById('extraCostRows');
+    // 법인·지사에 따라 달라지는 정산구분 기본값. 못 받아오면 서버가 준 항목 정의의 값을 쓴다.
+    var xcDefaults = null;
+
+    function xcItemOf(t) {
+      for (var i = 0; i < xcItems.length; i++) if (xcItems[i].chargeType === t) return xcItems[i];
+      return null;
+    }
+    function xcDefaultMode(t) {
+      if (xcDefaults && xcDefaults[t]) return xcDefaults[t];
+      var it = xcItemOf(t);
+      return (it && it.defaultMode) || 'monthly';
+    }
+    function xcTakenSingles(exceptRow) {
+      var taken = {};
+      Array.prototype.forEach.call(xcRowsEl.children, function (row) {
+        if (row === exceptRow) return;
+        var it = xcItemOf(row.querySelector('.xc-type').value);
+        if (it && it.single) taken[it.chargeType] = true;
+      });
+      return taken;
+    }
+
+    // 한 줄의 확장 선택지·금액칸을 현재 항목에 맞춰 다시 그린다.
+    function xcSyncRow(row, resetOption) {
+      var type = row.querySelector('.xc-type').value;
+      var it = xcItemOf(type);
+      if (!it) return;
+      var optSel = row.querySelector('.xc-option');
+      if (it.options.length) {
+        if (resetOption || !optSel.options.length
+            || !it.options.some(function (o) { return o.value === optSel.value; })) {
+          optSel.innerHTML = it.options.map(function (o) {
+            return '<option value="' + o.value + '">' + o.label + '</option>';
+          }).join('');
+        }
+        optSel.style.display = '';
+      } else {
+        optSel.innerHTML = '';
+        optSel.style.display = 'none';
+      }
+      // 주유·충전의 '가득'은 접수 시점에 금액을 모른다 — 금액칸을 감추고 안내를 대신 둔다.
+      var showAmount = !it.amountOption || optSel.value === it.amountOption;
+      var amountEl = row.querySelector('.xc-amount');
+      var noteEl = row.querySelector('.xc-amount-note');
+      amountEl.style.display = showAmount ? '' : 'none';
+      noteEl.style.display = showAmount ? 'none' : '';
+      // 도선료 금액은 경로탐색이 채운 ferry_fare_amount를 그대로 쓴다 — 여기서 또 받으면
+      // 어느 쪽이 저장되는지 알 수 없다. EJS 폼은 등록 전용이라 읽기전용으로 둔다.
+      if (it.ferry) {
+        amountEl.readOnly = true;
+        var ferryEl = document.getElementById('ferry_fare_amount');
+        amountEl.value = ferryEl ? (ferryEl.value || 0) : 0;
+      } else if (amountEl.readOnly) {
+        amountEl.readOnly = false;
+        amountEl.value = '';
+      }
+      if (resetOption) row.querySelector('.xc-mode').value = xcDefaultMode(type);
+      // 이미 들어간 도선료를 다른 줄에서 또 고르지 못하게 한다.
+      var taken = xcTakenSingles(row);
+      Array.prototype.forEach.call(row.querySelector('.xc-type').options, function (o) {
+        var oit = xcItemOf(o.value);
+        o.disabled = !!(oit && oit.single && o.value !== type && taken[o.value]);
+      });
+    }
+
+    function xcAddRow() {
+      var taken = xcTakenSingles(null);
+      var first = null;
+      for (var i = 0; i < xcItems.length; i++) {
+        if (!xcItems[i].single || !taken[xcItems[i].chargeType]) { first = xcItems[i]; break; }
+      }
+      if (!first) return;
+      var row = document.createElement('div');
+      row.className = 'extra-cost-row';
+      row.innerHTML =
+        '<select class="xc-type" name="intake_extra_type[]" aria-label="부대비용 항목">' +
+          xcItems.map(function (o) { return '<option value="' + o.chargeType + '">' + o.label + '</option>'; }).join('') +
+        '</select>' +
+        '<select class="xc-option" name="intake_extra_option[]" aria-label="세부 선택"></select>' +
+        '<input type="number" class="xc-amount" name="intake_extra_amount[]" min="0" step="100" placeholder="금액(선택)" aria-label="금액">' +
+        '<span class="hint xc-amount-note extra-cost-amount-note" style="display:none;">금액은 영수증 확인 후 입력</span>' +
+        '<select class="xc-mode" name="intake_extra_mode[]" aria-label="정산구분">' +
+          xcModes.map(function (m) { return '<option value="' + m.value + '">' + m.label + '</option>'; }).join('') +
+        '</select>' +
+        '<input type="hidden" name="intake_extra_id[]" value="">' +
+        '<button type="button" class="btn small secondary xc-remove">삭제</button>';
+      row.querySelector('.xc-type').value = first.chargeType;
+      xcRowsEl.appendChild(row);
+      xcSyncRow(row, true);
+    }
+
+    document.getElementById('addExtraCostBtn').addEventListener('click', xcAddRow);
+    xcRowsEl.addEventListener('change', function (e) {
+      var row = e.target.closest('.extra-cost-row');
+      if (!row) return;
+      if (e.target.classList.contains('xc-type')) xcSyncRow(row, true);
+      else if (e.target.classList.contains('xc-option')) xcSyncRow(row, false);
+    });
+    xcRowsEl.addEventListener('click', function (e) {
+      if (!e.target.classList.contains('xc-remove')) return;
+      var row = e.target.closest('.extra-cost-row');
+      if (row) row.remove();
+      // 도선료를 지우면 다른 줄에서 다시 고를 수 있어야 한다.
+      Array.prototype.forEach.call(xcRowsEl.children, function (r) { xcSyncRow(r, false); });
+    });
+
+    // 법인·지사가 바뀌면 정산구분 기본값을 다시 받아, 사용자가 아직 안 건드린 줄에만 반영한다.
+    function xcLoadDefaults() {
+      var q = new URLSearchParams();
+      var g = document.getElementById('requester_group_id');
+      var b = document.getElementById('branch_id');
+      if (g && g.value) q.set('group_id', g.value);
+      if (b && b.value) q.set('branch_id', b.value);
+      fetch('/orders/extra-cost-defaults?' + q.toString(), { credentials: 'same-origin' })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+          if (!d || !d.defaults) return;
+          xcDefaults = d.defaults;
+          Array.prototype.forEach.call(xcRowsEl.children, function (row) {
+            if (row.dataset.modeTouched) return;
+            row.querySelector('.xc-mode').value = xcDefaultMode(row.querySelector('.xc-type').value);
+          });
+        })
+        .catch(function () {});
+    }
+    xcRowsEl.addEventListener('change', function (e) {
+      if (e.target.classList.contains('xc-mode')) e.target.closest('.extra-cost-row').dataset.modeTouched = '1';
+    });
+    ['requester_group_id', 'branch_id'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.addEventListener('change', xcLoadDefaults);
+    });
+    xcLoadDefaults();
+  }
+
   // ---------- 경유지 동적 추가/삭제 ----------
   var waypointsWrap = document.getElementById('waypointsWrap');
   var addWaypointBtn = document.getElementById('addWaypointBtn');

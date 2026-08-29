@@ -84,6 +84,23 @@
           <label class="checkline"><input type="checkbox" id="sameAsOriginContact"> 출발지 연락처와 동일</label>
         </div>
       </div>
+
+      <%# 접수 단계 부대비용 — Next 폼(src/app/orders/new/ExtraCostSection.js)과 같은 화면이다.
+          한쪽만 고치면 플래그를 되돌렸을 때 조용히 사라진다. 항목·선택지 정의는 서버가 주는
+          intakeExtra를 그대로 쓴다(양쪽이 같은 정의를 본다).
+          청구 금액 설정이라 고객(client)에게는 보여주지 않는다. %>
+      <% if (currentUser && currentUser.role !== 'client' && intakeExtra && intakeExtra.items.length) { %>
+        <div class="extra-cost-block" id="extraCostBlock"
+             data-config="<%= JSON.stringify(intakeExtra) %>">
+          <div class="section-title small" style="margin:14px 0 6px;">부대비용</div>
+          <p class="hint" style="margin:0 0 8px;">
+            주유·충전·세차·주차·도선료를 접수할 때 미리 정해둘 수 있습니다.
+            정산구분은 요금설정 값이 기본으로 들어가며 여기서 바꿀 수 있습니다.
+          </p>
+          <div id="extraCostRows"></div>
+          <button type="button" class="btn small secondary add-waypoint-btn" id="addExtraCostBtn">+ 부대비용 추가</button>
+        </div>
+      <% } %>
     </section>
 
     <section class="card order-panel">
@@ -196,7 +213,8 @@
       <% if (currentUser.role !== 'client') { %>
       <div class="field">
         <label>요청 법인(고객사)</label>
-        <select name="requester_group_id">
+        <%# id는 부대비용 정산구분 기본값 조회(public/js/order-form.js)가 법인 변경을 잡는 데 쓴다. %>
+        <select name="requester_group_id" id="requester_group_id">
           <option value="">선택 안 함</option>
           <% groups.forEach(function(g){ %>
             <option value="<%= g.id %>"><%= g.name %></option>

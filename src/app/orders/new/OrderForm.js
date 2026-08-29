@@ -5,6 +5,7 @@ import AddressField, { resolveRegion } from './AddressField';
 import RouteMap from './RouteMap';
 import RouteCalculator from './RouteCalculator';
 import OrderSidePanel from '../[id]/OrderSidePanel';
+import ExtraCostSection from './ExtraCostSection';
 
 // Submits to the exact same POST /orders the legacy form.ejs uses, with the exact same
 // field names and urlencoded wire format (verified directly against the live endpoint).
@@ -216,6 +217,35 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
   const [routeInfo, setRouteInfo] = useState({ km: null, durationSec: null, toll: null, hasFerryLeg: false, isFinal: false });
   const [fareHint, setFareHint] = useState('');
   const [fareLocked, setFareLocked] = useState(false);
+  // 접수 단계 부대비용. edit 모드는 이미 붙어 있는 줄을 그대로 불러온다 — 접수 때 넣은 것을
+  // 여기서 못 고치면 오더상세 정산입력까지 가야 한다.
+  const [intakeExtras, setIntakeExtras] = useState(() => (initialData.intakeExtraRows || []).map((r, i) => ({
+    key: `xc-prefill-${i}`, id: r.id, chargeType: r.chargeType,
+    optionCode: r.optionCode || '', amount: r.amount ? String(r.amount) : '',
+    settleMode: r.settleMode || '',
+  })));
+  // 화면이 처음 들고 있던 줄. 저장할 때 "이 중 안 돌아온 것"만 지운다 — 통째로 갈아끼우면
+  // 관리자가 오더상세에서 넣은 톨게이트·특수구간 줄까지 같이 지워진다.
+  const intakeExtraKnownIds = useRef((initialData.intakeExtraRows || []).map((r) => r.id).filter(Boolean));
+  const [intakeExtraDefaults, setIntakeExtraDefaults] = useState(initialData.intakeExtraDefaults || null);
+  // 도선료를 손으로 고쳤으면 경로탐색이 다시 돌아도 덮어쓰지 않는다 — 고치자마자 되돌아가면
+  // 고칠 수가 없다.
+  const ferryOverridden = useRef(false);
+
+  // 법인·지사를 고르면 그 요금설정의 정산구분 기본값을 받아온다. 화면에서 "비면 월정산" 같은
+  // 규칙을 다시 구현하면 설정을 바꿨을 때 화면만 옛 기본값을 보인다.
+  useEffect(() => {
+    let cancelled = false;
+    const q = new URLSearchParams();
+    if (state.requester_group_id) q.set('group_id', String(state.requester_group_id));
+    if (state.branch_id) q.set('branch_id', String(state.branch_id));
+    fetch(`/orders/extra-cost-defaults?${q.toString()}`, { credentials: 'same-origin' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (!cancelled && d && d.defaults) setIntakeExtraDefaults(d.defaults); })
+      // 못 받아오면 서버가 내려준 항목 정의의 defaultMode를 그대로 쓴다 — 접수를 막을 일은 아니다.
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [state.requester_group_id, state.branch_id]);
   const fareRequestIdRef = useRef(0);
   const [vehicleTypeSuggestions, setVehicleTypeSuggestions] = useState([]);
   const vehicleTypeDebounceRef = useRef(null);
@@ -436,7 +466,9 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
         return;
       }
       dispatch({ type: 'SET_FIELD', name: 'fare_amount', value: String(data.totalFare != null ? data.totalFare : data.fare) });
-      dispatch({ type: 'SET_FIELD', name: 'ferry_fare_amount', value: data.ferryFare != null ? data.ferryFare : 0 });
+      if (!ferryOverridden.current) {
+        dispatch({ type: 'SET_FIELD', name: 'ferry_fare_amount', value: data.ferryFare != null ? data.ferryFare : 0 });
+      }
 
       let hint;
       if (data.ferryNeedVehicleType) {
@@ -627,6 +659,17 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
       params.set('chat_session_id', String(chatSessionId));
       params.set('chat_session_transition', state.chat_session_transition);
     }
+    // 부대비용. 도선료는 줄이 아니라 orders.ferry_fare_amount로 저장되므로 금액은 위에서
+    // 이미 보냈고, 여기서는 정산구분만 실어 보낸다.
+    intakeExtras.forEach((r) => {
+      params.append('intake_extra_type[]', r.chargeType);
+      params.append('intake_extra_option[]', r.optionCode || '');
+      params.append('intake_extra_amount[]', String(r.amount || 0));
+      params.append('intake_extra_mode[]', r.settleMode || '');
+      params.append('intake_extra_id[]', r.id ? String(r.id) : '');
+    });
+    intakeExtraKnownIds.current.forEach((id) => params.append('intake_extra_known_id[]', String(id)));
+
     state.waypoints.forEach((w) => {
       params.append('waypoints[]', w.address);
       params.append('waypoint_details[]', w.detail);
@@ -830,6 +873,23 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
               </div>
             </div>
           </div>
+
+          {/* 부대비용은 도착지 아래 — "이 차를 어떤 상태로 갖다줄지"라서 경로 이야기의 끝에 온다.
+              고객(client)에게는 청구 금액 설정이라 보여주지 않는다(요금 칸과 같은 규칙). */}
+          {initialData.currentUserRole !== 'client' && (
+            <ExtraCostSection
+              config={initialData.intakeExtra}
+              defaults={intakeExtraDefaults}
+              rows={intakeExtras}
+              onChange={setIntakeExtras}
+              ferryAmount={state.ferry_fare_amount}
+              ferryEditable
+              onFerryAmount={(v) => {
+                ferryOverridden.current = true;
+                setField('ferry_fare_amount', v === '' ? 0 : Math.max(0, Math.round(Number(v) || 0)));
+              }}
+            />
+          )}
         </section>
 
         <section className="card order-panel">
