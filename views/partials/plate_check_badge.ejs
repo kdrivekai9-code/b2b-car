@@ -1,0 +1,12 @@
+<%# 번호판 대조 결과 배지. 오더 상세와 오더 리스트가 같은 부품을 쓴다.
+    row: orders 행 (vehicle_number / plate_check_status / plate_recognized)
+
+    상이(mismatch)만 강하게 표시한다. 일치는 조용히 두는 게 맞다 — 전부 배지를 달면
+    정작 봐야 할 줄이 묻힌다. 못 읽음은 회색으로만 남긴다(장애가 아니라 정보 부족이다). %>
+<% if (row && row.plate_check_status === 'mismatch') { %>
+  <span class="badge red" title="접수 <%= row.vehicle_number || '-' %> / 사진 <%= row.plate_recognized || '-' %>">번호판 상이</span>
+<% } else if (row && row.plate_check_status === 'match') { %>
+  <span class="badge green" title="운행시작 사진의 번호판과 일치">번호판 확인</span>
+<% } else if (row && row.plate_check_status === 'unreadable') { %>
+  <span class="badge gray" title="사진에서 번호판을 읽지 못했습니다(사진 없음·흐림). 상이가 아닙니다.">번호판 미확인</span>
+<% } %>

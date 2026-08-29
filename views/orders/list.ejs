@@ -104,7 +104,10 @@
             ? '기사 ' + o.legs_assigned_count + '/' + o.leg_count + '명 배정' + (o.leg_driver_names ? ' (' + o.leg_driver_names + ')' : '')
             : (o.driver_name ? (o.driver_name + (o.driver_phone ? ' (' + o.driver_phone + ')' : '')) : '미배정');
         %>
-        <tr onclick="location.href='/orders/<%= o.id %>'" style="cursor:pointer;">
+        <%# 번호판 상이 건은 줄 자체를 물들인다 — 목록에서 한눈에 걸러야 하는 사건이라
+            배지만으로는 빽빽한 표에서 묻힌다. %>
+        <tr onclick="location.href='/orders/<%= o.id %>'" style="cursor:pointer;"
+            class="<%= o.plate_check_status === 'mismatch' ? 'row-plate-mismatch' : '' %>">
           <%# 나눠 접수한 건은 OID 옆에 "1/2"를 붙인다. 목록은 정보가 빽빽해서 배지 대신 작은 글씨로만 —
               없으면 같은 요청에서 나온 두 줄이 서로 무관해 보인다. %>
           <td data-column="oid" data-label="OID">
@@ -116,7 +119,10 @@
           <td data-column="origin" data-label="출발지" title="<%= o.origin_address %>"><%= o.origin_address %></td>
           <td data-column="waypoints" data-label="경유지" title="<%= o.waypoints_text || '' %>"><%= o.waypoints_text || '-' %></td>
           <td data-column="destination" data-label="도착지" title="<%= o.destination_address %>"><%= o.destination_address %></td>
-          <td data-column="vehicle" data-label="차종 / 차량번호" title="<%= [o.vehicle_type, o.vehicle_number].filter(Boolean).join(' / ') || '-' %>"><%= [o.vehicle_type, o.vehicle_number].filter(Boolean).join(' / ') || '-' %></td>
+          <td data-column="vehicle" data-label="차종 / 차량번호" title="<%= [o.vehicle_type, o.vehicle_number].filter(Boolean).join(' / ') || '-' %>">
+            <%= [o.vehicle_type, o.vehicle_number].filter(Boolean).join(' / ') || '-' %>
+            <% if (o.plate_check_status === 'mismatch') { %><span class="badge red" title="사진 인식: <%= o.plate_recognized || '-' %>">상이</span><% } %>
+          </td>
           <td data-column="driver" data-label="기사정보" title="<%= driverLabel %>"><%= driverLabel %></td>
           <td data-column="reserved_at" data-label="예약일시" title="<%= o.reserved_date %> <%= o.reserved_time %>"><%= o.reserved_date %> <%= o.reserved_time %></td>
           <td data-column="payment_method" data-label="결제방식" title="<%= o.payment_method_name || '-' %>"><%= o.payment_method_name || '-' %></td>

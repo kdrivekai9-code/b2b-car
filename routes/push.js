@@ -30,18 +30,19 @@ router.get('/status', asyncHandler(async (req, res) => {
 }));
 
 router.post('/subscribe', asyncHandler(async (req, res) => {
-  const { endpoint, keys, notify_order_events, notify_driver_assign, notify_agent_call, notify_system_alert, branch_id } = req.body;
+  const { endpoint, keys, notify_order_events, notify_driver_assign, notify_agent_call, notify_system_alert, notify_plate_mismatch, branch_id } = req.body;
   if (!endpoint || !keys) return res.status(400).json({ error: 'invalid subscription' });
   await db.run(`
-    INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, branch_id, notify_order_events, notify_driver_assign, notify_agent_call, notify_system_alert)
+    INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, branch_id, notify_order_events, notify_driver_assign, notify_agent_call, notify_system_alert, notify_plate_mismatch)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT (endpoint) DO UPDATE SET user_id=excluded.user_id, p256dh=excluded.p256dh, auth=excluded.auth,
       branch_id=excluded.branch_id, notify_order_events=excluded.notify_order_events, notify_driver_assign=excluded.notify_driver_assign,
-      notify_agent_call=excluded.notify_agent_call, notify_system_alert=excluded.notify_system_alert
+      notify_agent_call=excluded.notify_agent_call, notify_system_alert=excluded.notify_system_alert, notify_plate_mismatch=excluded.notify_plate_mismatch
   `, [
     req.session.user.id, endpoint, keys.p256dh, keys.auth,
     branch_id || null, notify_order_events === false ? 0 : 1, notify_driver_assign === false ? 0 : 1,
     notify_agent_call === false ? 0 : 1, notify_system_alert === false ? 0 : 1,
+    notify_plate_mismatch === false ? 0 : 1,
   ]);
   res.json({ ok: true });
 }));

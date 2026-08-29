@@ -41,7 +41,30 @@
     <div class="kv"><span class="k">차종 / 차량번호</span><span>
       <%= [order.vehicle_type, order.vehicle_number].filter(Boolean).join(' / ') || '-' %>
       <%- include('../partials/vehicle_class_badge', { row: order }) %>
+      <%- include('../partials/plate_check_badge', { row: order }) %>
     </span></div>
+    <%# 번호판이 다르면 근거(인식 결과 + 그 사진)를 바로 보여준다 — 배지만 있으면
+        관리자가 사진을 찾아 헤매고, 그 사이 차는 이미 달리고 있다. %>
+    <% if (order.plate_check_status === 'mismatch') { %>
+      <div class="alert error" style="margin-top:8px;">
+        <b>번호판이 접수 내용과 다릅니다.</b>
+        <div style="margin-top:6px;">
+          접수 차량번호 <b><%= order.vehicle_number || '-' %></b>
+          &nbsp;/&nbsp; 사진에서 인식 <b><%= order.plate_recognized || '-' %></b>
+        </div>
+        <% if (order.plate_photo_url) { %>
+          <div style="margin-top:8px;">
+            <a href="<%= order.plate_photo_url %>" target="_blank" rel="noopener">
+              <img src="<%= order.plate_photo_url %>" alt="운행시작 전면 사진" style="max-width:320px;border-radius:8px;display:block;"
+                   onerror="this.style.display='none';this.insertAdjacentHTML('afterend','<span class=\'page-sub\'>사진 링크가 만료되었습니다</span>')">
+            </a>
+          </div>
+        <% } %>
+        <p class="page-sub" style="margin-top:6px;">
+          <%= order.plate_checked_at || '' %> 확인. 다른 차량이 배차되었거나 접수 번호가 잘못 입력되었을 수 있습니다.
+        </p>
+      </div>
+    <% } %>
     <div class="kv"><span class="k">예약일시</span><span><%= order.reserved_date %> <%= order.reserved_time %></span></div>
     <div class="kv"><span class="k">결제방식</span><span><%= order.payment_method_name || '-' %></span></div>
     <div class="kv"><span class="k">요금</span><span><%= formatMoney(order.fare_amount) %></span></div>

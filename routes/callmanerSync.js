@@ -8,6 +8,7 @@ const callmaner = require('../lib/callmaner');
 const callmanerPhotos = require('../lib/callmanerPhotos');
 const photoAvailability = require('../lib/photoAvailability');
 const odometerOcr = require('../lib/odometerOcr');
+const plateOcr = require('../lib/plateOcr');
 const { runKakaoOrderNotifications } = require('../lib/kakaoOrderNotify');
 const { notify } = require('../lib/push');
 const { broadcastOrderListChanged } = require('../lib/realtimeChat');
@@ -388,6 +389,29 @@ async function syncOrdersByConfSlip(branch) {
         if (collected && (collected.before || collected.after)) {
           await callmanerPhotos.syncOdometer(odometerOcr, branch, order)
             .catch((e) => console.error(`계기판 주행거리 동기화 실패 (oid=${order.oid}):`, e.message));
+
+          // 번호판 대조 — 접수 차량번호와 운행시작 전면 사진이 같은 차인지 본다.
+          // 실패해도 동기화를 막지 않는다(대조는 보조 확인이고, 상태 전이와 통보가 우선이다).
+          const plate = await callmanerPhotos.syncPlateCheck(plateOcr, branch, order)
+            .catch((e) => { console.error(`번호판 대조 실패 (oid=${order.oid}):`, e.message); return null; });
+
+          // 상이일 때만 알린다. 못 읽은 건(unreadable)까지 알리면 헛알림이 쌓여
+          // 진짜 상이 건까지 무시하게 된다.
+          if (plate && plate.status === 'mismatch') {
+            try {
+              await notify({
+                branchId: branch.id, eventType: 'plate_mismatch', excludeUserId: 0,
+                title: `🚨 번호판 상이 — ${order.oid}`,
+                body: `접수 ${plate.registered} / 사진 ${plate.recognized}. 다른 차량일 수 있습니다.`,
+                url: `/orders/${order.id}`,
+              });
+            } catch (e) { console.error('번호판 상이 알림 발송 실패:', e.message); }
+            logIntegrationErrorAsync({
+              source: 'plate_check', operation: 'mismatch', refType: 'order', refId: order.id,
+              message: `번호판 상이: 접수 ${plate.registered} / 사진 ${plate.recognized}`,
+              context: { oid: order.oid, photoUrl: plate.photoUrl, photoSeq: plate.photoSeq },
+            });
+          }
         }
       }
       updated += 1;

@@ -17,6 +17,7 @@
     <div class="field"><label class="checkline"><input type="checkbox" id="notifyAgentCall" checked> 상담원 호출 알림 (AI 챗봇)</label></div>
     <%# 장애 알림은 기본으로 켠다 — 켜야 의미가 있는 알림이고, 이게 없으면 연동이 멈춰도 아무도 모른다. %>
     <div class="field"><label class="checkline"><input type="checkbox" id="notifySystemAlert" checked> 시스템 장애 알림 (연동 오류 · 동기화 지연)</label></div>
+    <div class="field"><label class="checkline"><input type="checkbox" id="notifyPlateMismatch" checked> 번호판 상이 알림 (접수 번호 ≠ 운행시작 사진)</label></div>
     <% } %>
   </div>
 
@@ -122,11 +123,13 @@
   document.getElementById('pushSubscribeBtn').addEventListener('click', async function () {
     var notifyAgentCallEl = document.getElementById('notifyAgentCall');
     var notifySystemAlertEl = document.getElementById('notifySystemAlert');
+    var notifyPlateMismatchEl = document.getElementById('notifyPlateMismatch');
     var prefs = {
       notify_order_events: document.getElementById('notifyOrderEvents').checked,
       notify_driver_assign: document.getElementById('notifyDriverAssign').checked,
       notify_agent_call: notifyAgentCallEl ? notifyAgentCallEl.checked : true,
       notify_system_alert: notifySystemAlertEl ? notifySystemAlertEl.checked : true,
+      notify_plate_mismatch: notifyPlateMismatchEl ? notifyPlateMismatchEl.checked : true,
     };
     var branchScope = document.getElementById('branchScope');
     if (branchScope) prefs.branch_id = branchScope.value || null;

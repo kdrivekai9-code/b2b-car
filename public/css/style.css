@@ -836,3 +836,9 @@ tr.order-flash-indigo td { --flash-bg:#e7e9fd; }
 @media (prefers-reduced-motion: reduce) {
   tr.order-row-status-flash td { animation: none; background: var(--flash-bg, #fff3c4); }
 }
+
+/* 번호판 상이 오더 — 목록에서 줄 자체를 물들인다.
+   배지만으로는 열이 16개인 표에서 묻힌다. 왼쪽 굵은 선으로 스캔할 때 바로 걸리게 한다.
+   호버 색이 배경을 덮지 않도록 !important를 쓴다(기존 tr:hover가 더 뒤에 선언돼 있다). */
+.table tr.row-plate-mismatch { background: #fef2f2 !important; box-shadow: inset 3px 0 0 #dc2626; }
+.table tr.row-plate-mismatch:hover { background: #fee2e2 !important; }

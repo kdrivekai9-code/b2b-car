@@ -35,12 +35,14 @@ export default function PushSettingsClient({ currentUser, branches }) {
       subscribeBtn.addEventListener('click', async () => {
         const notifyAgentCallEl = document.getElementById('notifyAgentCall');
         const notifySystemAlertEl = document.getElementById('notifySystemAlert');
+        const notifyPlateMismatchEl = document.getElementById('notifyPlateMismatch');
         const branchScope = document.getElementById('branchScope');
         const prefs = {
           notify_order_events: document.getElementById('notifyOrderEvents').checked,
           notify_driver_assign: document.getElementById('notifyDriverAssign').checked,
           notify_agent_call: notifyAgentCallEl ? notifyAgentCallEl.checked : true,
           notify_system_alert: notifySystemAlertEl ? notifySystemAlertEl.checked : true,
+          notify_plate_mismatch: notifyPlateMismatchEl ? notifyPlateMismatchEl.checked : true,
           branch_id: branchScope ? (branchScope.value || null) : null,
         };
         await window.__push.subscribe(prefs);
@@ -132,6 +134,7 @@ export default function PushSettingsClient({ currentUser, branches }) {
                   EJS 화면(views/push_settings.ejs)에도 같은 항목이 있다. 한쪽만 두면 그 화면으로
                   구독한 사람에게는 장애 알림이 안 간다. */}
               <div className="field"><label className="checkline"><input type="checkbox" id="notifySystemAlert" defaultChecked /> 시스템 장애 알림 (연동 오류 · 동기화 지연)</label></div>
+              <div className="field"><label className="checkline"><input type="checkbox" id="notifyPlateMismatch" defaultChecked /> 번호판 상이 알림 (접수 번호 ≠ 운행시작 사진)</label></div>
             </>
           )}
         </div>
