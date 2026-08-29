@@ -43,12 +43,15 @@
     <b>비워두면</b> 위 기본 금액을 쓰고, <b>0</b>을 넣으면 그 차종만 대형 할증을 받지 않습니다.
   </p>
   <% if (!(largeCarModels || []).length) { %>
-    <p class="page-sub">
-      <a href="/vehicle-models">차종 관리</a>에 <b>대형/화물</b>로 등록된 차종이 아직 없습니다.
+    <%# 여기서 할 일은 "차종 관리로 건너가는 것" 하나뿐이다. 문장 속 링크로 두면 눌러야 할
+        것이 글자에 묻혀 다음 행동이 보이지 않는다 — 버튼으로 꺼낸다(사용자 지시).
+        대형이 아닌 차종은 일부러 목록에서 뺀다 — 금액을 걸어도 판정이 false라 영영 적용되지
+        않는데, 화면에 있으면 설정했다고 착각한다. %>
+    <p class="page-sub" style="margin-bottom:8px;">
+      <b>대형/화물</b>로 등록된 차종이 아직 없습니다.
       차종을 등록하고 <b>대형/화물</b>에 체크하면 여기에 나옵니다.
-      <%# 대형이 아닌 차종은 일부러 뺀다 — 금액을 걸어도 판정이 false라 영영 적용되지 않는데,
-          화면에 있으면 설정했다고 착각한다. %>
     </p>
+    <a class="btn secondary" href="/vehicle-models" target="_blank" rel="noopener">🚘 차종 관리 열기</a>
   <% } else { %>
     <div class="table-wrap">
       <table class="table">
@@ -72,10 +75,12 @@
         </tbody>
       </table>
     </div>
-    <p class="page-sub">
-      <a href="/vehicle-models">차종 관리</a>에서 <b>대형/화물</b>로 등록한 차종이 모두 나옵니다
-      (현재 <%= largeCarModels.length %>건).
+    <%# 목록이 있을 때도 같은 버튼을 둔다 — 차종을 더하거나 판정을 고치러 가는 길이
+        비어 있을 때만 보이면, 정작 자주 쓰는 쪽에서 길이 사라진다. %>
+    <p class="page-sub" style="margin-bottom:8px;">
+      <b>대형/화물</b>로 등록한 차종이 모두 나옵니다 (현재 <%= largeCarModels.length %>건).
     </p>
+    <a class="btn secondary" href="/vehicle-models" target="_blank" rel="noopener">🚘 차종 관리 열기</a>
   <% } %>
 
   <div class="section-title" style="font-size:14px;margin-top:18px;">환경 / 지역</div>
