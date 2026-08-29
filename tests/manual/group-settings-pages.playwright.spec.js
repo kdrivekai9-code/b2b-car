@@ -1,4 +1,4 @@
-// 법인관리 서브메뉴 8개가 실제로 열리는지.
+// 법인관리 서브메뉴 7개가 실제로 열리는지.
 //
 // 왜 필요한가: EJS 화면은 문법이 틀려도 빌드에서 안 잡히고 열 때 500이 난다. 이번에 한 번에
 // 6개를 만들었고 공용 파티셜(group_tabs, customer_notification_events)까지 새로 넣어서,
@@ -31,7 +31,6 @@ const PAGES = [
   { path: 'fare-rules', title: '탁송 요금', mustHave: '거리 구간별 요금 규칙' },
   { path: 'daily-driver-fare-rules', title: '일일기사 요금', mustHave: '시간 구간별 요금' },
   { path: 'premium-fare-rules', title: '프리미엄(대리) 요금', mustHave: '준비 중' },
-  { path: 'office-fares', title: '지점 구간요금', mustHave: '지점 등록' },
   { path: 'settlement', title: '정산내역', mustHave: '금액 통계' },
   { path: 'customer-notifications', title: '고객 통보', mustHave: '상태별 고객 통보' },
   { path: 'dispatch-delay', title: '배차지연 알림', mustHave: '지연 판단과 상향 금액' },
@@ -40,7 +39,7 @@ const PAGES = [
 test.describe('법인관리 · 법인별 설정 화면', () => {
   test.describe.configure({ timeout: 180000 });
 
-  test('여덟 화면이 모두 열리고 탭이 서로를 가리킨다', async ({ page }) => {
+  test('일곱 화면이 모두 열리고 탭이 서로를 가리킨다', async ({ page }) => {
     test.skip(!groupId, '등록된 법인이 없습니다');
     const problems = [];
     page.on('pageerror', (e) => problems.push(e.message));

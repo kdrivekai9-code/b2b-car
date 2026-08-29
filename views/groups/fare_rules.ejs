@@ -13,6 +13,46 @@
 
 <% if (error) { %><div class="alert error"><%= error %></div><% } %>
 
+<%# ── 지점 구간요금 ────────────────────────────────────────────────────────
+    거리 구간표보다 **먼저** 적용되므로 화면 제일 위에 둔다(사용자 지시). 아래에 있으면
+    구간표만 고쳐놓고 "왜 요금이 안 바뀌지"를 겪는다.
+    등록 화면은 따로 있지만(줄이 수백 개라) 켜고 끄는 것은 여기서 한다 — 요금이 어떻게
+    산출되는지는 한 화면에서 보여야 한다. %>
+<div class="card" style="border-left:4px solid #2e5c8a;">
+  <div class="section-title">🏢 지점 구간요금 <span class="page-sub">(거리 구간표보다 먼저 적용)</span></div>
+  <p class="page-sub">
+    지점과 지역 사이의 <b>고정 요금표</b>입니다. 출발지 또는 도착지가 등록한 지점이면
+    반대편 지역의 요금을 그대로 청구하고, <b>아래 거리 구간표는 건너뜁니다.</b>
+  </p>
+
+  <div class="row" style="align-items:center;gap:16px;">
+    <div class="field" style="margin:0;">
+      <%# 숨은 '0'과 함께 보낸다 — 체크박스는 켜졌을 때만 올라와서, 이게 없으면 끄는 것이 저장되지 않는다. %>
+      <input type="hidden" name="office_fare_enabled" value="0" form="fareForm">
+      <label class="checkline inline">
+        <input type="checkbox" name="office_fare_enabled" value="1" form="fareForm"
+               <%= group.office_fare_enabled === false ? '' : 'checked' %>>
+        <b>지점 구간요금 우선 적용</b>
+      </label>
+    </div>
+    <div class="field" style="margin:0;">
+      <a class="btn secondary" href="/groups/<%= group.id %>/office-fares">지점 구간요금 등록 · 관리</a>
+    </div>
+  </div>
+
+  <p class="page-sub" style="margin-bottom:0;">
+    <% if (officeCount) { %>
+      현재 <b>지점 <%= officeCount %>곳 · 요금 <%= officeZoneCount.toLocaleString('ko-KR') %>줄</b>이 등록돼 있습니다.
+      <% if (group.office_fare_enabled === false) { %>
+        <%# 등록해두고 꺼둔 상태는 헷갈린다 — 표가 있는데 안 쓰이고 있다는 걸 분명히 말한다. %>
+        <span class="badge amber">적용 꺼짐</span> 지금은 이 표를 쓰지 않고 아래 거리 구간표로 계산합니다.
+      <% } %>
+    <% } else { %>
+      등록된 지점이 없습니다. 체크되어 있어도 <b>적용되지 않고</b> 아래 거리 구간표로 계산합니다.
+    <% } %>
+  </p>
+</div>
+
 <%# 비어 있을 때 무엇이 적용되는지 반드시 밝힌다 — 빈 표만 보이면 요금이 0원인 줄 안다. %>
 <div class="card">
   <div class="section-title">📌 현재 적용되는 요금표</div>
@@ -62,8 +102,7 @@
     <%# 지점 구간요금이 이 표를 덮는다. 그 사실을 여기서 밝히지 않으면 관리자는 이 표를
         고쳐놓고 "왜 안 바뀌지"를 겪는다 — 요금이 안 맞는 원인을 찾을 곳이 다른 화면이다. %>
     <p class="page-sub" style="margin-top:0;">
-      출발지나 도착지가 <a href="/groups/<%= group.id %>/office-fares">지점 구간요금</a>에 등록된 지점이면
-      <b>그 표의 금액이 먼저 적용됩니다.</b> 아래 구간표는 지점에 해당하지 않는 오더에 쓰입니다.
+      위 <b>지점 구간요금</b>에 해당하지 않는 오더에 이 표가 쓰입니다.
     </p>
     <div class="table-wrap">
     <table id="fareTiersTable">

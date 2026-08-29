@@ -399,8 +399,15 @@ async function loadGroupFarePage(groupId) {
   ]);
   const extra = extraRow || {};
   const largeCar = await loadLargeCarFeeView('group', groupId);
+  // 지점 구간요금은 이 화면 안에서 켜고 끈다(사용자 지시) — 등록 현황을 함께 보여줘야
+  // "켜져 있는데 표가 비어 있다"를 알아챌 수 있다.
+  const offices = await officeZoneFare.listOffices(groupId);
+  let officeZoneCount = 0;
+  for (const o of offices) officeZoneCount += (await officeZoneFare.listZoneFares(o.id)).length;
   return {
     group, groups, tiers, extra, branchTiers, branchExtra: branchExtra || {},
+    officeCount: offices.length,
+    officeZoneCount,
     placeRules: placeRules || [],
     tollRules: tollRules || [],
     extraCostItems: fareSurcharge.extraCostStates(extra),
@@ -493,6 +500,13 @@ router.post('/:id/fare-rules', asyncHandler(async (req, res) => {
   // 정산서 할증 표시 방식(사용자 지시: 법인별로 고른다). 총 청구액은 어느 쪽이든 같고
   // 표시만 달라진다 — 그래서 요금 저장과 같이 두어도 금액에 영향이 없다.
   const mode = String(req.body.settlement_surcharge_mode || '').trim() === 'itemized' ? 'itemized' : 'included';
+  // 지점 구간요금 우선 적용. 체크박스는 켜졌을 때만 올라오므로 숨은 필드('0')와 함께 온다.
+  const officeFareEnabled = checkboxDefaultOn(req.body.office_fare_enabled);
+  await db.run('UPDATE groups_tbl SET office_fare_enabled = ? WHERE id = ?', [officeFareEnabled, req.params.id])
+    .catch((e) => {
+      if (e && e.code === '42703') return; // 마이그레이션 20260829030000 전
+      console.error('지점 구간요금 사용 여부 저장 실패(무시):', e.message);
+    });
   await db.run('UPDATE groups_tbl SET settlement_surcharge_mode = ? WHERE id = ?', [mode, req.params.id])
     .catch((e) => {
       if (e && e.code === '42703') return; // 마이그레이션 20260829020000 전

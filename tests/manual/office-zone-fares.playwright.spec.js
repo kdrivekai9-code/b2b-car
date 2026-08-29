@@ -64,6 +64,9 @@ test.describe('법인관리 · 지점 구간요금', () => {
     // 고쳐놓고 왜 안 바뀌는지 찾는다.
     await expect(page.getByText('거리 구간별 요금 규칙보다 먼저 적용', { exact: false })).toBeVisible();
 
+    // 이 화면은 탭이 아니라 탁송 요금 안에서 들어온다(사용자 지시) — 돌아가는 길이 있어야 한다.
+    await expect(page.locator(`a[href="/groups/${groupId}/fare-rules"]`).first()).toBeVisible();
+
     // ── 지점 등록 ──
     // 주소검색은 카카오 API를 타고 사람이 후보를 고르는 흐름이라, 검사에서는 좌표를 직접
     // 채워 넣는다(그 UI 자체는 아래 "좌표 없이 등록 못 한다"에서 확인한다).
@@ -197,6 +200,47 @@ test.describe('법인관리 · 지점 구간요금', () => {
     // 적어 넣은 km는 그대로, 비운 km는 청사 기준으로 채워져야 한다.
     expect(Number(zones[0].distance_km)).toBe(5.2);
     expect(Number(zones[1].distance_km)).toBeGreaterThan(0);
+  });
+
+  // 켜고 끄는 것은 탁송 요금 화면에서 한다(사용자 지시) — 요금이 어떻게 산출되는지는 한
+  // 화면에서 보여야 한다. 등록 화면과 떨어져 있으면 "표는 있는데 왜 안 붙지"를 겪는다.
+  test('탁송 요금 화면 맨 위에서 우선 적용을 켜고 끌 수 있다', async ({ page }) => {
+    test.skip(!groupId, '법인이 없습니다');
+    await loginWithRetry(page, { baseUrl: BASE_URL, loginId: LOGIN_ID, password: PASSWORD });
+
+    const before = await db.get('SELECT office_fare_enabled FROM groups_tbl WHERE id = ?', [groupId]);
+    try {
+      await page.goto(`${BASE_URL}/groups/${groupId}/fare-rules`, { waitUntil: 'domcontentloaded' });
+
+      // 거리 구간표보다 **위에** 있어야 한다 — 아래 있으면 구간표만 고치고 왜 안 바뀌는지 찾는다.
+      const officeCard = page.locator('.card', { hasText: '지점 구간요금' }).first();
+      await expect(officeCard).toBeVisible();
+      const officeY = await officeCard.boundingBox();
+      const tierY = await page.locator('.card', { hasText: '거리 구간별 요금 규칙' }).first().boundingBox();
+      expect(officeY.y, '지점 구간요금이 거리 구간표보다 위에 있어야 한다').toBeLessThan(tierY.y);
+
+      // 등록 화면으로 가는 버튼.
+      await expect(officeCard.locator(`a[href="/groups/${groupId}/office-fares"]`)).toBeVisible();
+
+      // 꺼서 저장 → DB에 반영되고, 화면이 "적용 꺼짐"이라고 밝혀야 한다.
+      await officeCard.locator('input[type="checkbox"][name="office_fare_enabled"]').uncheck();
+      await page.locator('button[form="fareForm"]', { hasText: '저장' }).first().click();
+      await page.waitForURL(/saved=1/, { timeout: 30000 });
+      expect((await db.get('SELECT office_fare_enabled FROM groups_tbl WHERE id = ?', [groupId])).office_fare_enabled)
+        .toBe(false);
+      await expect(page.getByText('적용 꺼짐', { exact: false })).toBeVisible();
+
+      // 다시 켜면 되돌아온다 — 줄을 지우지 않고 되돌릴 수 있어야 한다.
+      await page.locator('.card', { hasText: '지점 구간요금' }).first()
+        .locator('input[type="checkbox"][name="office_fare_enabled"]').check();
+      await page.locator('button[form="fareForm"]', { hasText: '저장' }).first().click();
+      await page.waitForURL(/saved=1/, { timeout: 30000 });
+      expect((await db.get('SELECT office_fare_enabled FROM groups_tbl WHERE id = ?', [groupId])).office_fare_enabled)
+        .toBe(true);
+    } finally {
+      await db.run('UPDATE groups_tbl SET office_fare_enabled = ? WHERE id = ?',
+        [before ? before.office_fare_enabled : true, groupId]).catch(() => {});
+    }
   });
 
   test('샘플 양식을 받으면 업로드에 필요한 열이 다 들어 있다', async ({ page }) => {

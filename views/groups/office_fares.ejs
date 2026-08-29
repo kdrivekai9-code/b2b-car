@@ -8,13 +8,16 @@
       지점과 지역 사이의 <b>고정 요금표</b>입니다. 출발지 또는 도착지가 등록한 지점이면
       반대편 지역의 요금을 그대로 청구합니다.
       <b>이 표가 있으면 「탁송 요금」의 거리 구간별 요금 규칙보다 먼저 적용됩니다.</b>
+      적용 여부(우선 적용 체크)는 <a href="/groups/<%= group.id %>/fare-rules">탁송 요금</a> 화면에서 켜고 끕니다.
     </p>
   </div>
   <div class="page-head-actions">
-    <a class="btn secondary" href="/groups/<%= group.id %>/fare-rules">탁송 요금으로</a>
+    <a class="btn secondary" href="/groups/<%= group.id %>/fare-rules">← 탁송 요금으로 돌아가기</a>
   </div>
 </div>
-<%- include('../partials/group_tabs', { group: group, groups: groups, active: 'office_fare' }) %>
+<%# 이 화면은 탭이 아니라 탁송 요금 안에서 들어온다(사용자 지시) — 탭 줄에서는 '탁송 요금'이
+    켜진 채로 보여야 어디에 있는지 헷갈리지 않는다. %>
+<%- include('../partials/group_tabs', { group: group, groups: groups, active: 'fare' }) %>
 
 <% if (error) { %><div class="alert error"><%= error %></div><% } %>
 <% if (saved) { %><div class="alert"><%= saved %></div><% } %>

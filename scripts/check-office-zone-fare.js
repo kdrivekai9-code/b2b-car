@@ -126,6 +126,20 @@ async function cleanup() {
       originLat: OFFICE.lat, originLon: OFFICE.lon, destinationSido: '서울', destinationSigugun: '강동구',
     }), null);
 
+    console.log('[우선 적용을 끄면 표가 있어도 쓰지 않는다]');
+    // 표를 등록해두고도 "이번 달은 거리로 계산하자"처럼 잠시 끌 수 있어야 한다(사용자 지시).
+    // 끄면 거리 구간표로 돌아간다 — 줄을 지우지 않고도 되돌릴 수 있어야 한다.
+    await db.run('UPDATE groups_tbl SET office_fare_enabled = false WHERE id = ?', [group.id]);
+    check('꺼진 법인에는 붙지 않는다', await ozf.findZoneFare(group.id, {
+      originLat: OFFICE.lat, originLon: OFFICE.lon, destinationSido: '서울', destinationSigugun: '강동구',
+    }), null);
+    check('isEnabled가 false', await ozf.isEnabled(group.id), false);
+
+    await db.run('UPDATE groups_tbl SET office_fare_enabled = true WHERE id = ?', [group.id]);
+    check('다시 켜면 그대로 돌아온다', (await ozf.findZoneFare(group.id, {
+      originLat: OFFICE.lat, originLon: OFFICE.lon, destinationSido: '서울', destinationSigugun: '강동구',
+    }) || {}).fare, 30000);
+
     console.log('[시군구가 없는 시도 — 세종]');
     // 세종은 하위 시군구가 없는 단층제라 우리 지오코더가 sigugun을 항상 빈 값으로 준다
     // (실측: 세종시청·보람동·조치원읍·정부청사 모두 ''). 시군구로만 찾으면 세종 오더는
