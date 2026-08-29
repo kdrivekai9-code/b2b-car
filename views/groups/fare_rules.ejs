@@ -13,6 +13,102 @@
 
 <% if (error) { %><div class="alert error"><%= error %></div><% } %>
 
+<%# ── 지금 무엇으로 요금이 나오는가 ────────────────────────────────────────
+    예전에는 이 카드가 지점 구간요금 아래에 있었고, 내용도 **거리 구간표만** 말했다. 그래서
+    지점 구간요금을 켜둔 법인에서도 "이 법인 전용 요금표가 적용됩니다(구간 2개)"라고만 나와,
+    실제로 먼저 적용되는 표가 무엇인지 알 수 없었다(사용자 지적 2026-08-29).
+
+    두 표는 배타적이지 않다 — 지점 구간요금은 **걸릴 때만** 적용되고, 안 걸리는 구간은 거리
+    구간표로 떨어진다. 그래서 하나를 고르는 식이 아니라 순위로 보여준다.
+
+    화면 맨 위에 둔다: "지금 무엇이 적용되나"는 세부 설정보다 먼저 답해야 하는 질문이다. %>
+<%
+  const officeOn = group.office_fare_enabled !== false;
+  const officeActive = officeOn && officeCount > 0;
+  // 거리 구간표는 법인 표 → 지사 표 순으로 떨어진다(lib/branchPolicy.js loadFareTable).
+  const distanceSource = tiers.length ? 'group' : (branchTiers.length ? 'branch' : 'none');
+  const branchUsable = branchExtra.fare_table_enabled && branchTiers.length;
+  // 둘 다 없으면 자동 계산이 아예 안 된다 — 이건 경고로 띄워야 한다.
+  const noneUsable = !officeActive && distanceSource === 'none';
+%>
+<div class="card" style="border-left:4px solid #15803d;">
+  <div class="section-title">📌 현재 적용되는 요금표</div>
+  <p class="page-sub" style="margin-top:-4px;">
+    위에서부터 순서대로 확인합니다. <b>앞 순위에서 걸리면 뒤는 보지 않습니다.</b>
+  </p>
+
+  <div class="table-wrap">
+    <table class="table">
+      <thead><tr><th style="width:70px;">순위</th><th style="width:190px;">요금표</th><th style="width:120px;">상태</th><th>내용</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><b>1</b></td>
+          <td>지점 구간요금</td>
+          <td>
+            <% if (officeActive) { %><span class="badge green">적용 중</span>
+            <% } else if (officeOn && !officeCount) { %><span class="badge gray">등록 없음</span>
+            <% } else if (!officeOn && officeCount) { %><span class="badge amber">적용 꺼짐</span>
+            <% } else { %><span class="badge gray">사용 안 함</span><% } %>
+          </td>
+          <td>
+            <% if (officeActive) { %>
+              지점 <b><%= officeCount %>곳</b> · 요금 <b><%= officeZoneCount.toLocaleString('ko-KR') %>줄</b> —
+              출발지나 도착지가 등록 지점이면 이 금액으로 청구합니다.
+            <% } else if (officeOn && !officeCount) { %>
+              켜져 있지만 <b>등록된 지점이 없어</b> 적용되지 않습니다.
+            <% } else if (!officeOn && officeCount) { %>
+              지점 <%= officeCount %>곳이 등록돼 있으나 <b>적용을 꺼두었습니다.</b>
+            <% } else { %>
+              등록된 지점이 없고 적용도 꺼져 있습니다.
+            <% } %>
+          </td>
+        </tr>
+        <tr>
+          <td><b>2</b></td>
+          <td>거리 구간요금</td>
+          <td>
+            <% if (distanceSource === 'group') { %><span class="badge green">법인 전용</span>
+            <% } else if (distanceSource === 'branch') { %><span class="badge blue">지사 표</span>
+            <% } else { %><span class="badge red">없음</span><% } %>
+          </td>
+          <td>
+            <% if (distanceSource === 'group') { %>
+              이 법인 전용 요금표 (구간 <b><%= tiers.length %>개</b>)
+              <% if (!extra.fare_table_enabled) { %>
+                <%# 표가 있어도 "이 요금표 사용"이 꺼져 있으면 지사 표로 떨어진다. %>
+                <span class="badge amber">이 요금표 사용 꺼짐</span> — 실제로는 지사 표로 계산합니다.
+              <% } %>
+            <% } else if (distanceSource === 'branch') { %>
+              이 법인에 등록된 표가 없어 <b>소속 지사(<%= group.branch_name || '-' %>)</b> 표로 계산합니다.
+              (지사 구간 <%= branchTiers.length %>개<%= branchExtra.fare_table_enabled ? '' : ' · 지사 요금표 사용 꺼짐' %>)
+            <% } else { %>
+              법인·지사 어디에도 거리 구간표가 없습니다.
+            <% } %>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <% if (noneUsable) { %>
+    <div class="alert error" style="margin:10px 0 0;">
+      <b>자동 요금 계산이 되지 않는 상태입니다.</b>
+      지점 구간요금도 거리 구간표도 쓸 수 없어, 접수할 때 금액을 손으로 입력해야 합니다.
+    </div>
+  <% } else if (officeActive && distanceSource === 'none') { %>
+    <div class="alert" style="margin:10px 0 0;background:#fef3e2;color:#b45309;border-color:#f5d9a8;">
+      지점 구간요금에 <b>걸리지 않는 구간</b>은 계산할 표가 없습니다 — 그 경우 금액을 손으로 입력해야 합니다.
+    </div>
+  <% } %>
+
+  <% if (distanceSource === 'branch' && branchUsable) { %>
+    <form method="POST" action="/groups/<%= group.id %>/fare-rules/copy" style="margin-top:10px;"
+          onsubmit="return confirm('소속 지사 요금표를 이 법인으로 복사할까요?');">
+      <button class="btn secondary" type="submit">소속 지사 요금표 가져오기</button>
+    </form>
+  <% } %>
+</div>
+
 <%# ── 지점 구간요금 ────────────────────────────────────────────────────────
     거리 구간표보다 **먼저** 적용되므로 화면 제일 위에 둔다(사용자 지시). 아래에 있으면
     구간표만 고쳐놓고 "왜 요금이 안 바뀌지"를 겪는다.
@@ -51,25 +147,6 @@
       등록된 지점이 없습니다. 체크되어 있어도 <b>적용되지 않고</b> 아래 거리 구간표로 계산합니다.
     <% } %>
   </p>
-</div>
-
-<%# 비어 있을 때 무엇이 적용되는지 반드시 밝힌다 — 빈 표만 보이면 요금이 0원인 줄 안다. %>
-<div class="card">
-  <div class="section-title">📌 현재 적용되는 요금표</div>
-  <% if (tiers.length) { %>
-    <p class="page-sub" style="margin:0;"><b>이 법인 전용 요금표</b>가 적용됩니다. (구간 <%= tiers.length %>개)</p>
-  <% } else { %>
-    <p class="page-sub" style="margin:0;">
-      이 법인에 등록된 요금표가 없어 <b>소속 지사(<%= group.branch_name || '-' %>)의 탁송 요금표</b>가 적용됩니다.
-      (지사 구간 <%= branchTiers.length %>개<%= branchExtra.fare_table_enabled ? '' : ' · 지사 요금표 사용 꺼짐' %>)
-    </p>
-    <% if (branchTiers.length) { %>
-      <form method="POST" action="/groups/<%= group.id %>/fare-rules/copy" style="margin-top:10px;"
-            onsubmit="return confirm('소속 지사 요금표를 이 법인으로 복사할까요?');">
-        <button class="btn secondary" type="submit">소속 지사 요금표 가져오기</button>
-      </form>
-    <% } %>
-  <% } %>
 </div>
 
 <form id="fareForm" method="POST" action="/groups/<%= group.id %>/fare-rules">
