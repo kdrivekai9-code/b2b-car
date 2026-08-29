@@ -15,8 +15,9 @@ const TAB_DEFS = [
   { key: 'basic', label: '법인 정보', path: 'edit' },
   { key: 'accounts', label: '계정정보', path: 'accounts' },
   { key: 'fare', label: '탁송 요금', path: 'fare-rules' },
-  // 지점↔지역 계약표. 거리 구간표보다 먼저 적용되므로 '탁송 요금' 바로 옆에 둔다.
-  { key: 'office_fare', label: '지점 구간요금', path: 'office-fares' },
+  // 지점 구간요금은 일부러 탭에 두지 않는다(ae21138) — 켜고 끄는 것과 현황을 '탁송 요금'
+  // 화면 맨 위에서 함께 보여준다. 요금이 어떻게 산출되는지는 한 화면에서 답해야 한다.
+  // 등록/관리 화면(/office-fares)은 그 화면의 버튼으로 들어간다.
   { key: 'daily_driver_fare', label: '일일기사 요금', path: 'daily-driver-fare-rules' },
   { key: 'premium_fare', label: '프리미엄(대리) 요금', path: 'premium-fare-rules' },
   { key: 'settlement', label: '정산내역', path: 'settlement' },
