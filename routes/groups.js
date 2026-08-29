@@ -499,7 +499,6 @@ router.post('/:id/fare-rules', asyncHandler(async (req, res) => {
 
   // 정산서 할증 표시 방식(사용자 지시: 법인별로 고른다). 총 청구액은 어느 쪽이든 같고
   // 표시만 달라진다 — 그래서 요금 저장과 같이 두어도 금액에 영향이 없다.
-  const mode = String(req.body.settlement_surcharge_mode || '').trim() === 'itemized' ? 'itemized' : 'included';
   // 지점 구간요금 우선 적용. 체크박스는 켜졌을 때만 올라오므로 숨은 필드('0')와 함께 온다.
   const officeFareEnabled = checkboxDefaultOn(req.body.office_fare_enabled);
   await db.run('UPDATE groups_tbl SET office_fare_enabled = ? WHERE id = ?', [officeFareEnabled, req.params.id])
@@ -507,12 +506,6 @@ router.post('/:id/fare-rules', asyncHandler(async (req, res) => {
       if (e && e.code === '42703') return; // 마이그레이션 20260829030000 전
       console.error('지점 구간요금 사용 여부 저장 실패(무시):', e.message);
     });
-  await db.run('UPDATE groups_tbl SET settlement_surcharge_mode = ? WHERE id = ?', [mode, req.params.id])
-    .catch((e) => {
-      if (e && e.code === '42703') return; // 마이그레이션 20260829020000 전
-      console.error('정산 할증 표시 방식 저장 실패(무시):', e.message);
-    });
-
   await db.run('DELETE FROM group_fare_rules WHERE group_id = ?', [req.params.id]);
   for (let i = 0; i < baseDist.length; i++) {
     if (baseDist[i] === '' && baseFare[i] === '') continue;
@@ -1029,6 +1022,24 @@ router.get('/:id/settlement/excel', asyncHandler(async (req, res) => {
   res.end();
 }));
 
+// 정산서 할증 표시 방식 저장. 정산내역 화면 상단에서 바꾼다(사용자 지시) — 이 설정이 바꾸는
+// 것은 정산서의 줄 구성뿐이라, 요금을 설정하는 화면보다 정산서를 보는 화면에 있어야 맞다.
+//
+// 요금 저장(POST /fare-rules)에서는 뺐다. 필드가 없는 폼이 저장을 지나가면 매번 'included'로
+// 덮어써서 설정이 조용히 초기화된다.
+router.post('/:id/settlement/surcharge-mode', asyncHandler(async (req, res) => {
+  const mode = String(req.body.settlement_surcharge_mode || '').trim() === 'itemized' ? 'itemized' : 'included';
+  const month = settlementMonth(req.body.month);
+  await db.run('UPDATE groups_tbl SET settlement_surcharge_mode = ? WHERE id = ?', [mode, req.params.id])
+    .catch((e) => {
+      if (e && e.code === '42703') return; // 마이그레이션 20260829020000 전
+      console.error('정산 할증 표시 방식 저장 실패(무시):', e.message);
+    });
+  // 보던 달로 돌아간다 — 이번 달로 튕기면 방금 확인하던 정산서를 다시 찾아야 한다.
+  res.redirect(`/groups/${req.params.id}/settlement?month=${encodeURIComponent(month)}&saved=`
+    + encodeURIComponent(mode === 'itemized' ? '할증을 별도 줄로 표시합니다.' : '할증을 운행요금에 포함해 표시합니다.'));
+}));
+
 // 정산내역서 출력 — 내부 결재용 서류.
 //
 // 화면(settlement)과 같은 데이터를 쓰되 레이아웃이 다르다: 결재란·공급자/공급받는자·발행일이
@@ -1065,6 +1076,7 @@ router.get('/:id/settlement', asyncHandler(async (req, res) => {
   res.render('groups/settlement', {
     title: '정산내역 - ' + group.name,
     group, groups, month,
+    saved: req.query.saved || null,
     extraChargeTypes: extraCharges.EXTRA_CHARGE_TYPES,
     ...data,
   });

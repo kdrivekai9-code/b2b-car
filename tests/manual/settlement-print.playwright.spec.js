@@ -84,12 +84,13 @@ test.describe('정산내역서 출력', () => {
       { waitUntil: 'domcontentloaded' });
     expect(res.status()).toBe(200);
 
-    // 결재 서류로 쓰려면 있어야 하는 것들.
+    // 서류로 쓰려면 있어야 하는 것들.
     await expect(page.locator('h1')).toContainText('정 산 내 역 서');
     await expect(page.getByText(MONTH, { exact: false }).first()).toBeVisible();
-    await expect(page.locator('.approval')).toHaveCount(1);
-    // 도장 자리는 비어 있어야 한다 — 채워져 있으면 결재가 아니다.
-    await expect(page.locator('.approval td')).toHaveCount(3);
+    // 결재란은 걷어냈다(사용자 지시) — 다시 생기면 여기서 걸린다.
+    await expect(page.locator('.approval')).toHaveCount(0);
+    // 정보표가 전체 폭을 쓴다. 2단으로 감싸던 표가 남아 있으면 왼쪽 2/3에만 찍혀 여백이 뜬다.
+    await expect(page.locator('.meta')).toHaveCount(1);
     await expect(page.getByText('발행일', { exact: false })).toBeVisible();
     await expect(page.getByText('공급받는자', { exact: false })).toBeVisible();
 
@@ -113,6 +114,40 @@ test.describe('정산내역서 출력', () => {
     expect(hiddenOnPrint, '인쇄 시 버튼을 숨기는 규칙').toBe(true);
 
     expect(problems, `페이지 오류: ${problems.join(' | ')}`).toEqual([]);
+  });
+
+  // 표시 방식은 정산내역 화면 상단에서 바꾼다(사용자 지시) — 바꾸고 바로 아래에서 결과를
+  // 확인할 수 있어야 한다. 요금 설정 화면에 있으면 바꾼 뒤 정산으로 옮겨가 확인해야 한다.
+  test('정산내역 상단에서 표시 방식을 바꾸면 그 자리에서 반영된다', async ({ page }) => {
+    test.skip(!groupId, '법인이 없습니다');
+    await db.run('UPDATE groups_tbl SET settlement_surcharge_mode = ? WHERE id = ?', ['included', groupId]);
+    await loginWithRetry(page, { baseUrl: BASE_URL, loginId: LOGIN_ID, password: PASSWORD });
+    await page.goto(`${BASE_URL}/groups/${groupId}/settlement?month=${MONTH}`, { waitUntil: 'domcontentloaded' });
+
+    const card = page.locator('.card', { hasText: '정산서 할증 표시' });
+    await expect(card).toHaveCount(1);
+    // 정산 목록보다 **위에** 있어야 한다 — 바꾸고 바로 아래에서 결과를 봐야 한다.
+    const cardY = await card.boundingBox();
+    const listY = await page.locator('.settlement-table').boundingBox();
+    expect(cardY.y, '할증 표시 설정이 명세보다 위에 있어야 한다').toBeLessThan(listY.y);
+
+    // 포함 방식: 운행요금 합계에 할증이 들어 있다.
+    await expect(page.locator('.settlement-table tfoot')).toContainText('105,000원');
+
+    await card.locator('input[value="itemized"]').check();
+    await card.getByRole('button', { name: '적용' }).click();
+    await page.waitForURL(/saved=/, { timeout: 30000 });
+
+    // 조회하던 달이 유지돼야 한다 — 이번 달로 튕기면 방금 보던 정산서를 잃는다.
+    expect(page.url()).toContain(`month=${MONTH}`);
+    expect((await db.get('SELECT settlement_surcharge_mode FROM groups_tbl WHERE id = ?', [groupId]))
+      .settlement_surcharge_mode).toBe('itemized');
+
+    // 별도 줄 방식: 운행요금은 할증을 뺀 금액, 할증은 따로.
+    await expect(page.locator('.settlement-table tfoot')).toContainText('97,000원');
+    await expect(page.locator('.surcharge-table')).toContainText('수입차 할증');
+    // 총 청구액은 그대로.
+    await expect(page.locator('.stat-row').getByText('총 청구액').locator('..')).toContainText('145,000원');
   });
 
   test('표시 방식을 바꿔도 총 청구액은 같다', async ({ page }) => {

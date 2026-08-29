@@ -74,30 +74,6 @@
 
 <form id="fareForm" method="POST" action="/groups/<%= group.id %>/fare-rules">
   <div class="card">
-    <%# 할증은 이미 fare_amount에 더해져 청구된다(lib/branchPolicy.js). 여기서 고르는 것은
-        정산서에 어떻게 **보여줄지**뿐이라, 총 청구액은 어느 쪽이든 같다. 그 사실을 밝히지
-        않으면 관리자가 금액이 바뀔까 봐 못 바꾼다. %>
-    <div class="section-title">🧾 정산서 할증 표시</div>
-    <p class="page-sub" style="margin-top:0;">
-      수입차 · 대형 · 전기차 · 야간 · 오지 할증을 정산내역서에 어떻게 보여줄지 정합니다.
-      <b>총 청구액은 어느 쪽이든 같습니다</b> — 줄 구성만 달라집니다.
-    </p>
-    <div class="row" style="gap:20px;margin-bottom:6px;">
-      <label class="checkline inline">
-        <input type="radio" name="settlement_surcharge_mode" value="included"
-               <%= (group.settlement_surcharge_mode || 'included') !== 'itemized' ? 'checked' : '' %>>
-        운행요금에 포함 <span class="page-sub">(예: 운행요금 105,000원 · 기본 97,000 + 수입차 5,000 + 야간 3,000)</span>
-      </label>
-      <label class="checkline inline">
-        <input type="radio" name="settlement_surcharge_mode" value="itemized"
-               <%= (group.settlement_surcharge_mode || '') === 'itemized' ? 'checked' : '' %>>
-        별도 줄로 분리 <span class="page-sub">(예: 운행요금 97,000원 + 할증 8,000원)</span>
-      </label>
-    </div>
-    <p class="page-sub" style="margin-bottom:14px;">
-      계약서에 "탁송료" 한 줄로 적혀 있으면 <b>포함</b>이 맞습니다. 줄을 나누면 거래처에서 문의가 올 수 있습니다.
-    </p>
-
     <div class="section-title">📏 거리 구간별 요금 규칙</div>
     <%# 지점 구간요금이 이 표를 덮는다. 그 사실을 여기서 밝히지 않으면 관리자는 이 표를
         고쳐놓고 "왜 안 바뀌지"를 겪는다 — 요금이 안 맞는 원인을 찾을 곳이 다른 화면이다. %>

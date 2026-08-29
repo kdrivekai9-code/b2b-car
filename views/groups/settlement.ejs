@@ -9,9 +9,7 @@
       완료된 오더를 <b>완료일 기준</b>으로 묶었습니다. 금액은 업체별 계약 요금입니다(배차 요금 아님).
       <%# 어느 모드든 총 청구액은 같다 — 그 사실을 밝히지 않으면 모드를 바꿀 때 금액이
           달라지는 줄 알고 못 바꾼다. %>
-      할증 표시는 <b><%= surchargeMode === 'itemized' ? '별도 줄(항목별)' : '운행요금 포함' %></b>
-      방식입니다(<a href="/groups/<%= group.id %>/fare-rules">법인 요금설정</a>에서 변경 —
-      <b>총 청구액은 어느 쪽이든 같습니다</b>).
+      할증 표시는 <b><%= surchargeMode === 'itemized' ? '별도 줄(항목별)' : '운행요금 포함' %></b> 방식입니다.
     </p>
   </div>
   <div class="page-head-actions">
@@ -26,6 +24,43 @@
   </div>
 </div>
 <%- include('../partials/group_tabs', { group: group, groups: groups, active: 'settlement' }) %>
+
+<%# 방금 바꾼 것이 반영됐는지 알려준다 — 총액이 안 바뀌는 설정이라 화면만 보고는
+    적용됐는지 알기 어렵다. %>
+<% if (saved) { %><div class="alert"><%= saved %></div><% } %>
+
+<%# ── 할증 표시 방식 ──────────────────────────────────────────────────────
+    이 설정이 바꾸는 것은 아래 정산서의 줄 구성뿐이다(총 청구액은 같다). 그래서 요금을
+    설정하는 화면이 아니라 정산서를 보는 이 화면 위에 둔다 — 바꾸고 바로 아래에서 결과를
+    확인할 수 있어야 한다. %>
+<div class="card" style="border-left:4px solid #2e5c8a;">
+  <div class="section-title">🧾 정산서 할증 표시</div>
+  <p class="page-sub">
+    수입차 · 대형 · 전기차 · 야간 · 오지 할증을 정산내역서에 어떻게 보여줄지 정합니다.
+    <b>총 청구액은 어느 쪽이든 같습니다</b> — 줄 구성만 달라집니다.
+  </p>
+  <form method="POST" action="/groups/<%= group.id %>/settlement/surcharge-mode"
+        class="row" style="align-items:center;gap:20px;">
+    <%# 조회 중인 달을 함께 보낸다 — 안 보내면 저장 후 이번 달로 튕겨 방금 보던 정산서를 잃는다. %>
+    <input type="hidden" name="month" value="<%= month %>">
+    <label class="checkline inline">
+      <input type="radio" name="settlement_surcharge_mode" value="included"
+             <%= surchargeMode !== 'itemized' ? 'checked' : '' %>>
+      운행요금에 포함
+      <span class="page-sub">(예: 운행요금 105,000원 · 기본 97,000 + 수입차 5,000 + 야간 3,000)</span>
+    </label>
+    <label class="checkline inline">
+      <input type="radio" name="settlement_surcharge_mode" value="itemized"
+             <%= surchargeMode === 'itemized' ? 'checked' : '' %>>
+      별도 줄로 분리
+      <span class="page-sub">(예: 운행요금 97,000원 + 할증 8,000원)</span>
+    </label>
+    <button class="btn secondary" type="submit">적용</button>
+  </form>
+  <p class="page-sub" style="margin-bottom:0;">
+    계약서에 "탁송료" 한 줄로 적혀 있으면 <b>포함</b>이 맞습니다. 줄을 나누면 거래처에서 문의가 올 수 있습니다.
+  </p>
+</div>
 
 <div class="card">
   <form method="GET" action="/groups/<%= group.id %>/settlement" class="filter-row" style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
