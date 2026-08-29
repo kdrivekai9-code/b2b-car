@@ -82,6 +82,18 @@
     <tr><th>담당자</th><td><%= [group.contact_name, group.contact_phone].filter(Boolean).join(' · ') || '-' %></td></tr>
     <tr><th>공급자</th><td><%= group.branch_name || '-' %><%= group.branch_phone ? ' · ' + group.branch_phone : '' %></td></tr>
     <tr><th>발행일</th><td><%= issuedOn %><%= issuedBy ? ' · 작성 ' + issuedBy : '' %></td></tr>
+    <%# 입금계좌는 청구서의 목적 그 자체다 — 없으면 받는 쪽이 어디로 보낼지 몰라 따로 물어야
+        한다. 비어 있으면 빈 칸을 두지 말고 어디서 채우는지 알려준다. %>
+    <tr>
+      <th>입금계좌</th>
+      <td>
+        <% if (group.bank_account) { %>
+          <b><%= [group.bank_name, group.bank_account].filter(Boolean).join(' ') %></b><%= group.bank_holder ? ' · 예금주 ' + group.bank_holder : '' %>
+        <% } else { %>
+          <span class="muted">지사 정보에 입금계좌가 등록되어 있지 않습니다(지사관리 → 기본 정보).</span>
+        <% } %>
+      </td>
+    </tr>
   </table>
 
   <div class="section">

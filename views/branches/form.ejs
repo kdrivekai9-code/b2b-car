@@ -25,6 +25,16 @@
     <div class="row">
       <div class="field full"><label>주소</label><input type="text" name="address" value="<%= branch.address || '' %>"></div>
     </div>
+
+    <%# 청구서에 그대로 찍히는 값이다 — 비어 있으면 받는 쪽이 어디로 입금할지 알 수 없어
+        따로 물어야 한다. 세 칸으로 나눈 이유는 은행만 바꿀 때 전체를 다시 쓰지 않게 하고,
+        예금주가 빠진 채 저장되는 것을 눈으로 알아채기 위해서다. %>
+    <div class="section-title" style="font-size:14px;margin-top:16px;">💳 입금계좌 <span class="page-sub">(정산서·청구서에 표시)</span></div>
+    <div class="row">
+      <div class="field"><label>은행</label><input type="text" name="bank_name" placeholder="예: 국민은행" value="<%= branch.bank_name || '' %>"></div>
+      <div class="field"><label>계좌번호</label><input type="text" name="bank_account" placeholder="예: 123456-01-234567" value="<%= branch.bank_account || '' %>"></div>
+      <div class="field"><label>예금주</label><input type="text" name="bank_holder" placeholder="예: (주)씨엠엔피" value="<%= branch.bank_holder || '' %>"></div>
+    </div>
     <% if (mode === 'edit') { %>
     <div class="row">
       <div class="field">

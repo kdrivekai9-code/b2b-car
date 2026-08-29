@@ -308,6 +308,44 @@ test.describe('정산내역서 출력', () => {
     await expect(page.getByText('청구할 항목이 없습니다', { exact: false })).toBeVisible();
   });
 
+  // 입금계좌는 청구서의 목적 그 자체다 — 없으면 받는 쪽이 어디로 보낼지 몰라 따로 물어야 한다.
+  test('입금계좌가 두 문서에 모두 찍히고, 없으면 어디서 채우는지 알린다', async ({ page }) => {
+    test.skip(!groupId, '법인이 없습니다');
+    await page.addInitScript(() => { window.print = () => {}; });
+    await loginWithRetry(page, { baseUrl: BASE_URL, loginId: LOGIN_ID, password: PASSWORD });
+
+    const g = await db.get('SELECT branch_id FROM groups_tbl WHERE id = ?', [groupId]);
+    const before = await db.get('SELECT bank_name, bank_account, bank_holder FROM branches WHERE id = ?', [g.branch_id]);
+    try {
+      // 계좌가 비어 있을 때: 빈 칸을 두지 말고 어디서 채우는지 알려야 한다.
+      await db.run('UPDATE branches SET bank_name = NULL, bank_account = NULL, bank_holder = NULL WHERE id = ?',
+        [g.branch_id]);
+      await page.goto(`${BASE_URL}/groups/${groupId}/settlement/print?month=${MONTH}&autoprint=0`,
+        { waitUntil: 'domcontentloaded' });
+      await expect(page.getByText('입금계좌', { exact: false }).first()).toBeVisible();
+      await expect(page.getByText('등록되어 있지 않습니다', { exact: false })).toBeVisible();
+
+      // 채우면 두 문서에 모두 나와야 한다 — 한쪽만 나오면 그 문서를 받은 쪽만 물어본다.
+      await db.run(
+        'UPDATE branches SET bank_name = ?, bank_account = ?, bank_holder = ? WHERE id = ?',
+        ['국민은행', '123456-01-234567', '(주)검사', g.branch_id]
+      );
+      for (const path of ['settlement/print', 'settlement/individual-print']) {
+        await page.goto(`${BASE_URL}/groups/${groupId}/${path}?month=${MONTH}&autoprint=0`,
+          { waitUntil: 'domcontentloaded' });
+        // 개별정산 항목이 없는 달이면 청구서 장이 없다 — 그때는 계좌도 나올 자리가 없다.
+        if (await page.locator('.meta').count() === 0) continue;
+        await expect(page.getByText('123456-01-234567', { exact: false }).first(),
+          `${path}에 계좌번호`).toBeVisible();
+        await expect(page.getByText('(주)검사', { exact: false }).first(),
+          `${path}에 예금주`).toBeVisible();
+      }
+    } finally {
+      await db.run('UPDATE branches SET bank_name = ?, bank_account = ?, bank_holder = ? WHERE id = ?',
+        [before.bank_name, before.bank_account, before.bank_holder, g.branch_id]).catch(() => {});
+    }
+  });
+
   test('표시 방식을 바꿔도 총 청구액은 같다', async ({ page }) => {
     test.skip(!groupId, '법인이 없습니다');
     await page.addInitScript(() => { window.print = () => {}; });

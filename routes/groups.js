@@ -1158,7 +1158,8 @@ router.post('/:id/settlement/surcharge-mode', asyncHandler(async (req, res) => {
 // 인쇄할 때 건마다 페이지가 나뉜다.
 router.get('/:id/settlement/individual-print', asyncHandler(async (req, res) => {
   const group = await db.get(`
-    SELECT g.*, b.name AS branch_name, b.main_phone AS branch_phone
+    SELECT g.*, b.name AS branch_name, b.main_phone AS branch_phone,
+           b.bank_name, b.bank_account, b.bank_holder
       FROM groups_tbl g LEFT JOIN branches b ON b.id = g.branch_id
      WHERE g.id = ?`, [req.params.id]);
   if (!group) return res.status(404).send('법인을 찾을 수 없습니다.');
@@ -1194,7 +1195,8 @@ router.get('/:id/settlement/individual-print', asyncHandler(async (req, res) => 
 router.get('/:id/settlement/print', asyncHandler(async (req, res) => {
   const group = await db.get(`
     SELECT g.*, b.name AS branch_name, b.main_phone AS branch_phone,
-           b.address AS branch_address, b.contact_name AS branch_contact
+           b.address AS branch_address, b.contact_name AS branch_contact,
+           b.bank_name, b.bank_account, b.bank_holder
       FROM groups_tbl g LEFT JOIN branches b ON b.id = g.branch_id
      WHERE g.id = ?`, [req.params.id]);
   if (!group) return res.status(404).send('법인을 찾을 수 없습니다.');

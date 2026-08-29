@@ -56,6 +56,18 @@ router.post('/:id', asyncHandler(async (req, res) => {
     `UPDATE branches SET name=?, code=?, main_phone=?, address=?, contact_name=?, contact_phone=?, status=? WHERE id=?`,
     [name, code, main_phone, address, contact_name, contact_phone, status, req.params.id]
   );
+  // 입금계좌는 **별도 UPDATE**로 쓴다. 위 문에 컬럼을 더 붙이면 마이그레이션 전 DB에서 문
+  // 전체가 실패해 기본 정보까지 저장되지 않는다(이 저장소에서 같은 사고를 낸 적이 있다).
+  await db.run(
+    'UPDATE branches SET bank_name = ?, bank_account = ?, bank_holder = ? WHERE id = ?',
+    [String(req.body.bank_name || '').trim() || null,
+      String(req.body.bank_account || '').trim() || null,
+      String(req.body.bank_holder || '').trim() || null,
+      req.params.id]
+  ).catch((e) => {
+    if (e && e.code === '42703') return; // 마이그레이션 20260829050000 전
+    console.error('지사 입금계좌 저장 실패(무시):', e.message);
+  });
   res.redirect('/branches');
 }));
 
