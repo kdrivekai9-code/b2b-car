@@ -3,6 +3,8 @@
 // 않고, Vercel이 CRON_SECRET 환경변수 설정 시 자동으로 붙여주는 Authorization 헤더로 검증한다.
 const express = require('express');
 const db = require('../db');
+// 취소요금 — 상태가 '취소'로 바뀌는 모든 지점에서 같은 함수를 쓴다(경로마다 두면 빠진다).
+const tripFees = require('../lib/tripFees');
 const asyncHandler = require('../middleware/asyncHandler');
 const callmaner = require('../lib/callmaner');
 const callmanerPhotos = require('../lib/callmanerPhotos');
@@ -354,6 +356,12 @@ async function syncOrdersByConfSlip(branch) {
     if (info.status === order.callmaner_status && (!mappedStatus || mappedStatus === order.status)) continue;
 
     if (mappedStatus && mappedStatus !== order.status) {
+      // 콜마너에서 취소되면 여기로 온다 — 관리자 화면을 거치지 않으므로 취소요금 계산이
+      // 이 경로에도 있어야 한다. 예전에는 상태변경 라우트에만 있어서, 콜마너 취소 건은
+      // 취소요금이 한 푼도 안 붙었다(청구 누락, 2026-08-30 감사).
+      if (mappedStatus === '취소' && order.status !== '취소') {
+        await tripFees.applyCancelFee(db, order, order.status);
+      }
       await db.run(
         `UPDATE orders SET status = ?, callmaner_status = ?,
          callmaner_synced_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS'), callmaner_last_error = NULL,

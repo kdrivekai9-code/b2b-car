@@ -2188,16 +2188,7 @@ router.post('/:id/status', asyncHandler(async (req, res) => {
   // 되짚으면 그때는 이미 상태가 '취소'라 배차 전이었는지 후였는지 알 수 없다.
   // 이미 값이 있으면 덮어쓰지 않는다 — 취소를 되돌렸다가 다시 취소해도 두 번 붙으면 안 된다.
   if (status === '취소' && order.status !== '취소') {
-    try {
-      const feeExtra = await branchPolicy.findFareExtra(order.requester_group_id, order.branch_id);
-      const fee = tripFees.cancelFee(feeExtra, { previousStatus: order.status });
-      if (fee.amount > 0 && order.cancel_fee_amount == null) {
-        await db.run('UPDATE orders SET cancel_fee_amount = ?, cancel_fee_note = ? WHERE id = ?',
-          [fee.amount, fee.note, req.params.id]);
-      }
-    } catch (e) {
-      if (!e || e.code !== '42703') console.error('취소요금 계산 실패(취소는 그대로 진행):', e.message);
-    }
+    await tripFees.applyCancelFee(db, order, order.status);
   }
 
   await db.run(

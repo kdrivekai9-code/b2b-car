@@ -191,6 +191,21 @@ async function cleanup() {
     const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'lib/orderCreate.js'), 'utf8');
     check('createOrder가 스스로 채운다', /접수 경로가 안 넘겼으면 여기서 채운다/.test(src), true);
     check('이미 넘어온 값은 덮어쓰지 않는다', /const needWait = !row\.waitFee;/.test(src), true);
+
+    console.log('[감사 2차 — 취소요금이 관리자 화면 경로에만 있던 것]');
+    // 상태를 '취소'로 바꾸는 곳은 두 군데다: 관리자 화면(routes/orders.js)과 콜마너
+    // 동기화(routes/callmanerSync.js). 예전에는 앞쪽에만 계산이 있어서, 콜마너에서
+    // 취소된 건은 취소요금이 한 푼도 안 붙었다. 경로마다 계산을 두면 또 빠지므로
+    // tripFees.applyCancelFee 한 곳으로 모았다 — 두 경로가 그것을 부르는지 못 박는다.
+    const read = (f) => require('fs').readFileSync(require('path').join(__dirname, '..', f), 'utf8');
+    check('관리자 상태변경이 applyCancelFee를 부른다', /applyCancelFee\(/.test(read('routes/orders.js')), true);
+    check('콜마너 동기화가 applyCancelFee를 부른다', /applyCancelFee\(/.test(read('routes/callmanerSync.js')), true);
+
+    // 이미 붙은 취소요금을 다시 붙이면 두 번 청구된다(취소 → 되돌림 → 재취소).
+    let wrote = 0;
+    const fakeDb = { run: async () => { wrote += 1; } };
+    await tripFees.applyCancelFee(fakeDb, { id: 1, cancel_fee_amount: 5000 }, '기사배정');
+    check('이미 붙은 취소요금은 다시 안 붙는다', wrote, 0);
   } finally {
     await cleanup();
     await db.pool.end().catch(() => {});
