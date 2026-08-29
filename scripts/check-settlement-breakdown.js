@@ -135,6 +135,62 @@ async function cleanup() {
     check('완료 건수 집계', after.summary.settledCount, 1);
     // 상태가 바뀌어도 청구액은 그대로다.
     check('정산완료해도 총액 불변', after.grandTotal, data.grandTotal);
+    console.log('[감사에서 찾은 구멍 ① 개별정산이 월 정산서 총액에 들어가면 이중청구]');
+    // 개별정산은 건별 청구서로 따로 청구한다. 월 정산서 총액에도 넣으면 같은 금액을 두 번
+    // 청구하게 된다 — 실제로 그랬다(2026-08-30 감사).
+    await db.run("UPDATE group_fare_extra_settings SET fuel_mode = 'individual' WHERE group_id = ?", [group.id])
+      .catch(() => {});
+    const indiv = await groupsRoute.loadSettlement(group.id, MONTH);
+    const fuelLine = indiv.extras.find((e) => e.charge_type === '주유비' && String(e.oid || '').startsWith(MARK));
+    check('개별정산 줄은 목록에 남는다', !!fuelLine, true);
+    check('구분이 개별정산', fuelLine && fuelLine.settleMode, 'individual');
+    // 목록에는 있어도 청구 합계에는 없어야 한다. 도선료(30,000)는 월정산이라 남는다 —
+    // 개별정산으로 돌린 주유비 40,000만 빠진다.
+    check('개별정산 금액만 합계에서 빠진다', indiv.extraSummary.total, 30000);
+    check('총 청구액 = 운행요금 + 월정산 기타', indiv.grandTotal, indiv.summary.total + 30000);
+    // 목록 건수는 그대로여야 한다 — 청구에서 뺐다고 화면에서 사라지면 무엇이 있는지 모른다.
+    check('목록에서는 사라지지 않는다', indiv.extraSummary.listedCount, indiv.extras.length);
+    await db.run("UPDATE group_fare_extra_settings SET fuel_mode = 'monthly' WHERE group_id = ?", [group.id])
+      .catch(() => {});
+
+    console.log('[감사에서 찾은 구멍 ② 취소요금이 붙은 오더가 정산서에 안 나오면 청구 불가]');
+    // 예전에는 '완료'만 정산 대상이라, 취소요금을 계산해 저장해도 청구할 방법이 없었다.
+    const cancelled = await db.get(
+      `INSERT INTO orders (oid, branch_id, requester_group_id, status, reserved_date, reserved_time,
+                           origin_address, destination_address, fare_amount, cancel_fee_amount, cancel_fee_note)
+       VALUES (?, ?, ?, '취소', '2019-12-20', '10:00', '검사출발', '검사도착', 0, 20000, '배차 후 취소')
+       RETURNING id`,
+      [`${MARK}-c`, group.branch_id, group.id]
+    );
+    await db.run(
+      `INSERT INTO order_status_history (order_id, old_status, new_status, created_at)
+       VALUES (?, '기사배정', '취소', ?)`, [cancelled.id, `${MONTH}-20 11:00:00`]
+    );
+    const withCancel = await groupsRoute.loadSettlement(group.id, MONTH);
+    const cRow = withCancel.items.find((r) => r.oid === `${MARK}-c`);
+    check('취소 건이 정산서에 나온다', !!cRow, true);
+    check('취소요금이 청구된다', cRow && cRow.total, 20000);
+
+    // 취소요금이 0인 취소 건은 청구할 것이 없다 — 목록만 늘리면 읽기 어려워진다.
+    const freeCancel = await db.get(
+      `INSERT INTO orders (oid, branch_id, requester_group_id, status, reserved_date, reserved_time,
+                           origin_address, destination_address, fare_amount)
+       VALUES (?, ?, ?, '취소', '2019-12-21', '10:00', 'x', 'y', 0) RETURNING id`,
+      [`${MARK}-c0`, group.branch_id, group.id]
+    );
+    await db.run(
+      `INSERT INTO order_status_history (order_id, old_status, new_status, created_at)
+       VALUES (?, '접수', '취소', ?)`, [freeCancel.id, `${MONTH}-21 11:00:00`]
+    );
+    const after2 = await groupsRoute.loadSettlement(group.id, MONTH);
+    check('취소요금 0원 건은 안 나온다', after2.items.some((r) => r.oid === `${MARK}-c0`), false);
+
+    console.log('[감사에서 찾은 구멍 ③ 접수 경로마다 요금 근거가 빠지던 것]');
+    // createOrder는 모든 접수 경로가 지나는 한 곳이다. 예전에는 웹 폼 라우트에서만 계산해
+    // 넘겨서, 카카오·웹 AI로 접수된 오더는 할증 근거도 대기요금도 없었다(청구 누락).
+    const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'lib/orderCreate.js'), 'utf8');
+    check('createOrder가 스스로 채운다', /접수 경로가 안 넘겼으면 여기서 채운다/.test(src), true);
+    check('이미 넘어온 값은 덮어쓰지 않는다', /const needWait = !row\.waitFee;/.test(src), true);
   } finally {
     await cleanup();
     await db.pool.end().catch(() => {});

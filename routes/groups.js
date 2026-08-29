@@ -822,13 +822,17 @@ async function loadSettlement(groupId, month) {
       FROM orders o
       LEFT JOIN users su ON su.id = o.settled_by
       JOIN (
+        -- 어느 달로 묶을지 정하는 시각. 완료 건은 완료 시각, 취소 건은 취소 시각이다 —
+        -- 취소 건에는 완료 이력이 없어서 '완료'만 보면 조인에서 통째로 빠진다.
         SELECT order_id, MAX(created_at) AS completed_at
           FROM order_status_history
-         WHERE new_status = '완료'
+         WHERE new_status IN ('완료', '취소')
          GROUP BY order_id
       ) h ON h.order_id = o.id
      WHERE o.requester_group_id = ?
-       AND o.status = '완료'
+       -- 완료 건이 정산 대상이다. 다만 **취소요금이 붙은 취소 건**은 청구할 금액이 있으므로
+       -- 함께 넣는다 — 예전에는 완료만 봐서, 취소요금을 계산해 저장해도 청구할 방법이 없었다.
+       AND (o.status = '완료' OR (o.status = '취소' AND COALESCE(o.cancel_fee_amount, 0) > 0))
        AND SUBSTRING(h.completed_at, 1, 7) = ?
      ORDER BY h.completed_at ASC, o.id ASC
   `;
@@ -963,7 +967,13 @@ async function loadSettlement(groupId, month) {
   });
   extras.sort((a, b) => String(a.charged_on || '').localeCompare(String(b.charged_on || '')));
 
-  const extraSummary = extraCharges.summarize(extras);
+  // **월 정산서의 청구 총액에는 월정산 항목만 넣는다.**
+  //
+  // 개별정산은 건별 청구서로 따로 청구한다(요금설정에서 그렇게 정한 항목이다). 둘 다 총액에
+  // 넣으면 같은 금액을 월 정산서와 건별 청구서로 **두 번 청구**하게 된다 — 실제로 그랬다.
+  // 목록에는 그대로 보여준다(무엇이 있는지는 알아야 한다). 총액에서만 뺀다.
+  const monthlyExtras = extras.filter((e) => e.settleMode !== 'individual');
+  const extraSummary = extraCharges.summarize(monthlyExtras);
   // 월정산 / 개별정산으로 갈라 보여준다(사용자 지시 — 입금관리 목적).
   extraSummary.byMode = { monthly: { count: 0, amount: 0 }, individual: { count: 0, amount: 0 } };
   extras.forEach((e) => {
@@ -972,13 +982,16 @@ async function loadSettlement(groupId, month) {
     bucket.amount += e.amount;
   });
   extraSummary.settledCount = extras.filter((e) => e.settled).length;
+  // 목록에 보이는 줄 수(개별정산 포함)와 청구에 든 건수는 다르다 — 화면이 헷갈리지 않게 나눈다.
+  extraSummary.listedCount = extras.length;
 
   // 고를 수 있는 달 — 이 법인에 완료 오더가 있는 달만 보여준다. 빈 달을 늘어놓을 이유가 없다.
   const months = await db.all(`
     SELECT DISTINCT SUBSTRING(h.created_at, 1, 7) AS month
       FROM orders o
-      JOIN order_status_history h ON h.order_id = o.id AND h.new_status = '완료'
-     WHERE o.requester_group_id = ? AND o.status = '완료'
+      JOIN order_status_history h ON h.order_id = o.id AND h.new_status IN ('완료', '취소')
+     WHERE o.requester_group_id = ?
+       AND (o.status = '완료' OR (o.status = '취소' AND COALESCE(o.cancel_fee_amount, 0) > 0))
      ORDER BY 1 DESC
   `, [groupId]);
 

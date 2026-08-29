@@ -1176,7 +1176,7 @@ router.post('/', asyncHandler(async (req, res) => {
     // 남긴다 — 화면이 보낸 설명을 그대로 믿으면 근거가 아니게 된다.
     // 대기요금 — 도착지 대기시간이 요금설정 기준을 넘으면 붙는다. 거리와 무관해 요금 전체를
     // 다시 계산하지 않고 설정만 읽어 판정한다.
-    const feeExtra = await branchPolicy.loadExtraSettings(requester_group_id || null, branch_id || null);
+    const feeExtra = await branchPolicy.findFareExtra(requester_group_id || null, branch_id || null);
     waitFee = tripFees.waitFee(feeExtra, destination_wait_minutes);
 
     const distanceKm = Number(req.body.distance_km);
@@ -2189,7 +2189,7 @@ router.post('/:id/status', asyncHandler(async (req, res) => {
   // 이미 값이 있으면 덮어쓰지 않는다 — 취소를 되돌렸다가 다시 취소해도 두 번 붙으면 안 된다.
   if (status === '취소' && order.status !== '취소') {
     try {
-      const feeExtra = await branchPolicy.loadExtraSettings(order.requester_group_id, order.branch_id);
+      const feeExtra = await branchPolicy.findFareExtra(order.requester_group_id, order.branch_id);
       const fee = tripFees.cancelFee(feeExtra, { previousStatus: order.status });
       if (fee.amount > 0 && order.cancel_fee_amount == null) {
         await db.run('UPDATE orders SET cancel_fee_amount = ?, cancel_fee_note = ? WHERE id = ?',

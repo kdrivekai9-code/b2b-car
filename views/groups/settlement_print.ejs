@@ -162,10 +162,12 @@
 
   <div class="section">
     <div class="section-head">
-      <%= itemized && summary.surcharge > 0 ? '3' : '2' %>. 기타 정산 내역 (별도 청구, <%= extraSummary.count %>건)
+      <%= itemized && summary.surcharge > 0 ? '3' : '2' %>. 기타 정산 내역 (월정산, <%= extraSummary.count %>건)
     </div>
-    <% if (!extras.length) { %>
-      <p class="empty">별도 청구할 기타 정산 내역이 없습니다.</p>
+    <%# 개별정산은 건별 청구서로 따로 청구한다 — 이 문서에 넣으면 두 번 청구된다. %>
+    <% const monthlyExtras = extras.filter(function (e) { return e.settleMode !== 'individual'; }) %>
+    <% if (!monthlyExtras.length) { %>
+      <p class="empty">월정산으로 청구할 기타 정산 내역이 없습니다.</p>
     <% } else { %>
       <table class="rows">
         <thead>
@@ -178,7 +180,7 @@
           </tr>
         </thead>
         <tbody>
-          <% extras.forEach(function (r) { %>
+          <% monthlyExtras.forEach(function (r) { %>
             <tr>
               <td><%= r.charged_on || '-' %></td>
               <td><%= r.vehicle_number || '-' %></td>

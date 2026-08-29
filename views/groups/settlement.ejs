@@ -203,12 +203,13 @@
 <% } %>
 
 <div class="card">
-  <div class="section-title">🧾 기타 정산 내역 · 별도 청구 (<%= extraSummary.count %>건)</div>
+  <div class="section-title">🧾 기타 정산 내역 · 별도 청구 (<%= extraSummary.listedCount %>건)</div>
   <%# 실비가 어느 달로 묶이는지는 오더를 따라간다. 목록의 '일자'는 실제 발생일이라 월말 오더의
       톨게이트비가 다음 달 날짜로 찍힐 수 있는데, 그걸 보고 "잘못 들어왔다"고 읽지 않도록 밝힌다. %>
   <p class="page-sub">
-    주유비 · 주차요금 · 톨게이트비 중 <b>별도 청구</b>로 표시된 것만 모았습니다.
-    해당 오더가 완료된 달의 정산에 들어가며, 일자는 실제 발생일입니다.
+    <b>별도 청구</b>로 표시된 실비만 모았습니다. 해당 오더가 완료된 달로 묶이며, 일자는 실제 발생일입니다.
+    <b>아래 합계와 총 청구액에는 월정산 항목만 들어갑니다</b> —
+    개별정산은 건별 청구서로 따로 청구하므로, 함께 넣으면 두 번 청구하게 됩니다.
   </p>
   <% if (!extras.length) { %>
     <p class="page-sub" style="margin:0;">이 달에 별도 청구할 기타 정산 내역이 없습니다.</p>
@@ -250,7 +251,10 @@
                   월정산은 이 정산서에 모아 청구하고, 개별정산은 건별로 따로 청구한다. %>
               <td>
                 <% if (r.settleMode === 'individual') { %>
+                  <%# 이 줄은 아래 합계에 들어가지 않는다 — 건별 청구서로 따로 청구한다.
+                      합계에 넣으면 같은 금액을 두 번 청구하게 된다. %>
                   <span class="badge purple">개별정산</span>
+                  <br><span class="muted">건별 청구</span>
                 <% } else { %>
                   <span class="badge blue">월정산</span>
                 <% } %>
@@ -271,7 +275,7 @@
         </tbody>
         <tfoot>
           <tr>
-            <th colspan="6" style="text-align:right;">합계</th>
+            <th colspan="6" style="text-align:right;">합계 <span class="muted">(월정산만)</span></th>
             <th style="text-align:right;"><%= formatMoney(extraSummary.total) %></th>
             <th></th>
           </tr>
@@ -339,8 +343,10 @@
 
   <%# 월정산과 개별정산은 청구 시점이 달라 입금도 따로 들어온다 — 나눠 보여야 대사가 된다. %>
   <p class="page-sub" style="margin-bottom:0;">
-    기타 정산 내 <b>월정산 <%= formatMoney(extraSummary.byMode.monthly.amount) %></b>(<%= extraSummary.byMode.monthly.count %>건) ·
+    기타 정산 내 <b>월정산 <%= formatMoney(extraSummary.byMode.monthly.amount) %></b>(<%= extraSummary.byMode.monthly.count %>건)
+    — 위 총 청구액에 포함됩니다.<br>
     <b>개별정산 <%= formatMoney(extraSummary.byMode.individual.amount) %></b>(<%= extraSummary.byMode.individual.count %>건)
+    — <b>총 청구액에 포함되지 않습니다.</b> 건별 청구서로 따로 청구합니다.
   </p>
 </div>
 
