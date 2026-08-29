@@ -232,6 +232,82 @@ test.describe('정산내역서 출력', () => {
     expect((await db.get('SELECT settled_at FROM orders WHERE oid = ?', [`${MARK}-1`])).settled_at).toBeFalsy();
   });
 
+  // 개별정산은 건별로 따로 청구하기로 한 항목이다 — 월 정산서 한 장에 모으면 그 설정이
+  // 무의미해진다. 건마다 한 장씩 나오는지, 그리고 월정산 항목이 섞여 들어가지 않는지 본다.
+  test('개별정산 항목만 건별 청구서로 나온다', async ({ page }) => {
+    test.skip(!groupId, '법인이 없습니다');
+    await page.addInitScript(() => { window.print = () => {}; });
+
+    // 주유비·세차비를 개별정산으로, 주차비를 월정산으로 둔다.
+    // 개별정산을 **둘** 두는 이유: 한 건뿐이면 그 장이 마지막 장이라 페이지 나눔이 걸리지
+    // 않는다(:last-of-type). 그 상태로 검사하면 나눔이 없는 것을 정상으로 착각한다.
+    await db.run(
+      `UPDATE group_fare_extra_settings
+          SET fuel_mode = 'individual', wash_mode = 'individual', parking_mode = 'monthly'
+        WHERE group_id = ?`, [groupId]
+    ).catch(() => {});
+    const order = await db.get('SELECT id FROM orders WHERE oid = ?', [`${MARK}-1`]);
+    await db.run(
+      `INSERT INTO order_extra_charges (order_id, charge_type, amount, charged_on, billable)
+       VALUES (?, '주차요금', 7000, ?, true), (?, '세차비', 15000, ?, true)`,
+      [order.id, `${MONTH}-05`, order.id, `${MONTH}-05`]
+    );
+
+    await loginWithRetry(page, { baseUrl: BASE_URL, loginId: LOGIN_ID, password: PASSWORD });
+    const res = await page.goto(
+      `${BASE_URL}/groups/${groupId}/settlement/individual-print?month=${MONTH}&autoprint=0`,
+      { waitUntil: 'domcontentloaded' }
+    );
+    expect(res.status()).toBe(200);
+
+    await expect(page.locator('h1').first()).toContainText('청 구 서');
+    // 개별정산으로 둔 주유비만 나와야 한다.
+    await expect(page.getByText('기타정산(주유비)', { exact: false }).first()).toBeVisible();
+    // 월정산 항목이 섞이면 같은 금액을 월 정산서와 건별 청구서로 두 번 청구하게 된다.
+    await expect(page.getByText('기타정산(주차요금)', { exact: false })).toHaveCount(0);
+    // 도선료는 오더에서 파생된 줄이라 별도 청구 대상이 아니다.
+    await expect(page.getByText('기타정산(도선료)', { exact: false })).toHaveCount(0);
+
+    // 어느 운행 건에 대한 청구인지 밝혀야 한다.
+    await expect(page.getByText(`${MARK}-1`, { exact: false }).first()).toBeVisible();
+    await expect(page.getByText('40,000원', { exact: false }).first()).toBeVisible();
+
+    // 인쇄할 때 건마다 페이지가 나뉘어야 한다 — 붙어 나오면 월 정산서와 다를 게 없다.
+    // CSS 문자열이 아니라 **인쇄 모드에서 실제로 계산된 값**을 본다(브라우저가 속성 이름을
+    // break-after로 정규화해서, 문자열로 찾으면 있어도 못 찾는다).
+    await page.emulateMedia({ media: 'print' });
+    const breakAfter = await page.locator('.sheet').first().evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return cs.breakAfter || cs.pageBreakAfter;
+    });
+    expect(breakAfter, '건마다 페이지 나눔').toMatch(/page|always/);
+    await page.emulateMedia({ media: 'screen' });
+
+    // 여러 장이면 마지막에 요약 장이 붙는다 — 몇 장을 뽑았고 합이 얼마인지 확인하지 못하면
+    // 한 장이 빠져도 모른다.
+    await expect(page.getByText('청 구 요 약', { exact: false })).toBeVisible();
+    await expect(page.getByText('55,000원', { exact: false }).first()).toBeVisible();
+
+    await db.run("DELETE FROM order_extra_charges WHERE order_id = ? AND charge_type IN ('주차요금', '세차비')", [order.id]);
+  });
+
+  test('개별정산 항목이 없으면 빈 종이 대신 이유를 알린다', async ({ page }) => {
+    test.skip(!groupId, '법인이 없습니다');
+    await page.addInitScript(() => { window.print = () => {}; });
+    // 모두 월정산으로 되돌린다.
+    await db.run(
+      `UPDATE group_fare_extra_settings
+          SET fuel_mode = 'monthly', wash_mode = 'monthly', parking_mode = 'monthly'
+        WHERE group_id = ?`, [groupId]
+    ).catch(() => {});
+    await loginWithRetry(page, { baseUrl: BASE_URL, loginId: LOGIN_ID, password: PASSWORD });
+    await page.goto(`${BASE_URL}/groups/${groupId}/settlement/individual-print?month=${MONTH}&autoprint=0`,
+      { waitUntil: 'domcontentloaded' });
+    // 빈 종이가 나오면 설정을 의심하지 못한다.
+    await expect(page.getByText('개별정산', { exact: false }).first()).toBeVisible();
+    await expect(page.getByText('청구할 항목이 없습니다', { exact: false })).toBeVisible();
+  });
+
   test('표시 방식을 바꿔도 총 청구액은 같다', async ({ page }) => {
     test.skip(!groupId, '법인이 없습니다');
     await page.addInitScript(() => { window.print = () => {}; });

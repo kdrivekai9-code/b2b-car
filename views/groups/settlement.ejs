@@ -352,11 +352,18 @@
     운행요금 <b><%= summary.settledCount %>/<%= summary.count %>건</b> ·
     기타정산 <b><%= extraSummary.settledCount %>/<%= extraSummary.count %>건</b> 완료.
   </p>
-  <div style="display:flex;gap:8px;">
+  <div style="display:flex;gap:8px;flex-wrap:wrap;">
     <button class="btn" type="submit" form="settleForm" name="action" value="settle">선택 항목 정산완료</button>
     <%# 잘못 누른 것을 되돌릴 길이 없으면 아무도 안 쓴다. %>
     <button class="btn secondary" type="submit" form="settleForm" name="action" value="unsettle">선택 항목 미정산으로</button>
+    <%# 개별정산은 건별로 따로 청구한다 — 월 정산서로는 뽑을 수 없다. 고른 것이 없으면
+        그 달의 개별정산 전부를 뽑는다(월말에 한꺼번에 뽑는 흐름). %>
+    <button type="button" class="btn secondary" id="individualPrintBtn">📄 개별정산 건별 청구서</button>
   </div>
+  <p class="page-sub" style="margin-bottom:0;">
+    건별 청구서는 <b>기타 정산 중 개별정산 항목</b>만 뽑습니다(<%= extraSummary.byMode.individual.count %>건).
+    체크한 것이 있으면 그것만, 없으면 이 달의 개별정산 전부를 한 문서에 건별로 담습니다.
+  </p>
 </div>
 
 <script>
@@ -370,6 +377,21 @@
       });
     });
   });
+
+  var individualBtn = document.getElementById('individualPrintBtn');
+  if (individualBtn) {
+    individualBtn.addEventListener('click', function () {
+      // 체크한 기타정산 줄만 뽑는다. 하나도 안 골랐으면 ids를 비워 보내 그 달의 개별정산
+      // 전부를 뽑게 한다 — 매번 전부 체크하게 하면 쓰기 번거롭다.
+      var ids = Array.prototype.slice
+        .call(document.querySelectorAll('input[name="extra_id"]:checked'))
+        .map(function (cb) { return cb.value; });
+      var m = (document.getElementById('month') || {}).value || '<%= month %>';
+      var qs = 'month=' + encodeURIComponent(m) + (ids.length ? '&ids=' + encodeURIComponent(ids.join(',')) : '');
+      window.open('/groups/<%= group.id %>/settlement/individual-print?' + qs,
+        'individualPrint', 'width=900,height=1000,scrollbars=yes');
+    });
+  }
 
   var printBtn = document.getElementById('settlementPrintBtn');
   if (printBtn) {

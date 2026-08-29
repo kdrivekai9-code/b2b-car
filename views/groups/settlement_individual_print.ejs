@@ -1,0 +1,149 @@
+<%
+  // 개별정산 건별 청구서. 월 정산서(settlement_print.ejs)와 달리 **건마다 한 장**이다 —
+  // 요금설정에서 "개별정산"으로 둔 항목은 건별로 따로 청구하기로 한 것이라 한 장에 모으면
+  // 그 설정이 무의미해진다.
+  //
+  // 금액은 정산 화면과 같은 loadSettlement 결과를 그대로 쓴다. 여기서 다시 계산하면 청구서와
+  // 화면이 다른 숫자를 보이게 되고, 그건 발송한 뒤에야 드러난다.
+  const money = (n) => (Number(n) || 0).toLocaleString('ko-KR') + '원';
+  const addr = (a, d) => [a, d].filter(Boolean).join(' ') || '-';
+%><!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>개별정산 청구서 · <%= group.name %> · <%= month %></title>
+<style>
+  @page { size: A4; margin: 16mm 14mm; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 18px;
+    font-family: -apple-system, BlinkMacSystemFont, "Malgun Gothic", "맑은 고딕", sans-serif;
+    font-size: 12px; color: #111; background: #f4f5f7;
+  }
+  .toolbar { max-width: 820px; margin: 0 auto 12px; display: flex; gap: 8px; justify-content: flex-end; }
+  .btn { padding: 7px 14px; border: 1px solid #2e5c8a; background: #2e5c8a; color: #fff;
+         border-radius: 4px; cursor: pointer; font-size: 13px; }
+  .btn.secondary { background: #fff; color: #2e5c8a; }
+  .sheet { max-width: 820px; margin: 0 auto 18px; background: #fff; padding: 30px 32px; }
+  h1 { font-size: 22px; letter-spacing: 6px; text-align: center; margin: 0 0 4px; }
+  .subtitle { text-align: center; color: #555; margin-bottom: 20px; }
+  table { width: 100%; border-collapse: collapse; }
+  .meta th, .meta td { border: 1px solid #bbb; padding: 6px 9px; }
+  .meta th { background: #f2f3f5; text-align: left; width: 96px; font-weight: 600; white-space: nowrap; }
+  .amount { margin-top: 18px; border: 2px solid #333; padding: 12px 16px;
+            display: flex; justify-content: space-between; align-items: center; }
+  .amount b { font-size: 22px; }
+  .sign { margin-top: 28px; text-align: center; line-height: 1.9; }
+  .muted { color: #666; font-size: 11px; }
+  .empty { max-width: 820px; margin: 0 auto; background: #fff; padding: 30px; text-align: center; color: #666; }
+  @media print {
+    body { background: #fff; padding: 0; font-size: 11px; }
+    .toolbar { display: none; }
+    /* 건마다 한 장 — 이게 이 문서의 전부다. 붙어서 나오면 월 정산서와 다를 게 없다. */
+    .sheet { max-width: none; margin: 0; padding: 0; page-break-after: always; }
+    .sheet:last-of-type { page-break-after: auto; }
+    tr { page-break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+  <button class="btn" onclick="window.print()">인쇄</button>
+  <button class="btn secondary" onclick="window.close()">닫기</button>
+</div>
+
+<% if (!items.length) { %>
+  <%# 개별정산으로 둔 항목이 없으면 뽑을 것이 없다. 빈 종이가 나오면 설정을 의심하지 못한다. %>
+  <div class="empty">
+    <%= month %>에 <b>개별정산</b>으로 청구할 항목이 없습니다.<br>
+    <span class="muted">
+      요금설정의 부대비용에서 "제외 · 실비 개별정산"으로 둔 항목만 여기 나옵니다.
+      월정산 항목은 월 정산내역서에 포함됩니다.
+    </span>
+  </div>
+<% } %>
+
+<% items.forEach(function (r, i) { %>
+  <div class="sheet">
+    <h1>청 구 서</h1>
+    <p class="subtitle">
+      개별정산 · <%= month %>
+      <% if (items.length > 1) { %><span class="muted">(<%= i + 1 %>/<%= items.length %>)</span><% } %>
+    </p>
+
+    <table class="meta">
+      <tr><th>공급받는자</th><td><b><%= group.name %></b></td></tr>
+      <tr><th>사업자번호</th><td><%= group.business_registration_number || '-' %></td></tr>
+      <tr><th>공급자</th><td><%= group.branch_name || '-' %><%= group.branch_phone ? ' · ' + group.branch_phone : '' %></td></tr>
+      <tr><th>발행일</th><td><%= issuedOn %><%= issuedBy ? ' · 작성 ' + issuedBy : '' %></td></tr>
+    </table>
+
+    <table class="meta" style="margin-top:12px;">
+      <%# 어느 운행 건에 대한 청구인지 밝힌다 — 접수번호만으로는 받는 쪽이 무엇인지 모른다. %>
+      <tr><th>접수번호</th><td><%= r.oid %></td></tr>
+      <tr><th>발생일</th><td><%= r.charged_on || '-' %></td></tr>
+      <tr><th>차량번호</th><td><%= r.vehicle_number || '-' %></td></tr>
+      <tr><th>출발지</th><td><%= addr(r.origin_address, r.origin_address_detail) %></td></tr>
+      <tr><th>청구 항목</th><td><b>기타정산(<%= r.charge_type %>)</b></td></tr>
+      <% if (r.note) { %><tr><th>비고</th><td><%= r.note %></td></tr><% } %>
+      <tr>
+        <th>정산 상태</th>
+        <td>
+          <% if (r.settled) { %>
+            정산완료
+            <% if (r.settled_at) { %>
+              <span class="muted"><%= String(r.settled_at).slice(0, 16) %><%= r.settled_by_name ? ' · ' + r.settled_by_name : '' %></span>
+            <% } %>
+          <% } else { %>미정산<% } %>
+        </td>
+      </tr>
+    </table>
+
+    <div class="amount">
+      <span>청구 금액</span>
+      <b><%= money(r.amount) %></b>
+    </div>
+
+    <div class="sign">
+      위 금액을 청구합니다.<br>
+      <%= issuedOn %>
+    </div>
+  </div>
+<% }) %>
+
+<% if (items.length > 1) { %>
+  <%# 여러 장을 한 번에 뽑을 때 총액을 마지막에 한 번 밝힌다 — 몇 장을 뽑았고 합이 얼마인지
+      확인하지 못하면 한 장이 빠져도 모른다. %>
+  <div class="sheet">
+    <h1>청 구 요 약</h1>
+    <p class="subtitle">개별정산 <%= items.length %>건 · <%= month %></p>
+    <table class="meta">
+      <thead>
+        <tr><th style="width:auto;">접수번호</th><th style="width:auto;">항목</th><th style="width:120px;">금액</th></tr>
+      </thead>
+      <tbody>
+        <% items.forEach(function (r) { %>
+          <tr>
+            <td><%= r.oid %></td>
+            <td>기타정산(<%= r.charge_type %>)</td>
+            <td style="text-align:right;"><%= money(r.amount) %></td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+    <div class="amount">
+      <span>합계 <%= items.length %>건</span>
+      <b><%= money(total) %></b>
+    </div>
+  </div>
+<% } %>
+
+<script>
+  // 결재·발송용이라 대부분 열자마자 뽑는다. ?autoprint=0으로 열면 미리보기만 한다.
+  if (new URLSearchParams(location.search).get('autoprint') !== '0') {
+    window.addEventListener('load', function () { setTimeout(function () { window.print(); }, 300); });
+  }
+</script>
+</body>
+</html>

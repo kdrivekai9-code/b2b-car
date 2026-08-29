@@ -1149,6 +1149,42 @@ router.post('/:id/settlement/surcharge-mode', asyncHandler(async (req, res) => {
     + encodeURIComponent(mode === 'itemized' ? '할증을 별도 줄로 표시합니다.' : '할증을 운행요금에 포함해 표시합니다.'));
 }));
 
+// 개별정산 건별 청구서 — 개별정산으로 설정한 기타 정산 항목을 건마다 한 장씩 뽑는다.
+//
+// 월정산은 월 정산서 한 장에 모아 청구하지만, 개별정산은 건별로 따로 청구한다(요금설정에서
+// 그렇게 정한 항목이다). 그런데 월 정산서만 있어서 개별정산 건을 뽑을 방법이 없었다.
+//
+// 한 문서에 여러 장을 담는다 — 건마다 창을 열게 하면 열 건이면 열 번 뽑아야 한다.
+// 인쇄할 때 건마다 페이지가 나뉜다.
+router.get('/:id/settlement/individual-print', asyncHandler(async (req, res) => {
+  const group = await db.get(`
+    SELECT g.*, b.name AS branch_name, b.main_phone AS branch_phone
+      FROM groups_tbl g LEFT JOIN branches b ON b.id = g.branch_id
+     WHERE g.id = ?`, [req.params.id]);
+  if (!group) return res.status(404).send('법인을 찾을 수 없습니다.');
+  const month = settlementMonth(req.query.month);
+  const data = await loadSettlement(req.params.id, month);
+
+  // 고른 줄만 뽑는다. 안 고르면 그 달의 개별정산 전부 — 월말에 한꺼번에 뽑는 흐름이 자연스럽다.
+  const picked = String(req.query.ids || '').split(',').map((v) => v.trim()).filter(Boolean);
+  const items = data.extras.filter((e) => {
+    // 도선료처럼 오더에서 파생된 줄은 별도 청구서 대상이 아니다 — 운행요금과 함께 청구된다.
+    if (e.derived) return false;
+    if (picked.length) return picked.includes(String(e.id));
+    return e.settleMode === 'individual';
+  });
+
+  const now = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  res.render('groups/settlement_individual_print', {
+    group,
+    month,
+    items,
+    total: items.reduce((a, e) => a + (Number(e.amount) || 0), 0),
+    issuedOn: `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-${String(now.getUTCDate()).padStart(2, '0')}`,
+    issuedBy: (req.session.user && req.session.user.name) || '',
+  });
+}));
+
 // 정산내역서 출력 — 내부 결재용 서류.
 //
 // 화면(settlement)과 같은 데이터를 쓰되 레이아웃이 다르다: 결재란·공급자/공급받는자·발행일이
