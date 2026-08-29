@@ -5,7 +5,7 @@ const asyncHandler = require('../middleware/asyncHandler');
 // Gemini를 부르는 경로는 사용량을 제한한다(middleware/aiRateLimit.js의 주석 참조).
 const { aiRateLimit } = require('../middleware/aiRateLimit');
 const { ORDER_STATUSES } = require('../config');
-const { getEffectivePaymentMethods, getEffectiveStatuses, checkOperatingHours, calculateFareWithFerry, calculatePremiumFare, findSpecialTolls } = require('../lib/branchPolicy');
+const { getEffectivePaymentMethods, getEffectiveStatuses, checkOperatingHours, calculateFareWithFerry, calculatePremiumFare, findSpecialTolls, findFareExtra } = require('../lib/branchPolicy');
 const { notify } = require('../lib/push');
 const { kstNow } = require('../lib/period');
 const { parseIntakeText } = require('../lib/aiIntakeParser');
@@ -1157,8 +1157,11 @@ router.post('/', asyncHandler(async (req, res) => {
   // 얼마인지는 우리 표에서 서버가 정한다.
   let specialTolls = [];
   let fareSurcharges = [];
+  // 이 오더에 적용되는 요금설정 — 통행료를 특수교량만 청구할지 총액을 청구할지 여기서 갈린다.
+  let fareExtra = null;
   try {
     const tollgates = req.body.tollgates_json ? JSON.parse(req.body.tollgates_json) : [];
+    fareExtra = await findFareExtra(requester_group_id || null, branch_id || null);
     specialTolls = await findSpecialTolls(
       requester_group_id || null, branch_id || null,
       [origin_address, destination_address, Array.isArray(tollgates) ? tollgates : []]
@@ -1200,6 +1203,12 @@ router.post('/', asyncHandler(async (req, res) => {
     ferryFareAmount: ferry_fare_amount,
     specialTolls,
     fareSurcharges,
+    // 카카오 경로의 총 통행료와 이 오더에 적용되는 요금설정 — 둘로 통행료 청구액이 정해진다.
+    // 금액이지만 클라이언트에서 받는다: 카카오 응답에서 온 사실이라 tollgates_json과 성격이
+    // 같고, 서버가 다시 알려면 경로를 한 번 더 조회해야 한다(경유지까지 같은 경로로).
+    // 그대로 청구되지 않도록 요금설정과 함께 판정을 거친다(fareSurcharge.tollChargeFor).
+    tollFare: Number(req.body.toll_fare) > 0 ? Math.round(Number(req.body.toll_fare)) : null,
+    fareExtra,
     orderType: finalOrderType,
     tripType: trip_type || null,
     finalDestinationAddress: final_destination_address || null,

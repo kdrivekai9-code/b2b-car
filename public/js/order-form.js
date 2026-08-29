@@ -901,6 +901,10 @@
     var distEl = document.getElementById('fare_distance_km');
     if (distEl) distEl.value = (totalKm == null ? '' : String(totalKm.toFixed(2)));
     lastTollFare = tollFare;
+    // 총 통행료는 접수와 함께 저장돼야 한다 — 일반 통행료를 '실비'로 둔 법인에서는
+    // 이 값이 그대로 청구되고, 저장하지 않으면 정산 때 다시 알 방법이 없다.
+    var tollFareEl = document.getElementById('toll_fare');
+    if (tollFareEl) tollFareEl.value = (tollFare === null || tollFare === undefined) ? '' : String(tollFare);
     lastRouteTimingMeta = routeTimingMeta;
     updateFarePreview(totalKm);
     updateFerryFareTile(totalKm);

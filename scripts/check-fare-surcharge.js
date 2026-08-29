@@ -117,6 +117,39 @@ check('공백만 있어도 빈 칸으로 본다',
 check('빈 칸은 범위 검사도 하지 않는다',
   input.findBadFee({ large_model_id: ['7'], large_model_fee: [''] }), null);
 
+console.log('\n[통행료(TG) 청구액]');
+// 사용자 확정 규칙:
+//   일반 통행료 '포함' → 특수교량 금액만 (총액을 쓰면 기본요금에 든 일반분까지 이중 청구)
+//   일반 통행료 '실비' → 총 통행료 그대로 (총액에 특수교량이 이미 들어 있어 더하면 이중 청구)
+const sp = [{ name: '인천대교', amount: 5500 }];
+const toll = (extraCfg, opts) => fs.tollChargeFor(extraCfg, opts);
+const INC = { toll_normal_included: 1 };
+const EXC = { toll_normal_included: 0 };
+
+check('포함 — 특수교량만 청구',
+  (() => { const r = toll(INC, { specialTolls: sp, tollFare: 12000 }); return [r.chargeType, r.amount]; })(),
+  ['특수구간통행료', 5500]);
+check('포함 — 특수교량 없으면 청구 없음', toll(INC, { specialTolls: [], tollFare: 12000 }), null);
+check('실비 — 총 통행료를 청구',
+  (() => { const r = toll(EXC, { specialTolls: sp, tollFare: 12000 }); return [r.chargeType, r.amount]; })(),
+  ['톨게이트', 12000]);
+// 총액에 특수교량이 이미 들어 있다 — 12,000에 5,500을 더하면 그 다리를 두 번 받는다.
+check('실비 — 특수교량을 더하지 않는다',
+  toll(EXC, { specialTolls: sp, tollFare: 12000 }).amount, 12000);
+// 총액을 못 받은 접수 경로(카카오 미조회 등)에서 0원으로 두면 실비인데 아무것도 안 받는다.
+check('실비 — 총액을 모르면 특수교량만이라도',
+  (() => { const r = toll(EXC, { specialTolls: sp, tollFare: 0 }); return [r.chargeType, r.amount]; })(),
+  ['특수구간통행료', 5500]);
+check('실비 — 둘 다 없으면 청구 없음', toll(EXC, { specialTolls: [], tollFare: 0 }), null);
+// 설정이 비어 있으면(마이그레이션 전) 단가표 기본값 = 일반 통행료 포함이다.
+check('설정이 없으면 포함으로 본다',
+  (() => { const r = toll({}, { specialTolls: sp, tollFare: 12000 }); return r.chargeType; })(),
+  '특수구간통행료');
+// 어느 쪽이든 줄은 하나다 — 두 줄이면 합계가 실제 낸 돈과 달라진다.
+check('반환은 항상 한 줄이거나 없음',
+  [toll(INC, { specialTolls: sp, tollFare: 12000 }), toll(EXC, { specialTolls: sp, tollFare: 12000 })]
+    .every((r) => r === null || typeof r.amount === 'number'), true);
+
 console.log('\n[목적지 장소 할증]');
 const placeRules = [{ keyword: '유원지', fee: 3000 }, { keyword: '전망대', fee: 7000 }];
 const place = (address) => fs.computeSurcharges({}, { destinationAddress: address, placeRules }).items;

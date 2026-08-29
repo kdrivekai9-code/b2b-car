@@ -169,6 +169,9 @@
           <%# 경로가 지나간 요금소 이름. 서버가 이걸로 특수구간(민자 교량 등)을 판정해 정산
               항목을 만든다 — 금액은 서버가 우리 표에서 정한다(클라이언트 값을 믿지 않는다). %>
           <input type="hidden" id="tollgates_json" name="tollgates_json" value="">
+          <%# 경로 총 통행료(카카오). 일반 통행료를 '실비'로 둔 법인은 이 값이 그대로 청구된다 —
+              그래서 저장해야 한다(예전에는 화면에만 보여주고 버렸다). %>
+          <input type="hidden" id="toll_fare" name="toll_fare" value="">
           <%# 서버가 할증 내역을 다시 계산해 정산 근거로 남긴다 — 금액은 위 fare_amount를 쓰고
               여기 거리는 "왜 그 금액인지"를 판정하는 데만 쓴다. %>
           <input type="hidden" id="fare_distance_km" name="distance_km" value="">
