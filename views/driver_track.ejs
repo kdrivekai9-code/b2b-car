@@ -1,0 +1,194 @@
+<%
+  // 고객이 카카오 상담톡 링크로 여는 기사 위치 페이지. 공용 레이아웃(header/footer)을 쓰지
+  // 않는다 — 로그인 없이 열리는 화면에 사이드바·관리 메뉴가 보이면 안 된다.
+  //
+  // 화면이 30초마다 /track/:token/location.json만 다시 받아 마커를 옮긴다. 페이지를 통째로
+  // 새로고침하면 지도가 매번 처음 위치로 돌아가 따라가기가 안 된다.
+  const addr = (a, d) => [a, d].filter(Boolean).join(' ') || '-';
+%><!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<%# 카카오톡 인앱 브라우저에서 열리는 화면이라 확대/축소가 어긋나면 지도를 못 만진다. %>
+<title><%= title %></title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Malgun Gothic", "맑은 고딕", sans-serif;
+    background: #f4f5f7; color: #111; font-size: 14px;
+  }
+  .wrap { max-width: 640px; margin: 0 auto; background: #fff; min-height: 100vh; }
+  header { padding: 14px 16px; border-bottom: 1px solid #e5e7eb; }
+  header h1 { margin: 0 0 2px; font-size: 17px; }
+  header .oid { color: #6b7280; font-size: 12px; }
+  #map { width: 100%; height: 58vh; min-height: 300px; background: #e9ecef; }
+  .status { padding: 12px 16px; border-bottom: 1px solid #eee; }
+  .status .line { font-size: 15px; font-weight: 600; }
+  .status .sub { color: #6b7280; font-size: 12px; margin-top: 3px; }
+  /* 오래된 좌표는 색으로도 구분한다 — 글자만으로는 안 읽고 그대로 믿는다. */
+  .status.stale .line { color: #b45309; }
+  .status.off .line { color: #6b7280; font-weight: 500; }
+  .route { padding: 12px 16px; }
+  .route .row { display: flex; gap: 8px; padding: 5px 0; }
+  .route .tag {
+    flex: 0 0 44px; font-size: 11px; color: #fff; background: #2e5c8a;
+    border-radius: 3px; text-align: center; padding: 3px 0; height: 22px;
+  }
+  .route .tag.dest { background: #c2410c; }
+  .route .val { flex: 1; line-height: 1.5; }
+  .foot { padding: 14px 16px 28px; color: #9ca3af; font-size: 11px; line-height: 1.6; }
+  .empty { padding: 40px 20px; text-align: center; color: #6b7280; line-height: 1.7; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<% if (!order) { %>
+  <div class="empty">
+    링크가 올바르지 않거나 만료되었습니다.<br>
+    <span style="font-size:12px;">담당자에게 문의해주세요.</span>
+  </div>
+<% } else { %>
+  <header>
+    <h1>기사님 위치</h1>
+    <div class="oid"><%= order.oid %><%= order.vehicle_number ? ' · ' + order.vehicle_number : '' %></div>
+  </header>
+
+  <%# 첫 화면은 서버가 판단한 상태로 그린다 — 지도가 뜨기 전에 "왜 안 보이는지"를 먼저 알려야
+      고객이 새로고침을 반복하지 않는다. 이후는 폴링이 갱신한다. %>
+  <div class="status" id="status">
+    <div class="line" id="statusLine">위치를 확인하는 중입니다…</div>
+    <div class="sub" id="statusSub"></div>
+  </div>
+
+  <div id="map"></div>
+
+  <div class="route">
+    <div class="row">
+      <span class="tag">출발</span>
+      <span class="val"><%= addr(order.origin_address, order.origin_address_detail) %></span>
+    </div>
+    <div class="row">
+      <span class="tag dest">도착</span>
+      <span class="val"><%= addr(order.destination_address, order.destination_address_detail) %></span>
+    </div>
+  </div>
+
+  <div class="foot">
+    기사님 위치는 운행 중에만 표시되며, 운행이 완료되면 더 이상 수집·표시되지 않습니다.<br>
+    위치는 통신 상황에 따라 실제와 다소 차이가 있을 수 있습니다.
+  </div>
+<% } %>
+
+</div>
+
+<% if (order && kakaoJsKey) { %>
+<script src="//dapi.kakao.com/v2/maps/sdk.js?appkey=<%= kakaoJsKey %>"></script>
+<script>
+(function () {
+  var TOKEN = <%- JSON.stringify(token) %>;
+  var POLL_MS = 30000;
+
+  var statusEl = document.getElementById('status');
+  var lineEl = document.getElementById('statusLine');
+  var subEl = document.getElementById('statusSub');
+
+  // 왜 안 보이는지를 사유별로 다르게 말한다. "확인되지 않습니다" 한 마디로 뭉뚱그리면
+  // 고객이 새로고침만 반복하고 결국 전화한다.
+  var REASON_TEXT = {
+    not_dispatched: ['아직 기사님이 배정되지 않았습니다.', '배정되면 이 화면에 위치가 표시됩니다.'],
+    not_matched: ['아직 기사님이 배정되지 않았습니다.', '배정되면 이 화면에 위치가 표시됩니다.'],
+    completed: ['운행이 완료되었습니다.', '완료된 운행은 위치를 표시하지 않습니다.'],
+    no_fix: ['기사님 위치 신호가 아직 잡히지 않았습니다.', '잠시 후 다시 표시됩니다.'],
+    no_callmaner: ['위치 확인을 지원하지 않는 주문입니다.', ''],
+    mcp_not_configured: ['위치 확인을 지원하지 않는 주문입니다.', ''],
+    not_found: ['운행 정보를 찾지 못했습니다.', '잠시 후 다시 시도해주세요.']
+  };
+
+  var map = null;
+  var driverMarker = null;
+
+  function ensureMap(lat, lon) {
+    if (map) return map;
+    map = new kakao.maps.Map(document.getElementById('map'), {
+      center: new kakao.maps.LatLng(lat, lon), level: 5
+    });
+    return map;
+  }
+
+  function placeStatic(pos, label, color) {
+    if (!pos || !pos.lat || !pos.lon) return null;
+    var m = new kakao.maps.Marker({
+      map: map, position: new kakao.maps.LatLng(pos.lat, pos.lon)
+    });
+    new kakao.maps.CustomOverlay({
+      map: map, position: new kakao.maps.LatLng(pos.lat, pos.lon), yAnchor: 2.1,
+      content: '<div style="background:' + color + ';color:#fff;font-size:11px;padding:2px 6px;border-radius:3px;white-space:nowrap;">' + label + '</div>'
+    });
+    return m;
+  }
+
+  var staticDrawn = false;
+
+  function render(data) {
+    if (!data || !data.available) {
+      var t = REASON_TEXT[data && data.reason] || ['기사님 위치를 확인하지 못했습니다.', '잠시 후 다시 시도해주세요.'];
+      statusEl.className = 'status off';
+      lineEl.textContent = t[0];
+      subEl.textContent = t[1] || '';
+      return;
+    }
+
+    var bits = [];
+    if (data.distanceKm) bits.push('출발지까지 약 ' + data.distanceKm + 'km');
+    if (data.etaMinutes) bits.push('약 ' + data.etaMinutes + '분 소요 예상');
+    statusEl.className = 'status' + (data.stale ? ' stale' : '');
+    lineEl.textContent = bits.length ? bits.join(' · ') : '기사님이 이동 중입니다.';
+    // 오래된 좌표를 "지금 위치"로 보여주면 고객이 엉뚱한 곳에서 기다린다.
+    subEl.textContent = data.stale && data.ageMinutes != null
+      ? data.ageMinutes + '분 전에 확인된 위치입니다.'
+      : '위치는 30초마다 갱신됩니다.';
+
+    ensureMap(data.lat, data.lon);
+    if (!staticDrawn) {
+      placeStatic(data.origin, '출발', '#2e5c8a');
+      placeStatic(data.destination, '도착', '#c2410c');
+      staticDrawn = true;
+    }
+
+    var pos = new kakao.maps.LatLng(data.lat, data.lon);
+    if (!driverMarker) {
+      driverMarker = new kakao.maps.Marker({ map: map, position: pos, zIndex: 10 });
+      new kakao.maps.CustomOverlay({
+        map: map, position: pos, yAnchor: 2.1, zIndex: 11,
+        content: '<div style="background:#111;color:#fff;font-size:11px;padding:2px 6px;border-radius:3px;white-space:nowrap;">기사님</div>'
+      }).setMap(map);
+      map.setCenter(pos);
+    } else {
+      driverMarker.setPosition(pos);
+      map.panTo(pos);
+    }
+  }
+
+  function poll() {
+    fetch('/track/' + TOKEN + '/location.json', { credentials: 'same-origin' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) { if (d) render(d); })
+      // 한 번 실패해도 멈추지 않는다 — 지하주차장 등에서 잠깐 끊기는 것이 정상이다.
+      .catch(function () {});
+  }
+
+  poll();
+  var timer = setInterval(poll, POLL_MS);
+  // 탭이 가려져 있는 동안은 묻지 않는다. 카카오 인앱 브라우저를 켜둔 채 두는 사람이 많아,
+  // 그대로 두면 하루 종일 콜마너를 두드린다.
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) { clearInterval(timer); timer = null; }
+    else if (!timer) { poll(); timer = setInterval(poll, POLL_MS); }
+  });
+})();
+</script>
+<% } %>
+</body>
+</html>

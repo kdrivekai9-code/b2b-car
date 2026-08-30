@@ -42,6 +42,8 @@ const tripFees = require('../lib/tripFees');
 const branchPolicy = require('../lib/branchPolicy');
 // 기타 정산 내역(주유비·주차요금·톨게이트). 항목 정의를 법인 정산내역 화면과 공유한다.
 const extraCharges = require('../lib/extraCharges');
+// 기사 현재 위치(콜마너 MCP) — 화면·통보·챗봇이 같은 규칙을 쓰도록 한 곳에 모았다.
+const driverLocation = require('../lib/driverLocation');
 const fareSurcharge = require('../lib/fareSurcharge');
 const { getRouteFareSettings } = require('../lib/routeFareSearch');
 
@@ -1447,6 +1449,23 @@ async function loadOrderForView(req, res) {
   if (!clientScope.canView(scope, order)) { res.status(403); return null; }
   return order;
 }
+
+// 배차된 기사의 현재 위치. 화면이 30초마다 물어보므로 가볍고 조용해야 한다.
+//
+// 권한은 오더 조회 권한을 그대로 쓴다(loadOrderForView) — 관리자·지사뿐 아니라 고객도 자기
+// 오더의 기사 위치를 본다(사용자 지시). 남의 오더는 애초에 404/403으로 막힌다.
+router.get('/:id/driver-location.json', asyncHandler(async (req, res) => {
+  const order = await loadOrderForView(req, res);
+  if (!order) return res.json({ available: false, reason: 'not_found' });
+  const loc = await driverLocation.loadForOrder(order);
+  // 좌표를 그릴 수 있게 출발·도착도 같이 준다 — 기사 점만 있으면 어디로 가는 중인지 모른다.
+  res.json({
+    ...loc,
+    trackingUrl: driverLocation.trackingLink(order),
+    origin: { lat: order.origin_lat, lon: order.origin_lon, address: order.origin_address },
+    destination: { lat: order.destination_lat, lon: order.destination_lon, address: order.destination_address },
+  });
+}));
 
 // GET /:id(EJS)가 쓰는 것과 같은 부가 데이터(변경이력/드라이버/구간/사진/상태목록)를
 // 새 React 상세페이지의 관리자 패널(OrderDetailAdminPanels.js)에도 그대로 실어준다 —

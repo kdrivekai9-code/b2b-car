@@ -1,5 +1,6 @@
 import { headers } from 'next/headers';
 import CallmanerPhotos from './CallmanerPhotos';
+import DriverLocationMap from './DriverLocationMap';
 import { redirect } from 'next/navigation';
 import AppShell from '../../_components/AppShell';
 import OrderForm from '../new/OrderForm';
@@ -115,6 +116,13 @@ export default async function OrderDetailPage({ params }) {
           )}
         </div>
       )}
+
+      {/* 기사 위치 — 관리자·지사뿐 아니라 고객도 자기 오더의 기사 위치를 본다(사용자 지시).
+          "지금 어디쯤이에요?"가 상담 문의의 큰 몫이라, 화면에서 스스로 확인하면 그만큼 줄어든다.
+          배차 전·완료 후에는 컴포넌트가 스스로 아무것도 그리지 않는다. */}
+      <div style={{ marginTop: 18 }}>
+        <DriverLocationMap orderId={id} status={data.order.status} />
+      </div>
 
       {/* 콜마너 탁송사진 — 썸네일 깨짐 처리(onError)를 위해 클라이언트 컴포넌트로 뺐다.
           이 파일은 서버 컴포넌트라 이벤트 핸들러를 넘길 수 없다. */}

@@ -24,6 +24,8 @@ const settingsRoutes = require('./routes/settings');
 const driverRoutes = require('./routes/drivers');
 const photoUploadRoutes = require('./routes/photoUpload');
 const photoViewRoutes = require('./routes/photoView');
+// 기사 위치 추적(로그인 없이 토큰으로 연다) — /photos와 같은 공개 링크 계열.
+const driverTrackingRoutes = require('./routes/driverTracking');
 const receiptUploadRoutes = require('./routes/receiptUpload');
 const pushRoutes = require('./routes/push');
 const kakaoRoutes = require('./routes/kakao');
@@ -146,6 +148,7 @@ app.use('/upload', photoUploadRoutes);
 // 고객용 사진 모아보기 — 로그인 없이 토큰으로 연다(카카오톡 버튼이 여는 페이지).
 // 업로드와 열람은 권한이 달라 토큰도 라우터도 분리한다.
 app.use('/photos', photoViewRoutes);
+app.use('/track', driverTrackingRoutes);
 // 우편발송 인수증 업로드 — 경로가 짧은 이유는 lib/postalReceipt.js 주석 참고(적요1 100Byte).
 app.use('/r', receiptUploadRoutes);
 // 콜마너 상태동기화 크론도 세션 로그인 없는 서버 대 서버 호출이라 같은 이유로 먼저 등록한다

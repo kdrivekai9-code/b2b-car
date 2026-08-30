@@ -124,6 +124,17 @@
       <% } %>
     <% } %>
 
+    <%# 기사 위치 — Next 오더상세(src/app/orders/[id]/DriverLocationMap.js)와 같은 화면이다.
+        한쪽만 고치면 플래그를 되돌렸을 때 조용히 사라진다. 관리자·지사·고객 모두 본다.
+        배차 전·완료 후에는 아예 그리지 않는다 — 완료 뒤에는 위치를 더는 수집하지 않는다. %>
+    <% if (['기사배정', '운행시작'].indexOf(order.status) !== -1) { %>
+      <div class="section-title">📍 기사님 위치</div>
+      <div id="driverLoc" data-order-id="<%= order.id %>">
+        <p class="hint" id="driverLocText">위치를 확인하는 중입니다…</p>
+        <div id="driverLocMap" style="width:100%;height:280px;background:#e9ecef;border-radius:4px;display:none;"></div>
+      </div>
+    <% } %>
+
     <%# 콜마너 탁송사진 — 기사 업로드 사진과 별도다(외부 CDN 링크만 보관). 링크가 만료되면
         썸네일이 깨질 수 있어 onerror로 썸네일만 숨기고 링크는 남긴다. %>
     <% if (typeof callmanerPhotos !== 'undefined' && callmanerPhotos.length) { %>
@@ -429,3 +440,73 @@
   });
 </script>
 <%- include('../partials/footer') %>
+
+<%# 기사 위치 폴링. Next 컴포넌트와 같은 규칙(30초, 숨은 탭에서는 멈춤, 오래된 좌표는 밝힘). %>
+<% if (order && ['기사배정', '운행시작'].indexOf(order.status) !== -1) { %>
+<script src="//dapi.kakao.com/v2/maps/sdk.js?appkey=<%= process.env.KAKAO_JS_KEY || '' %>"></script>
+<script>
+(function () {
+  var box = document.getElementById('driverLoc');
+  if (!box) return;
+  var ORDER_ID = box.getAttribute('data-order-id');
+  var textEl = document.getElementById('driverLocText');
+  var mapEl = document.getElementById('driverLocMap');
+  var REASON = {
+    not_dispatched: '아직 기사님이 배정되지 않았습니다.',
+    not_matched: '아직 기사님이 배정되지 않았습니다.',
+    completed: '운행이 완료되어 위치를 표시하지 않습니다.',
+    no_fix: '기사님 위치 신호가 아직 잡히지 않았습니다.',
+    no_callmaner: '위치 확인을 지원하지 않는 주문입니다.',
+    mcp_not_configured: '위치 확인을 지원하지 않는 주문입니다.',
+    no_cid: '출발지 연락처가 없어 위치를 조회할 수 없습니다.'
+  };
+  var map = null, marker = null, drawn = false;
+
+  function pin(p, label, color) {
+    if (!p || !p.lat || !p.lon) return;
+    var at = new kakao.maps.LatLng(p.lat, p.lon);
+    new kakao.maps.Marker({ map: map, position: at });
+    new kakao.maps.CustomOverlay({ map: map, position: at, yAnchor: 2.1,
+      content: '<div style="background:' + color + ';color:#fff;font-size:11px;padding:2px 6px;border-radius:3px;white-space:nowrap;">' + label + '</div>' });
+  }
+
+  function render(d) {
+    if (!d || !d.available) {
+      mapEl.style.display = 'none';
+      textEl.textContent = REASON[d && d.reason] || '기사님 위치를 확인하지 못했습니다.';
+      return;
+    }
+    var bits = [];
+    if (d.distanceKm) bits.push('출발지까지 약 ' + d.distanceKm + 'km');
+    if (d.etaMinutes) bits.push('약 ' + d.etaMinutes + '분 소요 예상');
+    // 오래된 좌표를 "지금 위치"로 보여주면 엉뚱한 곳에서 기다리게 된다.
+    textEl.textContent = (bits.length ? bits.join(' · ') : '기사님이 이동 중입니다.')
+      + (d.stale && d.ageMinutes != null ? ' (' + d.ageMinutes + '분 전 기준)' : '');
+    if (!window.kakao || !kakao.maps || !kakao.maps.Map) return;
+    mapEl.style.display = '';
+    var pos = new kakao.maps.LatLng(d.lat, d.lon);
+    if (!map) map = new kakao.maps.Map(mapEl, { center: pos, level: 5 });
+    if (!drawn) { pin(d.origin, '출발', '#2e5c8a'); pin(d.destination, '도착', '#c2410c'); drawn = true; }
+    if (!marker) {
+      marker = new kakao.maps.Marker({ map: map, position: pos, zIndex: 10 });
+      new kakao.maps.CustomOverlay({ map: map, position: pos, yAnchor: 2.1, zIndex: 11,
+        content: '<div style="background:#111;color:#fff;font-size:11px;padding:2px 6px;border-radius:3px;white-space:nowrap;">기사님</div>' });
+      map.setCenter(pos);
+    } else { marker.setPosition(pos); map.panTo(pos); }
+  }
+
+  function poll() {
+    fetch('/orders/' + ORDER_ID + '/driver-location.json', { credentials: 'same-origin' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) { if (d) render(d); })
+      .catch(function () {});
+  }
+  poll();
+  var timer = setInterval(poll, 30000);
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) { clearInterval(timer); timer = null; }
+    else if (!timer) { poll(); timer = setInterval(poll, 30000); }
+  });
+})();
+</script>
+<% } %>
