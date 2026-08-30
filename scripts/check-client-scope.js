@@ -57,6 +57,27 @@ check('구분 없는 기존 계정도 법인까지만', scopeOf(legacy), { branc
 check('관리자는 제한 없음', scopeOf(admin), {});
 check('지사장은 지사까지만', scopeOf(manager), { branch_id: 1 });
 
+console.log('\n[레코드 접근 가드]');
+// 가드가 다섯 곳에 흩어져 있어 한 곳을 빠뜨렸고, 목록은 가려지는데 주소창에 id를 넣으면
+// 남의 오더가 그대로 열렸다(실측 403이 아니라 200). 이제 판정을 한 함수가 한다.
+const dealerScope = { branch_id: 1, group_id: 1, created_by: 7 };
+const hqScope = { branch_id: 1, group_id: 1 };
+const mine = { branch_id: 1, requester_group_id: 1, created_by: 7 };
+const sibling = { branch_id: 1, requester_group_id: 1, created_by: 8 };
+const otherGroup = { branch_id: 1, requester_group_id: 2, created_by: 7 };
+const otherBranch = { branch_id: 9, requester_group_id: 1, created_by: 7 };
+
+check('딜러 — 본인 오더는 열린다', clientScope.canView(dealerScope, mine), true);
+check('딜러 — 같은 법인 남의 오더는 막힌다', clientScope.denyReason(dealerScope, sibling), 'owner');
+check('딜러 — 다른 법인 오더는 막힌다', clientScope.denyReason(dealerScope, otherGroup), 'group');
+check('딜러 — 다른 지사 오더는 막힌다', clientScope.denyReason(dealerScope, otherBranch), 'branch');
+check('본사 직원 — 같은 법인이면 남의 오더도 열린다', clientScope.canView(hqScope, sibling), true);
+check('본사 직원 — 다른 법인은 막힌다', clientScope.canView(hqScope, otherGroup), false);
+check('관리자(빈 스코프)는 전부 열린다', clientScope.canView({}, otherGroup), true);
+// 문의는 requester_group_id를 쓰지만 다른 표는 group_id를 쓸 수 있다 — 둘 다 받는다.
+check('group_id 필드로도 판정한다',
+  clientScope.denyReason(hqScope, { branch_id: 1, group_id: 2, created_by: 7 }), 'group');
+
 console.log('\n[정산 구분]');
 // loadSettlement이 나누는 규칙: 별도청구 딜러만 따로, 나머지는 본사에 합친다.
 const rows = [

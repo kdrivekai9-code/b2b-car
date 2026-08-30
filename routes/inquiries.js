@@ -43,8 +43,7 @@ async function loadInquiryWithScope(id, req) {
   if (!inquiry) return null;
 
   const scope = scopeFilter(req);
-  if (scope.branch_id && Number(inquiry.branch_id) !== Number(scope.branch_id)) return null;
-  if (scope.group_id && Number(inquiry.requester_group_id) !== Number(scope.group_id)) return null;
+  if (!require('../lib/clientScope').canView(scope, inquiry)) return null;
   return inquiry;
 }
 

@@ -5,6 +5,7 @@ const asyncHandler = require('../middleware/asyncHandler');
 // Gemini를 부르는 경로는 사용량을 제한한다(middleware/aiRateLimit.js의 주석 참조).
 const { aiRateLimit } = require('../middleware/aiRateLimit');
 const { ORDER_STATUSES } = require('../config');
+const clientScope = require('../lib/clientScope');
 const { getEffectivePaymentMethods, getEffectiveStatuses, checkOperatingHours, calculateFareWithFerry, calculatePremiumFare, findSpecialTolls, findFareExtra } = require('../lib/branchPolicy');
 const { notify } = require('../lib/push');
 const { kstNow } = require('../lib/period');
@@ -1443,10 +1444,7 @@ async function loadOrderForView(req, res) {
   `, [req.params.id]);
   if (!order) { res.status(404); return null; }
   const scope = scopeFilter(req);
-  if (scope.branch_id && order.branch_id !== scope.branch_id) { res.status(403); return null; }
-  if (scope.group_id && order.requester_group_id !== scope.group_id) { res.status(403); return null; }
-  // 목록만 좁히면 주소창에 id를 넣어 남의 오더를 그대로 열 수 있다 — 상세에서도 막는다.
-  if (scope.created_by && Number(order.created_by) !== Number(scope.created_by)) { res.status(403); return null; }
+  if (!clientScope.canView(scope, order)) { res.status(403); return null; }
   return order;
 }
 
@@ -1537,12 +1535,7 @@ async function loadOrderForEdit(req, res) {
   const order = await db.get('SELECT * FROM orders WHERE id = ?', [req.params.id]);
   if (!order) { res.status(404).send('오더를 찾을 수 없습니다.'); return null; }
   const scope = scopeFilter(req);
-  if (scope.branch_id && order.branch_id !== scope.branch_id) { res.status(403).render('403', { title: '접근 권한 없음' }); return null; }
-  if (scope.group_id && order.requester_group_id !== scope.group_id) { res.status(403).render('403', { title: '접근 권한 없음' }); return null; }
-  // 개인 딜러는 본인이 접수한 오더만 — 목록·집계와 같은 규칙을 상세에도 건다.
-  if (scope.created_by && Number(order.created_by) !== Number(scope.created_by)) {
-    res.status(403).render('403', { title: '접근 권한 없음' }); return null;
-  }
+  if (!clientScope.canView(scope, order)) { res.status(403).render('403', { title: '접근 권한 없음' }); return null; }
   return order;
 }
 
@@ -1940,8 +1933,7 @@ router.get('/:id', asyncHandler(async (req, res) => {
   if (!order) return res.status(404).send('오더를 찾을 수 없습니다.');
 
   const scope = scopeFilter(req);
-  if (scope.branch_id && order.branch_id !== scope.branch_id) return res.status(403).render('403', { title: '접근 권한 없음' });
-  if (scope.group_id && order.requester_group_id !== scope.group_id) return res.status(403).render('403', { title: '접근 권한 없음' });
+  if (!clientScope.canView(scope, order)) return res.status(403).render('403', { title: '접근 권한 없음' });
 
   // 서로 의존관계 없는 조회들이라 순차로 기다릴 필요가 없다 — 병렬로 실행해서 왕복시간이
   // 곱연산되는 걸 막는다(GET /new에 이미 적용된 것과 같은 패턴).
@@ -2001,8 +1993,7 @@ router.get('/:id/callmaner-status.json', asyncHandler(async (req, res) => {
   if (!order) return res.status(404).json({ error: '오더를 찾을 수 없습니다.' });
 
   const scope = scopeFilter(req);
-  if (scope.branch_id && order.branch_id !== scope.branch_id) return res.status(403).json({ error: '접근 권한 없음' });
-  if (scope.group_id && order.requester_group_id !== scope.group_id) return res.status(403).json({ error: '접근 권한 없음' });
+  if (!clientScope.canView(scope, order)) return res.status(403).json({ error: '접근 권한 없음' });
 
   res.json({
     enabled: !!order.callmaner_enabled,
