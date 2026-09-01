@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const session = require('express-session');
 const pgSession = require('connect-pg-simple')(session);
+const { instrumentSessionStore } = require('./lib/sessionStore');
 const methodOverride = require('method-override');
 const path = require('path');
 const helmet = require('helmet');
@@ -93,7 +94,12 @@ app.use(session({
   // 2026-09-01에 그렇게 됐다 — 오더 목록·대시보드가 500이었고 favicon.ico까지 500이었다
   // (public에 없어서 세션 미들웨어까지 흘러간다). 그동안 /login만 200이라 멀쩡해 보였다
   // (saveUninitialized:false라 익명 GET은 세션을 만들지 않는다).
-  store: new pgSession({ pool, tableName: 'session', createTableIfMissing: false, disableTouch: true }),
+  // instrumentSessionStore: 저장소 실패를 integration_errors에 남긴다. 감싸지 않으면 실패가
+  // console.error로만 나가 경보가 볼 수 없다 — 2026-09-01에 1시간 30분짜리 전면 장애가
+  // 기록 한 줄 없이 지나갔다(lib/sessionStore.js).
+  store: instrumentSessionStore(
+    new pgSession({ pool, tableName: 'session', createTableIfMissing: false, disableTouch: true })
+  ),
   secret: process.env.SESSION_SECRET || 'b2b-car-dev-secret-change-me',
   resave: false,
   saveUninitialized: false,

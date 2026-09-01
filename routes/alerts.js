@@ -17,6 +17,9 @@ const SETTING_FIELDS = Object.entries(systemAlert.SETTINGS).map(([name, [key, , 
     backlogPercent: '백로그 기준(%)',
     stalledMin: '동기화 정지 기준(분)',
     timeBudgetThreshold: '시간 초과 임계(회)',
+    stuckMin: '고착 판정 기준(분)',
+    stuckMinCount: '고착 최소 건수(건)',
+    stuckWindowMin: '고착 관측 창(분)',
   }[name] || name,
 }));
 
@@ -104,6 +107,7 @@ router.get('/dry-run', requireAuth, requireRole('admin'), asyncHandler(async (re
     ...await systemAlert.checkSyncBacklog(cfg, syncLimit),
     ...await systemAlert.checkSyncTimeBudget(cfg),
     ...await systemAlert.checkSyncStalled(cfg),
+    ...await systemAlert.checkStuckErrors(cfg),
   ];
   res.json({ config: cfg, syncLimit, alerts });
 }));
