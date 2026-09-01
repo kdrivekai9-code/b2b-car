@@ -82,7 +82,18 @@ app.use(session({
   // rolling:true라 매 응답에 Set-Cookie는 계속 나가지만(브라우저 쿠키 만료는 정상적으로 계속 연장됨),
   // DB의 session 테이블까지 매 요청마다 UPDATE할 필요는 없다 — requireAuth가 lastSeenAt을 디바운스해서
   // 데이터가 실제로 바뀔 때만(수십 초에 한 번) session.save()로 expire까지 같이 갱신해주기 때문에 안전하다.
-  store: new pgSession({ pool, tableName: 'session', createTableIfMissing: true, disableTouch: true }),
+  // createTableIfMissing은 끈다. 표는 마이그레이션이 만든다
+  // (supabase/migrations/20260901010000_add_session_table.sql).
+  //
+  // 켜두면 실제로 서비스가 멈춘다: 이 옵션은 세션을 처음 건드릴 때 표 존재를 확인하고 그
+  // 결과를 약속 하나에 캐시하는데, **실패한 약속도 지우지 않는다**
+  // (node_modules/connect-pg-simple/index.js:197 — if (!this.#tableCreationPromise)).
+  // 부팅 순간 DB가 잠깐 안 닿으면 그 거부된 약속이 프로세스가 사는 내내 재사용되어,
+  // DB가 회복된 뒤에도 세션을 쓰는 모든 요청이 같은 에러로 영구히 실패한다. 재기동해야만 풀린다.
+  // 2026-09-01에 그렇게 됐다 — 오더 목록·대시보드가 500이었고 favicon.ico까지 500이었다
+  // (public에 없어서 세션 미들웨어까지 흘러간다). 그동안 /login만 200이라 멀쩡해 보였다
+  // (saveUninitialized:false라 익명 GET은 세션을 만들지 않는다).
+  store: new pgSession({ pool, tableName: 'session', createTableIfMissing: false, disableTouch: true }),
   secret: process.env.SESSION_SECRET || 'b2b-car-dev-secret-change-me',
   resave: false,
   saveUninitialized: false,
