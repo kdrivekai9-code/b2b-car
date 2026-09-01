@@ -217,6 +217,21 @@ app.use((err, req, res, next) => {
   res.status(500).send(message);
 });
 
+// 어디에도 잡히지 않은 비동기 실패로 프로세스가 죽지 않게 한다.
+//
+// Node 22의 기본 동작은 처리되지 않은 거부(unhandled rejection)를 만나면 프로세스를 끝내는
+// 것이다. 실제로 구글 호출이 10초 타임아웃 났을 때 서버가 통째로 내려갔고, 그동안 들어온
+// 요청은 전부 실패했다(오더 목록 500). 개별 원인은 그때그때 고치되, 원인 하나가 서비스
+// 전체를 멈추는 구조는 두지 않는다 — 접수 한 건이 실패하는 것과 모두가 못 쓰는 것은 다르다.
+//
+// 삼키지는 않는다. 스택까지 남겨 다음 사람이 원인을 찾을 수 있게 한다.
+process.on('unhandledRejection', (reason) => {
+  console.error('처리되지 않은 거부(프로세스는 계속 실행):', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('잡히지 않은 예외(프로세스는 계속 실행):', err);
+});
+
 // Vercel 등 서버리스 환경에서는 핸들러(app)만 내보내고 listen은 호출하지 않는다.
 if (!process.env.VERCEL) {
   app.listen(PORT, () => {

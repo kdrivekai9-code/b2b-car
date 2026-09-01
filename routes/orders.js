@@ -1177,6 +1177,13 @@ router.post('/', asyncHandler(async (req, res) => {
     : null;
 
   const createdRows = [];
+  // 이 오더에 적용되는 요금설정 — 통행료를 특수교량만 청구할지 총액을 청구할지 여기서 갈린다.
+  //
+  // 반복문 밖에 둔다. 안에서 선언하면 나뉜 건마다 다시 찾는 것도 낭비지만, 무엇보다
+  // 반복문이 끝난 뒤 접수 부대비용을 저장할 때 이 값이 없다(블록 스코프). 실제로 그래서
+  // "fareExtra is not defined"로 부대비용이 통째로 저장되지 않았다 — 오더는 등록되고
+  // 부대비용만 조용히 사라져 청구에서 빠졌다. part에 따라 달라지는 값도 아니다.
+  let fareExtra = null;
   for (const part of splitPlan.parts) {
   // 특수구간 통행료(민자 교량 등)를 서버가 다시 판정해 정산 항목으로 남긴다.
   //
@@ -1186,8 +1193,6 @@ router.post('/', asyncHandler(async (req, res) => {
   let specialTolls = [];
   let fareSurcharges = [];
   let waitFee = null;
-  // 이 오더에 적용되는 요금설정 — 통행료를 특수교량만 청구할지 총액을 청구할지 여기서 갈린다.
-  let fareExtra = null;
   try {
     const tollgates = req.body.tollgates_json ? JSON.parse(req.body.tollgates_json) : [];
     fareExtra = await findFareExtra(requester_group_id || null, branch_id || null);
