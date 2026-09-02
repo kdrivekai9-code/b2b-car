@@ -1696,9 +1696,15 @@ async function prepareDispatchRun(session, text) {
   if (scopeToViewer && !viewerPhone) return null; // 신원 미확인 — 조회하지 않고 상담원으로
   const viewerCid = scopeToViewer ? viewerPhone : null;
 
+  // 상담원 발화(sender='agent')도 히스토리에 넣는다.
+  //
+  // 빼두면 상담원이 응대 중인 세션에서 모델 눈에는 **답 없는 질문만 줄줄이** 보인다. 그러면
+  // 이번 질문 하나가 아니라 밀린 것까지 한꺼번에 답한다(실측 2026-09-02: "내일 예약건은
+  // 어떤게 있지?"에 오늘 건까지 붙어 나왔다). 초안 경로에서는 상담원이 곧 응답자이므로
+  // 그 발화가 모델 쪽 차례에 오는 것이 사실과도 맞다.
   const history = await db.all(
     `SELECT sender, message FROM chat_messages
-     WHERE session_id = ? AND sender IN ('user','bot') AND message IS NOT NULL
+     WHERE session_id = ? AND sender IN ('user','bot','agent') AND message IS NOT NULL
      ORDER BY id DESC LIMIT 10`,
     [session.id]
   ).catch(() => []);

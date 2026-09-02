@@ -100,9 +100,11 @@ async function buildDispatchSuggestion(session, text) {
   const user = await db.get('SELECT * FROM users WHERE id = ?', [session.user_id]).catch(() => null);
   if (!user) return null;
 
+  // 상담원 발화도 넣는다 — 빼두면 모델 눈에 답 없는 질문만 쌓여 보여서, 이번 질문 하나가
+  // 아니라 밀린 것까지 한꺼번에 답한다(routes/kakaoConsult.js prepareDispatchRun과 같은 이유).
   const history = await db.all(
     `SELECT sender, message FROM chat_messages
-      WHERE session_id = ? AND sender IN ('user', 'bot') AND message IS NOT NULL
+      WHERE session_id = ? AND sender IN ('user', 'bot', 'agent') AND message IS NOT NULL
       ORDER BY id DESC LIMIT 12`,
     [session.id]
   ).catch(() => []);
