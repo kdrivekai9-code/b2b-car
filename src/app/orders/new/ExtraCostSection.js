@@ -70,6 +70,7 @@ export default function ExtraCostSection({
       {!rows.length && (
         <p className="hint" style={{ margin: '0 0 8px' }}>
           주유·충전·세차·주차·도선료를 접수할 때 미리 정해둘 수 있습니다.
+          금액은 <b>주유 금액지정</b>일 때만 넣습니다 — 나머지는 기사 영수증으로 확정됩니다.
           정산구분은 요금설정 값이 기본으로 들어가며 여기서 바꿀 수 있습니다.
         </p>
       )}
@@ -77,9 +78,15 @@ export default function ExtraCostSection({
       {rows.map((r) => {
         const it = itemOf(r.chargeType);
         if (!it) return null;
-        // 금액칸을 언제 보여주나: 주유·충전은 '금액입력'을 골랐을 때만(가득은 접수 시점에
-        // 금액을 모른다), 나머지는 항상 — 실비라 나중에 채워도 되므로 비워둘 수 있다.
-        const showAmount = !it.amountOption || r.optionCode === it.amountOption;
+        // 금액칸을 언제 보여주나(사용자 확정 2026-09-02): 접수 때 금액을 정할 수 있는 항목만
+        // 열고, 그중 주유비는 '금액지정'을 골랐을 때만 연다.
+        //   · 주유비 + 금액지정 → 열림. "3만원어치 주유"는 고객이 정한 확정금액이다.
+        //   · 주유비 + 가득     → 닫힘. 접수 때는 금액을 모른다.
+        //   · 충전·세차·주차    → 닫힘. 금액이 확정되지 않는 실비다.
+        //   · 도선료·대기·취소  → 열림(금액이 본질인 항목).
+        // 칸이 열려 있으면 누군가 어림값을 넣고, 그 어림값이 영수증 없이 그대로 청구된다.
+        // 서버도 같은 규칙으로 눌러둔다(lib/extraCharges.js parseIntakeRows).
+        const showAmount = !!it.fixedAmount && (!it.amountOption || r.optionCode === it.amountOption);
         const isFerry = !!it.ferry;
         return (
           <div className="extra-cost-row" key={r.key}>

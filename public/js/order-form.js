@@ -346,8 +346,14 @@
         optSel.innerHTML = '';
         optSel.style.display = 'none';
       }
-      // 주유·충전의 '가득'은 접수 시점에 금액을 모른다 — 금액칸을 감추고 안내를 대신 둔다.
-      var showAmount = !it.amountOption || optSel.value === it.amountOption;
+      // 금액칸을 언제 보여주나(사용자 확정 2026-09-02) — Next 폼과 같은 규칙이다
+      // (src/app/orders/new/ExtraCostSection.js). 한쪽만 고치면 조용히 갈린다.
+      //   · 주유비 + 금액지정 → 열림. "3만원어치 주유"는 고객이 정한 확정금액이다.
+      //   · 주유비 + 가득     → 닫힘. 접수 때는 금액을 모른다.
+      //   · 충전·세차·주차    → 닫힘. 금액이 확정되지 않는 실비다.
+      //   · 도선료·대기·취소  → 열림(금액이 본질인 항목).
+      // 서버도 같은 규칙으로 눌러둔다(lib/extraCharges.js parseIntakeRows).
+      var showAmount = !!it.fixedAmount && (!it.amountOption || optSel.value === it.amountOption);
       var amountEl = row.querySelector('.xc-amount');
       var noteEl = row.querySelector('.xc-amount-note');
       amountEl.style.display = showAmount ? '' : 'none';

@@ -84,6 +84,49 @@ const fake = (items) => async () => ({ items });
   check('깨진 JSON도 화면을 죽이지 않는다',
     memoExtra.loadFromOrder({ memo_extra_json: '{{{' }).length === 0);
 
+  console.log('\n[접수 때 금액을 정할 수 있는 항목]');
+  // 사용자 확정 2026-09-02: 주유비만 금액을 정한다. "3만원어치 주유"는 고객이 정한
+  // 확정금액이지만, 충전·세차·주차는 얼마가 될지 기사가 쓰고 영수증을 올려야 정해진다.
+  // 칸이 열려 있으면 누군가 어림값을 넣고, 그 어림값이 영수증 없이 그대로 청구된다.
+  const extraCharges = require('../lib/extraCharges');
+  const itemOf = (t) => extraCharges.intakeItem(t);
+  check('주유비는 금액을 정할 수 있다', !!itemOf('주유비').fixedAmount);
+  check('충전비는 못 정한다', !itemOf('충전비').fixedAmount);
+  check('세차비는 못 정한다', !itemOf('세차비').fixedAmount);
+  check('주차요금은 못 정한다', !itemOf('주차요금').fixedAmount);
+  // 충전은 가득만이다 — 부분 충전을 금액으로 지정하지 않는다.
+  check('충전비 선택지는 가득 하나',
+    itemOf('충전비').options.length === 1 && itemOf('충전비').options[0].value === 'full',
+    itemOf('충전비').options.map((o) => o.value).join('/'));
+  check('주유비는 가득·금액지정 둘',
+    itemOf('주유비').options.map((o) => o.value).join('/') === 'full/amount');
+
+  // 서버가 화면을 우회한 금액을 눌러야 실효가 있다.
+  const sent = (type, option, amount) => extraCharges.parseIntakeRows({
+    intake_extra_type: [type], intake_extra_option: [option],
+    intake_extra_amount: [String(amount)], intake_extra_mode: [''], intake_extra_id: [''],
+  }, null, '2026-09-02').rows[0];
+  check('주유 금액지정 → 금액이 남는다', sent('주유비', 'amount', 30000).amount === 30000);
+  check('주유 가득 → 금액을 버린다', sent('주유비', 'full', 50000).amount === 0,
+    '가득은 접수 때 금액을 모른다');
+  check('충전 → 금액을 버린다', sent('충전비', 'full', 40000).amount === 0);
+  check('세차 → 금액을 버린다', sent('세차비', 'hand_wash', 20000).amount === 0);
+  check('주차 → 금액을 버린다', sent('주차요금', '', 3000).amount === 0);
+
+  console.log('\n[요청사항 분석도 같은 규칙]');
+  let a = await memoExtra.detectFromMemo('3만원 주유', null, {
+    generate: fake([{ code: 'fuel', evidence: '3만원 주유', amount: 30000 }]),
+  });
+  check('주유 금액은 살린다', a.length === 1 && a[0].amount === 30000);
+  a = await memoExtra.detectFromMemo('주차비 3천원', null, {
+    generate: fake([{ code: 'parking', evidence: '주차비 3천원', amount: 3000 }]),
+  });
+  check('주차 금액은 버린다', a.length === 1 && a[0].amount === 0, '영수증으로 정해진다');
+  a = await memoExtra.detectFromMemo('세차 2만원', null, {
+    generate: fake([{ code: 'wash', evidence: '세차 2만원', amount: 20000 }]),
+  });
+  check('세차 금액도 버린다', a.length === 1 && a[0].amount === 0);
+
   console.log('\n[두 화면이 같이 있는가]');
   // EJS와 Next가 함께 살아 있어야 한다 — 한쪽만 고치면 플래그를 되돌렸을 때 기능이 사라진다.
   const fs = require('fs');
@@ -101,6 +144,17 @@ const fake = (items) => async () => ({ items });
     (routes.match(/memoExtraCandidates:/g) || []).length === 2,
     '한 곳만 있으면 다른 화면에서는 배너가 안 뜬다');
   check('채택 라우트가 client를 막는다', /memo-extra[\s\S]{0,200}role === 'client'/.test(routes));
+
+  console.log('\n[금액칸 규칙이 두 폼에 같이 들어갔는가]');
+  // Next 폼과 EJS 공유 JS가 같은 조건을 써야 한다 — 한쪽만 고치면 플래그를 되돌렸을 때
+  // 금액칸이 다시 열리고, 어림값이 영수증 없이 청구된다.
+  const nextForm = read('src/app/orders/new/ExtraCostSection.js');
+  const sharedJs = read('public/js/order-form.js');
+  [['Next 폼', nextForm], ['공유 JS', sharedJs]].forEach(([name, src]) => {
+    check(`${name} — fixedAmount로 금액칸을 가른다`, /fixedAmount\s*&&/.test(src),
+      'fixedAmount를 안 보면 세차·주차에도 금액칸이 열린다');
+    check(`${name} — amountOption도 함께 본다`, /amountOption/.test(src));
+  });
 
   console.log(failures ? `\n${failures}건 실패` : '\n모두 통과');
   process.exit(failures ? 1 : 0);
