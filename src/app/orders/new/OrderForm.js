@@ -875,9 +875,15 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
           </div>
 
           {/* 부대비용은 도착지 아래 — "이 차를 어떤 상태로 갖다줄지"라서 경로 이야기의 끝에 온다.
-              고객(client)에게는 청구 금액 설정이라 보여주지 않는다(요금 칸과 같은 규칙). */}
-          {initialData.currentUserRole !== 'client' && (
+              고객(client)에게도 보여준다(사용자 확정 2026-09-02). 예전에는 통째로 감췄는데,
+              그 안에는 금액(청구액)과 **지시**가 섞여 있었다 — "주유 가득"은 금액이 아니라
+              지시이고, 접수 때는 금액을 아무도 모른다. 지시를 넣을 칸까지 사라져서 고객은
+              요청사항 본문에 글로 쓸 수밖에 없었고, 그 본문은 아무도 읽지 않았다.
+              고객에게 열리는 것은 실비 넷의 항목·옵션뿐이다 — 정산구분은 서버가 항목 목록
+              자체를 줄여 내려주고(intakeExtra.forClient), 저장할 때도 무시한다. */}
+          {!!initialData.intakeExtra && (
             <ExtraCostSection
+              forClient={initialData.intakeExtra.forClient}
               config={initialData.intakeExtra}
               defaults={intakeExtraDefaults}
               rows={intakeExtras}

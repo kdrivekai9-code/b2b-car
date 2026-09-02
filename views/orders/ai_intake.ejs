@@ -190,15 +190,24 @@
           재사용해 이미 있었다(src/app/orders/new/ExtraCostSection.js).
           도착지 아래 두는 것도 오더등록 폼과 같다 — "이 차를 어떤 상태로 갖다줄지"라서
           경로 이야기의 끝에 온다. 청구 금액 설정이라 고객(client)에게는 보여주지 않는다. %>
-      <% if (currentUser && currentUser.role !== 'client' && intakeExtra && intakeExtra.items.length) { %>
+      <%# 고객(client)에게도 열어준다(사용자 확정 2026-09-02) — 실비 넷의 항목·옵션만이고,
+    정산구분은 서버가 항목 목록 자체를 줄여 내려주고(intakeExtra.forClient) 저장할 때도
+    무시한다. "주유 가득"은 금액이 아니라 지시라서, 넣을 칸이 없으면 요청사항 본문에
+    글로 들어가고 그 본문은 아무도 읽지 않는다. %>
+      <% if (intakeExtra && intakeExtra.items.length) { %>
       <div class="ai-intake-section">
         <div class="extra-cost-block" id="extraCostBlock"
              data-config="<%= JSON.stringify(intakeExtra) %>">
           <div class="section-title small" style="margin:0 0 6px;">부대비용</div>
           <p class="hint" style="margin:0 0 8px;">
+            <% if (intakeExtra.forClient) { %>
+            주유·충전·세차·주차를 접수할 때 미리 요청해 두실 수 있습니다.
+            금액은 <b>주유 금액지정</b>일 때만 넣습니다 — 나머지는 기사님 영수증으로 확정됩니다.
+            <% } else { %>
             주유·충전·세차·주차·도선료를 접수할 때 미리 정해둘 수 있습니다.
             금액은 <b>주유 금액지정</b>일 때만 넣습니다 — 나머지는 기사 영수증으로 확정됩니다.
             정산구분은 요금설정 값이 기본으로 들어가며 여기서 바꿀 수 있습니다.
+            <% } %>
           </p>
           <div id="extraCostRows"></div>
           <button type="button" class="btn small secondary" id="addExtraCostBtn">+ 부대비용 추가</button>

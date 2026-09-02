@@ -58,6 +58,23 @@ function prefillFromQuery(query) {
 // return_to는 열린 리다이렉트가 되지 않도록 허용된 값만 통과시킨다.
 const ALLOWED_RETURN_TO = new Set(['/kakao-accounts']);
 
+// 법인 고객(client) 계정은 소속 법인이 반드시 있어야 한다.
+//
+// 없으면 그 계정이 낸 오더는 requester_group_id 없이 저장된다 — POST /orders가
+// scope.group_id(세션 값)를 그대로 쓰기 때문이다(middleware/auth.js scopeFilter). 그리고
+// 법인 정산은 requester_group_id로 모으므로, 그 오더는 **어느 정산서에도 오르지 않는다.**
+// 화면상 오더는 멀쩡해 보이고 청구만 조용히 빠지는, 눈에 안 띄는 종류의 사고다.
+//
+// 실제로 법인이 빈 client 계정이 운영 DB에 있었다(2026-09-02 확인). 그 계정이 오더를 한 건도
+// 안 낸 덕에 사고가 안 났을 뿐이라, 값이 새는 것을 운에 맡기지 않고 여기서 막는다.
+// 화면(UserForm.js / users/form.ejs)도 required로 막지만 그것만으로는 부족하다 —
+// 필수검사를 끄거나 요청을 직접 만들면 그대로 통과한다.
+function clientGroupError(role, groupId) {
+  if (role !== 'client') return null;
+  if (Number(groupId) > 0) return null;
+  return '법인 고객 계정은 소속 법인을 선택해야 합니다. 법인이 비어 있으면 그 계정이 낸 오더가 법인 정산서에 잡히지 않아 청구가 누락됩니다.';
+}
+
 router.get('/new/data.json', asyncHandler(async (req, res) => {
   const [branches, groups] = await Promise.all([
     db.all("SELECT * FROM branches WHERE status='active' ORDER BY name"),
@@ -97,6 +114,8 @@ async function ensureUniqueLoginId(hint) {
 
 router.post('/', asyncHandler(async (req, res) => {
   const { login_id, password, name, phone, role, branch_id, group_id, grade, return_to } = req.body;
+  const groupError = clientGroupError(role, group_id);
+  if (groupError) return res.status(400).send(groupError);
   const trimmedLoginId = String(login_id || '').trim();
   const finalLoginId = trimmedLoginId
     || await ensureUniqueLoginId(phone ? `kakao_${String(phone).replace(/\D/g, '')}` : null);
@@ -138,6 +157,11 @@ router.get('/:id/edit', asyncHandler(async (req, res) => {
 
 router.post('/:id', asyncHandler(async (req, res) => {
   const { name, phone, role, branch_id, group_id, grade, status, password } = req.body;
+  // 권한을 client로 바꾸는 수정에도 같이 걸린다 — 등록만 막으면 "일단 관리자로 만들고 나중에
+  // 고객으로 바꾸기"로 그대로 새어 나간다. 이미 법인이 빈 client 계정을 손볼 때도 여기서 걸려,
+  // 고치는 김에 법인을 채우게 된다.
+  const groupError = clientGroupError(role, group_id);
+  if (groupError) return res.status(400).send(groupError);
   if (password && password.trim()) {
     const hash = await bcrypt.hash(password, 10);
     await db.run(

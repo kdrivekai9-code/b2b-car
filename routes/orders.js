@@ -293,7 +293,7 @@ router.get('/stream', asyncHandler(async (req, res) => {
 // EJS 생성폼 라우트와 Next.js Stage 2 프리뷰(GET /orders/new/data.json)가 완전히 동일한
 // 조회 로직을 공유하도록 분리했다 — dashboard.js/orders.js(목록)/inquiries.js/chat.js에서
 // 이미 쓴 것과 같은 패턴.
-async function buildOrderFormInitData(scope, userId) {
+async function buildOrderFormInitData(scope, userId, role) {
   // 서로 의존관계 없는 조회들이라 순차적으로 기다릴 필요가 없다 — 병렬로 실행해서
   // 콜드스타트/커넥션 재연결로 왕복시간이 늘어난 상황에서 지연이 곱연산되는 걸 막는다.
   const [branches, groups, paymentMethods, favorites] = await Promise.all([
@@ -311,7 +311,10 @@ async function buildOrderFormInitData(scope, userId) {
     defaultBranch: scope.branch_id || '', defaultGroup: scope.group_id || '',
     // 접수 단계 부대비용의 항목·선택지 정의. 정산구분 기본값은 법인/지사마다 다르므로 여기서는
     // 항목 정의만 내려보내고, 화면이 법인·지사를 고르면 GET /orders/extra-cost-defaults로 받는다.
-    intakeExtra: extraCharges.intakeOptionsFor(null),
+    // 고객에게도 부대비용을 열어준다 — 다만 실비 넷만이고, 정산구분은 고르지 않는다
+    // (lib/extraCharges.js CLIENT_INTAKE_TYPES). "주유 가득"은 금액이 아니라 지시라서,
+    // 지시를 넣을 칸이 없으면 요청사항 본문에 글로 들어가고 그 본문은 아무도 읽지 않는다.
+    intakeExtra: extraCharges.intakeOptionsFor(null, { forClient: role === 'client' }),
   };
 }
 
@@ -351,8 +354,8 @@ router.get('/extra-cost-defaults', asyncHandler(async (req, res) => {
   res.json({ defaults });
 }));
 
-async function buildAiIntakeInitData(scope, userId) {
-  const data = await buildOrderFormInitData(scope, userId);
+async function buildAiIntakeInitData(scope, userId, role) {
+  const data = await buildOrderFormInitData(scope, userId, role);
   return {
     ...data,
     kakaoJsKey: process.env.KAKAO_JS_KEY || '',
@@ -427,7 +430,7 @@ async function loadAiIntakeRestoreData(userId, requestedSessionId) {
 
 router.get('/new', asyncHandler(async (req, res) => {
   const scope = scopeFilter(req);
-  const data = await buildOrderFormInitData(scope, req.session.user.id);
+  const data = await buildOrderFormInitData(scope, req.session.user.id, req.session.user.role);
   res.render('orders/form', {
     title: '오더 등록', ...data, mode: 'create', error: null,
     kakaoJsKey: process.env.KAKAO_JS_KEY || '',
@@ -440,7 +443,7 @@ router.get('/new', asyncHandler(async (req, res) => {
 // JSON 응답에는 따로 실어준다("요청자 연락처와 동일" 체크박스, client 요금 읽기전용 판단에 필요).
 router.get('/new/data.json', asyncHandler(async (req, res) => {
   const scope = scopeFilter(req);
-  const data = await buildOrderFormInitData(scope, req.session.user.id);
+  const data = await buildOrderFormInitData(scope, req.session.user.id, req.session.user.role);
   res.json({
     ...data,
     currentUserRole: req.session.user.role,
@@ -452,7 +455,7 @@ router.get('/new/data.json', asyncHandler(async (req, res) => {
 // Next.js AI 접수 화면이 초기 표시용 공통 데이터만 따로 fetch할 수 있게 하는 JSON 버전.
 router.get('/ai-intake/data.json', asyncHandler(async (req, res) => {
   const scope = scopeFilter(req);
-  const data = await buildAiIntakeInitData(scope, req.session.user.id);
+  const data = await buildAiIntakeInitData(scope, req.session.user.id, req.session.user.role);
   res.json({
     ...data,
     currentUserRole: req.session.user.role,
@@ -507,7 +510,7 @@ router.get('/ai-intake', asyncHandler(async (req, res) => {
   // "가장 최근의 열린 세션" 대신 사용자가 직접 고른 그 세션을 복원한다(본인 소유일 때만).
   const requestedSessionId = Number(req.query.session) || null;
   const [initData, restoreData] = await Promise.all([
-    buildAiIntakeInitData(scope, req.session.user.id),
+    buildAiIntakeInitData(scope, req.session.user.id, req.session.user.role),
     loadAiIntakeRestoreData(req.session.user.id, requestedSessionId),
   ]);
 
@@ -1173,7 +1176,7 @@ router.post('/', asyncHandler(async (req, res) => {
     // 같이 고쳐야 하는 구조 자체가 원인이라, 한 함수에서 받아 필요한 것만 덮어쓴다.
     // paymentMethods는 덮어쓴다 — 사용자가 방금 고른 지사 기준이어야 한다(세션 지사가 아니라).
     const [init, paymentMethods] = await Promise.all([
-      buildOrderFormInitData(scope, u.id),
+      buildOrderFormInitData(scope, u.id, u.role),
       getEffectivePaymentMethods(finalBranch),
     ]);
     return res.status(400).render('orders/form', {
@@ -1336,7 +1339,8 @@ router.post('/', asyncHandler(async (req, res) => {
     // 기본값은 그와 무관하게 필요하므로, 없으면 확정된 법인·지사로 직접 찾는다 — null로 두면
     // 요금설정에서 "포함"으로 둔 항목이 월정산으로 저장돼 청구되면 안 될 돈이 청구된다.
     const intakeFeeExtra = fareExtra || await branchPolicy.findFareExtra(finalGroup, finalBranch).catch(() => null);
-    const parsedIntake = extraCharges.parseIntakeRows(req.body, intakeFeeExtra, effectiveReservedDate);
+    const parsedIntake = extraCharges.parseIntakeRows(req.body, intakeFeeExtra, effectiveReservedDate,
+      { asClient: u.role === 'client' });
     if (parsedIntake.rows.length) await extraCharges.saveIntakeRows(newId, parsedIntake, u.id);
     // 도선료·대기요금·취소요금은 줄이 아니라 orders 컬럼에 저장된다 — 줄로도 만들면 같은 돈이
     // 두 군데서 집계돼 두 번 청구된다. 관리자가 넣은 값은 자동 계산보다 뒤에 쓰여 이긴다.
@@ -1543,7 +1547,7 @@ router.get('/:id/data.json', asyncHandler(async (req, res) => {
   const u = req.session.user;
   const [waypoints, formInit, history, statusConfig, drivers, photoSettingsRow] = await Promise.all([
     db.all('SELECT * FROM order_waypoints WHERE order_id = ? ORDER BY seq ASC', [req.params.id]),
-    buildOrderFormInitData(scope, u.id),
+    buildOrderFormInitData(scope, u.id, u.role),
     db.all(`
       SELECT h.*, u.name AS actor_name
       FROM order_status_history h
@@ -1597,7 +1601,9 @@ router.get('/:id/data.json', asyncHandler(async (req, res) => {
     memoExtraCandidates: u.role === 'client' ? [] : memoExtraCosts.pendingFromOrder(order),
     // 수정 화면의 부대비용 섹션. 이미 붙어 있는 줄을 그대로 보여줘야 "방금 접수 때 넣은 걸
     // 왜 못 고치나"가 되지 않는다. 정산구분 기본값은 이 오더의 요금설정에서 뽑는다.
-    intakeExtraRows: u.role === 'client' ? [] : await extraCharges.loadIntakeRows(req.params.id),
+    // 고객에게도 자기 줄을 돌려준다 — 안 주면 "방금 접수 때 넣은 걸 왜 못 고치나"가 되고,
+    // 더 나쁘게는 저장할 때 knownIds에서 빠져 그 줄이 지워진다.
+    intakeExtraRows: await extraCharges.loadIntakeRows(req.params.id),
     intakeExtraDefaults: await (async () => {
       const ex = await branchPolicy.findFareExtra(order.requester_group_id, order.branch_id).catch(() => null);
       const d = {};
@@ -1863,16 +1869,21 @@ router.post('/:id', asyncHandler(async (req, res) => {
 
   // 접수 부대비용 반영. 도선료 금액은 위 UPDATE에서 ferry_fare_amount로 이미 저장됐다
   // (경로탐색이 자동으로 채우지만 틀리거나 빠질 수 있어 화면에서 고칠 수 있게 했다) —
-  // 여기서는 정산구분만 따로 박는다. client는 부대비용을 보지도 보내지도 않으므로 건너뛴다.
-  if (req.session.user.role !== 'client') {
-    try {
-      const feeExtra = await branchPolicy.findFareExtra(finalGroup, finalBranch).catch(() => null);
-      const parsedIntake = extraCharges.parseIntakeRows(req.body, feeExtra, order.reserved_date);
-      await extraCharges.saveIntakeRows(req.params.id, parsedIntake, req.session.user.id);
-      await extraCharges.saveOrderFeeFields(req.params.id, parsedIntake.orderFees);
-    } catch (e) {
-      console.error('접수 부대비용 저장 실패(오더 수정은 완료):', e.message);
-    }
+  // 여기서는 정산구분만 따로 박는다.
+  //
+  // 고객(client)도 여기까지 온다. 접수 때 넣은 "주유 가득"을 수정에서 못 고치면 말이 안 되고,
+  // 더 나쁘게는 화면이 그 줄을 안 들고 있으면 knownIds에서 빠져 저장할 때 지워진다.
+  // 다만 고객이 보낸 정산구분과 실비 넷 밖의 항목은 무시한다(asClient).
+  const asClient = req.session.user.role === 'client';
+  try {
+    const feeExtra = await branchPolicy.findFareExtra(finalGroup, finalBranch).catch(() => null);
+    const parsedIntake = extraCharges.parseIntakeRows(req.body, feeExtra, order.reserved_date, { asClient });
+    await extraCharges.saveIntakeRows(req.params.id, parsedIntake, req.session.user.id);
+    // orders 컬럼(도선료·대기·취소요금)은 고객이 손대지 않는다 — 위에서 이미 걸러졌지만
+    // 빈 객체로 덮어써서 값이 지워지지 않게 고객 경로에서는 아예 부르지 않는다.
+    if (!asClient) await extraCharges.saveOrderFeeFields(req.params.id, parsedIntake.orderFees);
+  } catch (e) {
+    console.error('접수 부대비용 저장 실패(오더 수정은 완료):', e.message);
   }
 
   broadcastOrderListChangedAsync();

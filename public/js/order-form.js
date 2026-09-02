@@ -368,12 +368,16 @@
         amountEl.readOnly = false;
         amountEl.value = '';
       }
-      // 대기요금·취소요금은 실비가 아니라 운행요금이라 월/개별로 나눌 것이 없다 —
-      // 고를 것 없는 칸을 그리면 무엇을 고르라는 건지 모른다. 자동 계산 안내를 대신 둔다.
+      // 정산구분 칸을 감추는 경우가 둘이다.
+      //   · 대기요금·취소요금 — 실비가 아니라 운행요금이라 월/개별로 나눌 것이 없다.
+      //     고를 것 없는 칸을 그리면 무엇을 고르라는 건지 모른다.
+      //   · 고객(client) 화면 — 청구 방식은 계약이고 요금설정이 정한다. 서버도 고객이 보낸
+      //     값을 무시한다(lib/extraCharges.js parseIntakeRows asClient).
+      var hideMode = !!it.noSettleMode || !!xcConfig.forClient;
       var modeEl = row.querySelector('.xc-mode');
       var hintEl = row.querySelector('.xc-hint');
-      modeEl.style.display = it.noSettleMode ? 'none' : '';
-      modeEl.disabled = !!it.noSettleMode;
+      modeEl.style.display = hideMode ? 'none' : '';
+      modeEl.disabled = hideMode;
       hintEl.textContent = it.noSettleMode ? (it.hint || '') : '';
       hintEl.style.display = it.noSettleMode ? '' : 'none';
       amountEl.placeholder = it.noSettleMode ? '금액 직접 입력' : '금액(선택)';

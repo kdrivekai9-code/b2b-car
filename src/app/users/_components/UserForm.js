@@ -59,10 +59,15 @@ export default function UserForm({ mode, user, branches, groups, returnTo }) {
         </div>
       </div>
       <div className="row" style={{ display: role === 'client' ? 'flex' : 'none' }}>
+        {/* 법인 고객 계정은 소속 법인이 없으면 그 계정의 오더가 법인 정산서에 잡히지 않는다
+            — 청구가 조용히 빠진다. 서버도 같은 검증을 한다(routes/users.js clientGroupError).
+            required를 role === 'client'에 묶어두는 이유: 이 줄은 그 외 권한에서 display:none인데,
+            숨은 칸에 required가 남아 있으면 브라우저가 포커스를 못 줘 저장이 조용히 막힌다. */}
         <div className="field">
-          <label>소속 법인</label>
-          <select name="group_id" defaultValue={user.group_id != null ? String(user.group_id) : ''}>
-            <option value="">선택 안 함</option>
+          <label>소속 법인 *</label>
+          <select name="group_id" required={role === 'client'}
+            defaultValue={user.group_id != null ? String(user.group_id) : ''}>
+            <option value="">선택하세요</option>
             {groups.map((g) => (
               <option key={g.id} value={g.id}>{g.name}</option>
             ))}

@@ -127,6 +127,44 @@ const fake = (items) => async () => ({ items });
   });
   check('세차 금액도 버린다', a.length === 1 && a[0].amount === 0);
 
+  console.log('\n[고객에게 열어준 범위]');
+  // 사용자 확정 2026-09-02: 고객에게도 부대비용을 열되 실비 넷의 항목·옵션만이다.
+  // 예전에는 통째로 감췄는데, 그 안에 금액(청구액)과 지시가 섞여 있었다 — "주유 가득"은
+  // 지시이고 접수 때는 금액을 모른다. 넣을 칸이 없으면 요청사항 본문으로 새고, 아무도 안 읽는다.
+  check('고객 항목은 넷', extraCharges.CLIENT_INTAKE_TYPES.length === 4,
+    extraCharges.CLIENT_INTAKE_TYPES.join(','));
+  // orders 컬럼에 저장되는 셋은 성격이 다르다 — 도선료는 경로탐색이 채우고,
+  // 대기·취소요금은 실비가 아니라 운행요금이며 금액을 직접 넣는 항목이다.
+  ['도선료', '대기요금', '취소요금'].forEach((t) => {
+    check(`${t}는 고객에게 안 보인다`, !extraCharges.isClientAllowedType(t));
+  });
+  const forClient = extraCharges.intakeOptionsFor(null, { forClient: true });
+  check('고객 화면 설정에 forClient가 실린다', forClient.forClient === true, '정산구분 칸을 감추는 신호');
+  check('고객 화면 항목도 넷', forClient.items.length === 4);
+  check('관리자 화면은 일곱 그대로', extraCharges.intakeOptionsFor(null).items.length === 7);
+
+  console.log('\n[고객이 우회해 보내도 무시한다]');
+  const asClient = (body) => extraCharges.parseIntakeRows(body, null, '2026-09-02', { asClient: true });
+  const one = (type, mode, amount) => asClient({
+    intake_extra_type: [type], intake_extra_option: [type === '주유비' ? 'amount' : ''],
+    intake_extra_amount: [String(amount)], intake_extra_mode: [mode], intake_extra_id: [''],
+  });
+  // 청구 방식은 계약이고 요금설정이 정한다 — 고객이 '포함'을 보내면 청구가 사라진다.
+  check('고객의 정산구분은 무시된다', one('주유비', 'included', 30000).rows[0].settleMode === 'monthly');
+  check('그래도 청구 대상으로 남는다', one('주유비', 'included', 30000).rows[0].billable === true);
+  check('허용 밖 항목은 버린다', one('대기요금', '', 99000).rows.length === 0);
+  check('도선료도 버린다', one('도선료', '', 50000).rows.length === 0);
+  check('도선료가 orders 컬럼으로도 안 간다',
+    Object.keys(one('도선료', '', 50000).orderFees).length === 0,
+    '고객이 도선료 금액을 바꾸면 안 된다');
+  // 관리자는 그대로여야 한다 — 권한을 좁히다 관리자 기능을 막으면 운영이 멈춘다.
+  const asAdmin = extraCharges.parseIntakeRows({
+    intake_extra_type: ['주유비', '대기요금'], intake_extra_option: ['amount', ''],
+    intake_extra_amount: ['30000', '99000'], intake_extra_mode: ['included', ''], intake_extra_id: ['', ''],
+  }, null, '2026-09-02');
+  check('관리자의 정산구분은 살아 있다', asAdmin.rows[0].settleMode === 'included');
+  check('관리자는 대기요금을 넣을 수 있다', asAdmin.orderFees.wait && asAdmin.orderFees.wait.amount === 99000);
+
   console.log('\n[두 화면이 같이 있는가]');
   // EJS와 Next가 함께 살아 있어야 한다 — 한쪽만 고치면 플래그를 되돌렸을 때 기능이 사라진다.
   const fs = require('fs');
@@ -154,6 +192,17 @@ const fake = (items) => async () => ({ items });
     check(`${name} — fixedAmount로 금액칸을 가른다`, /fixedAmount\s*&&/.test(src),
       'fixedAmount를 안 보면 세차·주차에도 금액칸이 열린다');
     check(`${name} — amountOption도 함께 본다`, /amountOption/.test(src));
+  });
+  // 고객 화면에서 정산구분 칸이 남으면 고객이 청구 방식을 고르는 것처럼 보인다.
+  check('Next 폼 — 고객이면 정산구분을 안 그린다', /forClient \? null/.test(nextForm));
+  check('공유 JS — 고객이면 정산구분을 안 그린다', /xcConfig\.forClient/.test(sharedJs));
+  // 역할 가드를 화면에서 뺐으니 서버가 유일한 방어선이다.
+  check('접수 저장이 asClient를 넘긴다', /parseIntakeRows\([\s\S]{0,160}asClient/.test(routes));
+  const ejsForms = ['views/orders/form.ejs', 'views/orders/ai_intake.ejs'].map(read);
+  ejsForms.forEach((src, i) => {
+    check(`EJS 폼 ${i + 1} — 역할로 감추지 않는다`,
+      !/role !== 'client'[\s\S]{0,80}intakeExtra/.test(src),
+      '화면에서 감추면 고객은 지시를 넣을 칸이 없다');
   });
 
   console.log(failures ? `\n${failures}건 실패` : '\n모두 통과');

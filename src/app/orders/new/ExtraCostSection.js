@@ -18,6 +18,9 @@ const MODE_HINT = {
 export default function ExtraCostSection({
   config, defaults, rows, onChange,
   ferryAmount, onFerryAmount, ferryEditable,
+  // 고객(client) 화면인가. 정산구분 칸을 그리지 않는다 — 청구 방식은 계약이고 요금설정이
+  // 정한다. 서버도 고객이 보낸 정산구분을 무시한다(lib/extraCharges.js parseIntakeRows).
+  forClient,
 }) {
   const items = (config && config.items) || [];
   const modes = (config && config.modes) || [];
@@ -69,9 +72,9 @@ export default function ExtraCostSection({
       <div className="section-title small" style={{ margin: '14px 0 6px' }}>부대비용</div>
       {!rows.length && (
         <p className="hint" style={{ margin: '0 0 8px' }}>
-          주유·충전·세차·주차·도선료를 접수할 때 미리 정해둘 수 있습니다.
-          금액은 <b>주유 금액지정</b>일 때만 넣습니다 — 나머지는 기사 영수증으로 확정됩니다.
-          정산구분은 요금설정 값이 기본으로 들어가며 여기서 바꿀 수 있습니다.
+          {forClient
+            ? '주유·충전·세차·주차를 접수할 때 미리 요청해 두실 수 있습니다. 금액은 주유 금액지정일 때만 넣습니다 — 나머지는 기사님 영수증으로 확정됩니다.'
+            : '주유·충전·세차·주차·도선료를 접수할 때 미리 정해둘 수 있습니다. 금액은 주유 금액지정일 때만 넣습니다 — 나머지는 기사 영수증으로 확정됩니다. 정산구분은 요금설정 값이 기본으로 들어가며 여기서 바꿀 수 있습니다.'}
         </p>
       )}
 
@@ -126,7 +129,7 @@ export default function ExtraCostSection({
 
             {/* 대기요금·취소요금은 실비가 아니라 운행요금이라 월/개별로 나눌 것이 없다 —
                 고를 것 없는 칸을 그리면 무엇을 고르라는 건지 모른다. 대신 자동 계산 안내를 둔다. */}
-            {it.noSettleMode ? (
+            {forClient ? null : it.noSettleMode ? (
               <span className="hint extra-cost-hint" title={it.hint || ''}>{it.hint}</span>
             ) : (
               <select aria-label={`${it.label} 정산구분`} value={r.settleMode}
