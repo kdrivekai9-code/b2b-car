@@ -315,6 +315,27 @@ async function buildOrderFormInitData(scope, userId) {
   };
 }
 
+// 검증 실패로 폼을 다시 그릴 때, 사용자가 넣어둔 부대비용 줄을 원문 그대로 돌려준다.
+// parseIntakeRows를 쓰지 않는 이유: 그 함수는 저장용이라 금액 0인 줄 등을 걸러내는데, 다시
+// 그리는 화면에서 걸러내면 사용자가 넣은 줄이 사라진 것처럼 보인다. 여기서는 판단하지 않는다.
+function echoIntakeExtraRows(body) {
+  const arr = (v) => [].concat(v === undefined || v === null ? [] : v);
+  const types = arr(body.intake_extra_type);
+  const options = arr(body.intake_extra_option);
+  const amounts = arr(body.intake_extra_amount);
+  const modes = arr(body.intake_extra_mode);
+  return types
+    .map((t, i) => ({
+      chargeType: String(t || '').trim(),
+      // 필드 이름은 저장된 줄을 읽는 loadIntakeRows()와 맞춘다 — 같은 것을 두 이름으로
+      // 부르면 화면 쪽에서 어느 쪽인지 매번 확인해야 한다.
+      optionCode: String(options[i] || '').trim(),
+      amount: String(amounts[i] === undefined || amounts[i] === null ? '' : amounts[i]).trim(),
+      settleMode: String(modes[i] || '').trim(),
+    }))
+    .filter((r) => r.chargeType);
+}
+
 // 고른 법인/지사의 요금설정에서 부대비용 정산구분 기본값만 뽑아준다.
 // 화면이 규칙을 다시 구현하면(예: "비면 월정산") 설정을 바꿨을 때 화면만 옛 기본값을 보인다.
 router.get('/extra-cost-defaults', asyncHandler(async (req, res) => {
@@ -1146,20 +1167,23 @@ router.post('/', asyncHandler(async (req, res) => {
 
   if (formError) {
     if (wantsJson) return res.status(400).json({ error: formError });
-    // 서로 의존관계 없는 조회들이라 병렬로 실행한다 — 폼 검증 실패로 다시 그려주는 화면이라도
-    // 순차 대기로 왕복시간이 곱연산되면 사용자가 다시 시도하기까지 체감 지연이 생긴다.
-    const [branches, groups, paymentMethods, favorites] = await Promise.all([
-      scope.branch_id
-        ? db.all('SELECT * FROM branches WHERE id = ?', [scope.branch_id])
-        : db.all("SELECT * FROM branches WHERE status='active' ORDER BY name"),
-      db.all('SELECT * FROM groups_tbl ORDER BY name'),
+    // GET /new과 같은 초기 데이터를 그대로 쓴다. 예전에는 필요한 조회만 골라 다시 적어뒀는데,
+    // 그러다 intakeExtra 하나가 빠져서 검증 실패로 돌아온 화면에서는 부대비용 블록이 통째로
+    // 사라졌다(항목 정의가 없으면 form.ejs가 블록을 안 그린다). 목록이 늘 때마다 여기도
+    // 같이 고쳐야 하는 구조 자체가 원인이라, 한 함수에서 받아 필요한 것만 덮어쓴다.
+    // paymentMethods는 덮어쓴다 — 사용자가 방금 고른 지사 기준이어야 한다(세션 지사가 아니라).
+    const [init, paymentMethods] = await Promise.all([
+      buildOrderFormInitData(scope, u.id),
       getEffectivePaymentMethods(finalBranch),
-      db.all('SELECT * FROM favorite_addresses WHERE user_id = ? ORDER BY id DESC', [u.id]),
     ]);
     return res.status(400).render('orders/form', {
-      title: '오더 등록', order: { ...req.body, waypoints }, branches, groups, paymentMethods, favorites, mode: 'create',
+      ...init,
+      title: '오더 등록', order: { ...req.body, waypoints }, paymentMethods, mode: 'create',
       error: formError,
-      defaultBranch: scope.branch_id || '', defaultGroup: scope.group_id || '',
+      // 입력해둔 부대비용 줄도 되살린다 — 블록만 돌아오고 줄이 비어 있으면 지사를 안 골랐다는
+      // 이유로 주유·세차 지정을 처음부터 다시 넣게 된다. 원문 그대로 돌려주고(금액이 비었든
+      // 0이든) 화면이 다시 그린다 — 여기서 걸러내면 사용자가 지운 것처럼 보인다.
+      intakeExtraRows: echoIntakeExtraRows(req.body),
       kakaoJsKey: process.env.KAKAO_JS_KEY || '',
     });
   }

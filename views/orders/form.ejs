@@ -90,8 +90,11 @@
           intakeExtra를 그대로 쓴다(양쪽이 같은 정의를 본다).
           청구 금액 설정이라 고객(client)에게는 보여주지 않는다. %>
       <% if (currentUser && currentUser.role !== 'client' && intakeExtra && intakeExtra.items.length) { %>
+        <%# data-rows는 검증 실패로 다시 그릴 때만 채워진다 — 넣어둔 줄을 되살리기 위한 것이다.
+            평소(GET /orders/new)에는 빈 배열이라 아무 줄도 미리 그리지 않는다. %>
         <div class="extra-cost-block" id="extraCostBlock"
-             data-config="<%= JSON.stringify(intakeExtra) %>">
+             data-config="<%= JSON.stringify(intakeExtra) %>"
+             data-rows="<%= JSON.stringify(typeof intakeExtraRows !== 'undefined' && intakeExtraRows ? intakeExtraRows : []) %>">
           <div class="section-title small" style="margin:14px 0 6px;">부대비용</div>
           <p class="hint" style="margin:0 0 8px;">
             주유·충전·세차·주차·도선료를 접수할 때 미리 정해둘 수 있습니다.

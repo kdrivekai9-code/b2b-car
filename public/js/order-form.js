@@ -380,11 +380,15 @@
       });
     }
 
-    function xcAddRow() {
+    function xcAddRow(preset) {
       var taken = xcTakenSingles(null);
       var first = null;
-      for (var i = 0; i < xcItems.length; i++) {
-        if (!xcItems[i].single || !taken[xcItems[i].chargeType]) { first = xcItems[i]; break; }
+      if (preset && xcItemOf(preset.chargeType)) {
+        first = xcItemOf(preset.chargeType);
+      } else {
+        for (var i = 0; i < xcItems.length; i++) {
+          if (!xcItems[i].single || !taken[xcItems[i].chargeType]) { first = xcItems[i]; break; }
+        }
       }
       if (!first) return;
       var row = document.createElement('div');
@@ -405,9 +409,38 @@
       row.querySelector('.xc-type').value = first.chargeType;
       xcRowsEl.appendChild(row);
       xcSyncRow(row, true);
+      if (!preset) return;
+      // 되살리는 줄은 선택지를 먼저 되돌린 뒤 다시 맞춘다 — 금액칸을 보일지 말지가 선택지에
+      // 달려 있어서('가득'이면 감춤), 순서를 바꾸면 금액이 보이는데 값이 안 들어간다.
+      var optSel = row.querySelector('.xc-option');
+      if (preset.optionCode && optSel.querySelector('option[value="' + preset.optionCode + '"]')) {
+        optSel.value = preset.optionCode;
+      }
+      xcSyncRow(row, false);
+      var amountEl = row.querySelector('.xc-amount');
+      if (preset.amount !== '' && preset.amount !== null && preset.amount !== undefined
+          && !amountEl.readOnly) amountEl.value = preset.amount;
+      var modeEl = row.querySelector('.xc-mode');
+      if (preset.settleMode && modeEl.querySelector('option[value="' + preset.settleMode + '"]')) {
+        modeEl.value = preset.settleMode;
+        // 사용자가 고른 값이므로 법인 기본값 재조회(xcLoadDefaults)가 덮어쓰지 않게 표시한다.
+        row.dataset.modeTouched = '1';
+      }
     }
 
-    document.getElementById('addExtraCostBtn').addEventListener('click', xcAddRow);
+    // 검증 실패로 다시 그려진 화면이면 넣어뒀던 줄을 되살린다(서버가 data-rows로 준다).
+    (function xcRestoreRows() {
+      var raw = extraCostBlock.getAttribute('data-rows');
+      if (!raw) return;
+      var rows;
+      try { rows = JSON.parse(raw); } catch (e) { return; }
+      if (!Array.isArray(rows)) return;
+      rows.forEach(function (r) { if (r && r.chargeType) xcAddRow(r); });
+    })();
+
+    // addEventListener는 이벤트 객체를 첫 인자로 넘긴다 — xcAddRow에 그대로 물리면 그 객체가
+    // preset으로 들어가 chargeType이 없는 값으로 판단이 갈린다. 인자 없이 부른다.
+    document.getElementById('addExtraCostBtn').addEventListener('click', function () { xcAddRow(); });
     xcRowsEl.addEventListener('change', function (e) {
       var row = e.target.closest('.extra-cost-row');
       if (!row) return;
