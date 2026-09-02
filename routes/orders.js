@@ -18,6 +18,7 @@ function dispatchAgentLib() {
   return require('../lib/mcpDispatchAgent');
 }
 const { buildFareSuggestion } = require('../lib/agentAssist');
+const memoExtraCosts = require('../lib/memoExtraCosts');
 // 인사·자기소개 응답은 카카오 상담톡(routes/kakaoConsult.js)과 같은 규칙을 써야 해서 공용 모듈로 뺐다.
 const { isGreeting, getSmalltalkMessage } = require('../lib/smallTalk');
 const { broadcastMessage, broadcastSessionListChanged, broadcastOrderListChanged, openOrderListStream, closeChannel } = require('../lib/realtimeChat');
@@ -95,6 +96,20 @@ async function getCurrentOperatingMomentFromDb() {
     console.error('DB 현재시각 조회 실패, 로컬 시각으로 폴백:', e.message);
   }
   return getCurrentOperatingMoment();
+}
+
+// 응답 뒤에 돌릴 작업. Vercel 서버리스는 응답을 보낸 뒤 인스턴스를 얼려버려서, 그냥
+// fire-and-forget으로 두면 작업이 조용히 유실된다 — waitUntil로 "이 작업이 끝날 때까지
+// 살려두라"고 알려줘야 한다(routes/kakaoConsult.js와 같은 방식).
+let vercelWaitUntil = null;
+try { ({ waitUntil: vercelWaitUntil } = require('@vercel/functions')); } catch (e) { /* 로컬 실행 등 */ }
+
+function runAfterResponse(promise, label) {
+  const guarded = Promise.resolve(promise).catch((e) => console.error(`${label} 실패:`, e.message));
+  if (vercelWaitUntil) {
+    try { vercelWaitUntil(guarded); } catch (e) { /* 로컬에서는 무시 — 프로세스가 계속 살아 있다 */ }
+  }
+  return guarded;
 }
 
 const router = express.Router();
@@ -1302,6 +1317,26 @@ router.post('/', asyncHandler(async (req, res) => {
     // 도선료·대기요금·취소요금은 줄이 아니라 orders 컬럼에 저장된다 — 줄로도 만들면 같은 돈이
     // 두 군데서 집계돼 두 번 청구된다. 관리자가 넣은 값은 자동 계산보다 뒤에 쓰여 이긴다.
     await extraCharges.saveOrderFeeFields(newId, parsedIntake.orderFees);
+
+    // 요청사항 본문에 적힌 부대비용을 찾아 후보로 남긴다.
+    //
+    // 법인 고객에게는 위 부대비용 입력이 아예 보이지 않는다(청구 금액 설정이라 요금 칸과 같은
+    // 규칙으로 가린다). 그래서 고객이 "주유 가득 채워주세요"를 전할 수 있는 곳은 요청사항
+    // 본문뿐이고, 그 본문을 아무도 읽지 않으면 기사에게 지시가 안 닿고 실비도 청구되지 않는다.
+    //
+    // 줄을 만들지 않고 후보로만 둔다. 탁송 오더는 고객이 접수해도 콜마너에 대기로 들어가고
+    // 관리자가 확인해야 '접수'가 되므로, 그 확인 자리에서 사람이 고른다(사용자 확정).
+    //
+    // 응답 뒤로 미룬다 — 실측 1.2~5.3초로 들쭉날쭉해서 접수를 기다리게 할 수 없다.
+    // 이미 선택된 항목은 후보에서 뺀다(같은 돈이 두 줄이면 두 번 청구된다).
+    if (String(memo_customer || '').trim()) {
+      runAfterResponse(
+        memoExtraCosts.analyzeAndStore(newId, memo_customer, intakeFeeExtra, {
+          existingChargeTypes: parsedIntake.rows.map((r) => r.chargeType),
+        }),
+        '요청사항 부대비용 분석'
+      );
+    }
   } catch (e) {
     console.error('접수 부대비용 저장 실패(오더 등록은 완료):', e.message);
   }
@@ -1533,6 +1568,9 @@ router.get('/:id/data.json', asyncHandler(async (req, res) => {
     extraCharges: extraChargeRows,
     // 요금설정에서 "제외(실비 정산)"로 둔 항목만 고를 수 있다 — "포함" 항목을 청구하면 이중 청구다.
     extraChargeTypes: await extraCharges.billableTypesForOrder(order),
+    // 요청사항 본문에서 찾아낸 부대비용 후보. 고객에게는 내려주지 않는다(청구 이야기다).
+    // 확정이 아니라 후보다 — 관리자가 '접수'로 확정하기 전에 고르는 자리다.
+    memoExtraCandidates: u.role === 'client' ? [] : memoExtraCosts.pendingFromOrder(order),
     // 수정 화면의 부대비용 섹션. 이미 붙어 있는 줄을 그대로 보여줘야 "방금 접수 때 넣은 걸
     // 왜 못 고치나"가 되지 않는다. 정산구분 기본값은 이 오더의 요금설정에서 뽑는다.
     intakeExtraRows: u.role === 'client' ? [] : await extraCharges.loadIntakeRows(req.params.id),
@@ -1884,6 +1922,58 @@ router.post('/:id/voc', asyncHandler(async (req, res) => {
 //
 // 화면이 보낸 줄들로 통째로 갈아끼운다(lib/extraCharges.js replaceForOrder) — 줄마다
 // 수정/삭제 버튼을 따로 두지 않아도 되고, VOC 저장과 같은 방식이라 새로 배울 것이 없다.
+// 요청사항에서 찾아낸 부대비용 후보를 채택/기각한다.
+//
+// 후보를 자동으로 줄로 만들지 않는 이유는 lib/memoExtraCosts.js에 적어뒀다 — 잘못 읽으면
+// 없는 돈이 청구되고, 그 손해가 놓치는 손해보다 크다. 관리자가 '접수'로 확정하기 전에 고른다.
+//
+// 기각도 기록한다. 후보를 그냥 남겨두면 다음 사람이 같은 판단을 또 해야 하고, 지워버리면
+// 왜 청구하지 않았는지가 사라진다.
+router.post('/:id/memo-extra', asyncHandler(async (req, res) => {
+  if (req.session.user.role === 'client') return res.status(403).render('403', { title: '접근 권한 없음' });
+  const order = await loadOrderForVoc(req, res);
+  if (!order) return;
+
+  const accepted = [].concat(req.body.accept_code || []).map((c) => String(c || '').trim()).filter(Boolean);
+  const candidates = memoExtraCosts.loadFromOrder(order);
+  if (!candidates.length) return res.redirect('/orders/' + req.params.id);
+
+  // 이미 붙어 있는 항목은 건너뛴다 — 같은 돈이 두 줄이면 두 번 청구된다.
+  const existing = new Set((await extraCharges.loadIntakeRows(req.params.id)).map((r) => r.chargeType));
+
+  const rows = candidates
+    .filter((c) => accepted.includes(c.code))
+    // '포함'으로 설정된 항목은 줄을 만들지 않는다. 청구 대상이 아니라 기사 안내용이다.
+    .filter((c) => c.billable && !existing.has(c.chargeType))
+    .map((c) => ({
+      id: null,
+      chargeType: c.chargeType,
+      amount: Math.max(0, Math.round(Number(c.amount) || 0)),
+      chargedOn: order.reserved_date || null,
+      billable: true,
+      // 금액을 모르는 건(주유 "가득")은 영수증으로 채워진다 — 옵션 코드로 그 사실을 남긴다.
+      optionCode: Number(c.amount) > 0 ? 'amount' : null,
+      settleMode: c.settleMode,
+    }));
+
+  if (rows.length) {
+    await extraCharges.saveIntakeRows(req.params.id, { rows, knownIds: [] }, req.session.user.id);
+  }
+
+  // 채택 여부를 후보에 박아 남긴다.
+  const decided = candidates.map((c) => ({
+    ...c,
+    decision: accepted.includes(c.code) ? 'accepted' : 'rejected',
+    decidedBy: req.session.user.id,
+  }));
+  await db.run(
+    `UPDATE orders SET memo_extra_json = ? WHERE id = ?`,
+    [JSON.stringify(decided), req.params.id]
+  ).catch((e) => console.error('요청사항 부대비용 판단 기록 실패(줄은 저장됨):', e.message));
+
+  res.redirect('/orders/' + req.params.id);
+}));
+
 router.post('/:id/extra-charges', asyncHandler(async (req, res) => {
   if (req.session.user.role === 'client') return res.status(403).render('403', { title: '접근 권한 없음' });
   const order = await loadOrderForVoc(req, res);
@@ -1998,6 +2088,8 @@ router.get('/:id', asyncHandler(async (req, res) => {
     extraCharges: extraChargeRows,
     // 요금설정에서 "제외(실비 정산)"로 둔 항목만 고를 수 있다 — "포함" 항목을 청구하면 이중 청구다.
     extraChargeTypes: await extraCharges.billableTypesForOrder(order),
+    // EJS 화면과 Next 화면이 같은 값을 봐야 한다 — 한쪽만 고치면 조용히 갈린다.
+    memoExtraCandidates: req.session.user.role === 'client' ? [] : memoExtraCosts.pendingFromOrder(order),
     baseUrl: req.protocol + '://' + req.get('host'),
     ORDER_STATUSES: statusConfig.map((s) => s.status_code),
   });

@@ -197,6 +197,53 @@
     </div>
 
     <% if (currentUser.role !== 'client') { %>
+    <%# 요청사항에서 찾은 부대비용 후보 — 기사에게 전달되기 전에 관리자가 고르는 자리.
+        법인 고객에게는 접수 화면의 부대비용 입력이 보이지 않아 요청사항 본문이 유일한
+        통로다. 자동으로 줄을 만들지 않는 이유는 lib/memoExtraCosts.js에 적어뒀다.
+        Next 화면의 같은 카드는 src/app/orders/[id]/MemoExtraCandidates.js다 —
+        한쪽만 고치면 플래그를 되돌렸을 때 기능이 사라진다. %>
+    <% var memoExtras = (typeof memoExtraCandidates !== 'undefined' && memoExtraCandidates) || []; %>
+    <% var memoBillable = memoExtras.filter(function (c) { return c.billable; }); %>
+    <% var memoIncluded = memoExtras.filter(function (c) { return !c.billable; }); %>
+    <% if (memoExtras.length) { %>
+    <div class="card" style="border-color:#c7a008;">
+      <h2>요청사항에서 찾은 부대비용 <span style="font-size:12px;font-weight:400;color:#8a6d00;">확인 필요</span></h2>
+      <p class="page-sub" style="margin:0 0 10px;">
+        고객 요청사항 본문에 적혀 있는데 부대비용 항목으로는 선택되지 않은 것들입니다.
+        <b>기사에게 전달되기 전에</b> 확인해 주세요.
+      </p>
+      <form method="POST" action="/orders/<%= order.id %>/memo-extra">
+        <% memoBillable.forEach(function (c) { %>
+        <label style="display:block;padding:10px 12px;margin-bottom:8px;border:1px solid #e2e2e2;border-radius:6px;cursor:pointer;">
+          <input type="checkbox" name="accept_code" value="<%= c.code %>" checked style="margin-right:8px;">
+          <b><%= c.label %></b>
+          <%= Number(c.amount) > 0 ? ' ' + Number(c.amount).toLocaleString('ko-KR') + '원' : ' (금액 미정 — 영수증으로 확정)' %>
+          <span style="margin-left:8px;font-size:12px;color:#8a6d00;">
+            <%= c.settleMode === 'individual' ? '실비 개별정산' : '실비 월정산' %>
+          </span>
+          <%# 근거를 보여줘야 "왜 이게 잡혔나"를 판단할 수 있다. 요약이 아니라 원문 조각이다. %>
+          <div style="margin-top:4px;font-size:12px;color:#666;">요청사항: &ldquo;<%= c.evidence %>&rdquo;</div>
+        </label>
+        <% }); %>
+        <% if (memoIncluded.length) { %>
+        <%# 청구는 안 하지만 기사에게는 알려야 한다 — 지시가 안 닿으면 차가 빈 채로 간다. %>
+        <div style="padding:10px 12px;margin-bottom:8px;border-radius:6px;background:#f4f4f4;font-size:13px;color:#555;">
+          <b>요금에 포함된 항목</b> — 청구하지 않지만 기사에게는 전달됩니다.
+          <ul style="margin:6px 0 0;padding-left:18px;">
+            <% memoIncluded.forEach(function (c) { %>
+            <li><%= c.label %> — 요청사항: &ldquo;<%= c.evidence %>&rdquo;</li>
+            <% }); %>
+          </ul>
+        </div>
+        <% } %>
+        <button class="btn" type="submit"><%= memoBillable.length ? '선택한 항목 추가' : '확인' %></button>
+        <span style="margin-left:10px;font-size:12px;color:#888;">
+          체크를 모두 해제하고 눌러도 됩니다 — 그러면 청구하지 않은 것으로 기록됩니다.
+        </span>
+      </form>
+    </div>
+    <% } %>
+
     <%# 기타 정산 내역 — 운행요금과 별도로 거래처에 청구하는 실비다. 고객이 자기 오더의
         청구액을 바꿀 수 있으면 정산이 성립하지 않아 고객에게는 아예 보이지 않는다. %>
     <div class="card">

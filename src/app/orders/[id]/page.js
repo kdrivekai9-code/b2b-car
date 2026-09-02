@@ -7,6 +7,7 @@ import OrderForm from '../new/OrderForm';
 import OrderDetailAdminPanels from './OrderDetailAdminPanels';
 import OrderVocPanel from './OrderVocPanel';
 import OrderExtraChargesPanel from './OrderExtraChargesPanel';
+import MemoExtraCandidates from './MemoExtraCandidates';
 import OdometerSummary from './OdometerSummary';
 
 // 오더 상세페이지를 기존 접수폼(OrderForm.js, /orders/new)의 edit 모드로 재사용 —
@@ -137,6 +138,10 @@ export default async function OrderDetailPage({ params }) {
 
       {isAdminOrBranchManager && (
         <div style={{ marginTop: 18 }}>
+          {/* 요청사항에서 찾은 부대비용 후보를 부대비용 카드보다 **위에** 둔다 — 기사에게
+              전달되기 전에 판단해야 하는 것이라, 판단하고 나서 금액을 보는 순서가 맞다.
+              후보가 없거나 이미 판단했으면 스스로 아무것도 그리지 않는다. */}
+          <MemoExtraCandidates data={data} orderId={id} />
           {/* 기타 정산 내역은 거래처에 청구할 금액이라 고객에게는 보이지 않는다 — 서버도
               같은 기준으로 막는다(POST /:id/extra-charges). */}
           <OrderExtraChargesPanel data={data} orderId={id} />
