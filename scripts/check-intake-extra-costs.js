@@ -125,10 +125,17 @@ const MARK = 'zzq부대비용검사';
     check('한 오더에 하나뿐', waitItem.single, true);
 
     console.log('[저장]');
+    // 지사·법인을 실제 오더에서 빌려온다(외래키를 만족시키려는 것뿐이다). 법인까지 있는 것을
+    // 골라야 한다 — 아래 [정산 반영]이 loadSettlement(requester_group_id, ...)로 확인하기
+    // 때문이다. 예전에는 "지사가 있는 가장 최근 오더"를 썼는데, 법인 없이 등록된 오더가
+    // 맨 위로 올라온 시점부터 group_id가 null이 되어 정산 조회가 늘 빈손이 됐다.
+    // 그래서 정산 검사 2건이 제품 문제 없이도 실패했다 — 검사가 스스로 흔들리면 실패를
+    // 무시하게 되고, 그러면 진짜 청구 누락이 났을 때도 못 잡는다.
     const order = await db.get(
       `SELECT id, branch_id, requester_group_id FROM orders
-        WHERE branch_id IS NOT NULL ORDER BY id DESC LIMIT 1`);
-    if (!order) { console.log('  건너뜀 — 오더가 없다'); }
+        WHERE branch_id IS NOT NULL AND requester_group_id IS NOT NULL
+        ORDER BY id DESC LIMIT 1`);
+    if (!order) { console.log('  건너뜀 — 지사·법인이 모두 있는 오더가 없다'); }
     else {
       const made = await db.get(
         `INSERT INTO orders (oid, branch_id, requester_group_id, status, reserved_date, reserved_time,
