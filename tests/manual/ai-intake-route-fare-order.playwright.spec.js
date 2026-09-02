@@ -1,8 +1,11 @@
-// 목적: 경로/요금 안내가 접수 확인을 막지 않는지, 그리고 법인 토글로 끌 수 있는지 확인한다.
+// 목적: 경로/요금 안내가 접수 요약을 막지 않으면서도, "위 내용으로 등록해 드릴까요?"가 항상
+// 마지막 말풍선으로 남는지 확인한다. 그리고 법인 토글로 요금/경로를 끌 수 있는지도 본다.
 //
 // 왜 필요한가: 예전에는 announceFareGuideFromDb()(최대 20초 대기)가 끝나야 접수 확인 말풍선이
-// 나갔다. 실사용 지적 — 안 쓰는 법인 때문에 결과를 기다릴 이유가 없고, 쓰더라도 사용자가 입력한
-// 주문서 확인이 먼저 나와야 한다. 순서가 다시 뒤집히면 여기서 잡힌다.
+// 나갔다. 실사용 지적으로 요약을 먼저 내보내게 바꿨더니, 이번에는 요금 안내가 등록 확인 질문
+// **아래**로 붙어서 대화의 마지막 줄이 질문이 아니게 됐다("등록확인 질문 다음에 경로/예상요금이
+// 나온다"). 지금 규칙은 둘 다 지킨다 — 요약은 곧바로, 질문은 요금을 잠깐(CONFIRM_FARE_WAIT_MS)
+// 기다렸다가 맨 뒤에. 그 한도를 넘겨 늦게 온 요금은 이미 뜬 질문 **위로** 끼워 넣는다.
 //
 // 외부 의존(Gemini 파싱·카카오 주소검색·요금표)은 모킹한다. 검증 대상은 말풍선의 순서다.
 const { test, expect } = require('@playwright/test');
@@ -12,8 +15,10 @@ const BASE_URL = process.env.E2E_BASE_URL || 'http://127.0.0.1:3000';
 // 계정·비밀번호는 한 곳에서 가져온다 — 값이 없으면 즉시 멈춘다(tests/e2e-credentials.js).
 const { LOGIN_ID, PASSWORD } = require('../e2e-credentials');
 
-// 요금 조회가 느린 상황을 만든다 — 이 지연이 접수 확인을 막으면 안 된다.
+// 요금 조회가 느린 상황을 만든다 — 이 지연이 접수 요약을 막으면 안 된다.
 const FARE_DELAY_MS = 4000;
+// 확인 질문이 요금을 기다려주는 한도(ai-intake.js CONFIRM_FARE_WAIT_MS)를 넘기는 지연.
+const FARE_DELAY_OVER_WAIT_MS = 9000;
 
 const FULL_PARSE = {
   intent: 'dispatch_order',
@@ -29,7 +34,7 @@ const FULL_PARSE = {
   memo_customer: null,
 };
 
-async function setupMocks(page, { routeEnabled = true, fareEnabled = true } = {}) {
+async function setupMocks(page, { routeEnabled = true, fareEnabled = true, fareDelayMs = FARE_DELAY_MS } = {}) {
   await page.addInitScript(({ route, fare }) => {
     // ai_intake.ejs의 인라인 스크립트가 서버 값으로 이 전역을 덮어쓰므로, 단순 대입으로는
     // 테스트 값이 살아남지 않는다 — getter로 고정한다(아래 __aiIntakeRouteFinal과 같은 방식).
@@ -73,7 +78,7 @@ async function setupMocks(page, { routeEnabled = true, fareEnabled = true } = {}
   });
 
   await page.route('**/orders/fare-preview**', async (route) => {
-    await new Promise((r) => setTimeout(r, FARE_DELAY_MS));
+    await new Promise((r) => setTimeout(r, fareDelayMs));
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -95,10 +100,20 @@ async function botTexts(page) {
   return page.locator('.ai-chat-bubble.ai-bot').allTextContents();
 }
 
+// 필드가 다 채워져도 봇은 "추가 요청사항이 있으시면 알려주세요"를 한 번 묻고 기다린다 —
+// 여기에 답해야 요약·등록 확인 질문으로 넘어간다(ai-intake-confirm 테스트와 같은 관문).
+async function answerExtraRequest(page) {
+  await expect
+    .poll(async () => (await botTexts(page)).some((t) => /추가 요청사항|등록해 드릴까요/.test(t)), { timeout: 30000 })
+    .toBe(true);
+  if ((await botTexts(page)).some((t) => t.includes('등록해 드릴까요'))) return;
+  await sendMessage(page, '없음');
+}
+
 test.describe('AI intake 경로/요금 안내 순서', () => {
   test.describe.configure({ timeout: 90000 });
 
-  test('요금 조회가 느려도 접수 확인이 먼저 나가고, 진행중 안내 뒤에 요금이 따라온다', async ({ page }) => {
+  test('요금 조회가 느려도 접수 요약이 먼저 나가고, 진행중 안내 뒤에 요금이 따라온다', async ({ page }) => {
     await setupMocks(page, { routeEnabled: true, fareEnabled: true });
     await openAiIntakeWithRetry(page, { baseUrl: BASE_URL, loginId: LOGIN_ID, password: PASSWORD });
 
@@ -121,6 +136,51 @@ test.describe('AI intake 경로/요금 안내 순서', () => {
     const noticeIdx = all.findIndex((t) => /경로탐색중|요금검색중/.test(t));
     const fareIdx = all.findIndex((t) => /90,000/.test(t));
     expect(noticeIdx).toBeLessThan(fareIdx);
+  });
+
+  // 대기 한도(6초) 안에 요금이 오는 흔한 경우 — 질문이 요금 뒤에, 그리고 맨 마지막에 온다.
+  // 화면 순서뿐 아니라 저장 순서도 이래야 새로고침·상담관리 이력에서 같은 순서로 보인다.
+  test('요금이 제때 오면 등록 확인 질문이 그 뒤 맨 마지막에 나온다', async ({ page }) => {
+    await setupMocks(page, { routeEnabled: true, fareEnabled: true });
+    await openAiIntakeWithRetry(page, { baseUrl: BASE_URL, loginId: LOGIN_ID, password: PASSWORD });
+
+    await sendMessage(page, '내일 오후 2시 서울 강서구 양천로53길 30에서 경기 성남시 분당구 판교역로 160으로 토레스 12가3456 탁송 부탁드립니다');
+    await answerExtraRequest(page);
+
+    await expect
+      .poll(async () => (await botTexts(page)).some((t) => t.includes('등록해 드릴까요')), { timeout: 40000 })
+      .toBe(true);
+
+    const all = await botTexts(page);
+    const fareIdx = all.findIndex((t) => /90,000/.test(t));
+    const confirmIdx = all.findIndex((t) => t.includes('등록해 드릴까요'));
+    expect(fareIdx).toBeGreaterThanOrEqual(0);
+    expect(fareIdx).toBeLessThan(confirmIdx);
+    expect(confirmIdx).toBe(all.length - 1);
+  });
+
+  // 한도를 넘겨 늦게 온 경우 — 질문을 붙잡아두지 않되, 도착한 요금을 그 질문 위로 끼워 넣는다.
+  test('요금이 대기 한도보다 늦게 와도 질문 위로 끼워 넣어 질문이 마지막에 남는다', async ({ page }) => {
+    await setupMocks(page, { routeEnabled: true, fareEnabled: true, fareDelayMs: FARE_DELAY_OVER_WAIT_MS });
+    await openAiIntakeWithRetry(page, { baseUrl: BASE_URL, loginId: LOGIN_ID, password: PASSWORD });
+
+    await sendMessage(page, '내일 오후 2시 서울 강서구 양천로53길 30에서 경기 성남시 분당구 판교역로 160으로 토레스 12가3456 탁송 부탁드립니다');
+    await answerExtraRequest(page);
+
+    // 질문이 요금보다 먼저 뜬다 — 여기서 요금을 무한정 기다리지 않는다는 점이 확인된다.
+    await expect
+      .poll(async () => (await botTexts(page)).some((t) => t.includes('등록해 드릴까요')), { timeout: 40000 })
+      .toBe(true);
+    expect((await botTexts(page)).some((t) => /90,000/.test(t))).toBe(false);
+
+    await expect.poll(async () => (await botTexts(page)).some((t) => /90,000/.test(t)), { timeout: 30000 }).toBe(true);
+
+    const all = await botTexts(page);
+    const fareIdx = all.findIndex((t) => /90,000/.test(t));
+    const confirmIdx = all.findIndex((t) => t.includes('등록해 드릴까요'));
+    // 나중에 온 요금이 이미 떠 있는 질문 위로 들어갔는지 — 화면상 마지막 줄은 여전히 질문이다.
+    expect(fareIdx).toBeLessThan(confirmIdx);
+    expect(confirmIdx).toBe(all.length - 1);
   });
 
   test('둘 다 꺼져 있으면 요금 조회 자체를 하지 않는다', async ({ page }) => {

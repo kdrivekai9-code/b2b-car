@@ -174,6 +174,7 @@
   var lastBotRowInTurn = null;
   function resetTurnBotRow() {
     lastBotRowInTurn = null;
+    confirmQuestionRow = null;
   }
   // 배차 주문 도우미(콜마너 MCP)가 되물어본 상태 — true면 다음 메시지를 Gemini 의도분류로
   // 보내기 전에 도우미에게 먼저 넘긴다("네"/"1번" 같은 짧은 답이 FAQ로 새는 것을 막기 위함).
@@ -373,8 +374,18 @@
     try { return JSON.parse(raw); } catch (e) { return null; }
   }
 
-  function addBubble(text, who, createdAt, isQuestion, attachments) {
-    renderer.addBubble(text, who, createdAt, isQuestion, attachments);
+  function addBubble(text, who, createdAt, isQuestion, attachments, opts) {
+    return renderer.addBubble(text, who, createdAt, isQuestion, attachments, opts);
+  }
+
+  // "위 내용으로 등록해 드릴까요?" 말풍선의 DOM 행. 경로탐색/요금조회는 이 질문을 막지 않고
+  // 뒤에서 도는데(startBackgroundFareGuide), 결과가 늦게 오면 요금 안내가 질문 **아래로**
+  // 붙어서 마지막 줄이 질문이 아니게 된다 — 실사용 지적. 이 행을 기억해뒀다가 뒤늦은 요금
+  // 말풍선을 그 위에 끼워 넣는다. 새 사용자 메시지가 오면(resetTurnBotRow) 해제한다.
+  var confirmQuestionRow = null;
+  function addFareBubble(text) {
+    var anchor = (confirmQuestionRow && confirmQuestionRow.parentNode) ? confirmQuestionRow : null;
+    return addBubble(text, 'bot', null, false, null, anchor ? { before: anchor } : null);
   }
 
   // 필드 검증(주소/연락처/차량번호) 확인·재요청 말풍선은 화면에는 즉시 보여주면서도, 다음 정식
@@ -564,6 +575,22 @@
   function setField(id, value) {
     var el = document.getElementById(id);
     if (el && value) { el.value = value; el.disabled = false; el.style.display = ''; }
+  }
+
+  // 상세주소(건물명·상호명·동/호수)는 그때 같이 파싱된 주소에 딸린 값이다. 그래서 주소가 바뀌는
+  // 메시지에 상세주소가 안 딸려 오면 같이 지운다 — 안 그러면 "도착지를 강남역으로 바꿔주세요"에
+  // 앞 도착지의 상호명이 그대로 남아 엉뚱한 곳에 붙는다. 예전에는 order-form.js의 applyResult가
+  // 지오코딩할 때마다 상세주소 칸을 비워서 이 문제가 드러나지 않았는데, 그 비우기가 정작 방금
+  // 파싱한 값까지 날리고 있어서 되살렸다(confirmWith) — 그 대가로 정리는 여기서 해야 한다.
+  function syncAddressDetail(addressId, detailId, newAddress, newDetail) {
+    if (newDetail) { setField(detailId, newDetail); return; }
+    if (!newAddress) return; // 이번 메시지에 주소가 없으면 기존 상세주소는 그대로 둔다.
+    var addrEl = document.getElementById(addressId);
+    var detailEl = document.getElementById(detailId);
+    if (!addrEl || !detailEl) return;
+    // 같은 주소를 다시 말한 것뿐이면(재확인 등) 상세주소를 지울 이유가 없다.
+    if (String(addrEl.value || '').trim() === String(newAddress).trim()) return;
+    detailEl.value = '';
   }
 
   // 예약 시간은 시/분 드롭다운(분은 10분 단위 6개)으로 입력받지만, Gemini가 자연어("오후 2시 15분")에서
@@ -1240,7 +1267,7 @@
     if (!deferredFareGuideNoticeShown) {
       deferredFareGuideNoticeShown = true;
       var waitingText = '경로탐색이 완료되는 즉시 요금을 안내해드릴게요.';
-      addBubble(waitingText, 'bot');
+      addFareBubble(waitingText);
       logBotMessage({ logText: waitingText, needsAgent: false, requestedFeature: null });
     }
     if (deferredFareGuideTimer) return;
@@ -1266,6 +1293,31 @@
 
   var backgroundFareGuideRunning = false;
 
+  // 등록 확인 질문을 내보내기 전에 요금 안내를 이만큼까지만 기다린다. 요약은 이미 화면에 떠
+  // 있고 1.5초 뒤 "경로탐색중......"도 뜨므로 이 대기 동안 화면이 멈춰 보이지는 않는다.
+  // 넘기면 질문을 먼저 내보내고, 뒤늦게 온 요금은 addFareBubble이 그 질문 위로 끼워 넣는다.
+  var CONFIRM_FARE_WAIT_MS = 6000;
+
+  function fareGuideIdle() {
+    return !backgroundFareGuideRunning && !deferredFareGuideTimer;
+  }
+
+  // 경로탐색이 늦어도 "위 내용으로 등록해 드릴까요?"가 요금 안내 아래에 오도록, 확인 질문
+  // 직전에 잠깐 기다린다. 폴링으로 확인하는 이유는 이 대기가 시작되는 시점
+  // (fetchSummaryText 응답 후)과 요금조회가 시작되는 시점(setTimeout 0)의 순서가 보장되지
+  // 않아서다 — 콜백을 등록해두는 방식이면 이미 끝난 조회를 영영 기다릴 수 있다.
+  function waitForFareGuideBeforeConfirm() {
+    if (!isFareSearchEnabled()) return Promise.resolve();
+    if (!val('origin_address') || !val('destination_address')) return Promise.resolve();
+    var deadline = Date.now() + CONFIRM_FARE_WAIT_MS;
+    return new Promise(function (resolve) {
+      (function tick() {
+        if (fareGuideIdle() || Date.now() >= deadline) return resolve();
+        setTimeout(tick, 150);
+      })();
+    });
+  }
+
   // 접수 확인/다음 질문을 막지 않고 뒤에서 경로탐색+요금조회를 진행한다 — 예전에는 이
   // 조회(최대 20초 대기)가 끝나야 접수 확인 말풍선이 나갔다. 실사용 요청: 사용자가 입력한
   // 주문서 확인을 먼저 보여주고, 오래 걸리면 "경로탐색중......"만 띄운 뒤 결과가 나오는
@@ -1282,7 +1334,7 @@
       searchingTimer = null;
       // 경로가 이미 확정됐다면 남은 건 요금표 조회뿐이라 문구를 구분해준다.
       var searchingText = isRouteDistanceFinal() ? '요금검색중......' : '경로탐색중......';
-      addBubble(searchingText, 'bot');
+      addFareBubble(searchingText);
       logBotMessage({ logText: searchingText, needsAgent: false, requestedFeature: null });
     }, 1500);
 
@@ -1444,7 +1496,7 @@
 
           if (!data || !data.enabled) {
             var manualMsg = '등록된 법인/지사 구간요금이 없어 요금 자동 안내가 어렵습니다. 상담원이 확인 후 안내드리겠습니다.';
-            addBubble(manualMsg, 'bot');
+            addFareBubble(manualMsg);
             lastFareGuideKey = key;
             if (opts.returnPayload) {
               return {
@@ -1473,7 +1525,7 @@
           // 신호를 돌려줘서, 호출부(handleFareInquiryFlowFromText)가 답을 받을 때까지 멈추게 한다.
           if (data.ferryNeedVehicleType) {
             var fareInfoMsg = normalizeFareGuideText('현재 경로 기준 구간요금은 약 ' + baseFare.toLocaleString('ko-KR') + '원입니다.');
-            addBubble(fareInfoMsg, 'bot');
+            addFareBubble(fareInfoMsg);
             logBotMessage({ logText: fareInfoMsg, needsAgent: false, requestedFeature: null });
             var vehicleQuestionText = '도선료 계산을 위해 차종을 알려주세요. (예: 카니발, 그랜저)\n*전기차의 경우 도선 요금이 추가되니 반드시 기재요망';
             addBubble(vehicleQuestionText, 'bot', null, true);
@@ -1518,7 +1570,7 @@
           }
 
           msg = normalizeFareGuideText(msg);
-          addBubble(msg, 'bot');
+          addFareBubble(msg);
           lastFareGuideKey = key;
           deferredFareGuideNoticeShown = false;
           clearDeferredFareGuideTimer();
@@ -2183,8 +2235,12 @@
     fetchSummaryText().then(function (summary) {
       addBubble(summary, 'bot');
       logBotMessage({ logText: summary, needsAgent: false, requestedFeature: null });
-      addBubble(confirmQ, 'bot', null, true);
-      logBotMessage({ logText: confirmQ, needsAgent: false, requestedFeature: null });
+      // 요금 안내를 잠깐 기다렸다가 질문을 마지막에 놓는다 — 이렇게 해야 저장 순서(이력)도
+      // 화면과 같아진다. 시간 안에 못 받으면 질문을 먼저 내보내고 요금이 그 위로 들어간다.
+      return waitForFareGuideBeforeConfirm().then(function () {
+        confirmQuestionRow = addBubble(confirmQ, 'bot', null, true);
+        logBotMessage({ logText: confirmQ, needsAgent: false, requestedFeature: null });
+      });
     });
     return null;
   }
@@ -2360,11 +2416,15 @@
       .then(function (summary) {
         addBubble(summary, 'bot');
         logBotMessage({ logText: summary, needsAgent: false, requestedFeature: null });
-        var confirmQ = '위 내용으로 등록해 드릴까요?';
-        addBubble(confirmQ, 'bot', null, true);
-        logBotMessage({ logText: confirmQ, needsAgent: false, requestedFeature: null });
-        // 탁송 흐름과 동일하게 요약/확인질문을 먼저 내보낸 뒤 경로/요금은 뒤에서 따라붙인다.
+        // 탁송 흐름과 동일하게 요약을 먼저 내보낸 뒤 경로/요금을 뒤에서 돌리고, 확인 질문은
+        // 그 결과(또는 대기 한도)까지 기다렸다가 마지막에 놓는다.
         startBackgroundFareGuide();
+        return waitForFareGuideBeforeConfirm();
+      })
+      .then(function () {
+        var confirmQ = '위 내용으로 등록해 드릴까요?';
+        confirmQuestionRow = addBubble(confirmQ, 'bot', null, true);
+        logBotMessage({ logText: confirmQ, needsAgent: false, requestedFeature: null });
         return null;
       });
   }
@@ -2451,8 +2511,9 @@
     setField('memo_customer', data.memo_customer);
     setField('memo_billing', data.memo_billing);
     setField('vehicle_type', data.vehicle_type || data.vehicleType || null);
-    if (data.origin_detail_address) setField('origin_detail_address', data.origin_detail_address);
-    if (data.destination_detail_address) setField('destination_detail_address', data.destination_detail_address);
+    // 주소 입력칸은 아래 tasks를 만들면서 새 값으로 덮어쓰므로, 비교는 반드시 그 전인 여기서 한다.
+    syncAddressDetail('origin_address', 'origin_detail_address', data.origin_address, data.origin_detail_address);
+    syncAddressDetail('destination_address', 'destination_detail_address', data.destination_address, data.destination_detail_address);
 
     // ---- 일일기사 전용 pendingField 처리 ----
     // 예약일시 답변 — trip_type(왕복/편도) 확인 직후 이 질문을 물어보는데, 정작 그 답을

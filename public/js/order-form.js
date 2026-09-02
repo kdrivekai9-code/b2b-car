@@ -1998,7 +1998,23 @@
     // 직전에만 한꺼번에 기다린다(window.__aiIntakeWaitPendingRegions, ai-intake.js에서 호출).
     function confirmWith(best, detailToken, meta, searchedQuery) {
       if (!best) return { success: false, resolvedText: null };
+      // 챗봇이 이미 채워둔 상세주소를 지오코딩 결과가 지워버리지 않게 먼저 챙겨둔다.
+      // applyResult는 도로명주소 결과(type !== 'place')를 받으면 상세주소 칸을 비운다 — 사람이
+      // 직접 주소를 다시 고르는 등록화면에서는 옳다(이전 주소의 동/호수가 남으면 안 되니까).
+      // 그런데 AI 접수에서는 그 칸을 Gemini가 원문에서 분리해 미리 채워둔다
+      // (예: "군포시 농심로59번길 4 KG모빌리티(KGM광역서비스센터)" → 주소 / 상세주소).
+      // 검색어는 주소 부분만이라 아래 extractDetailHintFromResolved로도 되살릴 수 없어서
+      // (검색어에서 빼고 남는 게 없다) 상호명이 통째로 사라졌다 — 실사용 접수 건에서 확인.
+      var preservedDetail = detailInput ? String(detailInput.value || '').trim() : '';
       applyResult(best, mainInput, detailInput, slot, kind, document.getElementById(slot + 'Preview'));
+      // 장소(place) 결과면 applyResult가 place_name을 상세주소로 넣어둔 상태다. 챙겨둔 값이
+      // 그걸 포함하는 더 긴 표현이면(예: place_name "KG모빌리티" vs 원문 "KG모빌리티(KGM광역
+      // 서비스센터)") 원문 쪽이 정보가 많으므로 덮어쓰고, 아니면 겹치지 않을 때만 덧붙인다.
+      if (preservedDetail && detailInput) {
+        var afterApply = String(detailInput.value || '').trim();
+        if (!afterApply || preservedDetail.indexOf(afterApply) !== -1) detailInput.value = preservedDetail;
+        else appendDetailToken(detailInput, preservedDetail);
+      }
       var detailHint = extractDetailHintFromResolved(searchedQuery || query, best);
       if (detailToken) appendDetailToken(detailInput, detailToken);
       if (detailHint) appendDetailToken(detailInput, detailHint);

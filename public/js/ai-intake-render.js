@@ -133,7 +133,9 @@
       })();
     }
 
-    function appendBubbleRow(bubbleDiv, who, timeText) {
+    // before가 주어지면 그 행 **앞에** 끼워 넣는다 — 뒤늦게 도착한 요금 안내를 이미 떠 있는
+    // "위 내용으로 등록해 드릴까요?" 위로 올려서, 확인 질문이 항상 마지막에 남게 하기 위함.
+    function appendBubbleRow(bubbleDiv, who, timeText, before) {
       var row = document.createElement('div');
       row.className = 'ai-chat-row ' + (who === 'user' ? 'ai-row-user' : 'ai-row-start');
       var timeEl = document.createElement('span');
@@ -146,7 +148,8 @@
         row.appendChild(bubbleDiv);
         row.appendChild(timeEl);
       }
-      messages.appendChild(row);
+      if (before && before.parentNode === messages) messages.insertBefore(row, before);
+      else messages.appendChild(row);
       return row;
     }
 
@@ -179,7 +182,8 @@
       if (wrap.childNodes.length) parent.appendChild(wrap);
     }
 
-    function addBubble(text, who, createdAt, isQuestion, attachments) {
+    function addBubble(text, who, createdAt, isQuestion, attachments, opts) {
+      var before = (opts && opts.before) || null;
       var div = document.createElement('div');
       div.className = 'ai-chat-bubble ' + (who === 'user' ? 'ai-user' : (who === 'agent' ? 'ai-agent' : (who === 'system' ? 'ai-system' : 'ai-bot')));
       if (who === 'bot' && isQuestion) div.className += ' ai-bot-question';
@@ -216,17 +220,25 @@
         div.appendChild(userText);
       }
 
-      var row = appendBubbleRow(div, who, timeText);
+      var row = appendBubbleRow(div, who, timeText, before);
       if (who === 'bot') {
-        var previousBotRow = getLastBotRow();
-        if (previousBotRow) {
-          var prevTimeEl = previousBotRow.querySelector('.bubble-time');
-          if (prevTimeEl) prevTimeEl.style.display = 'none';
+        // 끼워 넣은 말풍선은 그 턴의 마지막이 아니다 — lastBotRow를 넘겨받으면 아래에 있는
+        // 확인 질문의 시간 표시가 지워지고 중간 말풍선에만 시간이 남는다. 자기 시간만 감춘다.
+        if (before) {
+          var ownTimeEl = row.querySelector('.bubble-time');
+          if (ownTimeEl) ownTimeEl.style.display = 'none';
+        } else {
+          var previousBotRow = getLastBotRow();
+          if (previousBotRow) {
+            var prevTimeEl = previousBotRow.querySelector('.bubble-time');
+            if (prevTimeEl) prevTimeEl.style.display = 'none';
+          }
+          setLastBotRow(row);
         }
-        setLastBotRow(row);
       }
       if (who !== 'user') collapseChatInput();
       scrollMessagesToBottom();
+      return row;
     }
 
     return {
