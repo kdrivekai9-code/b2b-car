@@ -7,6 +7,9 @@
 // 나온다"). 지금 규칙은 둘 다 지킨다 — 요약은 곧바로, 질문은 요금을 잠깐(CONFIRM_FARE_WAIT_MS)
 // 기다렸다가 맨 뒤에. 그 한도를 넘겨 늦게 온 요금은 이미 뜬 질문 **위로** 끼워 넣는다.
 //
+// 진행중 안내("경로탐색중......")도 함께 본다 — 결과가 나온 뒤에도 남아 있어서 다 끝났는데
+// 아직 찾고 있는 것처럼 보인다는 지적이 있었다. 이제 결과가 그 자리를 대신한다.
+//
 // 외부 의존(Gemini 파싱·카카오 주소검색·요금표)은 모킹한다. 검증 대상은 말풍선의 순서다.
 const { test, expect } = require('@playwright/test');
 const { openAiIntakeWithRetry } = require('./helpers/auth');
@@ -132,10 +135,11 @@ test.describe('AI intake 경로/요금 안내 순서', () => {
     // 요금 결과는 그 뒤에 따라온다.
     await expect.poll(async () => (await botTexts(page)).some((t) => /90,000/.test(t)), { timeout: 15000 }).toBe(true);
 
+    // 그리고 진행중 안내는 사라진다 — 결과 바로 위에 "요금검색중......"이 남아 있으면 다
+    // 끝났는데도 아직 찾고 있는 것처럼 보인다(실사용 지적).
     const all = await botTexts(page);
-    const noticeIdx = all.findIndex((t) => /경로탐색중|요금검색중/.test(t));
-    const fareIdx = all.findIndex((t) => /90,000/.test(t));
-    expect(noticeIdx).toBeLessThan(fareIdx);
+    expect(all.some((t) => /경로탐색중|요금검색중/.test(t))).toBe(false);
+    expect(all.some((t) => /90,000/.test(t))).toBe(true);
   });
 
   // 대기 한도(6초) 안에 요금이 오는 흔한 경우 — 질문이 요금 뒤에, 그리고 맨 마지막에 온다.
@@ -157,6 +161,7 @@ test.describe('AI intake 경로/요금 안내 순서', () => {
     expect(fareIdx).toBeGreaterThanOrEqual(0);
     expect(fareIdx).toBeLessThan(confirmIdx);
     expect(confirmIdx).toBe(all.length - 1);
+    expect(all.some((t) => /경로탐색중|요금검색중/.test(t))).toBe(false);
   });
 
   // 한도를 넘겨 늦게 온 경우 — 질문을 붙잡아두지 않되, 도착한 요금을 그 질문 위로 끼워 넣는다.
@@ -181,6 +186,7 @@ test.describe('AI intake 경로/요금 안내 순서', () => {
     // 나중에 온 요금이 이미 떠 있는 질문 위로 들어갔는지 — 화면상 마지막 줄은 여전히 질문이다.
     expect(fareIdx).toBeLessThan(confirmIdx);
     expect(confirmIdx).toBe(all.length - 1);
+    expect(all.some((t) => /경로탐색중|요금검색중/.test(t))).toBe(false);
   });
 
   test('둘 다 꺼져 있으면 요금 조회 자체를 하지 않는다', async ({ page }) => {

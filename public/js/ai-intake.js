@@ -383,9 +383,32 @@
   // 붙어서 마지막 줄이 질문이 아니게 된다 — 실사용 지적. 이 행을 기억해뒀다가 뒤늦은 요금
   // 말풍선을 그 위에 끼워 넣는다. 새 사용자 메시지가 오면(resetTurnBotRow) 해제한다.
   var confirmQuestionRow = null;
-  function addFareBubble(text) {
+  function insertFareRow(text) {
     var anchor = (confirmQuestionRow && confirmQuestionRow.parentNode) ? confirmQuestionRow : null;
     return addBubble(text, 'bot', null, false, null, anchor ? { before: anchor } : null);
+  }
+
+  // 진행 상태 말풍선("경로탐색중......", "경로탐색이 완료되는 즉시 …") — 결과가 나오면 치운다.
+  // 예전에는 평범한 봇 말풍선으로 띄우고 지우지 않아서, 요금 안내가 바로 아래에 붙은 뒤에도
+  // "요금검색중......"이 그대로 남아 아직 찾고 있는 것처럼 보였다(실사용 지적).
+  // 이력(logBotMessage)에도 남기지 않는다 — 다 끝난 대화를 새로고침하거나 상담관리에서 열 때
+  // "검색중"이 박혀 있으면 같은 오해를 준다. 진행 상태는 지금 이 화면에서만 뜻이 있다.
+  var fareSearchNoticeRow = null;
+  function showFareSearchNotice(text) {
+    clearFareSearchNotice();
+    fareSearchNoticeRow = insertFareRow(text);
+  }
+  function clearFareSearchNotice() {
+    if (fareSearchNoticeRow && fareSearchNoticeRow.parentNode) {
+      fareSearchNoticeRow.parentNode.removeChild(fareSearchNoticeRow);
+    }
+    fareSearchNoticeRow = null;
+  }
+  // 요금 안내(결과)는 진행 상태 말풍선을 치우고 그 자리에 놓인다 — 결과를 그리는 모든 경로가
+  // 이 함수를 지나므로, 치우는 것을 호출부마다 기억하지 않아도 된다.
+  function addFareBubble(text) {
+    clearFareSearchNotice();
+    return insertFareRow(text);
   }
 
   // 필드 검증(주소/연락처/차량번호) 확인·재요청 말풍선은 화면에는 즉시 보여주면서도, 다음 정식
@@ -1266,27 +1289,29 @@
     if (!val('origin_address') || !val('destination_address')) return;
     if (!deferredFareGuideNoticeShown) {
       deferredFareGuideNoticeShown = true;
-      var waitingText = '경로탐색이 완료되는 즉시 요금을 안내해드릴게요.';
-      addFareBubble(waitingText);
-      logBotMessage({ logText: waitingText, needsAgent: false, requestedFeature: null });
+      showFareSearchNotice('경로탐색이 완료되는 즉시 요금을 안내해드릴게요.');
     }
     if (deferredFareGuideTimer) return;
     deferredFareGuideTimer = setInterval(function () {
       if (!val('origin_address') || !val('destination_address')) {
         clearDeferredFareGuideTimer();
         deferredFareGuideNoticeShown = false;
+        // 주소가 비워져 이 대기가 무의미해졌다 — 안내를 남겨두면 영영 기다리는 것처럼 보인다.
+        clearFareSearchNotice();
         return;
       }
       if (!isRouteDistanceFinal()) return;
 
       clearDeferredFareGuideTimer();
       announceFareGuideFromDb().then(function (fareGuideText) {
-        if (!fareGuideText) {
-          deferredFareGuideNoticeShown = false;
-          return;
-        }
         deferredFareGuideNoticeShown = false;
+        // 안내 문장을 못 만든 경우(요금표 없음 등)에도 대기 안내는 치운다 — 기다릴 것이 없다.
+        clearFareSearchNotice();
+        if (!fareGuideText) return;
         logBotMessage({ logText: fareGuideText, needsAgent: false, requestedFeature: null });
+      }).catch(function () {
+        deferredFareGuideNoticeShown = false;
+        clearFareSearchNotice();
       });
     }, 900);
   }
@@ -1333,9 +1358,7 @@
     var searchingTimer = setTimeout(function () {
       searchingTimer = null;
       // 경로가 이미 확정됐다면 남은 건 요금표 조회뿐이라 문구를 구분해준다.
-      var searchingText = isRouteDistanceFinal() ? '요금검색중......' : '경로탐색중......';
-      addFareBubble(searchingText);
-      logBotMessage({ logText: searchingText, needsAgent: false, requestedFeature: null });
+      showFareSearchNotice(isRouteDistanceFinal() ? '요금검색중......' : '경로탐색중......');
     }, 1500);
 
     function stopSearchingNotice() {
@@ -1343,6 +1366,10 @@
         clearTimeout(searchingTimer);
         searchingTimer = null;
       }
+      // 결과 말풍선이 그려지는 경로는 addFareBubble이 알아서 치운다. 여기서 한 번 더 치우는
+      // 것은 결과 없이 끝나는 경우 때문이다 — 같은 경로를 이미 안내했거나(dedup) 조회가
+      // 실패했을 때. 그때 안내를 남겨두면 영영 검색중인 것처럼 보인다.
+      clearFareSearchNotice();
       backgroundFareGuideRunning = false;
     }
 
