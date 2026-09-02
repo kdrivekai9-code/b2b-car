@@ -87,6 +87,38 @@ const CUSTOMER_NAME_SQL = `COALESCE(
 const CUSTOMER_ROLE_SQL = `COALESCE(u.role, CASE WHEN cs.channel = 'kakao' THEN '카카오' END)`;
 const CUSTOMER_PHONE_SQL = `COALESCE(u.phone, cs.external_phone)`;
 
+// 배차 도우미 초안(웹 위젯) — 조회뿐 아니라 수정·취소·요금인상까지 봇이 할 수 있는 것을 만든다.
+// routes/kakaoConsult.js buildDispatchSuggestion과 같은 규칙이다. 다른 것은 사용자를 어디서
+// 얻느냐뿐이다 — 카카오는 매핑된 거래처에서, 웹은 세션 주인에게서 온다.
+//
+// draftMode로 돌린다(lib/mcpDispatchAgent.js). 변경 도구를 만나도 물러나지 않고 확인 문구를
+// 만들어 주되 **어떤 대기 상태도 저장하지 않는다** — 채택되지도 않은 초안이 고객의 다음 "네"를
+// 소비해버리면 안 되기 때문이다. 그래서 변경 계열(mutating)은 종류를 따로 둬서, 채택 시
+// 문구만 보내는 게 아니라 봇에게 응대를 넘겨 정식 경로가 확인을 다시 받고 실행하게 한다.
+async function buildDispatchSuggestion(session, text) {
+  if (!session.user_id) return null; // 비로그인 세션은 주문을 특정할 수 없다
+  const user = await db.get('SELECT * FROM users WHERE id = ?', [session.user_id]).catch(() => null);
+  if (!user) return null;
+
+  const history = await db.all(
+    `SELECT sender, message FROM chat_messages
+      WHERE session_id = ? AND sender IN ('user', 'bot') AND message IS NOT NULL
+      ORDER BY id DESC LIMIT 12`,
+    [session.id]
+  ).catch(() => []);
+  history.reverse();
+  // 방금 저장된 이번 발화는 runDispatchAgent가 따로 받는다 — 히스토리에도 있으면 두 번 읽힌다.
+  if (history.length && history[history.length - 1].sender === 'user'
+      && history[history.length - 1].message === text) {
+    history.pop();
+  }
+
+  const result = await runDispatchAgent({ user, sessionId: session.id, text, history, draftMode: true })
+    .catch((e) => { console.error('상담원 도우미 배차 초안 실패:', e.message); return null; });
+  if (!result || !result.handled || !result.message) return null;
+  return { kind: result.mutating ? 'dispatch_action' : 'dispatch', text: result.message, intake: null };
+}
+
 // 상담원 도우미 — 상담원이 응대 중인 세션의 고객 메시지마다 답변 초안을 만들어 둔다.
 // 고객 응답 경로를 붙잡지 않도록 fire-and-forget으로 돌리고(초안이 몇 초 늦게 떠도 무방),
 // 실패는 삼킨다 — 초안이 없다고 상담 자체가 막히면 안 된다.
@@ -108,7 +140,21 @@ function createSuggestionAsync(session, text, userMessageId) {
       ? `${pending.raw}\n${text}`
       : text;
 
-    const suggestion = await buildSuggestion(merged, { branchId: owner && owner.branch_id, sessionId: session.id });
+    let suggestion = await buildSuggestion(merged, { branchId: owner && owner.branch_id, sessionId: session.id });
+
+    // 주문 조회·수정·취소 같은 배차 도우미 용건은 buildSuggestion이 다루지 않는다(접수·요금·
+    // 운영시간·FAQ만 본다). 카카오 채널은 2026-08-24에 이 분기를 받았는데 웹 위젯에는 안
+    // 들어가서, 같은 질문에 채널에 따라 초안이 나오기도 하고 안 나오기도 했다
+    // (실측 2026-09-02 세션 1210: "오늘 접수한 오더 수정해줘", "오늘 예약건은 총몇개야?"
+    // 세 발화 모두 초안 0건. 초안이 없으면 30초 자동 발송도 안 돌아 봇이 통째로 침묵한다).
+    //
+    // 순서는 카카오와 같다 — 지식베이스(FAQ)보다 배차 도우미를 먼저 본다. FAQ는 실제 주문
+    // 상태를 모르는데 임계값만 넘으면 초안이 되어 정작 조회로 답할 수 있는 질문을 가로챈다.
+    if (!suggestion || suggestion.kind === 'faq') {
+      const dispatch = await buildDispatchSuggestion(session, text);
+      if (dispatch) suggestion = dispatch;
+    }
+
     if (!suggestion) return; // 확신이 없으면 제안하지 않는다(소음 방지)
 
     // 같은 세션에 쌓인 이전 대기 제안은 닫는다 — 고객이 새 메시지를 보냈으면 직전 초안은 낡았다.
