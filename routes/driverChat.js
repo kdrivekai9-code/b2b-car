@@ -185,6 +185,30 @@ router.get('/enter', asyncHandler(async (req, res) => {
   res.redirect(orderId ? `/driver/chat?order=${orderId}` : '/driver/chat');
 }));
 
+// ── FCM 등록토큰 받기 ───────────────────────────────────────────────────────
+// 앱이 **시작될 때** 부른다. 채팅 화면에 들어올 때만 받으면 순환에 빠진다 — 푸시를 보내려면
+// 토큰이 있어야 하는데, 토큰은 들어와야 오고, 들어오는 계기가 푸시다.
+//
+// 세션 쿠키가 아니라 서명토큰으로 인증한다. 앱이 시작될 때는 우리 화면을 연 적이 없어
+// 쿠키가 없다. 진입과 같은 토큰을 쓰면 앱이 만들 것이 하나뿐이다.
+router.post('/push-token', asyncHandler(async (req, res) => {
+  const result = driverToken.verify(req.body && req.body.t);
+  if (!result.ok) return res.status(401).json({ ok: false, reason: result.reason });
+
+  const token = String((req.body && req.body.fcmToken) || '').trim();
+  // 길이만 본다. 형식은 FCM이 바꿀 수 있고, 우리가 형식을 판정하면 그쪽이 바뀔 때 조용히 막힌다.
+  if (token.length < 20 || token.length > 4096) return res.status(400).json({ ok: false, reason: 'bad_token' });
+
+  const driver = await findOrCreateDriver(result.claims).catch((e) => {
+    console.error('기사 확인 실패(푸시토큰):', e.message);
+    return null;
+  });
+  if (!driver) return res.status(503).json({ ok: false, reason: 'not_ready' });
+
+  await require('../lib/driverPush').rememberToken(driver.id, token);
+  res.json({ ok: true });
+}));
+
 function requireDriver(req, res, next) {
   if (req.session && req.session.driver && req.session.driver.id) return next();
   const wantsJson = (req.get('accept') || '').includes('application/json')
