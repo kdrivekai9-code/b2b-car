@@ -58,9 +58,21 @@ async function findOrCreateDriver(claims) {
     return { ...sameName[0], callmaner_sabun: sabun };
   }
 
+  // drivers.branch_id는 NOT NULL이다. 콜마너 토큰의 branchCode는 콜마너 쪽 코드라 우리
+  // branches.id와 다르므로, **그 사번으로 배차된 오더의 지사**를 쓴다 — 기사가 실제로 일한
+  // 곳이라 가장 정확하다. 그마저 없으면(첫 진입이 배차보다 빠른 경우) 지사 하나를 골라 둔다.
+  // 지사를 잘못 잡아도 조회 범위는 사번으로 걸리므로 남의 오더가 보이지는 않는다.
+  const fromOrder = await db.get(
+    `SELECT branch_id FROM orders WHERE callmaner_driver_sabun = ? AND branch_id IS NOT NULL
+      ORDER BY id DESC LIMIT 1`,
+    [sabun]
+  ).catch(() => null);
+  const fallback = await db.get('SELECT id FROM branches ORDER BY id ASC LIMIT 1').catch(() => null);
+  const branchId = (fromOrder && fromOrder.branch_id) || (fallback && fallback.id) || null;
+
   const created = await db.run(
-    'INSERT INTO drivers (name, phone, status, callmaner_sabun) VALUES (?, ?, ?, ?) RETURNING id',
-    [name, null, '활성', sabun]
+    'INSERT INTO drivers (name, phone, status, branch_id, callmaner_sabun) VALUES (?, ?, ?, ?, ?) RETURNING id',
+    [name, null, '활성', branchId, sabun]
   );
   return db.get('SELECT * FROM drivers WHERE id = ?', [created.lastInsertRowid]);
 }
@@ -91,6 +103,48 @@ async function findOrCreateSession(orderId, driver) {
     throw e;
   }
 }
+
+// ── 링크 만들기(관리자) ─────────────────────────────────────────────────────
+// 콜마너 앱이 고쳐지기 전에도 파일럿을 돌리기 위한 자리다. 여기서 뽑은 링크를 기사에게 문자나
+// 카톡으로 보내면 그대로 동작한다 — 앱 수정이 하는 일은 "이 링크를 기사에게 전달하는 방법"
+// 하나뿐이고, 그 앞뒤는 전부 우리 것이다.
+//
+// 이 라우터는 requireAuth 앞에 마운트돼 있어(로그인 없는 기사 화면 때문에) 여기서 직접
+// 관리자인지 본다. 안 그러면 누구나 아무 사번의 링크를 만들어 남의 오더를 열 수 있다.
+function requireAdmin(req, res, next) {
+  const u = req.session && req.session.user;
+  if (u && (u.role === 'admin' || u.role === 'branch_manager')) return next();
+  return res.status(403).send('권한이 없습니다.');
+}
+
+router.get('/link', requireAdmin, asyncHandler(async (req, res) => {
+  const rows = await db.all(
+    `SELECT o.id, o.oid, o.status, o.callmaner_driver_sabun AS sabun, o.callmaner_driver_name AS driver_name,
+            o.reserved_date, o.reserved_time, o.origin_address, o.destination_address
+       FROM orders o
+      WHERE o.callmaner_driver_sabun IS NOT NULL AND o.callmaner_driver_sabun <> ''
+        AND o.status NOT IN ('완료', '취소')
+      ORDER BY o.id DESC LIMIT 50`
+  ).catch(() => []);
+
+  const base = process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`;
+  // 링크 수명을 길게 준다. 문자로 보내고 기사가 나중에 여는 경로라, 앱이 그때그때 만드는
+  // 1~5분짜리와는 쓰임이 다르다. 그래도 무한은 아니다 — 문자는 남는다.
+  const ttl = Math.min(Math.max(Number(req.query.ttl) || 86400, 300), 604800);
+
+  const items = driverToken.isConfigured() ? rows.map((r) => ({
+    ...r,
+    link: driverToken.entryUrl(base, { sabun: r.sabun, name: r.driver_name || '' }, ttl)
+      .replace('/driver/chat?t=', '/driver/enter?t='),
+  })) : [];
+
+  res.render('driver/link', {
+    layout: false,
+    configured: driverToken.isConfigured(),
+    items,
+    ttlHours: Math.round(ttl / 3600),
+  });
+}));
 
 // ── 진입 ────────────────────────────────────────────────────────────────────
 // 토큰을 세션 쿠키로 바꾸고 주소에서 토큰을 지운다. 외부 브라우저로 열리므로 주소가 히스토리에

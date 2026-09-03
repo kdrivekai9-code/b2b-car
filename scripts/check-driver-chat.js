@@ -81,6 +81,18 @@ check('출력을 이스케이프한다', /function esc\(/.test(view) && /&lt;/.t
 check('SSE를 쓰지 않는다', !/EventSource/.test(view));
 check('화면이 숨으면 폴링을 쉰다', /document\.hidden/.test(view));
 
+console.log('\n[링크 만들기 화면]');
+// 이 라우터는 requireAuth 앞에 마운트돼 있다(로그인 없는 기사 화면 때문에). 그래서 여기서
+// 직접 관리자인지 봐야 한다 — 안 그러면 누구나 아무 사번의 링크를 만들어 남의 오더를 연다.
+check('링크 화면에 관리자 가드가 있다', /router\.get\('\/link', requireAdmin/.test(src));
+check('가드가 admin·지사장만 통과시킨다',
+  /role === 'admin' \|\| u\.role === 'branch_manager'/.test(src));
+check('비밀키가 없으면 링크를 안 만든다', /driverToken\.isConfigured\(\) \? rows\.map/.test(src),
+  '빈 키로 만든 링크는 아무나 위조할 수 있다');
+// 문자로 보내는 링크라 앱이 그때그때 만드는 1~5분짜리보다 길어야 하지만, 무한은 아니다.
+check('유효기간에 상한이 있다', /Math\.min\(Math\.max\(Number\(req\.query\.ttl\)/.test(src));
+check('끝난 건은 목록에 없다', /status NOT IN \('완료', '취소'\)[\s\S]{0,80}ORDER BY o\.id DESC/.test(src));
+
 console.log('\n[토큰]');
 const token = read('lib/driverToken.js');
 check('HMAC 비교가 상수시간', /timingSafeEqual/.test(token));

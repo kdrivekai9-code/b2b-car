@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>기사 채팅 링크</title>
+<style>
+  :root{--bg:#f2f4f6;--card:#fff;--ink:#111;--muted:#666;--line:#e3e6ea;--accent:#2f6fed}
+  @media (prefers-color-scheme:dark){
+    :root{--bg:#14171a;--card:#1d2126;--ink:#e9edf2;--muted:#9aa4b0;--line:#2a3038;--accent:#4a86ff}
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:15px/1.6 -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic",sans-serif}
+  .wrap{max-width:900px;margin:0 auto;padding:24px 16px 64px}
+  h1{font-size:22px;margin:0 0 6px}
+  .sub{color:var(--muted);margin:0 0 20px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;
+        padding:14px 16px;margin-bottom:10px}
+  .top{display:flex;flex-wrap:wrap;gap:8px;align-items:baseline}
+  .oid{font-weight:600}
+  .chip{font-size:12px;color:var(--muted);border:1px solid var(--line);border-radius:12px;padding:1px 8px}
+  .route{color:var(--muted);font-size:13px;margin:4px 0 10px}
+  .linkrow{display:flex;gap:8px}
+  input{flex:1;min-width:0;padding:8px 10px;border:1px solid var(--line);border-radius:8px;
+        background:var(--bg);color:var(--ink);font:13px/1.4 ui-monospace,SFMono-Regular,monospace}
+  button{flex:0 0 auto;padding:8px 14px;border:0;border-radius:8px;background:var(--accent);
+         color:#fff;font:inherit;font-weight:600;cursor:pointer}
+  a.open{align-self:center;font-size:13px;color:var(--accent)}
+  .warn{background:#fde8e8;color:#8a1f1f;padding:14px 16px;border-radius:10px}
+  @media (prefers-color-scheme:dark){.warn{background:#3a1d1d;color:#f3b6b6}}
+  .empty{color:var(--muted);padding:28px 0;text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>기사 채팅 링크</h1>
+  <p class="sub">
+    콜마너 앱이 고쳐지기 전에도 이 링크를 기사에게 문자나 카톡으로 보내면 그대로 동작합니다.
+    앱 수정이 하는 일은 “이 링크를 기사에게 전달하는 방법” 하나뿐입니다.
+    <b>유효기간 <%= ttlHours %>시간</b> — 문자는 남으니 무한으로 두지 않습니다.
+  </p>
+
+  <% if (!configured) { %>
+    <div class="warn">
+      <b>DRIVER_TOKEN_SECRET이 설정되지 않았습니다.</b><br>
+      16자 이상의 비밀키를 환경변수에 넣어주세요. 빈 키로 서명을 “검증”하면 누구나 아무 사번으로
+      들어올 수 있어서, 설정 전에는 진입 자체를 막고 있습니다.
+    </div>
+  <% } else if (!items.length) { %>
+    <div class="empty">배차된(사번이 붙은) 진행 중 오더가 없습니다.</div>
+  <% } else { %>
+    <% items.forEach(function (it) { %>
+    <div class="card">
+      <div class="top">
+        <span class="oid"><%= it.oid %></span>
+        <span class="chip"><%= it.status %></span>
+        <span class="chip"><%= it.driver_name || '이름 미상' %> · <%= it.sabun %></span>
+        <span class="chip"><%= [it.reserved_date, it.reserved_time].filter(Boolean).join(' ') %></span>
+      </div>
+      <div class="route"><%= it.origin_address || '' %> → <%= it.destination_address || '' %></div>
+      <div class="linkrow">
+        <input type="text" readonly value="<%= it.link %>" onclick="this.select()">
+        <button type="button" data-link="<%= it.link %>">복사</button>
+        <a class="open" href="<%= it.link %>" target="_blank" rel="noopener">열기</a>
+      </div>
+    </div>
+    <% }); %>
+  <% } %>
+</div>
+<script>
+document.addEventListener('click', function (e) {
+  var btn = e.target.closest('button[data-link]');
+  if (!btn) return;
+  var link = btn.getAttribute('data-link');
+  // clipboard API는 https나 localhost에서만 동작한다 — 안 되는 환경에서는 입력칸을 선택해준다.
+  function fallback() {
+    var input = btn.parentNode.querySelector('input');
+    input.select();
+    try { document.execCommand('copy'); } catch (err) { /* 선택만 해줘도 손으로 복사할 수 있다 */ }
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(link).then(function () {
+      btn.textContent = '복사됨';
+      setTimeout(function () { btn.textContent = '복사'; }, 1500);
+    }, fallback);
+  } else { fallback(); }
+});
+</script>
+</body>
+</html>
