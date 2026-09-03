@@ -16,6 +16,11 @@ export default async function LoginPage({ searchParams }) {
   const error = sp?.expired
     ? (EXPIRED_MESSAGES[reason] || '세션이 만료되어 로그아웃되었습니다.')
     : null;
+  // 로그인 없이 열었던 주소. 우리 사이트 경로만 받는다 — 외부 주소를 그대로 쓰면 로그인
+  // 직후 남의 사이트로 보내는 통로가 된다(오픈 리다이렉트). '//'는 브라우저가 프로토콜
+  // 생략 절대주소로 읽으므로 함께 막는다. 서버도 같은 검사를 한다(routes/auth.js safeNext).
+  const rawNext = String(sp?.next || '');
+  const nextPath = rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : null;
 
   return (
     <div className="login-wrap">
@@ -24,6 +29,9 @@ export default async function LoginPage({ searchParams }) {
         <p>탁송 B2B 통합·운영 플랫폼</p>
         {error && <div className="error-msg">{error}</div>}
         <form method="POST" action="/login">
+          {/* 로그인 후 원래 보려던 곳으로 돌려보낸다 — EJS 로그인 화면도 같은 칸을 갖는다
+              (views/login.ejs). 한쪽만 있으면 플래그에 따라 동작이 갈린다. */}
+          {nextPath && <input type="hidden" name="next" value={nextPath} />}
           <div className="field">
             <label htmlFor="loginId">아이디</label>
             <input type="text" id="loginId" name="login_id" autoComplete="username" required autoFocus />

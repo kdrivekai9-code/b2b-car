@@ -114,7 +114,19 @@ async function findOrCreateSession(orderId, driver) {
 function requireAdmin(req, res, next) {
   const u = req.session && req.session.user;
   if (u && (u.role === 'admin' || u.role === 'branch_manager')) return next();
-  return res.status(403).send('권한이 없습니다.');
+
+  // 로그인 자체를 안 한 경우와 역할이 모자란 경우를 가른다.
+  //
+  // 예전에는 둘 다 "권한이 없습니다"였다. 이 라우터는 requireAuth 앞에 마운트돼 있어서
+  // (로그인 없는 기사 화면 때문에) 로그인 리다이렉트가 자동으로 걸리지 않는데, 그러면
+  // 로그아웃 상태로 주소를 연 관리자에게는 **막다른 길**이 된다 — 로그인하라는 말도 없고
+  // 로그인 화면으로 가지도 않는다. 실제로 그렇게 막혔다.
+  if (!u) return res.redirect('/login?next=' + encodeURIComponent(req.originalUrl));
+
+  return res.status(403).send(
+    `이 화면은 관리자·지사장만 열 수 있습니다. 지금 로그인한 계정은 "${u.name || ''}"(${u.role})입니다.\n`
+    + '기사 채팅 링크는 청구·배차 정보를 담고 있어 고객 계정에는 열지 않습니다.'
+  );
 }
 
 router.get('/link', requireAdmin, asyncHandler(async (req, res) => {

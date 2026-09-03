@@ -85,6 +85,26 @@ console.log('\n[링크 만들기 화면]');
 // 이 라우터는 requireAuth 앞에 마운트돼 있다(로그인 없는 기사 화면 때문에). 그래서 여기서
 // 직접 관리자인지 봐야 한다 — 안 그러면 누구나 아무 사번의 링크를 만들어 남의 오더를 연다.
 check('링크 화면에 관리자 가드가 있다', /router\.get\('\/link', requireAdmin/.test(src));
+// 이 라우터는 requireAuth 앞에 있어 로그인 리다이렉트가 자동으로 안 걸린다. 로그아웃 상태와
+// 역할 부족을 같은 403으로 뭉치면 관리자에게 막다른 길이 된다 — 로그인하라는 말도 없고
+// 로그인 화면으로 가지도 않는다. 실제로 그렇게 막혔다(2026-09-03).
+check('로그아웃이면 로그인 화면으로 보낸다', /if \(!u\) return res\.redirect\('\/login\?next=/.test(src));
+check('역할이 모자라면 어느 계정인지 알려준다', /지금 로그인한 계정은/.test(src));
+
+const auth = read('routes/auth.js');
+// 외부 주소를 그대로 쓰면 로그인 직후 남의 사이트로 보내는 통로가 된다.
+check('로그인 복귀 주소가 우리 경로로 제한된다', /function safeNext/.test(auth));
+check("'//'로 시작하는 것도 막는다", /startsWith\('\/\/'\)/.test(auth),
+  '브라우저가 프로토콜 생략 절대주소로 읽어 //evil.com이 외부로 나간다');
+check('로그인 후 그 주소로 돌아간다', /safeNext\(req\.body\.next\)/.test(auth));
+// 두 로그인 화면이 같이 있어야 한다 — 한쪽만 고치면 플래그에 따라 복귀가 사라진다.
+['views/login.ejs', 'src/app/login/page.js'].forEach((f) => {
+  check(`${f} — next 칸이 있다`, /name="next"/.test(read(f)));
+});
+// 주소를 손으로 쳐야만 열리면 아무도 안 쓴다.
+['views/partials/header.ejs', 'src/app/_components/AppShell.js'].forEach((f) => {
+  check(`${f} — 메뉴에 링크가 있다`, /\/driver\/link/.test(read(f)));
+});
 check('가드가 admin·지사장만 통과시킨다',
   /role === 'admin' \|\| u\.role === 'branch_manager'/.test(src));
 check('비밀키가 없으면 링크를 안 만든다', /driverToken\.isConfigured\(\) \? rows\.map/.test(src),

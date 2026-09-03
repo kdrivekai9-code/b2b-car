@@ -8,8 +8,20 @@ const { getClientIp, writeAccessLog } = require('../lib/accessLog');
 
 const router = express.Router();
 
+// 로그인 후 돌아갈 곳. 로그인 없이 열린 주소를 기억했다가 그리로 돌려보낸다 — 그러지 않으면
+// 관리자가 링크를 받아 열었다가 로그인하면 대시보드로 떨어져 무엇을 보려 했는지 잃어버린다.
+//
+// **우리 사이트 안의 경로만** 받는다. 외부 주소를 그대로 쓰면 로그인 직후 남의 사이트로
+// 보내는 통로가 된다(오픈 리다이렉트). '//'로 시작하는 것도 막는다 — 브라우저가 그걸
+// 프로토콜 생략 절대주소로 읽어 //evil.com이 외부로 나간다.
+function safeNext(raw) {
+  const v = String(raw || '').trim();
+  if (!v.startsWith('/') || v.startsWith('//')) return null;
+  return v;
+}
+
 router.get('/login', (req, res) => {
-  if (req.session.user) return res.redirect('/');
+  if (req.session.user) return res.redirect(safeNext(req.query.next) || '/');
   const reason = String(req.query.reason || '');
   const expiredMessage = {
     replaced: '다른 곳에서 로그인되어 로그아웃되었습니다.',
@@ -17,7 +29,7 @@ router.get('/login', (req, res) => {
     absolute: '로그인 후 최대 사용 시간(8시간)이 지나 자동 로그아웃되었습니다.',
   };
   const error = req.query.expired ? (expiredMessage[reason] || '세션이 만료되어 로그아웃되었습니다.') : null;
-  res.render('login', { title: '로그인', error });
+  res.render('login', { title: '로그인', error, nextPath: safeNext(req.query.next) });
 });
 
 router.post('/login', asyncHandler(async (req, res) => {
@@ -79,7 +91,7 @@ router.post('/login', asyncHandler(async (req, res) => {
     separate_settlement: !!user.separate_settlement,
   };
   await writeAccessLog({ ...logBase, userId: user.id, eventType: 'LOGIN_SUCCESS', workDetail: '로그인', subjectInfo: `사용자 ID ${user.id}` });
-  res.redirect('/');
+  res.redirect(safeNext(req.body.next) || '/');
 }));
 
 router.post('/logout', asyncHandler(async (req, res) => {

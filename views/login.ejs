@@ -13,6 +13,12 @@
     <p>탁송 B2B 통합·운영 플랫폼</p>
     <% if (error) { %><div class="error-msg"><%= error %></div><% } %>
     <form method="POST" action="/login">
+      <%# 로그인 없이 열었던 주소를 그대로 들고 간다 — 로그인 후 대시보드로 떨어지면
+          무엇을 보려 했는지 잃어버린다. 서버가 우리 사이트 경로인지 다시 검사한다
+          (routes/auth.js safeNext). Next 화면도 같은 칸을 갖는다. %>
+      <% if (typeof nextPath !== 'undefined' && nextPath) { %>
+      <input type="hidden" name="next" value="<%= nextPath %>">
+      <% } %>
       <div class="field">
         <label for="loginId">아이디</label>
         <input type="text" id="loginId" name="login_id" autocomplete="username" required autofocus>

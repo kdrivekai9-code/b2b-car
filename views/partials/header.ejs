@@ -46,6 +46,9 @@
         <a href="/groups" class="<%= path.startsWith('/groups') ? 'active' : '' %>" title="법인 관리"><span class="nav-icon">👥</span><span class="nav-label">법인 관리</span></a>
         <a href="/users" class="<%= path.startsWith('/users') ? 'active' : '' %>" title="사용자 관리"><span class="nav-icon">🧑‍💼</span><span class="nav-label">사용자 관리</span></a>
         <a href="/drivers" class="<%= path.startsWith('/drivers') ? 'active' : '' %>" title="기사 관리"><span class="nav-icon">🚙</span><span class="nav-label">기사 관리</span></a>
+        <%# 기사 채팅 링크 — 주소를 손으로 쳐야만 열리면 아무도 안 쓴다. Next 네비도 같은 줄을
+            갖는다(src/app/_components/AppShell.js) — 한쪽만 넣으면 플래그에 따라 사라진다. %>
+        <a href="/driver/link" class="<%= path.startsWith('/driver') ? 'active' : '' %>" title="기사 채팅 링크"><span class="nav-icon">🔗</span><span class="nav-label">기사 채팅 링크</span></a>
         <a href="/vehicle-models" class="<%= path.startsWith('/vehicle-models') ? 'active' : '' %>" title="차종 관리"><span class="nav-icon">🚘</span><span class="nav-label">차종 관리</span></a>
         <a href="/alerts" class="<%= path.startsWith('/alerts') ? 'active' : '' %>" title="장애 알림"><span class="nav-icon">🚨</span><span class="nav-label">장애 알림</span></a>
         <a href="/location-aliases" class="<%= path.startsWith('/location-aliases') ? 'active' : '' %>" title="거점 별칭 관리"><span class="nav-icon">📍</span><span class="nav-label">거점 별칭 관리</span></a>

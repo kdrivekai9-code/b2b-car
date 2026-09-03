@@ -58,6 +58,9 @@ export default function AppShell({ currentUser, activePath, topNav = false, chil
               <a href="/groups" className={isActive(activePath, '/groups') ? 'active' : ''} title="법인 관리"><span className="nav-icon">👥</span><span className="nav-label">법인 관리</span></a>
               <a href="/users" className={isActive(activePath, '/users') ? 'active' : ''} title="사용자 관리"><span className="nav-icon">🧑‍💼</span><span className="nav-label">사용자 관리</span></a>
               <a href="/drivers" className={isActive(activePath, '/drivers') ? 'active' : ''} title="기사 관리"><span className="nav-icon">🚙</span><span className="nav-label">기사 관리</span></a>
+              {/* 기사 채팅 링크 — EJS 네비에도 같은 줄이 있다(views/partials/header.ejs).
+                  Express가 그리는 화면이라 Next 라우트는 없고, 프록시가 그대로 넘긴다. */}
+              <a href="/driver/link" className={activePath.startsWith('/driver') ? 'active' : ''} title="기사 채팅 링크"><span className="nav-icon">🔗</span><span className="nav-label">기사 채팅 링크</span></a>
               <a href="/location-aliases" className={isActive(activePath, '/location-aliases') ? 'active' : ''} title="거점 별칭 관리"><span className="nav-icon">📍</span><span className="nav-label">거점 별칭 관리</span></a>
               <a href="/knowledge-base" className={isActive(activePath, '/knowledge-base') ? 'active' : ''} title="지식관리"><span className="nav-icon">📚</span><span className="nav-label">지식관리</span></a>
               <a href="/ferry-fares" className={isActive(activePath, '/ferry-fares') ? 'active' : ''} title="도선료 관리"><span className="nav-icon">🚢</span><span className="nav-label">도선료 관리</span></a>
