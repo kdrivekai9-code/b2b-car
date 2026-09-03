@@ -1117,7 +1117,8 @@ router.post('/', asyncHandler(async (req, res) => {
   const {
     branch_id, requester_group_id, origin_address, origin_detail_address, origin_contact,
     destination_address, destination_detail_address, destination_contact, vehicle_number, reserved_date, reserved_time,
-    vehicle_type, payment_method_id, fare_amount, ferry_fare_amount, memo_customer, memo_billing, chat_session_id, chat_session_transition,
+    vehicle_type, payment_method_id, fare_amount, ferry_fare_amount, memo_customer, memo_billing, memo_driver_chat,
+    chat_session_id, chat_session_transition,
     pickup_reserved_date, pickup_reserved_time,
     order_type, trip_type, final_destination_address, final_destination_address_detail,
     destination_wait_minutes, reservation_hours_bracket,
@@ -1345,6 +1346,13 @@ router.post('/', asyncHandler(async (req, res) => {
     // 도선료·대기요금·취소요금은 줄이 아니라 orders 컬럼에 저장된다 — 줄로도 만들면 같은 돈이
     // 두 군데서 집계돼 두 번 청구된다. 관리자가 넣은 값은 자동 계산보다 뒤에 쓰여 이긴다.
     await extraCharges.saveOrderFeeFields(newId, parsedIntake.orderFees);
+
+    // 기사 챗봇 전달사항. INSERT는 위치 인자가 40개라 손대면 어긋날 위험이 커서 따로 쓴다.
+    // 나뉜 건이라도 첫 건에만 붙인다 — 구간마다 같은 안내를 반복할 이유가 없다.
+    if (String(memo_driver_chat || '').trim()) {
+      await db.run('UPDATE orders SET memo_driver_chat = ? WHERE id = ?', [String(memo_driver_chat).trim(), newId])
+        .catch((e) => console.error('기사 챗봇 전달사항 저장 실패(오더 등록은 완료):', e.message));
+    }
 
     // 요청사항 본문에 적힌 부대비용을 찾아 후보로 남긴다.
     //
@@ -1653,7 +1661,7 @@ router.post('/:id', asyncHandler(async (req, res) => {
   const {
     branch_id, requester_group_id, origin_address, origin_detail_address, origin_contact,
     destination_address, destination_detail_address, destination_contact, vehicle_number, reserved_date, reserved_time,
-    vehicle_type, payment_method_id, fare_amount, ferry_fare_amount, memo_customer, memo_billing,
+    vehicle_type, payment_method_id, fare_amount, ferry_fare_amount, memo_customer, memo_billing, memo_driver_chat,
     pickup_reserved_date, pickup_reserved_time,
   } = req.body;
   const waypoints = [].concat(req.body.waypoints || []);
@@ -1785,7 +1793,7 @@ router.post('/:id', asyncHandler(async (req, res) => {
     UPDATE orders SET branch_id = ?, requester_group_id = ?, origin_address = ?, origin_address_detail = ?, origin_contact = ?,
       destination_address = ?, destination_address_detail = ?, destination_contact = ?, vehicle_number = ?,
       vehicle_type = ?, reserved_date = ?, reserved_time = ?, payment_method_id = ?, fare_amount = ?, ferry_fare_amount = ?,
-      memo_customer = ?, memo_billing = ?,
+      memo_customer = ?, memo_billing = ?, memo_driver_chat = ?,
       -- 콜마너 오더접수에 필요한 좌표/행정구역도 함께 저장한다. 그동안 이 UPDATE에서 빠져 있어서
       -- 오더 상세에서 주소를 다시 확정해도 좌표가 DB에 반영되지 않았다(폼은 보내고 있었는데
       -- 서버가 버렸음). COALESCE로 감싸 값이 안 온 경우 기존 값을 지우지 않는다.
@@ -1800,6 +1808,7 @@ router.post('/:id', asyncHandler(async (req, res) => {
     finalDestinationAddress, destination_detail_address || null, destination_contact || null, splitVehicle.vehicleNumber,
     splitVehicle.vehicleType, effectiveReservedDate, effectiveReservedTime, payment_method_id || null,
     Number(fare_amount) || 0, Number(ferry_fare_amount) || 0, memo_customer || null, memo_billing || null,
+    memo_driver_chat || null,
     toNumOrNullShared(req.body.origin_lat), toNumOrNullShared(req.body.origin_lon),
     req.body.origin_sido || null, req.body.origin_sigugun || null, req.body.origin_dong || null,
     toNumOrNullShared(req.body.destination_lat), toNumOrNullShared(req.body.destination_lon),

@@ -216,8 +216,26 @@
       <% } %>
 
       <div class="ai-intake-section">
-        <div class="field full"><label class="field-label-strong">메모(기사전달사항)</label><textarea id="memo_customer" name="memo_customer" class="single-line-textarea" placeholder="예)차량인수증 사인받아서 출발지 주소로 보내주세요"><%= order.memo_customer || '' %></textarea></div>
+        <div class="field full">
+          <label class="field-label-strong">메모(콜마너 기사전달사항)</label>
+          <p class="hint" style="margin:0 0 6px;">
+            콜마너 적요1(기사메모)로 나가며 <b>100Byte까지만</b> 전달됩니다.
+            맨 앞에 차량번호가 붙어 본문에 쓸 수 있는 건 <b class="memo-budget-limit">86</b>Byte쯤입니다.
+            더 긴 내용은 아래 <b>기사 챗봇 전달사항</b>에 쓰시면 길이 제한 없이 전달됩니다.
+          </p>
+          <textarea id="memo_customer" name="memo_customer" class="single-line-textarea" placeholder="예)차량인수증 사인받아서 출발지 주소로 보내주세요"><%= order.memo_customer || '' %></textarea>
+          <div class="memo-budget-preview" id="memoBudgetPreview" hidden>
+            <span class="memo-budget-count"></span>
+            <div class="memo-budget-text"><span class="kept"></span><span class="dropped"></span></div>
+          </div>
+        </div>
         <div class="field full"><label class="field-label-strong">업체 전달사항</label><textarea id="memo_billing" name="memo_billing" class="single-line-textarea" placeholder="예) 계산서/내역서 비고란에 'OOO'로 기재 요청"><%= order.memo_billing || '' %></textarea></div>
+        <%# 기사 챗봇 전달사항 — 길이 제한이 없는 쪽(views/orders/form.ejs와 같은 칸). %>
+        <div class="field full">
+          <label class="field-label-strong">기사 챗봇 전달사항</label>
+          <p class="hint" style="margin:0 0 6px;">기사 채팅 화면에 그대로 보이며 <b>길이 제한이 없습니다.</b></p>
+          <textarea id="memo_driver_chat" name="memo_driver_chat" class="single-line-textarea" placeholder="예) 지하 3층 B구역 기둥 옆, 키는 콘솔박스"><%= order.memo_driver_chat || '' %></textarea>
+        </div>
       </div>
 
       <% if (currentUser.role === 'admin') { %>

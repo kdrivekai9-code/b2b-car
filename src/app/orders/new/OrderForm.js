@@ -1,11 +1,14 @@
 'use client';
 
-import { useEffect, useReducer, useRef, useState } from 'react';
+import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import AddressField, { resolveRegion } from './AddressField';
 import RouteMap from './RouteMap';
 import RouteCalculator from './RouteCalculator';
 import OrderSidePanel from '../[id]/OrderSidePanel';
 import ExtraCostSection from './ExtraCostSection';
+// 적요1 100Byte 예산 계산 — 서버와 같은 모듈을 쓴다(lib/memoBudget.js).
+// 화면이 따로 세면 "여기서는 들어간다는데 실제로는 잘리는" 상태가 된다.
+import memoBudgetLib from '../../../../lib/memoBudget';
 
 // Submits to the exact same POST /orders the legacy form.ejs uses, with the exact same
 // field names and urlencoded wire format (verified directly against the live endpoint).
@@ -114,6 +117,8 @@ function initialFieldState(order, defaultBranch, mode) {
     // 위 도선료와 같은 이유로, edit 모드에서는 저장된 업체 전달사항을 그대로 채운다(create
     // 모드는 이 필드에 대응하는 상담 접수 데이터가 없어 항상 빈 값 — 기존 동작 유지).
     memo_billing: mode === 'edit' ? (order.memo_billing || '') : '',
+    // 기사 챗봇 전달사항 — 길이 제한이 없는 쪽. memo_customer(적요1, 100Byte)와 나눠 둔다.
+    memo_driver_chat: order.memo_driver_chat || '',
     order_type: order.order_type || 'dispatch',
     // 경로탐색 기본값 — 탁송은 무료도로, 프리미엄/일일기사는 추천(사용자 지정). DB에 저장되는
     // 값이 아니라(주문 필드가 아님) order_type만 보고 매번 다시 계산한다. 사용자가 드롭다운을
@@ -489,6 +494,14 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
 
   const isAdmin = currentUserRole === 'admin';
   const isClient = currentUserRole === 'client';
+  // 적요1에 실제로 들어가는 부분과 잘리는 부분. 번호판이 바뀌면 예산도 바뀐다 —
+  // 맨 앞에 번호판이 붙기 때문이다(lib/callmaner.js memoWithVehicle).
+  // 계산은 서버와 같은 모듈을 쓴다. 화면이 따로 세면 "여기서는 들어간다는데 실제로는
+  // 잘리는" 상태가 된다.
+  const memoBudget = useMemo(
+    () => memoBudgetLib.describe(state.memo_customer, state.vehicle_number),
+    [state.memo_customer, state.vehicle_number]
+  );
 
   // AI 챗봇 parse 결과를 폼으로 점진 반영한다. 값이 비어 있지 않은 필드만 덮어쓴다.
   // (빈 문자열로 기존 입력을 지우지 않도록 보호)
@@ -648,6 +661,7 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
     params.set('fare_amount', state.fare_amount);
     params.set('ferry_fare_amount', String(state.ferry_fare_amount || 0));
     params.set('memo_customer', state.memo_customer);
+    params.set('memo_driver_chat', state.memo_driver_chat);
     params.set('memo_billing', state.memo_billing);
     params.set('order_type', state.order_type || 'dispatch');
     if (state.trip_type) params.set('trip_type', state.trip_type);
@@ -1074,18 +1088,52 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
           <div className="route-stop order-memo-stop">
           <div className="route-stop-title"><span className="route-marker">요청 메모</span></div>
           <div className="field full">
-            <label>메모(기사전달사항)</label>
+            <label>메모(콜마너 기사전달사항)</label>
+            {/* 100Byte 제한을 라벨 바로 아래 둔다. 다 쓰고 나서 알려주면 이미 늦다 —
+                쓰는 사람은 다 갔다고 믿고, 기사는 안 온 줄도 모른다. */}
+            <p className="hint" style={{ margin: '0 0 6px' }}>
+              콜마너 적요1(기사메모)로 나가며 <b>100Byte까지만</b> 전달됩니다.
+              맨 앞에 차량번호가 붙어 본문에 쓸 수 있는 건 <b>{memoBudget.budget}Byte</b>
+              (한글 {Math.floor(memoBudget.budget / 3)}자쯤)입니다.
+              더 긴 내용은 아래 <b>기사 챗봇 전달사항</b>에 쓰시면 길이 제한 없이 전달됩니다.
+            </p>
             {/* 실제 입력된 내용이 없으면 여러 줄짜리 큰 textarea 대신 한 줄 높이로 표시한다
                 (사용자 요청) — 값이 생기면(입력 중이든 이미 저장돼 있든) 원래 높이로 돌아온다. */}
             <textarea className={state.memo_customer ? '' : 'single-line-textarea'}
               placeholder="예) 사고 이력 안내&#10;예) 스크래치 등 차량 관련 내용"
               value={state.memo_customer} onChange={(e) => setField('memo_customer', e.target.value)} />
+            {/* textarea 안의 글자 일부만 색을 바꿀 수는 없다. 그래서 아래에 "실제로 나가는
+                모양"을 따로 그린다 — 잘리는 부분이 눈에 보여야 고쳐 쓸 수 있다. */}
+            {!!state.memo_customer && (
+              <div className="memo-budget-preview">
+                <span className="memo-budget-count">
+                  {memoBudget.totalBytes} / {memoBudget.budget}Byte
+                  {memoBudget.over ? ' — 회색 부분은 기사에게 전달되지 않습니다' : ''}
+                </span>
+                <div className="memo-budget-text">
+                  <span className="kept">{memoBudget.kept}</span>
+                  <span className="dropped">{memoBudget.dropped}</span>
+                </div>
+              </div>
+            )}
           </div>
           <div className="field full">
             <label>업체 전달사항</label>
             <textarea className={state.memo_billing ? '' : 'single-line-textarea'}
               placeholder="예) 계산서/내역서 비고란에 'OOO'로 기재 요청"
               value={state.memo_billing} onChange={(e) => setField('memo_billing', e.target.value)} />
+          </div>
+          {/* 기사 챗봇 전달사항 — 길이 제한이 없는 유일한 통로다. 위 칸과 나눠 둔 이유가
+              그 제한이다. 한 칸에 섞으면 길게 쓴 만큼 콜마너로 나가는 쪽이 잘린다. */}
+          <div className="field full">
+            <label>기사 챗봇 전달사항</label>
+            <p className="hint" style={{ margin: '0 0 6px' }}>
+              기사 채팅 화면에 그대로 보입니다. <b>길이 제한이 없습니다</b> —
+              적요1에 못 담는 상세 안내를 여기에 쓰세요. 고객에게는 보이지 않습니다.
+            </p>
+            <textarea className={state.memo_driver_chat ? '' : 'single-line-textarea'}
+              placeholder="예) 지하 3층 B구역 기둥 옆, 키는 콘솔박스&#10;예) 인수자 도착 15분 전에 전화 주세요"
+              value={state.memo_driver_chat} onChange={(e) => setField('memo_driver_chat', e.target.value)} />
           </div>
           </div>
 

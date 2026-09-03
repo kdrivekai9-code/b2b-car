@@ -33,7 +33,15 @@
     padding:10px 14px calc(10px);
     padding-top:calc(10px + env(safe-area-inset-top, 0px));
   }
+  .hrow{display:flex;align-items:flex-start;gap:10px}
+  .hmain{flex:1;min-width:0}
+  .branch{font-size:12px;color:var(--muted);letter-spacing:.02em}
   .oid{font-size:13px;color:var(--muted)}
+  /* 44px 탭 목표 — 장갑 낀 손으로도 눌러야 한다. */
+  .callbtn{flex:0 0 auto;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    min-width:56px;min-height:48px;padding:4px 8px;border-radius:12px;
+    background:var(--me);color:var(--me-ink);text-decoration:none;font-size:11px;font-weight:600}
+  .callbtn .ico{font-size:18px;line-height:1.1}
   .route{font-weight:600;margin-top:2px}
   .route .arrow{color:var(--muted);margin:0 5px}
   .veh{font-size:13px;color:var(--muted);margin-top:2px}
@@ -58,6 +66,10 @@
   .memo{margin:10px 14px 0;padding:12px 14px;background:var(--card);
         border:1px solid var(--line);border-radius:10px;white-space:pre-wrap}
   .memo h2{margin:0 0 6px;font-size:14px;color:var(--muted)}
+  /* 상담원이 직접 쓴 안내는 고객 요청사항보다 위에, 더 눈에 띄게 — 지금 이 건에서
+     사람이 판단해 보낸 말이라 가장 최신이고 가장 구체적이다. */
+  .memo.dm{border-color:var(--me)}
+  .memo.dm h2{color:var(--me)}
 
   .log{flex:1;overflow-y:auto;padding:12px 14px 4px;display:flex;flex-direction:column;gap:8px;
        -webkit-overflow-scrolling:touch}
@@ -89,7 +101,18 @@
 </head>
 <body>
 <header>
-  <div class="oid" id="oid">불러오는 중…</div>
+  <div class="hrow">
+    <div class="hmain">
+      <div class="branch" id="branch"></div>
+      <div class="oid" id="oid">불러오는 중…</div>
+    </div>
+    <%# 전화 버튼은 항상 상단에 둔다 — 현장에서 막혔을 때 찾아 내려갈 여유가 없다.
+        tel: 링크는 폰에서 전화걸기 화면을 연다. 번호가 없으면 아예 그리지 않는다 —
+        눌러도 아무 일 없는 버튼이 있는 것이 없는 것보다 나쁘다. %>
+    <a class="callbtn" id="call" hidden>
+      <span class="ico">📞</span><span class="lbl">전화</span>
+    </a>
+  </div>
   <div class="route" id="route"></div>
   <div class="veh" id="veh"></div>
 </header>
@@ -97,6 +120,7 @@
 <nav class="tabs" id="tabs" hidden></nav>
 <div class="err" id="err" hidden></div>
 <section class="tasks" id="tasks" hidden></section>
+<section class="memo dm" id="drivermemo" hidden></section>
 <section class="memo" id="memo" hidden></section>
 
 <div class="log" id="log"></div>
@@ -126,6 +150,8 @@
   function render(d) {
     if (!d.current) {
       $('oid').textContent = '진행 중인 오더가 없습니다';
+      $('branch').textContent = '';
+      $('call').hidden = true;
       $('route').textContent = '';
       $('log').innerHTML = '<div class="empty">배차된 건이 생기면 여기에 표시됩니다.</div>';
       $('text').disabled = true; $('btn').disabled = true;
@@ -134,7 +160,20 @@
     state.orderId = d.current.id;
 
     var cur = (d.orders || []).filter(function (o) { return o.current; })[0] || {};
-    $('oid').textContent = d.current.oid + ' · ' + d.current.status;
+    // 접수번호는 우리 번호와 콜마너 번호를 함께 보여준다 — 기사가 콜마너 화면에서 찾는
+    // 번호는 뒤쪽이고, 우리 번호만 주면 "그런 건 없다"가 된다.
+    $('branch').textContent = d.current.branchName || '';
+    $('oid').textContent = d.current.oid
+      + (d.current.confSlip ? ' / ' + d.current.confSlip : '')
+      + ' · ' + d.current.status;
+
+    var call = $('call');
+    if (d.current.branchPhone) {
+      // tel:은 폰에서 전화걸기 화면을 연다. 하이픈·공백은 빼야 일부 기기에서 제대로 걸린다.
+      call.href = 'tel:' + String(d.current.branchPhone).replace(/[^0-9+]/g, '');
+      call.querySelector('.lbl').textContent = '전화';
+      call.hidden = false;
+    } else { call.hidden = true; }
     $('route').innerHTML = esc(cur.origin || '') + '<span class="arrow">→</span>' + esc(cur.destination || '');
     $('veh').textContent = [cur.vehicle, cur.reservedAt].filter(Boolean).join(' · ');
 
@@ -143,7 +182,7 @@
     if ((d.orders || []).length > 1) {
       tabs.innerHTML = d.orders.map(function (o) {
         return '<a class="tab' + (o.current ? ' on' : '') + '" href="/driver/chat?order=' + o.id + '">'
-          + esc(o.oid) + '</a>';
+          + esc(o.oid) + (o.confSlip ? ' / ' + esc(o.confSlip) : '') + '</a>';
       }).join('');
       tabs.hidden = false;
     } else { tabs.hidden = true; }
@@ -161,6 +200,12 @@
       }).join('') + '</ul>';
       $('tasks').hidden = false;
     } else { $('tasks').hidden = true; }
+
+    // 상담원이 직접 쓴 안내가 먼저다 — 가장 최신이고 가장 구체적이다.
+    if (d.current.driverMemo) {
+      $('drivermemo').innerHTML = '<h2>담당자 안내</h2>' + esc(d.current.driverMemo);
+      $('drivermemo').hidden = false;
+    } else { $('drivermemo').hidden = true; }
 
     if (d.current.memo) {
       $('memo').innerHTML = '<h2>고객 요청사항</h2>' + esc(d.current.memo);

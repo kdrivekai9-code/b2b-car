@@ -25,13 +25,35 @@ const DRIVER_ORDER_SQL = `
          o.origin_address, o.origin_address_detail, o.origin_contact,
          o.destination_address, o.destination_address_detail, o.destination_contact,
          o.vehicle_number, o.vehicle_type, o.memo_customer,
+         __OPTIONAL__
          -- 요청사항에서 채택된 부대비용을 기사 화면에 함께 보여준다(buildDriverTasks).
          o.memo_extra_json,
-         o.callmaner_conf_slip, o.callmaner_driver_sabun
+         o.callmaner_conf_slip, o.callmaner_driver_sabun,
+         -- 발주 지사 — 기사가 물어볼 곳이다. 전화번호가 없으면 버튼을 안 그린다.
+         b.name AS branch_name, COALESCE(NULLIF(b.main_phone, ''), b.contact_phone) AS branch_phone
     FROM orders o
+    LEFT JOIN branches b ON b.id = o.branch_id
    WHERE o.callmaner_driver_sabun = ?
      AND o.status NOT IN ('완료', '취소')
    ORDER BY o.reserved_date ASC, o.reserved_time ASC, o.id ASC`;
+
+// 마이그레이션이 아직 안 돌았을 수 있는 칸은 빼고 한 번 더 시도한다.
+//
+// 없는 칸 하나 때문에 기사 화면이 통째로 죽으면 안 된다 — 기사는 그 화면 말고 다른 길이 없고,
+// 무엇이 잘못됐는지도 모른다. lib/orderCreate.js가 같은 방식으로 버틴다(42703 = 없는 칸).
+const OPTIONAL_DRIVER_COLUMNS = `
+         -- 길이 제한이 없는 쪽. 적요1(100Byte)에 못 담는 안내가 여기로 온다.
+         o.memo_driver_chat,`;
+
+async function loadDriverOrders(sabun) {
+  try {
+    return await db.all(DRIVER_ORDER_SQL.replace('__OPTIONAL__', OPTIONAL_DRIVER_COLUMNS), [sabun]);
+  } catch (e) {
+    if (!(e && e.code === '42703')) throw e;
+    console.error('기사 오더 조회 — 아직 없는 칸을 빼고 다시 시도한다:', e.message);
+    return db.all(DRIVER_ORDER_SQL.replace('__OPTIONAL__', ''), [sabun]);
+  }
+}
 
 // 사번으로 기사를 찾고, 없으면 만든다.
 //
@@ -247,7 +269,7 @@ router.get('/chat', requireDriver, (req, res) => {
 // 때문이다 — 왕복이 늘면 지하주차장에서 그만큼 더 기다린다.
 router.get('/chat/data.json', requireDriver, asyncHandler(async (req, res) => {
   const driver = req.session.driver;
-  const orders = await db.all(DRIVER_ORDER_SQL, [driver.sabun]);
+  const orders = await loadDriverOrders(driver.sabun);
 
   const wanted = /^\d+$/.test(String(req.query.order || '')) ? Number(req.query.order) : null;
   // 지목한 오더가 이 기사 것이 아니면 무시한다 — 주소창으로 남의 오더를 여는 길을 막는다.
@@ -271,6 +293,9 @@ router.get('/chat/data.json', requireDriver, asyncHandler(async (req, res) => {
     driver: { name: driver.name, sabun: driver.sabun },
     orders: orders.map((o) => ({
       id: o.id, oid: o.oid, status: o.status,
+      // 콜마너 접수번호를 함께 준다 — 기사가 콜마너 화면에서 찾는 번호는 이쪽이다.
+      // 우리 번호만 주면 "그런 건 없다"가 된다.
+      confSlip: o.callmaner_conf_slip || '',
       reservedAt: [o.reserved_date, o.reserved_time].filter(Boolean).join(' '),
       origin: [o.origin_address, o.origin_address_detail].filter(Boolean).join(' '),
       destination: [o.destination_address, o.destination_address_detail].filter(Boolean).join(' '),
@@ -279,7 +304,13 @@ router.get('/chat/data.json', requireDriver, asyncHandler(async (req, res) => {
     })),
     current: current ? {
       id: current.id, oid: current.oid, status: current.status,
+      confSlip: current.callmaner_conf_slip || '',
+      // 발주 지사와 그 전화번호. 기사가 현장에서 막히면 여기로 건다.
+      branchName: current.branch_name || '',
+      branchPhone: current.branch_phone || '',
       memo: current.memo_customer || '',
+      // 상담원이 기사에게 직접 쓴 안내. 길이 제한이 없다.
+      driverMemo: current.memo_driver_chat || '',
       originContact: current.origin_contact || '',
       destinationContact: current.destination_contact || '',
       tasks: extras,

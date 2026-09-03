@@ -2209,3 +2209,67 @@
     });
   }
 })();
+
+// ---------- 적요1 100Byte 미리보기 ----------
+// 이 칸에 쓴 글이 그대로 기사에게 가는 줄 알지만, 콜마너 적요1이 100Byte라 그 뒤가 말없이
+// 잘린다(실측: 기사 메모의 24.4%가 예산 초과). 쓰는 사람은 다 갔다고 믿고, 기사는 안 온 줄도
+// 모른다. 그래서 잘리는 부분을 눈에 보이게 그린다.
+//
+// 계산 규칙은 lib/memoBudget.js와 같아야 한다 — 갈리면 "화면에는 들어간다는데 실제로는
+// 잘리는" 상태가 된다. Next 폼은 그 모듈을 그대로 import한다.
+(function () {
+  var MEMO1_MAX_BYTES = 100;
+  var SEPARATOR_BYTES = 3;     // 차량번호와 본문 사이 " / "
+  var ASSUMED_PLATE_BYTES = 11; // 번호판을 모를 때 잡아두는 자리
+
+  var memoEl = document.getElementById('memo_customer');
+  var previewEl = document.getElementById('memoBudgetPreview');
+  if (!memoEl || !previewEl) return;
+
+  var countEl = previewEl.querySelector('.memo-budget-count');
+  var keptEl = previewEl.querySelector('.kept');
+  var droppedEl = previewEl.querySelector('.dropped');
+  var limitEl = document.querySelector('.memo-budget-limit');
+
+  function byteLength(s) { return new TextEncoder().encode(String(s || '')).length; }
+
+  function plateValue() {
+    var el = document.getElementById('vehicle_number') || document.querySelector('[name="vehicle_number"]');
+    return el ? String(el.value || '').trim() : '';
+  }
+
+  function budget() {
+    var plate = plateValue();
+    var plateBytes = plate ? byteLength(plate) : ASSUMED_PLATE_BYTES;
+    return Math.max(20, MEMO1_MAX_BYTES - plateBytes - SEPARATOR_BYTES);
+  }
+
+  function render() {
+    var text = String(memoEl.value || '');
+    var limit = budget();
+    if (limitEl) limitEl.textContent = String(limit);
+    if (!text) { previewEl.hidden = true; return; }
+
+    // 글자 단위로 센다 — 바이트로 자르면 한글 한 글자가 반토막 나서 깨진 글자가 보인다.
+    var used = 0;
+    var cut = text.length;
+    for (var i = 0; i < text.length; i += 1) {
+      var b = byteLength(text[i]);
+      if (used + b > limit) { cut = i; break; }
+      used += b;
+    }
+    var total = byteLength(text);
+    keptEl.textContent = text.slice(0, cut);
+    droppedEl.textContent = text.slice(cut);
+    countEl.textContent = total + ' / ' + limit + 'Byte'
+      + (cut < text.length ? ' — 회색 부분은 기사에게 전달되지 않습니다' : '');
+    previewEl.hidden = false;
+  }
+
+  memoEl.addEventListener('input', render);
+  // 번호판이 바뀌면 예산도 바뀐다 — 맨 앞에 번호판이 붙기 때문이다.
+  document.addEventListener('input', function (e) {
+    if (e.target && e.target.name === 'vehicle_number') render();
+  });
+  render();
+})();
