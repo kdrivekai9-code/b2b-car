@@ -13,6 +13,11 @@ const asyncHandler = require('../middleware/asyncHandler');
 const driverToken = require('../lib/driverToken');
 const extraCharges = require('../lib/extraCharges');
 const memoExtraCosts = require('../lib/memoExtraCosts');
+const multer = require('multer');
+const receiptOcr = require('../lib/receiptOcr');
+const { ensureBucket, uploadPhoto } = require('../lib/storage');
+const { notify } = require('../lib/push');
+const { logIntegrationErrorAsync } = require('../lib/integrationLog');
 
 const router = express.Router();
 
@@ -342,16 +347,22 @@ function safeJson(raw) {
 // 청구 대상인 것에만 "영수증 필요"를 붙인다.
 async function buildDriverTasks(order) {
   const rows = await extraCharges.loadIntakeRows(order.id).catch(() => []);
+  // loadIntakeRows는 camelCase로 돌려준다(chargeType/optionCode/settleMode) — snake_case로
+  // 읽으면 전부 undefined가 되어 이름 없는 빈 줄이 기사 화면에 뜬다.
   const tasks = rows.map((r) => {
-    const item = extraCharges.intakeItem(r.charge_type);
-    const option = item && (item.options || []).find((o) => o.value === r.option_code);
+    const item = extraCharges.intakeItem(r.chargeType);
+    const option = item && (item.options || []).find((o) => o.value === r.optionCode);
     return {
-      chargeType: r.charge_type,
-      label: item ? item.label : r.charge_type,
+      // 영수증을 어느 줄에 붙일지 — 화면이 이 id로 올린다. orders 컬럼 항목(도선료·대기요금)은
+      // 테이블 줄이 아니라 id가 없다. 그런 줄에는 업로드 버튼을 그리지 않는다.
+      chargeId: r.id || null,
+      chargeType: r.chargeType,
+      label: item ? item.label : r.chargeType,
       option: option ? option.label : null,
       amount: Number(r.amount) || 0,
       // 'included'는 요금에 포함이라 청구하지 않는다. 그래도 기사는 해야 한다.
-      needsReceipt: r.settle_mode !== 'included',
+      needsReceipt: r.settleMode !== 'included',
+      hasReceipt: !!r.hasReceipt,
     };
   });
   // 요청사항에서 찾았지만 아직 관리자가 판단하지 않은 것은 보내지 않는다 — 확정되지 않은
@@ -394,4 +405,121 @@ router.post('/chat/message', requireDriver, asyncHandler(async (req, res) => {
   res.json({ ok: true, id: inserted.lastInsertRowid });
 }));
 
-module.exports = { router, requireDriver, findOrCreateDriver, findOrCreateSession, buildDriverTasks, DRIVER_ORDER_SQL };
+// ── 영수증 업로드 ───────────────────────────────────────────────────────────
+// 로그인 없이 토큰으로 들어온 화면이 올리는 파일이라 이미지로만 제한한다 — 제한이 없으면
+// 어떤 파일이든 올려 공개 URL로 호스팅될 수 있다(routes/photoUpload.js와 같은 이유).
+const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'];
+const receiptUpload = multer({
+  storage: multer.memoryStorage(),
+  // 폰 사진은 3~8MB다. Vercel 본문 상한이 4.5MB라 그보다 크면 함수에 닿기 전에 막힌다 —
+  // 화면에서 미리 줄여 보낸다(canvas 리사이즈). 여기 상한은 그걸 통과한 것만 받는 안전선이다.
+  limits: { fileSize: 6 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (!ALLOWED_MIME_TYPES.includes(file.mimetype)) return cb(new Error('이미지 파일만 올릴 수 있습니다.'));
+    cb(null, true);
+  },
+});
+
+// 금액이 어긋나면 상담원에게 알린다. 기사도 고객도 이 어긋남을 해결할 수 없다 —
+// 고객이 정한 금액과 실제 쓴 돈이 다른 건 사람이 판단해 정리할 일이다.
+async function notifyAmountMismatch(order, charge, decision, ocr) {
+  const won = (n) => Number(n || 0).toLocaleString('ko-KR') + '원';
+  const body = [
+    `${order.oid} · ${order.vehicle_number || '차량번호 없음'}`,
+    `${charge.charge_type} — 고객 요청 ${won(decision.expected)} / 영수증 ${won(decision.amount)}`,
+    ocr && ocr.merchant ? `(${ocr.merchant})` : null,
+  ].filter(Boolean).join('\n');
+
+  await notify({
+    branchId: order.branch_id,
+    eventType: 'agent_call',
+    title: '⚠️ 영수증 금액이 요청과 다릅니다',
+    body,
+    url: `/orders/${order.id}`,
+  }).catch((e) => console.error('영수증 불일치 알림 실패(무시):', e.message));
+
+  // 푸시를 못 받는 상담원도 있고, 나중에 되짚어야 할 때도 있다 — 기록을 함께 남긴다.
+  logIntegrationErrorAsync({
+    source: 'receipt', operation: 'amount_mismatch',
+    refType: 'order', refId: Number(order.id),
+    message: `${charge.charge_type} 요청 ${decision.expected} / 영수증 ${decision.amount}`,
+    context: {
+      oid: order.oid, vehicle: order.vehicle_number || null,
+      chargeType: charge.charge_type, expected: decision.expected,
+      receipt: decision.amount, gap: decision.gap,
+      merchant: (ocr && ocr.merchant) || null,
+    },
+  });
+}
+
+// multer가 거부한 것(형식·크기)을 JSON으로 돌려준다.
+//
+// 그냥 두면 전역 오류 처리기로 흘러가 HTML 500이 나가고, 기사 화면은 그걸 JSON으로 읽으려다
+// "올리지 못했습니다"조차 못 띄운다 — 기사는 무엇이 잘못됐는지 알 수 없다.
+function receiptFile(req, res, next) {
+  receiptUpload.single('photo')(req, res, (err) => {
+    if (!err) return next();
+    const tooBig = err.code === 'LIMIT_FILE_SIZE';
+    return res.status(400).json({
+      error: tooBig ? '사진이 너무 큽니다. 다시 찍어 올려주세요.' : (err.message || '사진을 올릴 수 없습니다.'),
+    });
+  });
+}
+
+router.post('/chat/receipt', requireDriver, receiptFile, asyncHandler(async (req, res) => {
+  const driver = req.session.driver;
+  const chargeId = Number(req.body.chargeId);
+  if (!req.file) return res.status(400).json({ error: '사진을 선택해주세요.' });
+
+  // 이 기사 오더의 실비 줄이 맞는지 확인한다 — 화면이 보낸 id를 그대로 믿으면 남의 오더에
+  // 영수증을 붙이고 남의 청구액을 바꿀 수 있다.
+  const charge = await db.get(
+    `SELECT e.*, o.id AS order_id, o.oid, o.branch_id, o.vehicle_number
+       FROM order_extra_charges e
+       JOIN orders o ON o.id = e.order_id
+      WHERE e.id = ? AND o.callmaner_driver_sabun = ? AND o.status NOT IN ('완료','취소')`,
+    [chargeId, driver.sabun]
+  ).catch(() => null);
+  if (!charge) return res.status(403).json({ error: '이 항목에는 영수증을 올릴 수 없습니다.' });
+
+  await ensureBucket().catch(() => {});
+  const ext = (String(req.file.originalname || '').match(/\.[a-zA-Z0-9]+$/) || ['.jpg'])[0].slice(0, 10);
+  const url = await uploadPhoto(charge.order_id, `receipt-${chargeId}-${Date.now()}${ext}`, req.file.buffer, req.file.mimetype);
+
+  // 대화에 남긴다 — 상담원이 같은 자리에서 보고, 나중에 "이 금액의 근거"를 되짚을 수 있다.
+  const session = await findOrCreateSession(charge.order_id, driver);
+  const msg = await db.run(
+    `INSERT INTO chat_messages (session_id, sender, message, attachments_json)
+     VALUES (?, 'user', ?, ?) RETURNING id`,
+    [session.id, `${charge.charge_type} 영수증을 올렸습니다.`, JSON.stringify([{ url }])]
+  );
+  await db.run('UPDATE order_extra_charges SET chat_message_id = ? WHERE id = ?', [msg.lastInsertRowid, chargeId])
+    .catch((e) => console.error('영수증 연결 실패(사진은 저장됨):', e.message));
+
+  // 판독은 응답 뒤로 미룬다 — 기사는 사진을 올리고 바로 다음 일을 해야 한다.
+  // 실패해도 사진은 이미 붙어 있어 상담원이 눈으로 보고 넣을 수 있다.
+  const ocr = await receiptOcr.readReceipt(url).catch(() => null);
+  const decision = receiptOcr.decide(charge, ocr);
+
+  if (decision.action === 'apply' || decision.action === 'match') {
+    await db.run('UPDATE order_extra_charges SET amount = ? WHERE id = ?', [decision.amount, chargeId])
+      .catch((e) => console.error('영수증 금액 저장 실패:', e.message));
+  } else if (decision.action === 'mismatch') {
+    // 넣지 않는다. 고객이 동의한 적 없는 금액을 자동으로 청구할 수는 없다.
+    await notifyAmountMismatch(charge, charge, decision, ocr);
+  }
+
+  res.json({
+    ok: true, url,
+    action: decision.action,
+    amount: decision.amount,
+    // 기사에게는 결과를 짧게만 알린다. 금액 다툼은 상담원과 고객 사이의 일이다.
+    message: decision.action === 'mismatch'
+      ? '영수증을 받았습니다. 금액을 담당자가 확인합니다.'
+      : decision.action === 'manual'
+        ? '영수증을 받았습니다. 금액은 담당자가 확인합니다.'
+        : `영수증을 받았습니다. ${Number(decision.amount).toLocaleString('ko-KR')}원으로 등록했습니다.`,
+  });
+}));
+
+module.exports = { router, requireDriver, notifyAmountMismatch, findOrCreateDriver, findOrCreateSession, buildDriverTasks, DRIVER_ORDER_SQL };

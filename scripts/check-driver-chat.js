@@ -62,7 +62,12 @@ check('사번에도 유니크', /unique index[\s\S]{0,80}drivers\(callmaner_sabu
 
 console.log('\n[기사에게 무엇을 보여주나]');
 // 청구 여부와 전달 여부는 별개다 — 요금에 포함이어도 지시가 안 닿으면 차가 빈 채로 간다.
-check('할 일에 청구 대상이 아닌 것도 넣는다', /needsReceipt: r\.settle_mode !== 'included'/.test(src));
+// loadIntakeRows는 camelCase로 돌려준다 — snake_case로 읽으면 전부 undefined가 되어
+// 이름 없는 빈 줄이 기사 화면에 뜬다(실제로 그랬다).
+check('할 일에 청구 대상이 아닌 것도 넣는다', /needsReceipt: r\.settleMode !== 'included'/.test(src));
+check('실비 줄을 camelCase로 읽는다',
+  /extraCharges\.intakeItem\(r\.chargeType\)/.test(src) && !/r\.charge_type/.test(src),
+  'loadIntakeRows가 돌려주는 이름과 맞아야 한다');
 // 확정되지 않은 지시를 흘리면 채택되지 않았을 때 기사가 헛돈을 쓴다.
 check('요청사항 후보는 채택된 것만 보낸다', /decision === 'accepted'/.test(src));
 check('요금·청구액은 안 보낸다', !/fare_amount|total_fare/.test(src),

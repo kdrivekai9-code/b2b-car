@@ -63,6 +63,15 @@
   .tag{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:10px;
        font-size:12px;background:var(--bg);color:var(--muted);border:1px solid var(--line)}
   .tag.need{color:var(--accent);border-color:var(--accent)}
+  .tag.done{color:#2e8b57;border-color:#2e8b57}
+  .task{padding:6px 0;border-bottom:1px solid var(--line)}
+  .task:last-child{border-bottom:0;padding-bottom:0}
+  .taskline{line-height:1.5}
+  /* 장갑 낀 손으로도 눌러야 한다 — 44px 아래로 내리지 않는다. */
+  .upbtn{display:inline-flex;align-items:center;justify-content:center;margin-top:6px;
+    min-height:44px;padding:0 14px;border:1px solid var(--me);border-radius:12px;
+    color:var(--me);font-size:14px;font-weight:600}
+  .upbtn.busy{opacity:.5}
   .memo{margin:10px 14px 0;padding:12px 14px;background:var(--card);
         border:1px solid var(--line);border-radius:10px;white-space:pre-wrap}
   .memo h2{margin:0 0 6px;font-size:14px;color:var(--muted)}
@@ -190,14 +199,21 @@
     // 할 일 — 청구 여부와 무관하게 전달한다. 지시가 안 닿으면 차가 빈 채로 간다.
     var tasks = d.current.tasks || [];
     if (tasks.length) {
-      $('tasks').innerHTML = '<h2>이 건에서 해주실 일</h2><ul>' + tasks.map(function (t) {
+      $('tasks').innerHTML = '<h2>이 건에서 해주실 일</h2>' + tasks.map(function (t) {
         var amount = t.amount > 0 ? ' ' + t.amount.toLocaleString('ko-KR') + '원' : '';
         var opt = t.option ? ' (' + esc(t.option) + ')' : '';
-        var tag = t.needsReceipt
-          ? '<span class="tag need">영수증 필요</span>'
-          : '<span class="tag">요금 포함</span>';
-        return '<li>' + esc(t.label) + opt + amount + tag + '</li>';
-      }).join('') + '</ul>';
+        var tag = t.hasReceipt
+          ? '<span class="tag done">영수증 받음</span>'
+          : (t.needsReceipt ? '<span class="tag need">영수증 필요</span>' : '<span class="tag">요금 포함</span>');
+        // 청구 대상이고 아직 영수증이 없는 줄에만 버튼을 그린다. orders 컬럼 항목(도선료 등)은
+        // chargeId가 없어 붙일 자리가 없다.
+        var btn = (t.needsReceipt && t.chargeId && !t.hasReceipt)
+          ? '<label class="upbtn">📷 영수증 올리기'
+            + '<input type="file" accept="image/*" capture="environment" data-charge="' + t.chargeId + '" hidden></label>'
+          : '';
+        return '<div class="task"><div class="taskline">' + esc(t.label) + opt + amount + tag + '</div>'
+          + btn + '</div>';
+      }).join('');
       $('tasks').hidden = false;
     } else { $('tasks').hidden = true; }
 
@@ -255,6 +271,63 @@
       })
       .catch(function (e) { showError(e.message); })
       .then(function () { state.sending = false; $('btn').disabled = false; });
+  });
+
+  // 사진을 줄여서 올린다.
+  //
+  // 폰 사진은 3~8MB인데 Vercel 본문 상한이 4.5MB라, 원본을 그대로 보내면 함수에 닿기도 전에
+  // 막힌다. 기사에게는 "왜인지 모르게 안 올라감"으로 보인다. 영수증은 글자만 읽으면 되므로
+  // 긴 변 1600px이면 충분하다.
+  function shrink(file) {
+    return new Promise(function (resolve) {
+      var img = new Image();
+      var url = URL.createObjectURL(file);
+      img.onload = function () {
+        URL.revokeObjectURL(url);
+        var max = 1600;
+        var scale = Math.min(1, max / Math.max(img.width, img.height));
+        // 이미 작으면 그대로 보낸다 — 다시 그리면 화질만 떨어진다.
+        if (scale >= 1 && file.size < 3 * 1024 * 1024) return resolve(file);
+        var c = document.createElement('canvas');
+        c.width = Math.round(img.width * scale);
+        c.height = Math.round(img.height * scale);
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        c.toBlob(function (blob) {
+          resolve(blob ? new File([blob], 'receipt.jpg', { type: 'image/jpeg' }) : file);
+        }, 'image/jpeg', 0.85);
+      };
+      // 못 읽는 형식(HEIC 등)이면 원본을 그대로 보낸다 — 서버가 받아준다.
+      img.onerror = function () { URL.revokeObjectURL(url); resolve(file); };
+      img.src = url;
+    });
+  }
+
+  document.addEventListener('change', function (e) {
+    var input = e.target;
+    if (!input || input.type !== 'file' || !input.dataset.charge) return;
+    var file = input.files && input.files[0];
+    if (!file) return;
+    var label = input.closest('.upbtn');
+    if (label) label.classList.add('busy');
+
+    shrink(file).then(function (small) {
+      var fd = new FormData();
+      fd.append('photo', small);
+      fd.append('chargeId', input.dataset.charge);
+      return fetch('/driver/chat/receipt', { method: 'POST', body: fd, headers: { 'X-Requested-With': 'fetch' } })
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); });
+    }).then(function (out) {
+      if (!out.ok) throw new Error(out.j.error || '올리지 못했습니다.');
+      showError('');
+      // 결과 문구는 서버가 정한다 — 금액을 넣었는지 담당자 확인으로 넘겼는지가 여기서 갈린다.
+      if (out.j.message) alert(out.j.message);
+      load();
+    }).catch(function (err) {
+      showError(err.message);
+    }).then(function () {
+      if (label) label.classList.remove('busy');
+      input.value = '';
+    });
   });
 
   // 입력칸이 내용에 맞춰 늘어난다 — 여러 줄을 쓰는데 한 줄만 보이면 뭘 썼는지 모른다.
