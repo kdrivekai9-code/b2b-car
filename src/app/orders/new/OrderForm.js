@@ -661,8 +661,9 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
     params.set('fare_amount', state.fare_amount);
     params.set('ferry_fare_amount', String(state.ferry_fare_amount || 0));
     params.set('memo_customer', state.memo_customer);
-    params.set('memo_driver_chat', state.memo_driver_chat);
-    params.set('memo_billing', state.memo_billing);
+    // 고객 화면에는 이 두 칸이 없다. 값이 실려 나가면 서버가 나눠 넣은 결과를 덮어쓴다.
+    if (!isClient) params.set('memo_driver_chat', state.memo_driver_chat);
+    if (!isClient) params.set('memo_billing', state.memo_billing);
     params.set('order_type', state.order_type || 'dispatch');
     if (state.trip_type) params.set('trip_type', state.trip_type);
     if (state.final_destination_address) params.set('final_destination_address', state.final_destination_address);
@@ -1087,6 +1088,23 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
 
           <div className="route-stop order-memo-stop">
           <div className="route-stop-title"><span className="route-marker">요청 메모</span></div>
+          {isClient ? (
+            /* 고객은 한 칸에 다 쓴다(사용자 확정 2026-09-03).
+               100Byte니 적요1이니 하는 것은 우리 사정이지 고객이 알아야 할 일이 아니다 —
+               칸을 나눠 놓으면 어디에 무엇을 써야 할지 고민하게 되고, 그 고민의 답을 우리가
+               더 잘 안다. 서버가 이 한 덩어리를 기사용·업체용으로 나누고 적요1 요약까지
+               만든다(lib/intakeMemoSplit.js, routes/orders.js). */
+            <div className="field full">
+              <label>요청사항</label>
+              <p className="hint" style={{ margin: '0 0 6px' }}>
+                기사님께 전할 말과 정산·계산서 관련 요청을 함께 적어주세요. 담당자가 나눠 전달합니다.
+              </p>
+              <textarea className={state.memo_customer ? '' : 'single-line-textarea'}
+                placeholder="예) 성능장 앞 주차, 차키는 콘솔박스&#10;예) 주유 가득 채워주세요&#10;예) 계산서 비고란에 'OOO' 기재 요청"
+                value={state.memo_customer} onChange={(e) => setField('memo_customer', e.target.value)} />
+            </div>
+          ) : (
+          <>
           <div className="field full">
             <label>메모(콜마너 기사전달사항)</label>
             {/* 100Byte 제한을 라벨 바로 아래 둔다. 다 쓰고 나서 알려주면 이미 늦다 —
@@ -1135,6 +1153,8 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
               placeholder="예) 지하 3층 B구역 기둥 옆, 키는 콘솔박스&#10;예) 인수자 도착 15분 전에 전화 주세요"
               value={state.memo_driver_chat} onChange={(e) => setField('memo_driver_chat', e.target.value)} />
           </div>
+          </>
+          )}
           </div>
 
           {chatSessionId && (

@@ -98,6 +98,27 @@ async function getCurrentOperatingMomentFromDb() {
   return getCurrentOperatingMoment();
 }
 
+// 고객이 한 칸에 쓴 요청사항을 기사용·업체용·적요1 요약으로 나눠 저장한다.
+//
+// 나누는 규칙은 카카오 접수가 이미 쓰고 있는 것을 그대로 쓴다(lib/intakeMemoSplit.js) —
+// 실사용으로 검증된 분류를 채널마다 다시 만들 이유가 없다.
+async function splitClientMemo(orderId, memo, plate) {
+  const { splitIntakeMemo } = require('../lib/intakeMemoSplit');
+  const split = await splitIntakeMemo({ memo: String(memo || ''), options: {} }, { plate: plate || null })
+    .catch((e) => {
+      console.error('고객 요청사항 분류 실패(원문을 그대로 둔다):', e.message);
+      return null;
+    });
+  // 분류가 실패하면 아무것도 바꾸지 않는다. 원문이 memo_customer에 그대로 있으므로
+  // 지금까지와 같은 상태다 — 섣불리 비우면 기사가 아무것도 못 받는다.
+  if (!split || !String(split.driver || '').trim()) return;
+
+  await db.run(
+    `UPDATE orders SET memo_customer = ?, memo_billing = ?, memo_driver_brief = ? WHERE id = ?`,
+    [split.driver || null, split.company || null, split.driverBrief || null, orderId]
+  ).catch((e) => console.error('요청사항 분류 저장 실패(원문은 남아 있음):', e.message));
+}
+
 // 응답 뒤에 돌릴 작업. Vercel 서버리스는 응답을 보낸 뒤 인스턴스를 얼려버려서, 그냥
 // fire-and-forget으로 두면 작업이 조용히 유실된다 — waitUntil로 "이 작업이 끝날 때까지
 // 살려두라"고 알려줘야 한다(routes/kakaoConsult.js와 같은 방식).
@@ -1347,6 +1368,26 @@ router.post('/', asyncHandler(async (req, res) => {
     // 두 군데서 집계돼 두 번 청구된다. 관리자가 넣은 값은 자동 계산보다 뒤에 쓰여 이긴다.
     await extraCharges.saveOrderFeeFields(newId, parsedIntake.orderFees);
 
+    // 고객이 쓴 요청사항 한 덩어리를 기사용·업체용으로 나눈다.
+    //
+    // 고객 화면에는 칸이 하나뿐이다(사용자 확정 2026-09-03). 100Byte니 적요1이니 하는 것은
+    // 우리 사정이지 고객이 알아야 할 일이 아니라, 나누는 일도 우리가 한다.
+    //   memo_customer     → 기사에게 갈 말
+    //   memo_billing      → 정산·계산서 요청(기사에게 안 보인다)
+    //   memo_driver_brief → 적요1에 실을 100Byte 요약
+    //
+    // 관리자가 접수한 건은 나누지 않는다 — 이미 칸을 나눠서 직접 넣었다. 거기에 LLM을 또
+    // 돌리면 사람이 정한 배치를 뒤엎는다.
+    //
+    // 응답 뒤로 미룬다(실측 2.3초). 실패해도 접수를 막지 않는다 — 못 나눈 것은 전부 기사 쪽에
+    // 남아 지금까지와 같은 상태이고, 그게 접수가 실패하는 것보다 낫다.
+    if (u.role === 'client' && String(memo_customer || '').trim()) {
+      runAfterResponse(
+        splitClientMemo(newId, memo_customer, vehicle_number),
+        '고객 요청사항 분류'
+      );
+    }
+
     // 기사 챗봇 전달사항. INSERT는 위치 인자가 40개라 손대면 어긋날 위험이 커서 따로 쓴다.
     // 나뉜 건이라도 첫 건에만 붙인다 — 구간마다 같은 안내를 반복할 이유가 없다.
     if (String(memo_driver_chat || '').trim()) {
@@ -1811,8 +1852,12 @@ router.post('/:id', asyncHandler(async (req, res) => {
     finalBranch, finalGroup, finalOriginAddress, origin_detail_address || null, origin_contact || null,
     finalDestinationAddress, destination_detail_address || null, destination_contact || null, splitVehicle.vehicleNumber,
     splitVehicle.vehicleType, effectiveReservedDate, effectiveReservedTime, payment_method_id || null,
-    Number(fare_amount) || 0, Number(ferry_fare_amount) || 0, memo_customer || null, memo_billing || null,
-    memo_driver_chat || null,
+    Number(fare_amount) || 0, Number(ferry_fare_amount) || 0, memo_customer || null,
+    // 고객 화면에는 이 두 칸이 없다. 안 보낸 값을 그대로 쓰면 null로 덮여서, 관리자가 적어둔
+    // 기사 챗봇 전달사항과 접수 때 나눠 넣은 업체전달사항이 통째로 사라진다.
+    // 업체전달사항은 아래 재분류가 다시 채운다(splitClientMemo).
+    req.session.user.role === 'client' ? order.memo_billing : (memo_billing || null),
+    req.session.user.role === 'client' ? order.memo_driver_chat : (memo_driver_chat || null),
     toNumOrNullShared(req.body.origin_lat), toNumOrNullShared(req.body.origin_lon),
     req.body.origin_sido || null, req.body.origin_sigugun || null, req.body.origin_dong || null,
     toNumOrNullShared(req.body.destination_lat), toNumOrNullShared(req.body.destination_lon),
@@ -1897,6 +1942,13 @@ router.post('/:id', asyncHandler(async (req, res) => {
     if (!asClient) await extraCharges.saveOrderFeeFields(req.params.id, parsedIntake.orderFees);
   } catch (e) {
     console.error('접수 부대비용 저장 실패(오더 수정은 완료):', e.message);
+  }
+
+  // 고객이 요청사항을 고쳤으면 다시 나눈다 — 고객 화면에는 칸이 하나뿐이라 memo_billing과
+  // 적요1 요약은 여기서만 갱신된다. 안 하면 처음 접수 때 나눈 값이 그대로 남아, 고친 내용이
+  // 기사에게도 정산에도 안 간다.
+  if (asClient && String(memo_customer || '').trim() && (memo_customer || null) !== order.memo_customer) {
+    runAfterResponse(splitClientMemo(req.params.id, memo_customer, vehicle_number), '고객 요청사항 재분류');
   }
 
   broadcastOrderListChangedAsync();

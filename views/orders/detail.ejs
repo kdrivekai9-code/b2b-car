@@ -88,10 +88,14 @@
 
     <div class="section-title">메모</div>
     <div class="kv"><span class="k">고객사 메모</span><span><%= order.memo_customer || '작성된 메모가 없습니다.' %></span></div>
+    <%# 업체요청사항과 기사 챗봇 전달사항은 관리자에게만 보인다(사용자 확정 2026-09-03).
+        고객은 요청사항을 한 칸에 쓰고, 나누는 일은 서버가 한다 — 나뉜 결과를 되돌려 보여주면
+        "내가 이렇게 쓴 적 없는데"가 된다. 기사 챗봇 전달사항은 애초에 상담원이 기사에게
+        하는 말이라 고객이 볼 자리가 아니다. %>
+    <% if (currentUser.role !== 'client') { %>
     <div class="kv"><span class="k">업체요청사항</span><span><%= order.memo_billing || '작성된 내용이 없습니다.' %></span></div>
-    <%# 기사 챗봇 전달사항 — 상담원이 기사에게 직접 쓴 안내. 적요1(100Byte)과 달리 길이 제한이
-        없어서 상세한 내용이 여기로 온다. %>
     <div class="kv"><span class="k">기사 챗봇 전달사항</span><span><%= order.memo_driver_chat || '작성된 내용이 없습니다.' %></span></div>
+    <% } %>
     <div class="kv"><span class="k">관리자 메모</span><span><%= order.memo_admin || '작성된 메모가 없습니다.' %></span></div>
 
     <% if (canViewPhotos) { %>

@@ -66,6 +66,37 @@ forms.forEach((f) => {
   check(`${f} — 기사 챗봇 전달사항 칸이 있다`, /memo_driver_chat/.test(src));
 });
 
+console.log('\n[고객 화면은 한 칸이다]');
+// 100Byte니 적요1이니 하는 것은 우리 사정이지 고객이 알아야 할 일이 아니다. 칸을 나눠 놓으면
+// 어디에 무엇을 써야 할지 고민하게 되고, 그 고민의 답을 우리가 더 잘 안다.
+const orderForm = read('src/app/orders/new/OrderForm.js');
+check('고객이면 한 칸으로 그린다', /isClient \? \(/.test(orderForm) && /<label>요청사항<\/label>/.test(orderForm));
+check('고객 칸에는 100Byte 안내가 없다',
+  !/요청사항<\/label>[\s\S]{0,400}100Byte/.test(orderForm),
+  '고객에게 우리 내부 제약을 설명할 이유가 없다');
+// 화면에 없는 칸이 값을 실어 보내면 서버가 나눠 넣은 결과를 덮어쓴다.
+check('고객은 업체전달사항을 안 보낸다', /if \(!isClient\) params\.set\('memo_billing'/.test(orderForm));
+check('고객은 챗봇 전달사항을 안 보낸다', /if \(!isClient\) params\.set\('memo_driver_chat'/.test(orderForm));
+
+console.log('\n[서버가 나눈다]');
+const routesSrc = read('routes/orders.js');
+check('접수에서 나눈다', /u\.role === 'client'[\s\S]{0,120}splitClientMemo/.test(routesSrc));
+check('수정에서도 다시 나눈다', /asClient[\s\S]{0,200}splitClientMemo\(req\.params\.id/.test(routesSrc));
+// 카카오 접수가 이미 쓰는 분류를 그대로 쓴다 — 채널마다 다시 만들 이유가 없다.
+check('검증된 분류를 재사용한다', /splitIntakeMemo/.test(routesSrc));
+// 분류가 실패하면 원문이 그대로 남아야 한다. 섣불리 비우면 기사가 아무것도 못 받는다.
+check('분류 실패 시 아무것도 안 바꾼다',
+  /if \(!split \|\| !String\(split\.driver \|\| ''\)\.trim\(\)\) return;/.test(routesSrc));
+// 고객이 수정할 때 안 보낸 칸이 null로 덮이면 관리자가 적어둔 내용이 통째로 사라진다.
+check('고객 수정이 관리자 칸을 덮지 않는다',
+  /role === 'client' \? order\.memo_billing/.test(routesSrc)
+  && /role === 'client' \? order\.memo_driver_chat/.test(routesSrc));
+
+console.log('\n[고객 상세에는 안 보인다]');
+const detail = read('views/orders/detail.ejs');
+check('업체요청사항·챗봇 전달사항을 관리자에게만',
+  /currentUser\.role !== 'client'[\s\S]{0,300}기사 챗봇 전달사항/.test(detail));
+
 console.log('\n[저장과 전달]');
 const routes = read('routes/orders.js');
 check('접수에서 저장한다', /UPDATE orders SET memo_driver_chat = \?/.test(routes));
