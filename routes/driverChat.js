@@ -121,7 +121,12 @@ function requireAdmin(req, res, next) {
   // (로그인 없는 기사 화면 때문에) 로그인 리다이렉트가 자동으로 걸리지 않는데, 그러면
   // 로그아웃 상태로 주소를 연 관리자에게는 **막다른 길**이 된다 — 로그인하라는 말도 없고
   // 로그인 화면으로 가지도 않는다. 실제로 그렇게 막혔다.
-  if (!u) return res.redirect('/login?next=' + encodeURIComponent(req.originalUrl));
+  //
+  // originalUrl이 아니라 path를 쓴다. Vercel은 모든 요청을 /api/index로 rewrite하면서
+  // ?path=... 를 붙이는데, originalUrl에는 그게 그대로 남는다 — 실측으로 복귀 주소가
+  // /driver/link?path=driver%2Flink 로 나왔다. 동작은 하지만 내부 라우팅이 사용자 주소에
+  // 새어 나오고, 로그인을 두 번 거치면 계속 겹쳐 붙는다.
+  if (!u) return res.redirect('/login?next=' + encodeURIComponent(req.baseUrl + req.path));
 
   return res.status(403).send(
     `이 화면은 관리자·지사장만 열 수 있습니다. 지금 로그인한 계정은 "${u.name || ''}"(${u.role})입니다.\n`
