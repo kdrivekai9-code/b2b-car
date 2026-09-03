@@ -14,6 +14,7 @@ const authRoutes = require('./routes/auth');
 const dashboardRoutes = require('./routes/dashboard');
 const branchRoutes = require('./routes/branches');
 const groupRoutes = require('./routes/groups');
+const photoDeliveryRoutes = require('./routes/photoDelivery');
 const vehicleModelRoutes = require('./routes/vehicleModels');
 const alertRoutes = require('./routes/alerts');
 const userRoutes = require('./routes/users');
@@ -193,6 +194,10 @@ app.use('/groups', groupRoutes);
 // 법인 계정용 「내 정산내역」 — /groups는 관리자 전용이라 같은 화면을 여기로 연다.
 // 개인 딜러는 본인 접수분만, 본사 직원은 법인 전체를 본다(lib/clientScope.js).
 app.use('/my/settlement', groupRoutes.myRouter);
+// 법인 계정용 「사진 전송리스트」 — 탁송사진·실비영수증을 오더별로 모아 보고 한 번에 내려받는다.
+// 지금까지 고객이 사진에 닿는 길은 카카오로 받은 링크 한 건씩(/photos/:token)뿐이라, 지난
+// 오더를 다시 보려면 상담원이 링크를 새로 만들어 보내야 했다.
+app.use('/my/photos', photoDeliveryRoutes);
 // 차종 마스터 — 수입차/대형·화물/전기차 할증의 판정 근거를 관리한다.
 app.use('/vehicle-models', vehicleModelRoutes);
 // 장애 알림 — 연동 오류 급증·동기화 지연을 웹푸시로 알린다(자체 CRON_SECRET 검증은 라우트 안에서).

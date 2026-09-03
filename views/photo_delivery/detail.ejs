@@ -1,0 +1,107 @@
+<%- include('../partials/header') %>
+<div class="page-head-row">
+  <div>
+    <h1 class="page-title">탁송 사진</h1>
+    <p class="page-sub">
+      <% if (order) { %>접수번호 <%= order.oid %><% if (order.vehicle_number) { %> · <%= order.vehicle_number %><% } %><% } %>
+    </p>
+  </div>
+  <div class="page-head-actions">
+    <a class="btn secondary" href="/my/photos">목록</a>
+    <% if (order && reason !== 'not_allowed' && reason !== 'no_photos') { %>
+      <a class="btn" href="/my/photos/<%= order.id %>/download.zip">전체 다운로드</a>
+    <% } %>
+  </div>
+</div>
+
+<% if (reason === 'not_allowed') { %>
+  <div class="card">
+    <p class="page-sub" style="margin:0">이 오더의 사진은 공개되어 있지 않습니다. 담당 상담원에게 문의해 주세요.</p>
+  </div>
+<% } else { %>
+
+  <% if (order && (order.origin_address || order.destination_address)) { %>
+    <div class="card">
+      <p style="margin:0;line-height:1.7;">
+        <%= order.origin_address || '' %><% if (order.destination_address) { %> → <%= order.destination_address %><% } %>
+      </p>
+    </div>
+  <% } %>
+
+  <% if (reason === 'no_photos') { %>
+    <div class="card"><p class="page-sub" style="margin:0">아직 등록된 사진이 없습니다.</p></div>
+  <% } %>
+
+  <%# 운행 전 / 운행 완료 후를 따로 묶는다. 같은 항목을 두 단계에서 비교해야 흠집이 언제
+      생겼는지 알 수 있다 — 사고 처리의 전부가 그것이다. 항목 이름은 서버가 붙인다
+      (lib/callmanerPhotos.js photoLabel) — 확인된 자리만 이름이 있고 나머지는 "3번"이다. %>
+  <% (phases || []).forEach(function (g) { %>
+    <div class="card">
+      <h2><%= g.label %> <span class="page-sub" style="font-weight:400;font-size:12px;">(<%= g.items.length %>장)</span></h2>
+      <div class="photo-grid">
+        <% g.items.forEach(function (p) { %>
+          <%# 원본은 새 창에서 연다 — 목록 안 썸네일로는 흠집을 확인할 수 없다. %>
+          <a class="photo-cell" href="<%= p.url %>" target="_blank" rel="noopener noreferrer">
+            <img src="<%= p.url %>" alt="<%= g.label %> <%= p.label %>" loading="lazy">
+            <span class="photo-cap<%= (odometerIndex && Number(p.seq) === Number(odometerIndex)) ? ' odo' : '' %>">
+              <%= p.label %>
+              <% if (odometerIndex && Number(p.seq) === Number(odometerIndex) && p.odometer_km) { %>
+                <br><%= Number(p.odometer_km).toLocaleString('ko-KR') %>km
+              <% } %>
+            </span>
+          </a>
+        <% }); %>
+      </div>
+    </div>
+  <% }); %>
+
+  <%# 실비정산 영수증 — 부대비용 줄과 그 근거 사진을 나란히 둔다. 금액만 있고 사진이 어디
+      있는지 모르면 청구를 다투는 자리에서 아무것도 못 한다. 사진이 아직 없는 줄도 남긴다 —
+      빠진 것이 보여야 "영수증을 안 올렸다"를 알 수 있다. %>
+  <% if ((receipts || []).length) { %>
+    <div class="card">
+      <h2>실비정산 영수증</h2>
+      <p class="page-sub" style="margin:0 0 10px;">운행요금과 별도로 청구되는 실비입니다.</p>
+      <% receipts.forEach(function (c) { %>
+        <div class="receipt-row">
+          <div class="receipt-head">
+            <b><%= c.charge_type %></b>
+            <span class="receipt-amount"><%= Number(c.amount || 0) > 0 ? Number(c.amount).toLocaleString('ko-KR') + '원' : '금액 미정' %></span>
+            <% if (c.charged_on) { %><span class="page-sub" style="margin:0"><%= c.charged_on %></span><% } %>
+          </div>
+          <% if (c.note) { %><div class="page-sub" style="margin:2px 0 0"><%= c.note %></div><% } %>
+          <% var files = (c.receipt && c.receipt.files) || []; %>
+          <% if (files.length) { %>
+            <div class="photo-grid" style="margin-top:8px;">
+              <% files.forEach(function (f) { var url = (typeof f === 'string') ? f : (f && f.url); %>
+                <% if (url) { %>
+                  <a class="photo-cell" href="<%= url %>" target="_blank" rel="noopener noreferrer">
+                    <img src="<%= url %>" alt="<%= c.charge_type %> 영수증" loading="lazy">
+                  </a>
+                <% } %>
+              <% }); %>
+            </div>
+          <% } else { %>
+            <div class="page-sub" style="margin:6px 0 0">영수증 사진이 아직 등록되지 않았습니다.</div>
+          <% } %>
+        </div>
+      <% }); %>
+    </div>
+  <% } %>
+<% } %>
+
+<style>
+  .photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; }
+  .photo-cell { display: block; text-decoration: none; color: inherit; }
+  /* object-fit이 cover가 아니라 contain인 이유는 views/photo_view.ejs에 적어둔 것과 같다 —
+     분쟁 증빙 사진이라 한 귀퉁이라도 잘리면 안 된다. */
+  .photo-cell img { width: 100%; aspect-ratio: 4 / 3; object-fit: contain; border-radius: 8px;
+                    border: 1px solid var(--border, #e5e7eb); background: rgba(127,127,127,.1); display: block; }
+  .photo-cap { display: block; font-size: 11.5px; text-align: center; margin-top: 4px; color: var(--muted, #6b7280); line-height: 1.4; }
+  .photo-cap.odo { color: #0f766e; font-weight: 700; }
+  .receipt-row { padding: 12px 0; border-top: 1px solid var(--border, #e5e7eb); }
+  .receipt-row:first-of-type { border-top: 0; padding-top: 0; }
+  .receipt-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .receipt-amount { font-variant-numeric: tabular-nums; }
+</style>
+<%- include('../partials/footer') %>

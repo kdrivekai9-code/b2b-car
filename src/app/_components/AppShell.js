@@ -21,6 +21,7 @@ export default function AppShell({ currentUser, activePath, topNav = false, chil
     ? ' · ' + (GRADE_LABEL[currentUser.grade] || '')
     : '';
   const isAdmin = currentUser && currentUser.role === 'admin';
+  const isClient = currentUser && currentUser.role === 'client';
   const isAdminOrBranchManager = currentUser && (currentUser.role === 'admin' || currentUser.role === 'branch_manager');
 
   return (
@@ -49,6 +50,16 @@ export default function AppShell({ currentUser, activePath, topNav = false, chil
           <a href="/notices" className={isActive(activePath, '/notices') ? 'active' : ''} title="공지사항"><span className="nav-icon">📢</span><span className="nav-label">공지사항</span></a>
           <a href="/push/settings" className={isActive(activePath, '/push') ? 'active' : ''} title="오더 알림 설정"><span className="nav-icon">🔔</span><span className="nav-label">오더 알림 설정</span></a>
           <a href="/faq" className={isActive(activePath, '/faq') ? 'active' : ''} title="FAQ 문의"><span className="nav-icon">💬</span><span className="nav-label">FAQ 문의</span></a>
+          {/* 고객 전용 메뉴 — EJS 네비(views/partials/header.ejs)에 있던 세 줄이 여기에는
+              통째로 빠져 있었다. 고객이 Next가 그리는 화면에 들어오면 정산내역·팀 현황으로
+              가는 길이 사라진다. 한쪽에만 메뉴를 넣지 않는다는 규칙을 여기서 맞춘다. */}
+          {isClient && (
+            <>
+              <a href="/orders/team-feed" className={isActive(activePath, '/orders/team-feed') ? 'active' : ''} title="팀 접수 현황 안내"><span className="nav-icon">🏷️</span><span className="nav-label">팀 접수 현황 안내</span></a>
+              <a href="/my/settlement" className={isActive(activePath, '/my/settlement') ? 'active' : ''} title="정산내역"><span className="nav-icon">🧾</span><span className="nav-label">정산내역</span></a>
+              <a href="/my/photos" className={isActive(activePath, '/my/photos') ? 'active' : ''} title="사진 전송리스트"><span className="nav-icon">📷</span><span className="nav-label">사진 전송리스트</span></a>
+            </>
+          )}
           {isAdminOrBranchManager && (
             <a href="/inquiries" className={isActive(activePath, '/inquiries') ? 'active' : ''} title="문의 관리"><span className="nav-icon">📝</span><span className="nav-label">문의 관리</span></a>
           )}

@@ -936,7 +936,9 @@ async function loadSettlement(groupId, month, dealerUserId = null) {
       ...r, fare, ferry,
       // 총액에 대기·취소요금을 더한다. 도선료는 기타 정산으로 옮겨(사용자 지시) 여기서 뺀다 —
       // 총 청구액에는 아래 extraSummary를 통해 그대로 들어간다.
-      total: fare + waitFee + cancelFee,
+      // 계산은 tripFees.billableTripFare 한 곳에서 한다 — 사진 전송리스트도 같은 함수를 쓴다.
+      // 두 화면이 같은 오더를 두고 다른 금액을 말하면 그 차이를 해명하는 데 시간이 다 든다.
+      total: tripFees.billableTripFare(r),
       surcharges,
       surchargeTotal,
       waitFee,

@@ -1,0 +1,69 @@
+<%- include('../partials/header') %>
+<div class="page-head-row">
+  <div>
+    <h1 class="page-title">사진 전송리스트</h1>
+    <p class="page-sub">
+      탁송사진이 등록된 오더입니다. 사진보기를 누르면 운행 전·운행 완료 후 사진과 실비 영수증을 함께 볼 수 있습니다.
+      <% if (meIsDealer) { %>본인이 접수한 건만 보입니다.<% } %>
+    </p>
+  </div>
+</div>
+
+<div class="card">
+  <% if (!rows.length) { %>
+    <p class="page-sub" style="margin:0">
+      아직 사진이 등록된 오더가 없습니다. 기사가 촬영을 마치면 여기에 나타납니다.
+    </p>
+  <% } else { %>
+    <div style="overflow-x:auto;">
+    <table class="table">
+      <thead>
+        <tr>
+          <th style="width:120px">접수번호</th>
+          <th style="width:140px">예약일시</th>
+          <th style="width:130px">차량번호</th>
+          <th style="width:90px">상태</th>
+          <th style="width:110px">사진보기</th>
+          <th style="width:130px">사진다운로드</th>
+          <th style="width:110px" class="num">운행요금</th>
+          <th style="width:110px" class="num">부대비용</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% rows.forEach(function (r) { %>
+        <tr>
+          <td><%= r.oid || '-' %></td>
+          <td><%= r.reservedDate || '-' %><% if (r.reservedTime) { %> <%= r.reservedTime %><% } %></td>
+          <td>
+            <%= r.vehicleNumber || '-' %>
+            <% if (r.vehicleType) { %><div class="page-sub" style="margin:0;font-size:11.5px;"><%= r.vehicleType %></div><% } %>
+          </td>
+          <td><%= r.status %></td>
+          <%# 열람이 막힌 지사는 링크 대신 이유를 보여준다 — 눌러도 안 되는 링크를 두면
+              고객이 몇 번을 누르다 결국 전화한다(지사 설정: branch_photo_settings). %>
+          <% if (r.canViewPhotos) { %>
+            <td><a class="btn small secondary" href="/my/photos/<%= r.id %>">사진보기 (<%= r.photoCount %>)</a></td>
+            <td><a class="btn small secondary" href="/my/photos/<%= r.id %>/download.zip">전체 다운로드</a></td>
+          <% } else { %>
+            <td colspan="2"><span class="page-sub" style="margin:0">사진 공개가 설정되지 않았습니다. 상담원에게 문의해 주세요.</span></td>
+          <% } %>
+          <td class="num"><%= (r.tripFare || 0).toLocaleString('ko-KR') %>원</td>
+          <td class="num">
+            <% if (r.extraCount) { %>
+              <%= (r.extraAmount || 0).toLocaleString('ko-KR') %>원
+              <div class="page-sub" style="margin:0;font-size:11.5px;"><%= r.extraCount %>건</div>
+            <% } else { %>
+              -
+            <% } %>
+          </td>
+        </tr>
+        <% }); %>
+      </tbody>
+    </table>
+    </div>
+    <p class="page-sub" style="margin:10px 0 0;">
+      부대비용은 청구 대상 실비만 더한 금액입니다 — 기본요금에 포함된 항목은 여기 들어가지 않습니다.
+    </p>
+  <% } %>
+</div>
+<%- include('../partials/footer') %>

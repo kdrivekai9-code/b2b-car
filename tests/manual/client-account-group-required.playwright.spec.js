@@ -38,7 +38,10 @@ test.describe('법인 고객 계정의 소속 법인 필수', () => {
       [LOGIN_PREFIX]
     );
     if (res.rowCount) console.log('검사가 만든 계정 정리:', res.rows.map((r) => r.login_id).join(', '));
-    await pool.end();
+    // pool.end()를 부르지 않는다. 커넥션 풀은 워커 프로세스 하나를 여러 스펙이 공유하므로,
+    // 여기서 닫으면 **다음 스펙 파일이** "Cannot use a pool after calling end on the pool"으로
+    // 통째로 죽는다(실제로 group-settings-pages가 그렇게 죽었다). 유휴 소켓은 db.js의
+    // idleTimeoutMillis가 알아서 닫아 워커가 매달리지도 않는다.
   });
 
   test('권한을 클라이언트로 고르면 소속 법인이 필수가 된다', async ({ page }) => {

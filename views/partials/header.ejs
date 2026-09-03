@@ -37,6 +37,9 @@
         <a href="/orders/team-feed" class="<%= path.startsWith('/orders/team-feed') ? 'active' : '' %>" title="팀 접수 현황 안내"><span class="nav-icon">🏷️</span><span class="nav-label">팀 접수 현황 안내</span></a>
         <%# 개인 딜러는 본인 접수분만, 본사 직원은 법인 전체가 보인다(lib/clientScope.js). %>
         <a href="/my/settlement" class="<%= path.startsWith('/my/settlement') ? 'active' : '' %>" title="정산내역"><span class="nav-icon">🧾</span><span class="nav-label">정산내역</span></a>
+        <%# 사진 전송리스트 — 탁송사진·실비영수증을 오더별로 모아 본다. Next 네비도 같은 줄을
+            갖는다(src/app/_components/AppShell.js) — 한쪽만 넣으면 플래그에 따라 사라진다. %>
+        <a href="/my/photos" class="<%= path.startsWith('/my/photos') ? 'active' : '' %>" title="사진 전송리스트"><span class="nav-icon">📷</span><span class="nav-label">사진 전송리스트</span></a>
       <% } %>
       <% if (currentUser && (currentUser.role === 'admin' || currentUser.role === 'branch_manager')) { %>
         <a href="/inquiries" class="<%= path.startsWith('/inquiries') ? 'active' : '' %>" title="문의 관리"><span class="nav-icon">📝</span><span class="nav-label">문의 관리</span></a>
