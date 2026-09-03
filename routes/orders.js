@@ -1601,6 +1601,10 @@ router.get('/:id/data.json', asyncHandler(async (req, res) => {
     },
     rawWaypoints: waypoints,
     history, drivers, photos, callmanerPhotos: callmanerPhotoRows, canViewPhotos, legs,
+    // 운행전·운행후를 순번으로 짝지어 내려준다 — 화면이 다시 세면 EJS와 Next가 갈린다.
+    callmanerPhotoPairs: callmanerPhotos.pairByPhase(callmanerPhotoRows),
+    // 실비 영수증. 청구 금액이라 고객에게는 아예 내려주지 않는다(extraChargeRows와 같은 규칙).
+    receiptCharges: u.role === 'client' ? [] : await extraCharges.loadWithReceipts(req.params.id),
     extraCharges: extraChargeRows,
     // 요금설정에서 "제외(실비 정산)"로 둔 항목만 고를 수 있다 — "포함" 항목을 청구하면 이중 청구다.
     extraChargeTypes: await extraCharges.billableTypesForOrder(order),
@@ -2129,6 +2133,8 @@ router.get('/:id', asyncHandler(async (req, res) => {
   res.render('orders/detail', {
     title: '오더 상세 - ' + order.oid, order, history, waypoints, drivers, photos,
     callmanerPhotos: callmanerPhotoRows, canViewPhotos, legs,
+    callmanerPhotoPairs: callmanerPhotos.pairByPhase(callmanerPhotoRows),
+    receiptCharges: req.session.user.role === 'client' ? [] : await extraCharges.loadWithReceipts(req.params.id),
     extraCharges: extraChargeRows,
     // 요금설정에서 "제외(실비 정산)"로 둔 항목만 고를 수 있다 — "포함" 항목을 청구하면 이중 청구다.
     extraChargeTypes: await extraCharges.billableTypesForOrder(order),

@@ -901,3 +901,31 @@ tr.order-flash-indigo td { --flash-bg:#e7e9fd; }
   white-space:pre-wrap;word-break:break-all;}
 .memo-budget-text .kept{color:#111;font-weight:600;}
 .memo-budget-text .dropped{color:#aaa;text-decoration:line-through;}
+
+/* 운행전·운행후 짝 비교 — 같은 자리를 나란히 놓아야 무엇이 달라졌는지 보인다.
+   흠집이 언제 생겼는지가 사고 처리의 전부라, 짝을 손으로 맞추게 두면 안 된다. */
+.photo-compare{display:flex;flex-direction:column;gap:10px;}
+.photo-row{border:1px solid #ececec;border-radius:8px;padding:8px 10px;background:#fff;}
+.photo-label{font-size:13px;font-weight:600;color:#333;margin-bottom:6px;}
+.photo-pair{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+.photo-cell{position:relative;display:block;border-radius:6px;overflow:hidden;
+  background:#f4f4f4;border:1px solid #e5e5e5;aspect-ratio:4/3;}
+.photo-cell img{width:100%;height:100%;object-fit:cover;display:block;}
+.photo-cell .photo-phase{position:absolute;left:4px;top:4px;padding:1px 7px;border-radius:9px;
+  font-size:11px;background:rgba(0,0,0,.6);color:#fff;}
+/* 빠진 자리를 남긴다 — 보여야 "안 찍었다"를 알 수 있다. */
+.photo-cell.empty{display:flex;align-items:center;justify-content:center;
+  border-style:dashed;color:#aaa;font-size:12px;}
+
+/* 실비 영수증 — 항목·금액과 사진을 붙여 놓아야 근거가 된다. 금액만 있고 사진이 어디 있는지
+   모르면 청구를 다투는 자리에서 아무것도 못 한다. */
+.receipt-list{display:flex;flex-direction:column;gap:10px;}
+.receipt-row{border:1px solid #ececec;border-radius:8px;padding:10px 12px;background:#fff;}
+.receipt-head{display:flex;flex-wrap:wrap;gap:8px;align-items:baseline;}
+.receipt-amount{font-variant-numeric:tabular-nums;font-weight:600;}
+.receipt-mode,.receipt-date{font-size:12px;color:#777;border:1px solid #e5e5e5;
+  border-radius:10px;padding:1px 8px;}
+.receipt-note{margin-top:4px;font-size:13px;color:#666;}
+.receipt-shots{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;}
+.receipt-shots .photo-cell{width:140px;aspect-ratio:3/4;}
+.receipt-missing{margin-top:6px;font-size:13px;color:#a86;}

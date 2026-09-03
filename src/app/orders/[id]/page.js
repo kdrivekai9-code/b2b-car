@@ -1,5 +1,6 @@
 import { headers } from 'next/headers';
 import CallmanerPhotos from './CallmanerPhotos';
+import ReceiptGallery from './ReceiptGallery';
 import DriverLocationMap from './DriverLocationMap';
 import { redirect } from 'next/navigation';
 import AppShell from '../../_components/AppShell';
@@ -127,7 +128,12 @@ export default async function OrderDetailPage({ params }) {
 
       {/* 콜마너 탁송사진 — 썸네일 깨짐 처리(onError)를 위해 클라이언트 컴포넌트로 뺐다.
           이 파일은 서버 컴포넌트라 이벤트 핸들러를 넘길 수 없다. */}
-      {data.canViewPhotos && <CallmanerPhotos photos={data.callmanerPhotos} />}
+      {data.canViewPhotos && (
+        <CallmanerPhotos photos={data.callmanerPhotos} pairs={data.callmanerPhotoPairs} />
+      )}
+      {/* 실비 영수증은 사진 바로 아래 — 같은 운행에서 나온 근거라 함께 본다.
+          청구 금액이라 고객에게는 서버가 아예 내려주지 않는다(routes/orders.js). */}
+      <ReceiptGallery charges={data.receiptCharges} />
 
       {/* VOC 접수는 역할 무관 공통 — 실제로 사고/과태료/클레임을 겪는 쪽은 고객사라
           고객사도 자기 오더에 직접 접수할 수 있어야 한다(서버 권한은 loadOrderForVoc가

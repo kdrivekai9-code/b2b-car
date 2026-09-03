@@ -142,27 +142,81 @@
         썸네일이 깨질 수 있어 onerror로 썸네일만 숨기고 링크는 남긴다. %>
     <% if (typeof callmanerPhotos !== 'undefined' && callmanerPhotos.length) { %>
       <div class="section-title">🚚 콜마너 탁송사진</div>
-      <% ['start', 'end'].forEach(function (phase) { %>
-        <% const rows = callmanerPhotos.filter(function (p) { return p.phase === phase; }); %>
-        <% if (rows.length) { %>
-          <p class="page-sub" style="margin:6px 0 4px;">
-            <strong><%= phase === 'start' ? '운행전' : '운행후' %></strong> <%= rows.length %>장
-          </p>
-          <div class="callmaner-gallery">
-            <% rows.forEach(function (p) { %>
-              <a href="<%= p.url %>" target="_blank" rel="noopener" class="upload-photo-item">
-                <img src="<%= p.url %>" alt="<%= phase === 'start' ? '운행전' : '운행후' %> <%= p.seq %>번째 사진"
-                     onerror="this.style.display='none'">
-                <span class="upload-photo-leg"><%= p.seq %></span>
-              </a>
-            <% }) %>
+      <%# 운행전·운행후를 순번으로 짝지어 나란히 놓는다. 각각 13장을 따로 늘어놓으면 같은 자리를
+          비교하려고 눈으로 세어 짝을 찾아야 한다 — 흠집이 언제 생겼는지가 사고 처리의 전부인데
+          그걸 손으로 맞추게 두면 안 된다. 짝짓기는 서버가 한다(lib/callmanerPhotos.js
+          pairByPhase) — 화면이 다시 세면 Next 화면과 갈린다. %>
+      <p class="page-sub" style="margin:4px 0 10px;">
+        같은 항목의 <strong>운행전 · 운행후</strong>를 나란히 놓았습니다. 총 <%= callmanerPhotos.length %>장.
+      </p>
+      <div class="photo-compare">
+        <% (typeof callmanerPhotoPairs !== 'undefined' ? callmanerPhotoPairs : []).forEach(function (p) { %>
+          <div class="photo-row">
+            <div class="photo-label"><%= p.label %></div>
+            <div class="photo-pair">
+              <% [['start','운행전'], ['end','운행후']].forEach(function (ph) { %>
+                <% var shot = p[ph[0]]; %>
+                <% if (shot) { %>
+                  <a class="photo-cell" href="<%= shot.url %>" target="_blank" rel="noopener">
+                    <img src="<%= shot.url %>" alt="<%= p.label %> <%= ph[1] %>" loading="lazy"
+                         onerror="this.style.display='none'">
+                    <span class="photo-phase"><%= ph[1] %></span>
+                  </a>
+                <% } else { %>
+                  <%# 빠진 자리를 남긴다 — 보여야 "안 찍었다"를 알 수 있다. %>
+                  <div class="photo-cell empty"><span><%= ph[1] %> 없음</span></div>
+                <% } %>
+              <% }) %>
+            </div>
           </div>
-        <% } %>
-      <% }) %>
-      <p class="page-sub" style="margin:8px 0 0;">
+        <% }) %>
+      </div>
+      <p class="page-sub" style="margin:10px 0 0;">
         콜마너가 제공하는 링크를 그대로 보여줍니다 — 콜마너 쪽에서 만료되면 열리지 않을 수 있습니다.
       </p>
     <% } %>
+    <% } %>
+
+    <%# 실비 영수증 — 사진 바로 아래. 같은 운행에서 나온 근거라 함께 본다.
+        금액만 있고 사진이 어디 있는지 모르면 청구를 다투는 자리에서 아무것도 못 한다.
+        Next 화면의 같은 카드는 src/app/orders/[id]/ReceiptGallery.js다. %>
+    <% var receipts = (typeof receiptCharges !== 'undefined' && receiptCharges) || []; %>
+    <% if (receipts.length) { %>
+    <div class="card">
+      <h2>🧾 실비 영수증</h2>
+      <% var waiting = receipts.filter(function (r) { return !(r.receipt && r.receipt.files && r.receipt.files.length); }).length; %>
+      <p class="page-sub" style="margin:4px 0 12px;">
+        실비 <%= receipts.length %>건<% if (waiting) { %> · <strong>영수증 없음 <%= waiting %>건</strong><% } %>
+      </p>
+      <div class="receipt-list">
+        <% receipts.forEach(function (r) { %>
+          <% var files = ((r.receipt && r.receipt.files) || []).map(function (f) { return typeof f === 'string' ? { url: f } : f; })
+               .filter(function (f) { return f && f.url; }); %>
+          <div class="receipt-row">
+            <div class="receipt-head">
+              <strong><%= r.charge_type %></strong>
+              <span class="receipt-amount"><%= Number(r.amount || 0).toLocaleString('ko-KR') %>원</span>
+              <span class="receipt-mode"><%= { included: '요금 포함', monthly: '월정산', individual: '개별정산' }[r.settle_mode] || (r.settle_mode || '') %></span>
+              <% if (!r.billable) { %><span class="receipt-mode">청구 안 함</span><% } %>
+              <% if (r.charged_on) { %><span class="receipt-date"><%= r.charged_on %></span><% } %>
+            </div>
+            <% if (r.note) { %><div class="receipt-note"><%= r.note %></div><% } %>
+            <% if (files.length) { %>
+              <div class="receipt-shots">
+                <% files.forEach(function (f, i) { %>
+                  <a class="photo-cell" href="<%= f.url %>" target="_blank" rel="noopener">
+                    <img src="<%= f.url %>" alt="<%= r.charge_type %> 영수증 <%= i + 1 %>" loading="lazy"
+                         onerror="this.style.display='none'">
+                  </a>
+                <% }) %>
+              </div>
+            <% } else { %>
+              <div class="receipt-missing">영수증이 아직 올라오지 않았습니다.</div>
+            <% } %>
+          </div>
+        <% }) %>
+      </div>
+    </div>
     <% } %>
   </div>
 
