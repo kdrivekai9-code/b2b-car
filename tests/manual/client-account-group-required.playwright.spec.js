@@ -8,6 +8,11 @@
 //
 // 이 스펙은 계정을 만들지 않는다. 만드는 쪽을 확인하려면 운영 DB에 실제 계정이 생기므로,
 // "거부되는지"만 본다 — 막히는 것이 이 규칙의 전부이기도 하다.
+//
+// 그래도 뒷정리를 반드시 한다. 가드가 없는 상태에서 이 스펙을 돌리면(회귀 확인처럼 일부러
+// 되돌려 보는 경우) 거부되지 않고 **실제로 계정이 만들어진다** — 실제로 그렇게 남긴 적이 있다
+// (2026-09-02, zzq_group_guard_… 계정이 운영 DB에 남았다). 검사가 실패하는 순간이 곧 뒷정리가
+// 필요해지는 순간이라, 성공/실패와 무관하게 지운다. 지우는 대상은 이 스펙이 만든 접두어뿐이다.
 const { test, expect } = require('@playwright/test');
 const { loginWithRetry } = require('./helpers/auth');
 // 계정·비밀번호는 한 곳에서 가져온다 — 값이 없으면 즉시 멈춘다(tests/e2e-credentials.js).
@@ -17,8 +22,24 @@ const { LOGIN_ID, PASSWORD } = require('../e2e-credentials');
 const NEXT_BASE = process.env.E2E_NEXT_BASE_URL || 'http://localhost:3001';
 const EXPRESS_BASE = process.env.E2E_BASE_URL || 'http://127.0.0.1:3000';
 
+// 이 스펙이 만드는 계정에만 붙는 접두어. 뒷정리가 이것만 지운다.
+const LOGIN_PREFIX = 'zzq_group_guard_';
+
 test.describe('법인 고객 계정의 소속 법인 필수', () => {
   test.describe.configure({ timeout: 90000 });
+
+  // 가드가 없으면 위 요청들이 실제로 계정을 만든다 — 그대로 두면 운영 DB에 법인 없는 client
+  // 계정이 남고, 그건 바로 이 스펙이 막으려는 상태 그 자체다. DB로 직접 지운다(계정 삭제
+  // 라우트에 기대면 그 라우트가 막힌 날 뒷정리도 같이 멈춘다).
+  test.afterAll(async () => {
+    const { pool } = require('../../db');
+    const res = await pool.query(
+      "DELETE FROM users WHERE login_id LIKE $1 || '%' RETURNING login_id",
+      [LOGIN_PREFIX]
+    );
+    if (res.rowCount) console.log('검사가 만든 계정 정리:', res.rows.map((r) => r.login_id).join(', '));
+    await pool.end();
+  });
 
   test('권한을 클라이언트로 고르면 소속 법인이 필수가 된다', async ({ page }) => {
     await loginWithRetry(page, { baseUrl: NEXT_BASE, loginId: LOGIN_ID, password: PASSWORD });
@@ -52,7 +73,7 @@ test.describe('법인 고객 계정의 소속 법인 필수', () => {
 
     // 화면의 required만으로는 부족하다 — 끄거나 요청을 직접 만들면 그대로 통과한다.
     const res = await page.request.post(`${EXPRESS_BASE}/users`, {
-      form: { login_id: `zzq_group_guard_${Date.now()}`, name: 'zzq법인가드검사', role: 'client', group_id: '' },
+      form: { login_id: `${LOGIN_PREFIX}${Date.now()}`, name: 'zzq법인가드검사', role: 'client', group_id: '' },
       maxRedirects: 0,
     });
     expect(res.status()).toBe(400);
@@ -61,7 +82,7 @@ test.describe('법인 고객 계정의 소속 법인 필수', () => {
     // 0이나 숫자가 아닌 값도 "고르지 않음"과 같다 — 그대로 넣으면 정산이 못 찾는 값이 박힌다.
     for (const bad of ['0', 'abc', '-1']) {
       const r = await page.request.post(`${EXPRESS_BASE}/users`, {
-        form: { login_id: `zzq_group_guard_${bad}_${Date.now()}`, name: 'zzq법인가드검사', role: 'client', group_id: bad },
+        form: { login_id: `${LOGIN_PREFIX}${bad}_${Date.now()}`, name: 'zzq법인가드검사', role: 'client', group_id: bad },
         maxRedirects: 0,
       });
       expect(r.status(), `group_id=${bad}`).toBe(400);
