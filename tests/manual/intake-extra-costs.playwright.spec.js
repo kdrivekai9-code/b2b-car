@@ -93,8 +93,10 @@ test.describe('접수 단계 부대비용', () => {
     await typeSel.selectOption('충전비');
     const optionLabels = await block.locator('.extra-cost-row').first().locator('select').nth(1)
       .locator('option').allInnerTexts();
-    // 충전비는 주유비와 같은 규칙으로 돈다.
-    expect(optionLabels).toEqual(['가득(full)', '금액입력']);
+    // 충전비는 '가득'만이다. 예전에는 주유비와 똑같이 '금액입력'도 있었는데, 접수 시점에
+    // 금액을 알 수 없는 실비에 금액칸을 열어두면 누군가 어림값을 넣고 그 값이 영수증 없이
+    // 그대로 청구된다(d55414e, 사용자 확정 규칙). 부분 충전을 금액으로 지정하지 않는다.
+    expect(optionLabels).toEqual(['가득(full)']);
   });
 
   test('대기요금·취소요금은 금액만 받고 정산구분 칸이 없다', async ({ page }) => {
