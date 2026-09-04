@@ -1371,6 +1371,10 @@ router.post('/', asyncHandler(async (req, res) => {
     destinationDong: destination_dong || null,
     memoCustomer: memo_customer || null,
     memoBilling: memo_billing || null,
+    // 화면에서 이미 고른 부대비용 항목. 요청사항 분석이 같은 항목을 또 후보로 올리지 않게
+    // 넘긴다 — 같은 돈이 두 줄이면 두 번 청구된다. 여기서 바로 읽는 이유는 아래 부대비용
+    // 저장이 오더 생성 뒤에 돌아서, 그때는 이미 분석이 시작됐기 때문이다.
+    intakeChargeTypes: [].concat(req.body.intake_extra_type || []).filter(Boolean),
     createdBy: u.id,
     // 나뉜 건에는 그 구간에 남은 경유지만 실린다(같은 날 이어 도는 곳). 나뉘지 않았으면 전부.
     waypoints: part.waypoints || [],
@@ -1428,26 +1432,6 @@ router.post('/', asyncHandler(async (req, res) => {
     if (String(memo_driver_chat || '').trim()) {
       await db.run('UPDATE orders SET memo_driver_chat = ? WHERE id = ?', [String(memo_driver_chat).trim(), newId])
         .catch((e) => console.error('기사 챗봇 전달사항 저장 실패(오더 등록은 완료):', e.message));
-    }
-
-    // 요청사항 본문에 적힌 부대비용을 찾아 후보로 남긴다.
-    //
-    // 법인 고객에게는 위 부대비용 입력이 아예 보이지 않는다(청구 금액 설정이라 요금 칸과 같은
-    // 규칙으로 가린다). 그래서 고객이 "주유 가득 채워주세요"를 전할 수 있는 곳은 요청사항
-    // 본문뿐이고, 그 본문을 아무도 읽지 않으면 기사에게 지시가 안 닿고 실비도 청구되지 않는다.
-    //
-    // 줄을 만들지 않고 후보로만 둔다. 탁송 오더는 고객이 접수해도 콜마너에 대기로 들어가고
-    // 관리자가 확인해야 '접수'가 되므로, 그 확인 자리에서 사람이 고른다(사용자 확정).
-    //
-    // 응답 뒤로 미룬다 — 실측 1.2~5.3초로 들쭉날쭉해서 접수를 기다리게 할 수 없다.
-    // 이미 선택된 항목은 후보에서 뺀다(같은 돈이 두 줄이면 두 번 청구된다).
-    if (String(memo_customer || '').trim()) {
-      runAfterResponse(
-        memoExtraCosts.analyzeAndStore(newId, memo_customer, intakeFeeExtra, {
-          existingChargeTypes: parsedIntake.rows.map((r) => r.chargeType),
-        }),
-        '요청사항 부대비용 분석'
-      );
     }
   } catch (e) {
     console.error('접수 부대비용 저장 실패(오더 등록은 완료):', e.message);

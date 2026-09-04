@@ -15,6 +15,7 @@ const extraCharges = require('../lib/extraCharges');
 const memoExtraCosts = require('../lib/memoExtraCosts');
 const multer = require('multer');
 const receiptOcr = require('../lib/receiptOcr');
+const postalReceipt = require('../lib/postalReceipt');
 const { ensureBucket, uploadPhoto } = require('../lib/storage');
 const { notify } = require('../lib/push');
 const { logIntegrationErrorAsync } = require('../lib/integrationLog');
@@ -48,7 +49,11 @@ const DRIVER_ORDER_SQL = `
 // 무엇이 잘못됐는지도 모른다. lib/orderCreate.js가 같은 방식으로 버틴다(42703 = 없는 칸).
 const OPTIONAL_DRIVER_COLUMNS = `
          -- 길이 제한이 없는 쪽. 적요1(100Byte)에 못 담는 안내가 여기로 온다.
-         o.memo_driver_chat,`;
+         o.memo_driver_chat,
+         -- 인수증 등기 발송 요청. 이 링크는 지금까지 적요1로만 나갔는데, 적요1은 100Byte라
+         -- 차량번호·요청사항과 자리를 다투다 잘릴 수 있다. 잘리면 기사는 인수증을 어디에
+         -- 올려야 하는지 알 방법이 없다 — 길이 제한이 없는 이 화면에도 함께 띄운다.
+         o.postal_requested, o.receipt_upload_token,`;
 
 async function loadDriverOrders(sabun) {
   try {
@@ -373,6 +378,30 @@ async function buildDriverTasks(order) {
     if (tasks.some((t) => t.chargeType === c.chargeType)) return;
     tasks.push({ chargeType: c.chargeType, label: c.label, option: null, amount: 0, needsReceipt: false });
   });
+
+  // 인수증 등기 발송. 부대비용이 아니라 별도 흐름이라(order_receipts) 위 줄들과 섞이지 않는다.
+  //
+  // 여기 넣는 이유는 적요1이 잘리기 때문이다. 지금까지 이 안내가 닿는 길은 콜마너 적요1에 실린
+  // /r/<token> 링크 하나뿐이었는데, 적요1은 100Byte라 차량번호·요청사항과 자리를 다툰다.
+  // 잘리면 기사는 인수증을 어디에 올려야 하는지 알 방법이 없고, 고객은 등기를 못 받는다.
+  //
+  // 업로드는 기존 화면(/r/:token)을 그대로 쓴다 — 등기번호까지 함께 받아야 해서 이 화면의
+  // 사진 한 장 올리기와 모양이 다르다. 두 벌로 만들면 한쪽만 고쳐진다.
+  if (order.postal_requested && order.receipt_upload_token) {
+    const done = await db.get(
+      'SELECT COUNT(*)::int AS n FROM order_receipts WHERE order_id = ?', [order.id]
+    ).catch(() => null);
+    tasks.push({
+      chargeType: 'postal_receipt',
+      label: '인수증 등기 발송',
+      option: '고객 서명 받아 출발지 주소로',
+      amount: 0,
+      needsReceipt: true,
+      hasReceipt: !!(done && Number(done.n) > 0),
+      // 이 링크가 있으면 화면이 업로드 버튼 대신 링크 버튼을 그린다.
+      uploadUrl: postalReceipt.receiptUploadUrl(order.receipt_upload_token),
+    });
+  }
   return tasks;
 }
 

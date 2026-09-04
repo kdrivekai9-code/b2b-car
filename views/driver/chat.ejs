@@ -180,15 +180,25 @@
       $('tasks').innerHTML = '<h2>이 건에서 해주실 일</h2>' + tasks.map(function (t) {
         var amount = t.amount > 0 ? ' ' + t.amount.toLocaleString('ko-KR') + '원' : '';
         var opt = t.option ? ' (' + esc(t.option) + ')' : '';
+        var isPostal = !!t.uploadUrl;
         var tag = t.hasReceipt
-          ? '<span class="tag done">영수증 받음</span>'
-          : (t.needsReceipt ? '<span class="tag need">영수증 필요</span>' : '<span class="tag">요금 포함</span>');
+          ? '<span class="tag done">' + (isPostal ? '발송 완료' : '영수증 받음') + '</span>'
+          : (t.needsReceipt
+            ? '<span class="tag need">' + (isPostal ? '등기 발송 필요' : '영수증 필요') + '</span>'
+            : '<span class="tag">요금 포함</span>');
         // 청구 대상이고 아직 영수증이 없는 줄에만 버튼을 그린다. orders 컬럼 항목(도선료 등)은
         // chargeId가 없어 붙일 자리가 없다.
-        var btn = (t.needsReceipt && t.chargeId && !t.hasReceipt)
-          ? '<label class="upbtn">📷 영수증 올리기'
-            + '<input type="file" accept="image/*" capture="environment" data-charge="' + t.chargeId + '" hidden></label>'
-          : '';
+        //
+        // 인수증 등기는 업로드 화면이 따로 있다(/r/:token) — 사진만이 아니라 등기번호까지
+        // 받아야 해서 이 화면의 "사진 한 장" 방식과 모양이 다르다. 그래서 파일 선택 대신
+        // 그 화면으로 가는 링크를 그린다.
+        var btn = '';
+        if (t.uploadUrl && !t.hasReceipt) {
+          btn = '<a class="upbtn" href="' + esc(t.uploadUrl) + '">📮 등기번호·인수증 올리기</a>';
+        } else if (t.needsReceipt && t.chargeId && !t.hasReceipt) {
+          btn = '<label class="upbtn">📷 영수증 올리기'
+            + '<input type="file" accept="image/*" capture="environment" data-charge="' + t.chargeId + '" hidden></label>';
+        }
         return '<div class="task"><div class="taskline">' + esc(t.label) + opt + amount + tag + '</div>'
           + btn + '</div>';
       }).join('');
