@@ -938,3 +938,15 @@ tr.order-flash-indigo td { --flash-bg:#e7e9fd; }
   vertical-align:middle;cursor:help;}
 .chip.chip-danger{color:#d93025;border-color:#d93025;text-decoration:none;}
 .chip.chip-danger.on{background:#d93025;color:#fff;}
+
+/* 요청사항에서 읽어낸 부대비용 — 고객에게 되돌려 보여주는 자리. 위 부대비용 목록과 섞지
+   않는다. 위는 고객이 직접 고른 것이고 이쪽은 우리가 글에서 추측한 것이라, 섞으면 등록된
+   것으로 읽히고 관리자가 기각했을 때 봤던 것이 사라진다. */
+.memo-extra-echo{margin-top:12px;padding:10px 12px;border:1px dashed #d0d0d0;border-radius:8px;
+  background:#fafafa;font-size:13px;}
+.memo-extra-echo-head{font-weight:600;margin-bottom:6px;}
+.memo-extra-echo-tag{margin-left:6px;padding:1px 8px;border-radius:10px;font-size:11px;
+  font-weight:500;background:#fff3cd;color:#8a6d00;border:1px solid #e8d48a;}
+.memo-extra-echo ul{margin:0;padding-left:18px;}
+.memo-extra-echo li{margin-bottom:3px;}
+.memo-extra-echo-src{color:#777;}

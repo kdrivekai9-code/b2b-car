@@ -1671,6 +1671,10 @@ router.get('/:id/data.json', asyncHandler(async (req, res) => {
     // 요청사항 본문에서 찾아낸 부대비용 후보. 고객에게는 내려주지 않는다(청구 이야기다).
     // 확정이 아니라 후보다 — 관리자가 '접수'로 확정하기 전에 고르는 자리다.
     memoExtraCandidates: u.role === 'client' ? [] : memoExtraCosts.pendingFromOrder(order),
+    // 고객에게는 "이렇게 이해했습니다"만 읽기전용으로 돌려준다(청구 이야기는 빼고).
+    // 아무것도 안 보여주면 알아들었는지 몰라 전화가 오고, 부대비용 항목에 섞으면 확정된
+    // 것으로 읽힌다 — 그 사이가 맞다(lib/memoExtraCosts.js customerViewFromOrder).
+    memoExtraForCustomer: u.role === 'client' ? memoExtraCosts.customerViewFromOrder(order) : [],
     // 수정 화면의 부대비용 섹션. 이미 붙어 있는 줄을 그대로 보여줘야 "방금 접수 때 넣은 걸
     // 왜 못 고치나"가 되지 않는다. 정산구분 기본값은 이 오더의 요금설정에서 뽑는다.
     // 고객에게도 자기 줄을 돌려준다 — 안 주면 "방금 접수 때 넣은 걸 왜 못 고치나"가 되고,
@@ -2217,6 +2221,7 @@ router.get('/:id', asyncHandler(async (req, res) => {
     extraChargeTypes: await extraCharges.billableTypesForOrder(order),
     // EJS 화면과 Next 화면이 같은 값을 봐야 한다 — 한쪽만 고치면 조용히 갈린다.
     memoExtraCandidates: req.session.user.role === 'client' ? [] : memoExtraCosts.pendingFromOrder(order),
+    memoExtraForCustomer: req.session.user.role === 'client' ? memoExtraCosts.customerViewFromOrder(order) : [],
     baseUrl: req.protocol + '://' + req.get('host'),
     ORDER_STATUSES: statusConfig.map((s) => s.status_code),
   });

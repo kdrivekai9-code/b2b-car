@@ -9,6 +9,9 @@
 // 규칙대로인지를 본다 — 요금설정에 따른 정산구분, 이미 선택된 항목 제외, 중복 제거.
 require('dotenv').config();
 
+const fs = require('fs');
+const path = require('path');
+const read = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
 const memoExtra = require('../lib/memoExtraCosts');
 const fareSurcharge = require('../lib/fareSurcharge');
 
@@ -165,11 +168,41 @@ const fake = (items) => async () => ({ items });
   check('관리자의 정산구분은 살아 있다', asAdmin.rows[0].settleMode === 'included');
   check('관리자는 대기요금을 넣을 수 있다', asAdmin.orderFees.wait && asAdmin.orderFees.wait.amount === 99000);
 
+  console.log('\n[고객에게 되돌려 보여주는 것]');
+  // 아무 반응이 없으면 고객은 우리가 알아들었는지 몰라 전화한다 — 이 채널이 없애려는 바로
+  // 그 통화다. 그렇다고 부대비용 항목에 섞으면 확정된 것으로 읽히고, 관리자가 기각했을 때
+  // 봤던 것이 사라진다. 그 사이가 맞다: 읽기전용 안내로 "확인 중"임을 못 박는다.
+  const custOrder = { memo_extra_json: JSON.stringify([
+    { code: 'fuel', label: '주유비', amount: 30000, evidence: '주유 3만원', settleMode: 'monthly', billable: true },
+    { code: 'wash', label: '세차비', amount: 0, evidence: '손세차', settleMode: 'individual', billable: true, decision: 'rejected' },
+  ]) };
+  const cust = memoExtra.customerViewFromOrder(custOrder);
+  check('판단 안 한 것만 보여준다', cust.length === 1, `${cust.length}건`);
+  // 고객이 직접 쓴 숫자라 이미 아는 값이고, 오히려 그게 맞는지 확인받아야 할 대상이다.
+  check('금액은 보여준다', cust[0] && cust[0].amount === 30000);
+  // 그게 있어야 "내가 쓴 게 이렇게 읽혔구나"를 알고 틀렸으면 그 자리에서 잡는다.
+  check('근거 원문을 함께 준다', cust[0] && cust[0].evidence === '주유 3만원');
+  // 계약 사항이라 고객이 정할 것이 아니고, 확정도 안 된 후보에 청구 방식을 붙이면 이미
+  // 청구가 시작된 것처럼 읽힌다.
+  check('정산구분은 빼고 준다', cust[0] && cust[0].settleMode === undefined && cust[0].billable === undefined);
+
+  const routesForCust = read('routes/orders.js');
+  check('고객에게만 내려준다',
+    (routesForCust.match(/memoExtraForCustomer: (u|req\.session\.user)\.role === 'client' \? memoExtra/g) || []).length === 2);
+  check('관리자용 후보는 고객에게 안 준다',
+    (routesForCust.match(/memoExtraCandidates: (u|req\.session\.user)\.role === 'client' \? \[\]/g) || []).length === 2);
+
+  // 세 화면 모두에 있어야 한다 — 한쪽만 고치면 채널에 따라 보이고 안 보인다.
+  ['views/orders/form.ejs', 'views/orders/ai_intake.ejs', 'src/app/orders/new/ExtraCostSection.js'].forEach((f) => {
+    const src2 = read(f);
+    check(`${f} — 확인 중 카드가 있다`, /요청사항에서 확인한 내용/.test(src2));
+    check(`${f} — 확정이 아니라고 말한다`, /담당자 확인 후 확정됩니다/.test(src2));
+    // 섞으면 등록된 것으로 읽힌다.
+    check(`${f} — 부대비용 목록과 분리돼 있다`, /memo-extra-echo/.test(src2));
+  });
+
   console.log('\n[두 화면이 같이 있는가]');
   // EJS와 Next가 함께 살아 있어야 한다 — 한쪽만 고치면 플래그를 되돌렸을 때 기능이 사라진다.
-  const fs = require('fs');
-  const path = require('path');
-  const read = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
   const ejs = read('views/orders/detail.ejs');
   const next = read('src/app/orders/[id]/MemoExtraCandidates.js');
   const routes = read('routes/orders.js');

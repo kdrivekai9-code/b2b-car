@@ -899,6 +899,7 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
           {!!initialData.intakeExtra && (
             <ExtraCostSection
               forClient={initialData.intakeExtra.forClient}
+              memoExtras={initialData.memoExtraForCustomer}
               config={initialData.intakeExtra}
               defaults={intakeExtraDefaults}
               rows={intakeExtras}

@@ -112,6 +112,23 @@
           </p>
           <div id="extraCostRows"></div>
           <button type="button" class="btn small secondary add-waypoint-btn" id="addExtraCostBtn">+ 부대비용 추가</button>
+        <%# 요청사항에서 읽어낸 것 — 위 부대비용 목록과 **섞지 않는다.** 위는 고객이 직접 고른
+              것이고 이쪽은 우리가 글에서 추측한 것이라, 섞으면 등록된 것으로 읽히고 관리자가
+              기각했을 때 봤던 것이 사라진다. 그래도 보여주는 이유는 아무 반응이 없으면 고객이
+              우리가 알아들었는지 몰라 전화하기 때문이다. Next 폼도 같은 카드를 갖는다
+              (src/app/orders/new/ExtraCostSection.js). %>
+          <% var memoEchos = (typeof memoExtraForCustomer !== 'undefined' && memoExtraForCustomer) || []; %>
+          <% if (memoEchos.length) { %>
+          <div class="memo-extra-echo">
+            <div class="memo-extra-echo-head">요청사항에서 확인한 내용 <span class="memo-extra-echo-tag">확인 중</span></div>
+            <ul>
+              <% memoEchos.forEach(function (c) { %>
+                <li><b><%= c.label %></b><%= c.amount > 0 ? ' ' + Number(c.amount).toLocaleString('ko-KR') + '원' : '' %><% if (c.evidence) { %><span class="memo-extra-echo-src"> &mdash; &ldquo;<%= c.evidence %>&rdquo;</span><% } %></li>
+              <% }); %>
+            </ul>
+            <p class="hint" style="margin:6px 0 0;">담당자 확인 후 확정됩니다. 다르게 이해된 부분이 있으면 알려주세요.</p>
+          </div>
+          <% } %>
         </div>
       <% } %>
     </section>

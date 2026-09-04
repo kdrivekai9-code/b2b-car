@@ -21,6 +21,8 @@ export default function ExtraCostSection({
   // 고객(client) 화면인가. 정산구분 칸을 그리지 않는다 — 청구 방식은 계약이고 요금설정이
   // 정한다. 서버도 고객이 보낸 정산구분을 무시한다(lib/extraCharges.js parseIntakeRows).
   forClient,
+  // 요청사항에서 읽어낸 것(고객에게만, 읽기전용). 아직 확정이 아니다.
+  memoExtras,
 }) {
   const items = (config && config.items) || [];
   const modes = (config && config.modes) || [];
@@ -146,6 +148,33 @@ export default function ExtraCostSection({
 
       <button type="button" className="btn small secondary add-waypoint-btn" onClick={add}
         disabled={rows.length >= 20}>+ 부대비용 추가</button>
+
+      {/* 요청사항에서 읽어낸 것 — 위 목록과 **섞지 않는다.** 위는 고객이 직접 고른 것이고
+          이쪽은 우리가 글에서 추측한 것이라, 섞으면 등록된 것으로 읽히고 관리자가 기각했을 때
+          봤던 것이 사라진다. 없던 걸 보여줬다가 치우는 것이 처음부터 안 보여주는 것보다 나쁘다.
+
+          그래도 보여주는 이유: 아무 반응이 없으면 고객은 우리가 알아들었는지 몰라 전화한다 —
+          이 채널이 없애려는 바로 그 통화다. 근거 원문을 함께 두면 틀렸을 때 고객이 그 자리에서
+          잡는다(3만원을 30만원으로 읽었는지는 관리자보다 고객이 더 잘 안다). */}
+      {!!(memoExtras && memoExtras.length) && (
+        <div className="memo-extra-echo">
+          <div className="memo-extra-echo-head">
+            요청사항에서 확인한 내용 <span className="memo-extra-echo-tag">확인 중</span>
+          </div>
+          <ul>
+            {memoExtras.map((c, i) => (
+              <li key={`${c.label}-${i}`}>
+                <b>{c.label}</b>
+                {c.amount > 0 ? ` ${Number(c.amount).toLocaleString('ko-KR')}원` : ''}
+                {c.evidence ? <span className="memo-extra-echo-src"> — “{c.evidence}”</span> : null}
+              </li>
+            ))}
+          </ul>
+          <p className="hint" style={{ margin: '6px 0 0' }}>
+            담당자 확인 후 확정됩니다. 다르게 이해된 부분이 있으면 알려주세요.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
