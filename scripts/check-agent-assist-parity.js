@@ -65,5 +65,24 @@ check('buildSuggestion이 있다', typeof agentAssist.buildSuggestion === 'funct
 // 봇 직접 응대보다 높게 잡는다 — 상담원이 이미 보고 있는 화면이라 애매한 제안은 소음이다.
 check('FAQ 임계가 0.7 이상', agentAssist.FAQ_THRESHOLD >= 0.7, String(agentAssist.FAQ_THRESHOLD));
 
+console.log('\n[되는 기능을 "준비 중"이라고 하지 않는다]');
+// 이 문구는 MCP 배차 도우미가 생기기 전 것이다. 지금은 주문 조회·변경·취소가 실제로 동작하고,
+// 상담원으로 넘어가는 이유는 대개 기능이 없어서가 아니다 — 실측 2026-09-04: 고객 전화번호가
+// 콜마너에 없어 주문을 특정 못 한 것(customer_not_registered)이 그대로 이 문구를 탔다.
+// 되는 기능을 "준비 중"이라고 하면 거짓이고, 고객은 아예 안 되는 줄 알고 다시 묻지 않는다.
+const chatSrc = read('routes/chat.js');
+check('"기능은 아직 준비 중입니다"를 쓰지 않는다', !/기능은 아직 준비 중입니다\. `/.test(chatSrc));
+check('상담원이 이어받는다고 말한다', /상담원이 확인해드릴게요/.test(chatSrc));
+// 어느 기능이었는지는 DB에 남아 우리가 본다 — 고객에게 설명할 일이 아니다.
+check('요청한 기능은 세션에 기록한다', /requested_feature = \?/.test(chatSrc));
+
+const mcpSrc = read('lib/mcpDispatchAgent.js');
+// 고칠 수 있는 문제인데 아무 데도 안 남으면 관리자는 왜 그런지 알 방법이 없다.
+// 계정 전화번호를 콜마너에 등록하거나 고치면 그날부터 조회가 된다.
+// 로그 호출이 reason 문자열보다 앞에 있으므로 순서를 뒤집어 본다.
+check('등록 안 된 연락처를 기록한다',
+  /logIntegrationErrorAsync\([\s\S]{0,200}operation: 'customer_not_registered'/.test(mcpSrc));
+check('번호는 가려서 남긴다', /phone: access\.maskPhone/.test(mcpSrc));
+
 console.log(failures ? `\n${failures}건 실패` : '\n모두 통과');
 process.exit(failures ? 1 : 0);

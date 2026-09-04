@@ -623,14 +623,21 @@ router.post('/:sessionId/bot-message', asyncHandler(async (req, res) => {
 
   if (needsAgent && session.status === 'bot') {
     agentOnline = await isAnyAgentOnline();
-    // "상담원 연결" 자체를 요청한 경우("아직 준비 중인 기능"이 아니라 지금 하려는 바로 그 행동)에는
-    // "'상담원 연결' 기능은 아직 준비 중입니다"라는 모순된 문구를 빼고 바로 안내한다.
+    // "기능은 아직 준비 중입니다"라고 하지 않는다(2026-09-04 수정).
+    //
+    // 이 문구는 MCP 배차 도우미가 생기기 전에 쓰던 것이다. 지금은 주문 조회·변경·취소가
+    // 실제로 동작하고, 여기까지 오는 이유는 대개 기능이 없어서가 아니다 — 실측: 고객 전화번호가
+    // 콜마너에 등록돼 있지 않아 주문을 특정할 수 없는 경우(customer_not_registered)가 그대로
+    // 이 문구를 탔다. 되는 기능을 "준비 중"이라고 말하면 거짓이고, 고객은 아예 안 되는
+    // 기능으로 알고 다시 묻지 않는다.
+    //
+    // 무엇이 막혔는지는 고객이 알 필요도 없고 알아도 할 수 있는 게 없다. 상담원이 이어받는다는
+    // 사실만 정확히 말한다. 어느 기능이었는지는 requested_feature로 DB에 남아 우리가 본다.
     const isDirectAgentRequest = requestedFeature === '상담원 연결';
-    const featurePrefix = (requestedFeature && !isDirectAgentRequest) ? `'${requestedFeature}' ` : '';
-    const featureNotice = isDirectAgentRequest ? '' : `${featurePrefix}기능은 아직 준비 중입니다. `;
+    const featureLabel = (requestedFeature && !isDirectAgentRequest) ? `'${requestedFeature}'는 ` : '';
     finalMessage = agentOnline
-      ? `${featureNotice}상담원 연결해드릴게요. 잠시만 기다려주세요.`
-      : `${featureNotice}지금은 응답 시간이 아니거나 응답할 수 있는 상담원이 없습니다. 문의 내용을 남겨주시면 확인 후 연락드리겠습니다.`;
+      ? `${featureLabel}상담원이 확인해드릴게요. 잠시만 기다려주세요.`
+      : `${featureLabel}담당자 확인이 필요합니다. 지금은 응답 시간이 아니거나 응답할 수 있는 상담원이 없습니다. 문의 내용을 남겨주시면 확인 후 연락드리겠습니다.`;
 
     await db.run(
       `UPDATE chat_sessions SET status = 'needs_agent', requested_feature = ?,
