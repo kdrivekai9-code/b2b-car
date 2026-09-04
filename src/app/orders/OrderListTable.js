@@ -48,15 +48,33 @@ const DEFAULT_VISIBLE = ['oid', 'branch', 'group', 'group_phone', 'origin', 'des
 // 고객 화면은 볼 것이 다르다. EJS 쪽(public/js/order-list-columns.js)과 같은 규칙이다 —
 // 한쪽만 고치면 플래그를 되돌렸을 때 컬럼 구성이 달라진다.
 //   지사      아예 뺀다. 고객은 자기 지사 하나뿐이라 모든 줄이 같은 값이고 칸만 차지한다.
-//   요청 법인  기본으로 끈다(같은 이유). 고를 수는 있게 남긴다.
-//   담당자     켠다. 같은 법인 안에서 "누가 넣은 건인지"가 고객이 실제로 찾는 값이다.
+//   요청 법인  기본으로 끄고 맨 뒤로 보낸다(같은 이유). 지우지는 않는다 — 여러 법인을 걸친
+//             계정이 생기면 그때 켜면 된다. 끈 컬럼이 앞자리를 차지하면 컬럼 설정 창에서
+//             매번 그 줄을 지나쳐야 한다.
+//   담당자     켜고, 비워진 요청 법인 자리로 올린다. 같은 법인 안에서 "누가 넣은 건인지"가
+//             고객이 실제로 찾는 값이라 앞쪽에 있어야 한다.
+function clientOrder(base) {
+  const o1 = base.filter((k) => k !== 'branch');
+  const groupIdx = o1.indexOf('group');
+  const o2 = o1.filter((k) => k !== 'group' && k !== 'created_by');
+  o2.splice(groupIdx, 0, 'created_by');
+  o2.push('group');
+  return o2;
+}
+
+// 컬럼 기본값을 바꿔도, 설정을 한 번이라도 저장한 사람에게는 저장값이 이겨서 영영 안 바뀐다.
+// 그렇다고 매번 덮어쓰면 사용자가 직접 켠 컬럼이 계속 꺼져서 더 나쁘다 — 한 번만 적용하고
+// 표시를 남긴다(EJS 쪽 LAYOUT_REV와 같은 값이어야 한다. 저장소를 공유하기 때문이다).
+const LAYOUT_REV = 2; // 2 = 고객 화면에서 요청 법인을 맨 뒤·기본 해제로, 담당자를 그 자리로.
+
 function columnConfigFor(role) {
   const isClient = role === 'client';
   const labels = { ...COLUMN_LABELS };
   if (isClient) delete labels.branch;
   return {
+    isClient,
     labels,
-    order: isClient ? DEFAULT_ORDER.filter((k) => k !== 'branch') : DEFAULT_ORDER,
+    order: isClient ? clientOrder(DEFAULT_ORDER) : DEFAULT_ORDER,
     visible: isClient
       ? DEFAULT_VISIBLE.filter((k) => k !== 'branch' && k !== 'group')
       : DEFAULT_VISIBLE,
@@ -97,6 +115,12 @@ function loadColumnState(config) {
   const known = Object.keys(config.labels);
   saved.order = saved.order.filter((k) => known.indexOf(k) !== -1);
   saved.visible = saved.visible.filter((k) => known.indexOf(k) !== -1);
+  // 위 LAYOUT_REV 주석 참고 — 바뀐 기본 배치를 한 번만 저장값에 반영한다.
+  if (config.isClient && Number(saved.rev || 1) < LAYOUT_REV) {
+    saved.order = clientOrder(saved.order);
+    saved.visible = saved.visible.filter((k) => k !== 'group');
+  }
+  saved.rev = LAYOUT_REV;
   return saved;
 }
 

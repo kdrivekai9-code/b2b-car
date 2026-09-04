@@ -16,16 +16,33 @@
 
   // 고객 화면은 볼 것이 다르다.
   //   지사   — 아예 뺀다. 고객은 자기 지사 하나뿐이라 모든 줄이 같은 값이고 칸만 차지한다.
-  //   요청 법인 — 목록에서는 기본으로 끈다(같은 이유). 다만 고를 수는 있게 남긴다 — 여러 법인을
-  //              걸친 계정이 생기면 그때 켜면 된다.
-  //   담당자 — 켠다. 같은 법인 안에서 "누가 넣은 건인지"가 고객이 실제로 찾는 값이다.
+  //   요청 법인 — 기본으로 끄고 **맨 뒤로** 보낸다(같은 이유). 지우지는 않는다 — 여러 법인을
+  //              걸친 계정이 생기면 그때 켜면 된다. 끈 컬럼이 목록 앞자리를 차지하면
+  //              컬럼 설정 창에서 매번 그 줄을 지나쳐야 한다.
+  //   담당자 — 켜고, 비워진 요청 법인 자리로 올린다. 같은 법인 안에서 "누가 넣은 건인지"가
+  //           고객이 실제로 찾는 값이라 앞쪽에 있어야 한다.
   // 역할은 서버가 표에 data-my-role로 실어준다(views/orders/list.ejs).
   var IS_CLIENT = String(table.dataset.myRole || '') === 'client';
+  // Next 쪽 같은 함수(src/app/orders/OrderListTable.js clientOrder)와 규칙이 같아야 한다.
+  function clientOrder(base) {
+    var o = base.filter(function (k) { return k !== 'branch'; });
+    var groupIdx = o.indexOf('group');
+    o = o.filter(function (k) { return k !== 'group' && k !== 'created_by'; });
+    o.splice(groupIdx, 0, 'created_by');
+    o.push('group');
+    return o;
+  }
   if (IS_CLIENT) {
     delete COLUMN_LABELS.branch;
-    DEFAULT_ORDER = DEFAULT_ORDER.filter(function (k) { return k !== 'branch'; });
+    DEFAULT_ORDER = clientOrder(DEFAULT_ORDER);
     DEFAULT_VISIBLE = DEFAULT_VISIBLE.filter(function (k) { return k !== 'branch' && k !== 'group'; });
   }
+
+  // 컬럼 기본값을 바꿔도, 설정을 한 번이라도 저장한 사람에게는 저장값이 이겨서 영영 안 바뀐다.
+  // 그 사람들이 대다수라 기본값만 고치면 바뀐 것이 아무에게도 안 보인다. 그렇다고 매번
+  // 덮어쓰면 사용자가 직접 켠 컬럼이 계속 꺼져서 더 나쁘다 — 그래서 **한 번만** 적용하고
+  // 표시를 남긴다. 이후에 사용자가 다시 켜면 그 선택이 유지된다.
+  var LAYOUT_REV = 2; // 2 = 고객 화면에서 요청 법인을 맨 뒤·기본 해제로, 담당자를 그 자리로.
 
   var STORAGE_KEY = 'orderList.columns.v1';
   var WIDTH_KEY = 'orderList.widths.v1';
@@ -55,6 +72,12 @@
     var known = Object.keys(COLUMN_LABELS);
     saved.order = saved.order.filter(function (k) { return known.indexOf(k) !== -1; });
     saved.visible = saved.visible.filter(function (k) { return known.indexOf(k) !== -1; });
+    // 위 LAYOUT_REV 주석 참고 — 바뀐 기본 배치를 한 번만 저장값에 반영한다.
+    if (IS_CLIENT && Number(saved.rev || 1) < LAYOUT_REV) {
+      saved.order = clientOrder(saved.order);
+      saved.visible = saved.visible.filter(function (k) { return k !== 'group'; });
+    }
+    saved.rev = LAYOUT_REV;
     return saved;
   }
   function saveState(state) { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }

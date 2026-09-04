@@ -87,6 +87,49 @@ function localsFor(role) {
   check('EJS 쪽에 고객 분기가 있다', /IS_CLIENT/.test(legacy) && /k !== 'group'/.test(legacy), true);
   check('Next 쪽에 고객 분기가 있다', /columnConfigFor/.test(next) && /k !== 'group'/.test(next), true);
 
+  console.log('[고객 컬럼 순서 — 요청 법인은 맨 뒤, 담당자가 그 자리]');
+  // 두 구현이 각자 clientOrder를 갖고 있어 실제로 같은 배열을 만드는지 본다. 규칙을 글로만
+  // 맞춰두면 한쪽이 바뀌었을 때 화면에 따라 순서가 달라진다.
+  // 함수 본문은 중괄호를 세어 잘라낸다. 정규식으로 끝을 찾으면(첫 '\n}') 들여쓰기가 다른
+  // 두 파일에서 서로 다른 지점을 끝으로 잡아, 엉뚱한 코드까지 함께 잘려 온다.
+  const extractFn = (src, name) => {
+    const start = src.indexOf(`function ${name}(`);
+    if (start === -1) return null;
+    let depth = 0;
+    for (let i = src.indexOf('{', start); i < src.length; i += 1) {
+      if (src[i] === '{') depth += 1;
+      else if (src[i] === '}') {
+        depth -= 1;
+        if (depth === 0) return src.slice(start, i + 1);
+      }
+    }
+    return null;
+  };
+  const clientOrderOf = (src) => {
+    const fn = extractFn(src, 'clientOrder');
+    if (!fn) return null;
+    // eslint-disable-next-line no-new-func
+    return new Function(`${fn}\nreturn clientOrder(${JSON.stringify(legacyOrder)});`)();
+  };
+  const legacyClient = clientOrderOf(legacy);
+  const nextClient = clientOrderOf(next);
+  check('두 구현의 고객 순서가 같다', legacyClient, nextClient);
+  check('지사가 빠진다', legacyClient.includes('branch'), false);
+  // 담당자가 요청 법인이 있던 자리(고객 기준 OID 다음)로 온다.
+  check('담당자가 OID 바로 뒤', legacyClient.slice(0, 2), ['oid', 'created_by']);
+  check('요청 법인이 맨 뒤', legacyClient[legacyClient.length - 1], 'group');
+  // 자리만 옮기고 지우지는 않는다 — 여러 법인을 걸친 계정이 생기면 켤 수 있어야 한다.
+  check('요청 법인이 목록에서 사라지지는 않는다', legacyClient.includes('group'), true);
+  check('컬럼 수는 지사 하나만 줄어든다', legacyClient.length, legacyOrder.length - 1);
+
+  console.log('[기본값 변경을 이미 저장한 사람에게도 한 번 반영한다]');
+  // 저장값이 이기는 구조라, 표시(rev)가 없으면 바뀐 배치가 아무에게도 안 보인다.
+  const revOf = (src) => { const m = src.match(/LAYOUT_REV = (\d+)/); return m ? Number(m[1]) : null; };
+  check('두 구현의 LAYOUT_REV가 같다', revOf(legacy), revOf(next));
+  check('LAYOUT_REV가 2 이상', revOf(legacy) >= 2, true);
+  check('EJS가 rev를 저장한다', /saved\.rev = LAYOUT_REV/.test(legacy), true);
+  check('Next가 rev를 저장한다', /saved\.rev = LAYOUT_REV/.test(next), true);
+
   console.log('[목록 조회 — 담당자 이름을 실어온다]');
   const routes = fs.readFileSync(path.join(__dirname, '../routes/orders.js'), 'utf8');
   // 조인이 빠지면 화면은 멀쩡히 뜨고 담당자 칸만 조용히 '-'가 된다.
