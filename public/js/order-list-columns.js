@@ -7,11 +7,25 @@
     oid: 'OID', branch: '지사', group: '요청 법인', group_phone: '대표번호',
     origin: '출발지', waypoints: '경유지', destination: '도착지', vehicle: '차량번호',
     driver: '기사정보', reserved_at: '예약일시', payment_method: '결제방식',
-    fare: '요금', dispatch_fare: '배차 요금', status: '상태', voc: 'VOC', photo: '사진', created_at: '등록일시',
+    fare: '요금', dispatch_fare: '배차 요금', status: '상태', voc: 'VOC', photo: '사진',
+    created_by: '담당자', created_at: '등록일시',
   };
   var ALWAYS_VISIBLE = ['oid'];
-  var DEFAULT_ORDER = ['oid', 'branch', 'group', 'group_phone', 'origin', 'waypoints', 'destination', 'vehicle', 'driver', 'reserved_at', 'payment_method', 'fare', 'dispatch_fare', 'status', 'voc', 'photo', 'created_at'];
-  var DEFAULT_VISIBLE = ['oid', 'branch', 'group', 'group_phone', 'origin', 'destination', 'vehicle', 'reserved_at', 'payment_method', 'fare', 'dispatch_fare', 'status', 'created_at'];
+  var DEFAULT_ORDER = ['oid', 'branch', 'group', 'group_phone', 'origin', 'waypoints', 'destination', 'vehicle', 'driver', 'reserved_at', 'payment_method', 'fare', 'dispatch_fare', 'status', 'voc', 'photo', 'created_by', 'created_at'];
+  var DEFAULT_VISIBLE = ['oid', 'branch', 'group', 'group_phone', 'origin', 'destination', 'vehicle', 'reserved_at', 'payment_method', 'fare', 'dispatch_fare', 'status', 'created_by', 'created_at'];
+
+  // 고객 화면은 볼 것이 다르다.
+  //   지사   — 아예 뺀다. 고객은 자기 지사 하나뿐이라 모든 줄이 같은 값이고 칸만 차지한다.
+  //   요청 법인 — 목록에서는 기본으로 끈다(같은 이유). 다만 고를 수는 있게 남긴다 — 여러 법인을
+  //              걸친 계정이 생기면 그때 켜면 된다.
+  //   담당자 — 켠다. 같은 법인 안에서 "누가 넣은 건인지"가 고객이 실제로 찾는 값이다.
+  // 역할은 서버가 표에 data-my-role로 실어준다(views/orders/list.ejs).
+  var IS_CLIENT = String(table.dataset.myRole || '') === 'client';
+  if (IS_CLIENT) {
+    delete COLUMN_LABELS.branch;
+    DEFAULT_ORDER = DEFAULT_ORDER.filter(function (k) { return k !== 'branch'; });
+    DEFAULT_VISIBLE = DEFAULT_VISIBLE.filter(function (k) { return k !== 'branch' && k !== 'group'; });
+  }
 
   var STORAGE_KEY = 'orderList.columns.v1';
   var WIDTH_KEY = 'orderList.widths.v1';
@@ -36,6 +50,11 @@
       saved.order.push(key);
       if (DEFAULT_VISIBLE.indexOf(key) !== -1 && saved.visible.indexOf(key) === -1) saved.visible.push(key);
     });
+    // 이 역할에 없는 컬럼은 저장값에 남아 있어도 버린다 — 고객 화면에서 '지사'를 켠 채로
+    // 저장해둔 사람이 있으면 체크박스 목록에 이름 없는 줄(undefined)이 뜬다.
+    var known = Object.keys(COLUMN_LABELS);
+    saved.order = saved.order.filter(function (k) { return known.indexOf(k) !== -1; });
+    saved.visible = saved.visible.filter(function (k) { return known.indexOf(k) !== -1; });
     return saved;
   }
   function saveState(state) { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }

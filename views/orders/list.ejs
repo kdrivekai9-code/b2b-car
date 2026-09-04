@@ -70,11 +70,13 @@
 
 <section class="card list-section-card">
   <div class="table-wrap">
-  <table id="ordersTable">
+  <%# 컬럼 기본값이 역할마다 다르다(public/js/order-list-columns.js) — 고객에게는 지사를
+      빼고 담당자를 켠다. 그 판단을 클라이언트가 하려면 역할을 알아야 한다. %>
+  <table id="ordersTable" data-my-role="<%= currentUser ? currentUser.role : '' %>">
     <thead>
       <tr>
         <th data-column="oid">OID</th>
-        <th data-column="branch">지사</th>
+        <% if (!currentUser || currentUser.role !== 'client') { %><th data-column="branch">지사</th><% } %>
         <th data-column="group">요청 법인</th>
         <th data-column="group_phone">대표번호</th>
         <th data-column="origin">출발지</th>
@@ -89,6 +91,9 @@
         <th data-column="status">상태</th>
         <th data-column="voc">VOC</th>
         <th data-column="photo">사진</th>
+        <%# 담당자 = 이 오더를 등록한 사람. 고객 화면에서는 지사·법인이 늘 자기 것이라
+            모든 줄이 같은 값이고, 정작 알고 싶은 "누가 넣었나"는 볼 수 없었다. %>
+        <th data-column="created_by">담당자</th>
         <th data-column="created_at">등록일시</th>
       </tr>
     </thead>
@@ -113,7 +118,7 @@
           <td data-column="oid" data-label="OID">
             <a href="/orders/<%= o.id %>"><%= o.oid %></a><% if (o.split_group_id && Number(o.split_total) > 1) { %><span class="split-mark" title="분리접수 <%= o.split_seq %>/<%= o.split_total %>건"><%= o.split_seq %>/<%= o.split_total %></span><% } %>
           </td>
-          <td data-column="branch" data-label="지사" title="<%= o.branch_name %>"><%= o.branch_name %></td>
+          <% if (!currentUser || currentUser.role !== 'client') { %><td data-column="branch" data-label="지사" title="<%= o.branch_name %>"><%= o.branch_name %></td><% } %>
           <td data-column="group" data-label="요청 법인" title="<%= o.group_name || '-' %>"><%= o.group_name || '-' %></td>
           <td data-column="group_phone" data-label="대표번호" title="<%= o.group_phone || '-' %>"><%= o.group_phone || '-' %></td>
           <td data-column="origin" data-label="출발지" title="<%= o.origin_address %>"><%= o.origin_address %></td>
@@ -136,6 +141,9 @@
           %>
           <td data-column="voc" data-label="VOC"><%= vocLabels %></td>
           <td data-column="photo" data-label="사진"><%= Number(o.photo_count) > 0 ? ('📷 ' + o.photo_count) : '-' %></td>
+          <%# 이름이 없으면 아이디로 대신한다 — 카카오로만 소통하는 계정은 이름이 비어 있을 수
+              있는데(routes/users.js ensureUniqueLoginId), 그때 빈칸이면 누구인지 알 수 없다. %>
+          <td data-column="created_by" data-label="담당자" title="<%= o.created_by_name || o.created_by_login || '-' %>"><%= o.created_by_name || o.created_by_login || '-' %></td>
           <td data-column="created_at" data-label="등록일시" title="<%= o.created_at %>"><%= String(o.created_at || '').slice(0, 16) %></td>
         </tr>
       <% }) %>

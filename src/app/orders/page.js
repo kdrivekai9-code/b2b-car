@@ -83,7 +83,7 @@ export default async function OrdersListPage({ searchParams }) {
       </form>
 
       <section className="card list-section-card">
-        <OrderListTable orders={orders} filters={filters} statusSummary={statusSummary} />
+        <OrderListTable orders={orders} filters={filters} statusSummary={statusSummary} currentUserRole={currentUserRole} />
         {pagination.totalPages > 1 && (
           <div className="pagination-bar">
             {pagination.page > 1

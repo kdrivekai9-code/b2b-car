@@ -205,6 +205,10 @@ async function buildOrdersListData(scope, query) {
   const sql = `
     SELECT o.*, b.name AS branch_name, g.name AS group_name, g.main_phone AS group_phone,
       pm.name AS payment_method_name, d.name AS driver_name, d.phone AS driver_phone,
+      -- 담당자 = 이 오더를 등록한 사람. 고객 목록에서는 지사·법인 대신 이 값이 쓸모 있다
+      -- (같은 법인 안에서 "누가 넣은 건인지"가 알고 싶은 것이고, 지사·법인은 늘 자기 것이라
+      -- 모든 줄이 같은 값이다). 관리자 목록에서도 문의가 오면 먼저 찾는 값이다.
+      cu.name AS created_by_name, cu.login_id AS created_by_login,
       (SELECT string_agg(w.address, ', ' ORDER BY w.seq) FROM order_waypoints w WHERE w.order_id = o.id) AS waypoints_text,
       (SELECT COUNT(*) FROM order_photos p WHERE p.order_id = o.id) AS photo_count,
       (SELECT COUNT(*) FROM order_legs ol WHERE ol.order_id = o.id) AS leg_count,
@@ -215,6 +219,7 @@ async function buildOrdersListData(scope, query) {
     LEFT JOIN groups_tbl g ON g.id = o.requester_group_id
     LEFT JOIN payment_methods pm ON pm.id = o.payment_method_id
     LEFT JOIN drivers d ON d.id = o.assigned_driver_id
+    LEFT JOIN users cu ON cu.id = o.created_by
     ${whereSql}
     -- 기본 정렬은 "가장 최근에 등록된 오더가 맨 위"(사용자 확정 사항). 예전에는 예약일시
     -- 기준이라 방금 등록한 오더가 예약이 먼 미래가 아니면 목록 중간에 묻혀서 찾기 어려웠다.

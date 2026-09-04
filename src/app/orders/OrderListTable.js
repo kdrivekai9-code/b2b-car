@@ -37,11 +37,31 @@ const COLUMN_LABELS = {
   origin: '출발지', waypoints: '경유지', destination: '도착지', vehicle: '차량번호',
   driver: '기사정보', reserved_at: '예약일시', payment_method: '결제방식',
   // 요금은 둘이다 — 고객에게 청구하는 계약 요금과, 콜마너에 거는 배차 요금(관리자만 본다).
-  fare: '요금', dispatch_fare: '배차 요금', status: '상태', voc: 'VOC', photo: '사진', created_at: '등록일시',
+  fare: '요금', dispatch_fare: '배차 요금', status: '상태', voc: 'VOC', photo: '사진',
+  // 담당자 = 이 오더를 등록한 사람. 문의가 오면 먼저 찾는 값이라 기본으로 켠다.
+  created_by: '담당자', created_at: '등록일시',
 };
 const ALWAYS_VISIBLE = ['oid'];
-const DEFAULT_ORDER = ['oid', 'branch', 'group', 'group_phone', 'origin', 'waypoints', 'destination', 'vehicle', 'driver', 'reserved_at', 'payment_method', 'fare', 'dispatch_fare', 'status', 'voc', 'photo', 'created_at'];
-const DEFAULT_VISIBLE = ['oid', 'branch', 'group', 'group_phone', 'origin', 'destination', 'vehicle', 'reserved_at', 'payment_method', 'fare', 'dispatch_fare', 'status', 'created_at'];
+const DEFAULT_ORDER = ['oid', 'branch', 'group', 'group_phone', 'origin', 'waypoints', 'destination', 'vehicle', 'driver', 'reserved_at', 'payment_method', 'fare', 'dispatch_fare', 'status', 'voc', 'photo', 'created_by', 'created_at'];
+const DEFAULT_VISIBLE = ['oid', 'branch', 'group', 'group_phone', 'origin', 'destination', 'vehicle', 'reserved_at', 'payment_method', 'fare', 'dispatch_fare', 'status', 'created_by', 'created_at'];
+
+// 고객 화면은 볼 것이 다르다. EJS 쪽(public/js/order-list-columns.js)과 같은 규칙이다 —
+// 한쪽만 고치면 플래그를 되돌렸을 때 컬럼 구성이 달라진다.
+//   지사      아예 뺀다. 고객은 자기 지사 하나뿐이라 모든 줄이 같은 값이고 칸만 차지한다.
+//   요청 법인  기본으로 끈다(같은 이유). 고를 수는 있게 남긴다.
+//   담당자     켠다. 같은 법인 안에서 "누가 넣은 건인지"가 고객이 실제로 찾는 값이다.
+function columnConfigFor(role) {
+  const isClient = role === 'client';
+  const labels = { ...COLUMN_LABELS };
+  if (isClient) delete labels.branch;
+  return {
+    labels,
+    order: isClient ? DEFAULT_ORDER.filter((k) => k !== 'branch') : DEFAULT_ORDER,
+    visible: isClient
+      ? DEFAULT_VISIBLE.filter((k) => k !== 'branch' && k !== 'group')
+      : DEFAULT_VISIBLE,
+  };
+}
 const NUMERIC_COLUMNS = ['oid', 'fare', 'dispatch_fare', 'photo'];
 
 const STORAGE_KEY = 'orderList.columns.v1';
@@ -53,25 +73,30 @@ const HIGHLIGHT_MS = 5000;
 // 색이 남은 채로 멈추거나 먼저 꺼진다 — public/css/style.css의 order-row-status-flash도 같이 본다.
 const STATUS_FLASH_MS = 3000;
 
-function loadColumnState() {
+function loadColumnState(config) {
   let saved = null;
   try { saved = JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch { saved = null; }
   if (!saved || !saved.order || !saved.visible) {
-    return { order: DEFAULT_ORDER.slice(), visible: DEFAULT_VISIBLE.slice() };
+    return { order: config.order.slice(), visible: config.visible.slice() };
   }
   ['order', 'visible'].forEach((listKey) => {
     const i = saved[listKey].indexOf('uid');
     if (i !== -1) saved[listKey][i] = 'oid';
   });
-  DEFAULT_ORDER.forEach((key) => {
+  config.order.forEach((key) => {
     // 이 사람이 설정을 저장한 뒤에 새로 생긴 컬럼만 걸린다 — 저장된 순서에 아예 없다는 뜻이다.
     // 기본 표시 컬럼이면 켜준 채로 넣는다. 컬럼을 추가해도 저장된 설정이 있는 사람에게는
     // 영영 안 보이던 문제(배차 요금이 그랬다)를 여기서 막는다. 반대로 사용자가 직접 끈 컬럼은
     // saved.order에 남아 있어 여기 걸리지 않으므로 되살아나지 않는다.
     if (saved.order.indexOf(key) !== -1) return;
     saved.order.push(key);
-    if (DEFAULT_VISIBLE.indexOf(key) !== -1 && saved.visible.indexOf(key) === -1) saved.visible.push(key);
+    if (config.visible.indexOf(key) !== -1 && saved.visible.indexOf(key) === -1) saved.visible.push(key);
   });
+  // 이 역할에 없는 컬럼은 저장값에 남아 있어도 버린다 — 고객 화면에서 '지사'를 켠 채로
+  // 저장해둔 사람이 있으면 체크박스 목록에 이름 없는 줄이 뜬다.
+  const known = Object.keys(config.labels);
+  saved.order = saved.order.filter((k) => known.indexOf(k) !== -1);
+  saved.visible = saved.visible.filter((k) => known.indexOf(k) !== -1);
   return saved;
 }
 
@@ -102,6 +127,8 @@ function cellValue(o, key) {
     case 'status': return o.status;
     case 'voc': return [o.voc_accident_note ? '사고' : null, o.voc_fine_note ? '과태료' : null, o.voc_claim_note ? '클레임' : null].filter(Boolean).join(', ') || '-';
     case 'photo': return Number(o.photo_count) > 0 ? `📷 ${o.photo_count}` : '-';
+    // 이름이 없으면 아이디로 대신한다 — 카카오로만 소통하는 계정은 이름이 비어 있을 수 있다.
+    case 'created_by': return o.created_by_name || o.created_by_login || '-';
     case 'created_at': return formatDateTimeNoSeconds(o.created_at);
     default: return '';
   }
@@ -117,10 +144,11 @@ function sortValue(o, key) {
   return text;
 }
 
-export default function OrderListTable({ orders, filters, statusSummary }) {
+export default function OrderListTable({ orders, filters, statusSummary, currentUserRole }) {
   const router = useRouter();
-  const [columnOrder, setColumnOrder] = useState(DEFAULT_ORDER);
-  const [visibleColumns, setVisibleColumns] = useState(DEFAULT_VISIBLE);
+  const columnConfig = useMemo(() => columnConfigFor(currentUserRole), [currentUserRole]);
+  const [columnOrder, setColumnOrder] = useState(columnConfig.order);
+  const [visibleColumns, setVisibleColumns] = useState(columnConfig.visible);
   const [widths, setWidths] = useState({});
   const [density, setDensity] = useState('normal');
   const [panelOpen, setPanelOpen] = useState(false);
@@ -139,12 +167,12 @@ export default function OrderListTable({ orders, filters, statusSummary }) {
   // 먼저 기본값으로 뜬 다음 JS가 저장된 설정을 적용했으니 동일한 동작(잠깐의 기본값 표시 후
   // 저장된 설정으로 전환).
   useEffect(() => {
-    const state = loadColumnState();
+    const state = loadColumnState(columnConfig);
     setColumnOrder(state.order);
     setVisibleColumns(state.visible);
     try { setWidths(JSON.parse(localStorage.getItem(WIDTH_KEY)) || {}); } catch { /* keep default */ }
     setDensity(localStorage.getItem(DENSITY_KEY) || 'normal');
-  }, []);
+  }, [columnConfig]);
 
   // 실시간 갱신: /orders/stream 신호가 오면 목록을 다시 조회한다. 짧은 시간에 신호가
   // 연달아 오면(연속 상태변경 등) debounce로 한 번만 반영한다. 재연결(onopen) 시에도 한 번
@@ -309,8 +337,8 @@ export default function OrderListTable({ orders, filters, statusSummary }) {
     localStorage.removeItem(STORAGE_KEY);
     localStorage.removeItem(WIDTH_KEY);
     localStorage.removeItem(DENSITY_KEY);
-    setColumnOrder(DEFAULT_ORDER.slice());
-    setVisibleColumns(DEFAULT_VISIBLE.slice());
+    setColumnOrder(columnConfig.order.slice());
+    setVisibleColumns(columnConfig.visible.slice());
     setWidths({});
     setDensity('normal');
     setSortState({ key: null, dir: null });
@@ -362,7 +390,7 @@ export default function OrderListTable({ orders, filters, statusSummary }) {
               return (
                 <label className="checkline" key={key}>
                   <input type="checkbox" checked={visibleColumns.includes(key)} disabled={locked} onChange={() => toggleVisible(key)} />
-                  {' ' + COLUMN_LABELS[key] + (locked ? ' (고정)' : '')}
+                  {' ' + columnConfig.labels[key] + (locked ? ' (고정)' : '')}
                 </label>
               );
             })}
@@ -394,7 +422,7 @@ export default function OrderListTable({ orders, filters, statusSummary }) {
                   onDrop={() => handleDrop(key)}
                   onClick={(e) => { if (!e.target.closest('.col-resize-handle')) handleSort(key); }}
                 >
-                  {COLUMN_LABELS[key]}
+                  {columnConfig.labels[key]}
                   <span className={`sort-icon${sortState.key === key ? ' sort-icon-active' : ''}`}>
                     {sortState.key === key ? (sortState.dir === 'asc' ? ' ▲' : ' ▼') : ' ⇅'}
                   </span>
