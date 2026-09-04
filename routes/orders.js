@@ -19,6 +19,7 @@ function dispatchAgentLib() {
 }
 const { buildFareSuggestion } = require('../lib/agentAssist');
 const memoExtraCosts = require('../lib/memoExtraCosts');
+const postalReceipt = require('../lib/postalReceipt');
 // 인사·자기소개 응답은 카카오 상담톡(routes/kakaoConsult.js)과 같은 규칙을 써야 해서 공용 모듈로 뺐다.
 const { isGreeting, getSmalltalkMessage } = require('../lib/smallTalk');
 const { broadcastMessage, broadcastSessionListChanged, broadcastOrderListChanged, openOrderListStream, closeChannel } = require('../lib/realtimeChat');
@@ -2052,6 +2053,45 @@ router.post('/:id/voc', asyncHandler(async (req, res) => {
 //
 // 기각도 기록한다. 후보를 그냥 남겨두면 다음 사람이 같은 판단을 또 해야 하고, 지워버리면
 // 왜 청구하지 않았는지가 사라진다.
+// 요청사항을 다시 분석한다 — 기존 오더에 소급 적용하는 자리.
+//
+// 왜 필요한가: 부대비용 후보와 등기우편 판정은 **접수 시점에만** 돈다. 그래서 그 기능이
+// 생기기 전에 만들어진 오더는 요청사항에 "주유 3만원", "등기로 보내주세요"가 그대로 적혀
+// 있어도 아무 일도 일어나지 않는다(실측 OID1455: 2026-08-24 접수, 두 기능은 8/25·9/2 추가).
+// 요청사항을 나중에 고친 경우도 마찬가지다.
+//
+// 자동으로 전부 다시 돌리지 않는다. 오더 수만큼 모델 호출이 늘고, 옛 오더 대부분은 이미
+// 사람이 손으로 처리했을 텐데 거기에 후보를 새로 얹으면 정리된 것을 다시 흐트러뜨린다.
+// 관리자가 그 오더를 보고 있을 때 눌러서 돌린다.
+router.post('/:id/reanalyze-memo', asyncHandler(async (req, res) => {
+  if (req.session.user.role === 'client') return res.status(403).render('403', { title: '접근 권한 없음' });
+  const order = await loadOrderForVoc(req, res);
+  if (!order) return;
+
+  const memo = String(order.memo_customer || '').trim();
+  if (!memo) return res.redirect('/orders/' + req.params.id + '?notice=memo_empty');
+
+  // 등기우편 판정 — 규칙이라 즉시 끝난다. 이미 토큰이 있으면 새로 만들지 않는다(그 링크가
+  // 이미 적요1로 기사에게 나갔을 수 있고, 바꾸면 기사가 든 링크가 죽는다).
+  const postalSource = [order.memo_customer, order.memo_billing].filter(Boolean).join('\n');
+  if (!order.receipt_upload_token && postalReceipt.isPostalRequested(postalSource)) {
+    await db.run(
+      'UPDATE orders SET postal_requested = true, receipt_upload_token = ? WHERE id = ?',
+      [postalReceipt.generateReceiptToken(), req.params.id]
+    ).catch((e) => console.error('우편발송 요청 표시 저장 실패:', e.message));
+  }
+
+  // 부대비용 후보 — 모델 호출이라 기다린다. 관리자가 버튼을 누르고 결과를 보려는 자리라
+  // 응답 뒤로 미루면 화면을 새로고침해야 보인다.
+  const feeExtra = await branchPolicy.findFareExtra(order.requester_group_id, order.branch_id).catch(() => null);
+  const existing = await extraCharges.loadIntakeRows(req.params.id).catch(() => []);
+  await memoExtraCosts.analyzeAndStore(req.params.id, memo, feeExtra, {
+    existingChargeTypes: existing.map((r) => r.chargeType),
+  });
+
+  res.redirect('/orders/' + req.params.id);
+}));
+
 router.post('/:id/memo-extra', asyncHandler(async (req, res) => {
   if (req.session.user.role === 'client') return res.status(403).render('403', { title: '접근 권한 없음' });
   const order = await loadOrderForVoc(req, res);

@@ -168,6 +168,25 @@ const fake = (items) => async () => ({ items });
   check('관리자의 정산구분은 살아 있다', asAdmin.rows[0].settleMode === 'included');
   check('관리자는 대기요금을 넣을 수 있다', asAdmin.orderFees.wait && asAdmin.orderFees.wait.amount === 99000);
 
+  console.log('\n[기존 오더에 소급할 길]');
+  // 부대비용 후보와 등기우편 판정은 접수 시점에만 돈다. 그래서 그 기능이 생기기 전에 만들어진
+  // 오더는 요청사항에 "주유 3만원", "등기로 보내주세요"가 그대로 적혀 있어도 아무 일도 일어나지
+  // 않는다(실측 OID1455: 2026-08-24 접수, 두 기능은 8/25·9/2 추가). 요청사항을 나중에 고친
+  // 경우도 마찬가지다. 다시 돌릴 길이 없으면 그 오더는 영영 빈 채로 남는다.
+  const routesSrc2 = read('routes/orders.js');
+  check('다시 분석하는 라우트가 있다', /router\.post\('\/:id\/reanalyze-memo'/.test(routesSrc2));
+  check('고객은 못 쓴다', /reanalyze-memo[\s\S]{0,200}role === 'client'[\s\S]{0,40}403/.test(routesSrc2));
+  // 등기 판정도 함께 돌려야 한다 — 둘 다 접수 시점에만 돌던 것이라 같은 처지다.
+  check('등기우편 판정도 함께 돌린다', /reanalyze-memo[\s\S]{0,900}isPostalRequested/.test(routesSrc2));
+  // 그 링크가 이미 적요1로 기사에게 나갔을 수 있다. 바꾸면 기사가 든 링크가 죽는다.
+  check('이미 있는 인수증 토큰은 안 바꾼다', /!order\.receipt_upload_token && postalReceipt\.isPostalRequested/.test(routesSrc2));
+  // 관리자가 버튼을 누르고 결과를 보려는 자리다 — 응답 뒤로 미루면 새로고침해야 보인다.
+  check('결과를 기다렸다 돌려준다', /reanalyze-memo[\s\S]{0,1200}await memoExtraCosts\.analyzeAndStore/.test(routesSrc2));
+  // 후보가 없을 때 카드가 통째로 사라지면 다시 돌릴 방법이 있는 줄도 모른다.
+  ['views/orders/detail.ejs', 'src/app/orders/[id]/MemoExtraCandidates.js'].forEach((f) => {
+    check(`${f} — 후보가 없어도 버튼을 그린다`, /reanalyze-memo/.test(read(f)));
+  });
+
   console.log('\n[고객에게 되돌려 보여주는 것]');
   // 아무 반응이 없으면 고객은 우리가 알아들었는지 몰라 전화한다 — 이 채널이 없애려는 바로
   // 그 통화다. 그렇다고 부대비용 항목에 섞으면 확정된 것으로 읽히고, 관리자가 기각했을 때
