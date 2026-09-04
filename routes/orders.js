@@ -175,8 +175,19 @@ const CALLMANER_TRIGGER_STATUSES = ['접수', '대기'];
 
 // EJS 렌더 라우트와 Next.js 프리뷰(GET /orders/data.json)가 완전히 동일한 쿼리/스코핑/필터
 // 로직을 공유하도록 분리했다 — dashboard.js의 buildDashboardData와 같은 패턴.
-async function buildOrdersListData(scope, query) {
+// 콜마너 전송 실패 — 접수번호를 못 받았고 실패 사유가 남아 있는 건.
+//
+// 접수번호가 없다고 다 실패는 아니다. 연동을 붙이기 전에 만든 옛 데이터는 시도 자체가 없어
+// 사유도 없다(실측 법인1: 미등록 46건 중 36건이 그것). 그런 건까지 "실패"로 세면 고칠 수
+// 없는 숫자가 매일 떠 있게 되고, 그러면 아무도 안 본다. 사유가 남은 것만 센다.
+const SEND_FAILED_SQL = 'o.callmaner_conf_slip IS NULL AND o.callmaner_last_error IS NOT NULL';
+
+async function buildOrdersListData(scope, query, role) {
   const { branch_id, status, from, to, q } = query;
+  // 고객에게는 이 필터도 배지도 주지 않는다 — 우리 연동 사정이라 고객이 할 수 있는 게 없고,
+  // 실패 사유에는 콜마너 내부 메시지가 그대로 들어 있다.
+  const isAdminView = role !== 'client';
+  const sendFailedOnly = isAdminView && String(query.send_failed || '') === '1';
   const page = Math.max(1, parseInt(query.page, 10) || 1);
   const offset = (page - 1) * ORDERS_PAGE_SIZE;
 
@@ -199,6 +210,8 @@ async function buildOrdersListData(scope, query) {
   const where = whereNoStatus.slice();
   const params = paramsNoStatus.slice();
   if (status) { where.push('o.status = ?'); params.push(status); }
+  // 상태 필터와 같은 자리에 둔다 — 상태별 집계(whereNoStatus)에는 넣지 않아야 탭이 그대로 돈다.
+  if (sendFailedOnly) where.push(`(${SEND_FAILED_SQL})`);
 
   const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : '';
   const whereNoStatusSql = whereNoStatus.length ? 'WHERE ' + whereNoStatus.join(' AND ') : '';
@@ -237,7 +250,8 @@ async function buildOrdersListData(scope, query) {
       COUNT(*) FILTER (WHERE o.status = '완료') AS completed,
       COUNT(*) FILTER (WHERE o.status = '대기') AS pending,
       COUNT(*) FILTER (WHERE o.status = '취소') AS cancelled,
-      COUNT(*) FILTER (WHERE o.status = '문의') AS inquiry
+      COUNT(*) FILTER (WHERE o.status = '문의') AS inquiry,
+      COUNT(*) FILTER (WHERE ${SEND_FAILED_SQL}) AS send_failed
     FROM orders o ${whereNoStatusSql}
   `;
 
@@ -258,27 +272,39 @@ async function buildOrdersListData(scope, query) {
     pending: Number(summaryRow.pending) || 0,
     cancelled: Number(summaryRow.cancelled) || 0,
     inquiry: Number(summaryRow.inquiry) || 0,
+    // 고객에게는 0으로 내려 화면에 아예 안 뜨게 한다.
+    sendFailed: isAdminView ? (Number(summaryRow.send_failed) || 0) : 0,
   };
 
   return {
     // 담당자 표시 이름은 서버에서 한 번 만들어 내려보낸다 — EJS 표와 Next 표가 각자 가공하면
     // 같은 오더가 화면에 따라 다르게 보인다(lib/orderDisplay.js).
-    orders: orders.map((o) => ({ ...o, created_by_display: orderDisplay.creatorLabel(o) })),
+    orders: orders.map((o) => ({
+      ...o,
+      created_by_display: orderDisplay.creatorLabel(o),
+      // 판정을 서버가 한 번 하고 두 화면이 그대로 쓴다 — 화면이 각자 조건을 다시 쓰면 갈린다.
+      // 고객에게는 사유 원문도 주지 않는다(콜마너 내부 메시지가 그대로 들어 있다).
+      send_failed: isAdminView && !o.callmaner_conf_slip && !!o.callmaner_last_error,
+      callmaner_last_error: isAdminView ? o.callmaner_last_error : null,
+    })),
     branches, ORDER_STATUSES, statusSummary,
-    filters: { branch_id: branch_id || '', status: status || '', from: from || '', to: to || '', q: q || '' },
+    filters: {
+      branch_id: branch_id || '', status: status || '', from: from || '', to: to || '', q: q || '',
+      send_failed: sendFailedOnly ? '1' : '',
+    },
     pagination: { page, pageSize: ORDERS_PAGE_SIZE, totalCount, totalPages },
   };
 }
 
 router.get('/', asyncHandler(async (req, res) => {
-  const data = await buildOrdersListData(scopeFilter(req), req.query);
+  const data = await buildOrdersListData(scopeFilter(req), req.query, req.session.user.role);
   res.render('orders/list', { title: '오더 리스트', ...data });
 }));
 
 // Next.js Stage 1 프리뷰(src/app/orders/page.js)가 fetch()로 호출하는 JSON 버전 — 같은
 // requireAuth(라우터 상단에 이미 적용됨)와 같은 scopeFilter/쿼리를 그대로 재사용한다.
 router.get('/data.json', asyncHandler(async (req, res) => {
-  const data = await buildOrdersListData(scopeFilter(req), req.query);
+  const data = await buildOrdersListData(scopeFilter(req), req.query, req.session.user.role);
   // EJS 버전은 res.locals.currentUser(서버 전역)로 지사 필터 노출 여부를 판단한다 —
   // JSON 응답에는 그 값이 없으므로 role만 별도로 실어준다(다른 정보는 안 실음).
   res.json({ ...data, currentUserRole: req.session.user.role, currentUser: req.session.user });

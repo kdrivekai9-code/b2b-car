@@ -402,6 +402,16 @@ export default function OrderListTable({ orders, filters, statusSummary, current
           <span className="chip">대기 {statusSummary.pending}건</span>
           <span className="chip">취소 {statusSummary.cancelled}건</span>
           <span className="chip">문의 {statusSummary.inquiry}건</span>
+          {/* 눌러서 걸러볼 수 있게 한다 — 숫자만 보여주면 어느 건인지 찾느라 목록을 훑어야
+              한다. 0건이면 안 그린다(고객에게는 서버가 0으로 내린다).
+              views/orders/list.ejs에도 같은 칩이 있다. */}
+          {!!statusSummary.sendFailed && (
+            <a className={`chip chip-danger${filters.send_failed ? ' on' : ''}`}
+              href={`/orders?${new URLSearchParams({ ...filters, send_failed: filters.send_failed ? '' : '1' }).toString()}`}
+              title="배차 시스템으로 전송되지 못한 오더만 봅니다">
+              ? 전송실패 {statusSummary.sendFailed}건{filters.send_failed ? ' (해제)' : ''}
+            </a>
+          )}
         </div>
         <button type="button" className="btn secondary" onClick={() => setPanelOpen((v) => !v)}>⚙️ 항목 설정</button>
       </div>
@@ -471,6 +481,14 @@ export default function OrderListTable({ orders, filters, statusSummary, current
                       서로 무관해 보인다. views/orders/list.ejs에도 같은 표시가 있다. */}
                   if (key === 'oid') return (
                     <td key={key} data-column={key}>
+                      {/* 콜마너 전송 실패 표시 — 맨 앞. 이 건은 배차가 아예 시작되지 않았는데
+                          상태만 보면 진행 중처럼 읽혀서 눈에 먼저 걸려야 한다. 고객에게는
+                          서버가 send_failed를 false로 내려 아무것도 그리지 않는다.
+                          views/orders/list.ejs에도 같은 표시가 있다. */}
+                      {o.send_failed && (
+                        <span className="send-failed-mark" aria-label="전송 실패"
+                          title={`배차 시스템 전송 실패: ${o.callmaner_last_error || '사유 미상'}`}>?</span>
+                      )}
                       <a href={`/orders/${o.id}`}>{value}</a>
                       {o.split_group_id && Number(o.split_total) > 1 && (
                         <span className="split-mark" title={`분리접수 ${o.split_seq}/${o.split_total}건`}>{o.split_seq}/{o.split_total}</span>

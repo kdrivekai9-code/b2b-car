@@ -50,6 +50,15 @@
     <span class="chip">대기 <%= statusSummary.pending %>건</span>
     <span class="chip">취소 <%= statusSummary.cancelled %>건</span>
     <span class="chip">문의 <%= statusSummary.inquiry %>건</span>
+    <%# 전송 실패는 눌러서 걸러볼 수 있게 한다 — 숫자만 보여주면 어느 건인지 찾느라 목록을
+        훑어야 한다. 0건이면 아예 안 그린다(고객에게는 서버가 0으로 내린다). %>
+    <% if (statusSummary.sendFailed) { %>
+      <% var sfQs = new URLSearchParams({ ...filters, send_failed: filters.send_failed ? '' : '1' }); %>
+      <a class="chip chip-danger <%= filters.send_failed ? 'on' : '' %>" href="/orders?<%= sfQs.toString() %>"
+         title="배차 시스템으로 전송되지 못한 오더만 봅니다">
+        ? 전송실패 <%= statusSummary.sendFailed %>건<%= filters.send_failed ? ' (해제)' : '' %>
+      </a>
+    <% } %>
   </div>
   <button class="btn secondary" type="button" id="columnSettingsBtn">⚙️ 항목 설정</button>
 </div>
@@ -116,6 +125,10 @@
           <%# 나눠 접수한 건은 OID 옆에 "1/2"를 붙인다. 목록은 정보가 빽빽해서 배지 대신 작은 글씨로만 —
               없으면 같은 요청에서 나온 두 줄이 서로 무관해 보인다. %>
           <td data-column="oid" data-label="OID">
+            <%# 콜마너 전송 실패 표시 — 맨 앞에 둔다. 이 건은 배차가 아예 시작되지 않았는데
+                상태만 보면 진행 중처럼 읽혀서, 눈에 먼저 걸려야 한다. 고객에게는 서버가
+                send_failed를 false로 내려 아무것도 그리지 않는다. %>
+            <% if (o.send_failed) { %><span class="send-failed-mark" title="배차 시스템 전송 실패: <%= o.callmaner_last_error || '사유 미상' %>" aria-label="전송 실패">?</span><% } %>
             <a href="/orders/<%= o.id %>"><%= o.oid %></a><% if (o.split_group_id && Number(o.split_total) > 1) { %><span class="split-mark" title="분리접수 <%= o.split_seq %>/<%= o.split_total %>건"><%= o.split_seq %>/<%= o.split_total %></span><% } %>
           </td>
           <% if (!currentUser || currentUser.role !== 'client') { %><td data-column="branch" data-label="지사" title="<%= o.branch_name %>"><%= o.branch_name %></td><% } %>

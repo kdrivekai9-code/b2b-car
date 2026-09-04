@@ -929,3 +929,12 @@ tr.order-flash-indigo td { --flash-bg:#e7e9fd; }
 .receipt-shots{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;}
 .receipt-shots .photo-cell{width:140px;aspect-ratio:3/4;}
 .receipt-missing{margin-top:6px;font-size:13px;color:#a86;}
+
+/* 콜마너 전송 실패 표시 — 목록 맨 앞. 이 건은 배차가 아예 시작되지 않았는데 상태만 보면
+   진행 중처럼 읽혀서, 눈에 먼저 걸려야 한다. */
+.send-failed-mark{display:inline-flex;align-items:center;justify-content:center;
+  width:18px;height:18px;margin-right:6px;border-radius:50%;
+  background:#d93025;color:#fff;font-size:12px;font-weight:700;line-height:1;
+  vertical-align:middle;cursor:help;}
+.chip.chip-danger{color:#d93025;border-color:#d93025;text-decoration:none;}
+.chip.chip-danger.on{background:#d93025;color:#fff;}
