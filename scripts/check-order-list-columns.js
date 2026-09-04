@@ -39,7 +39,11 @@ function localsFor(role) {
       fare_amount: 1000, dispatch_fare_amount: null, status: '완료', photo_count: 0,
       leg_count: 0, legs_assigned_count: 0, leg_driver_names: null,
       driver_name: null, driver_phone: null, created_at: '2026-01-01 09:00:00',
-      created_by_name: '홍길동', created_by_login: 'hong',
+      created_by_name: '서울모터스 홍길동', created_by_login: 'hong',
+      // 담당자 칸은 서버가 만들어 내려주는 값을 그대로 쓴다(lib/orderDisplay.js creatorLabel).
+      created_by_display: require('../lib/orderDisplay').creatorLabel({
+        created_by_name: '서울모터스 홍길동', group_name: '서울모터스', created_by_login: 'hong',
+      }),
     }],
     branches: [{ id: 1, name: '서울' }],
     ORDER_STATUSES: ['완료'],
@@ -63,8 +67,23 @@ function localsFor(role) {
   check('요청 법인 칸은 고객에게도 남는다', has(client, 'group'), true);
   // 컬럼 스크립트가 역할을 알아야 기본값을 가른다.
   check('표에 역할이 실린다', /data-my-role="client"/.test(client), true);
-  // 이름이 없는 계정은 아이디로 보여준다.
-  check('담당자 이름이 찍힌다', admin.includes('홍길동'), true);
+  // 회사명은 떼고 사람 이름만 — 요청 법인은 별도 칸에 있고, 고객 화면에서는 모든 줄이 같은
+  // 법인이라 이름마다 반복되면 정작 사람 이름이 뒤로 밀린다.
+  check('담당자 이름이 찍힌다', admin.includes('>홍길동<'), true);
+  check('담당자에 회사명이 붙지 않는다', admin.includes('>서울모터스 홍길동<'), false);
+
+  console.log('[담당자 표시 이름 — lib/orderDisplay.js]');
+  const { creatorLabel } = require('../lib/orderDisplay');
+  check('회사명 접두어를 뗀다', creatorLabel({ created_by_name: '서울모터스 채정식', group_name: '서울모터스' }), '채정식');
+  check('구분자가 하이픈이어도 뗀다', creatorLabel({ created_by_name: '서울모터스-김 하늘', group_name: '서울모터스' }), '김 하늘');
+  // 이름 안의 공백으로 자르면 "김 하늘"이 "하늘"이 된다. 회사명과 겹치는 접두어만 도려낸다.
+  check('공백 있는 이름을 자르지 않는다', creatorLabel({ created_by_name: '김 하늘', group_name: '서울모터스' }), '김 하늘');
+  // 구분자를 요구하지 않으면 "서울모터스강남"이 "강남"으로 뭉개진다.
+  check('다른 회사 이름을 뭉개지 않는다',
+    creatorLabel({ created_by_name: '서울모터스강남 이철수', group_name: '서울모터스' }), '서울모터스강남 이철수');
+  check('회사명만 있으면 그대로 둔다', creatorLabel({ created_by_name: '서울모터스', group_name: '서울모터스' }), '서울모터스');
+  check('이름이 없으면 아이디', creatorLabel({ created_by_login: 'kakao_010', group_name: '서울모터스' }), 'kakao_010');
+  check('아무것도 없으면 -', creatorLabel({}), '-');
 
   console.log('[컬럼 기본값 — 두 구현이 같은 규칙을 쓴다]');
   // 실행하지 않고 소스에서 기본값 배열을 읽는다. 두 파일 모두 브라우저 전용이라
@@ -135,6 +154,8 @@ function localsFor(role) {
   // 조인이 빠지면 화면은 멀쩡히 뜨고 담당자 칸만 조용히 '-'가 된다.
   check('created_by_name을 SELECT 한다', /cu\.name AS created_by_name/.test(routes), true);
   check('users 조인이 있다', /LEFT JOIN users cu ON cu\.id = o\.created_by/.test(routes), true);
+  // 표시 이름은 서버가 만들어 내려보낸다 — 화면마다 각자 가공하면 같은 오더가 다르게 보인다.
+  check('created_by_display를 만들어 내려준다', /created_by_display: orderDisplay\.creatorLabel/.test(routes), true);
 
   console.log(failures ? `\n${failures}건 실패` : '\n모두 통과');
   process.exit(failures ? 1 : 0);

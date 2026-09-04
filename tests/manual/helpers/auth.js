@@ -16,32 +16,45 @@ function sleep(ms) {
 // 로그인 자체를 검증하는 테스트는 이 헬퍼를 쓰지 않으면 된다.
 //
 // 세션 쿠키가 담기므로 저장소에 올리지 않는다(.gitignore).
+// **계정마다 따로 담는다.** 예전에는 쿠키 한 벌만 저장해서, 어느 계정으로 로그인을 요청하든
+// 그 한 벌을 그대로 물려줬다. 관리자 계정으로 한 번 돌고 나면 고객 계정으로 로그인해도
+// 관리자 세션이 재사용돼서, 고객 화면 테스트가 관리자 화면을 보고 있었다(실제로 그렇게 해서
+// data-my-role이 client가 아니라 admin으로 나왔다). 계정이 하나뿐일 때는 드러나지 않던 문제다.
 const STATE_FILE = path.join(__dirname, '..', '.auth-cookies.json');
 
-let cachedCookies = null;
+const cachedByAccount = new Map();
 
-function loadCachedCookies() {
-  if (cachedCookies) return cachedCookies;
+function loadAllCached() {
   try {
     const raw = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
-    if (Array.isArray(raw) && raw.length) cachedCookies = raw;
+    // 예전 형식(배열 한 벌)은 어느 계정 것인지 알 수 없다 — 버리고 새로 로그인한다.
+    return (raw && !Array.isArray(raw) && typeof raw === 'object') ? raw : {};
   } catch (_error) {
-    cachedCookies = null;
+    return {};
   }
-  return cachedCookies;
 }
 
-function saveCachedCookies(cookies) {
-  cachedCookies = cookies;
+function loadCachedCookies(loginId) {
+  if (cachedByAccount.has(loginId)) return cachedByAccount.get(loginId);
+  const all = loadAllCached();
+  const cookies = Array.isArray(all[loginId]) && all[loginId].length ? all[loginId] : null;
+  cachedByAccount.set(loginId, cookies);
+  return cookies;
+}
+
+function saveCachedCookies(loginId, cookies) {
+  cachedByAccount.set(loginId, cookies);
   try {
-    fs.writeFileSync(STATE_FILE, JSON.stringify(cookies), 'utf8');
+    const all = loadAllCached();
+    all[loginId] = cookies;
+    fs.writeFileSync(STATE_FILE, JSON.stringify(all), 'utf8');
   } catch (_error) {
     // 저장에 실패해도 테스트는 진행한다 — 다음 실행이 다시 로그인할 뿐이다.
   }
 }
 
-async function tryCachedLogin(page, protectedUrl) {
-  const cookies = loadCachedCookies();
+async function tryCachedLogin(page, protectedUrl, loginId) {
+  const cookies = loadCachedCookies(loginId);
   if (!cookies || !cookies.length) return false;
   try {
     await page.context().clearCookies();
@@ -64,10 +77,13 @@ async function loginWithRetry(page, options = {}) {
   const password = options.password || DEFAULT_PASSWORD;
   const attempts = Number(options.attempts || 6);
   const loginUrl = baseUrl + '/login';
-  const protectedUrl = baseUrl + '/chat/sessions?view=list';
+  // 보호 페이지는 역할에 따라 다르다 — /chat/sessions는 관리자 전용이라 고객 계정으로는
+  // 로그인에 성공해도 403이 뜨고, 그걸 "로그인 실패"로 읽어 계속 다시 시도하게 된다.
+  // 어느 역할이든 로그인만 되어 있으면 열리는 곳을 본다.
+  const protectedUrl = baseUrl + '/orders';
 
-  if (await tryCachedLogin(page, protectedUrl)) return;
-  cachedCookies = null;
+  if (await tryCachedLogin(page, protectedUrl, loginId)) return;
+  cachedByAccount.set(loginId, null);
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     await page.context().clearCookies();
@@ -85,7 +101,7 @@ async function loginWithRetry(page, options = {}) {
     if (!/\/login(?:\?|$)/.test(page.url())) {
       await page.goto(protectedUrl, { waitUntil: 'domcontentloaded' });
       if (!/\/login(?:\?|$)/.test(page.url())) {
-        saveCachedCookies(await page.context().cookies());
+        saveCachedCookies(loginId, await page.context().cookies());
         return;
       }
     }
