@@ -109,11 +109,12 @@ check('마이그레이션 전에도 화면이 산다', /e\.code === '42703'/.tes
 console.log('\n[기사 화면 상단]');
 const view = read('views/driver/chat.ejs');
 check('발주 지사를 보여준다', /branchName/.test(view) && /id="branch"/.test(view));
-check('전화 버튼이 tel: 로 건다', /'tel:' \+ String\(d\.current\.branchPhone\)/.test(view));
-// 눌러도 아무 일 없는 버튼이 있는 것이 없는 것보다 나쁘다.
-check('번호가 없으면 버튼을 감춘다', /call\.hidden = true/.test(view));
-// 하이픈이 섞이면 일부 기기에서 제대로 안 걸린다.
-check('번호에서 기호를 뺀다', /replace\(\/\[\^0-9\+\]\/g, ''\)/.test(view));
+// 전화 버튼은 두지 않는다(사용자 확정 2026-09-04). 기사는 이미 콜마너 앱으로 연락할 길이
+// 있고, 여기에 또 두면 같은 용건이 두 통로로 들어와 어느 쪽을 봐야 할지 갈린다. 이 화면은
+// 글로 남는 채널이라는 것이 값어치인데 전화는 기록이 안 남는다.
+check('전화 버튼이 없다', !/callbtn|tel:/.test(view));
+check('안 쓰는 전화번호를 내려보내지 않는다',
+  !/branchPhone/.test(require('fs').readFileSync(require('path').join(__dirname, '..', 'routes/driverChat.js'), 'utf8')));
 // 기사가 콜마너 화면에서 찾는 번호는 콜마너 것이다.
 check('접수번호를 함께 보여준다', /confSlip \? ' \/ ' \+ d\.current\.confSlip/.test(view));
 check('탭에도 함께', /o\.confSlip \? ' \/ '/.test(view));

@@ -34,8 +34,8 @@ const DRIVER_ORDER_SQL = `
          -- 요청사항에서 채택된 부대비용을 기사 화면에 함께 보여준다(buildDriverTasks).
          o.memo_extra_json,
          o.callmaner_conf_slip, o.callmaner_driver_sabun,
-         -- 발주 지사 — 기사가 물어볼 곳이다. 전화번호가 없으면 버튼을 안 그린다.
-         b.name AS branch_name, COALESCE(NULLIF(b.main_phone, ''), b.contact_phone) AS branch_phone
+         -- 발주 지사 이름만. 전화는 이 화면에서 걸지 않는다.
+         b.name AS branch_name
     FROM orders o
     LEFT JOIN branches b ON b.id = o.branch_id
    WHERE o.callmaner_driver_sabun = ?
@@ -310,9 +310,9 @@ router.get('/chat/data.json', requireDriver, asyncHandler(async (req, res) => {
     current: current ? {
       id: current.id, oid: current.oid, status: current.status,
       confSlip: current.callmaner_conf_slip || '',
-      // 발주 지사와 그 전화번호. 기사가 현장에서 막히면 여기로 건다.
+      // 발주 지사. 전화번호는 내려보내지 않는다(사용자 확정 2026-09-04) — 화면에서 전화
+      // 버튼을 뺐고, 안 쓰는 연락처를 계속 실어 보낼 이유가 없다.
       branchName: current.branch_name || '',
-      branchPhone: current.branch_phone || '',
       memo: current.memo_customer || '',
       // 상담원이 기사에게 직접 쓴 안내. 길이 제한이 없다.
       driverMemo: current.memo_driver_chat || '',
