@@ -6,6 +6,7 @@ import RouteMap from './RouteMap';
 import RouteCalculator from './RouteCalculator';
 import OrderSidePanel from '../[id]/OrderSidePanel';
 import ExtraCostSection from './ExtraCostSection';
+import MemoReanalyzeButton from './MemoReanalyzeButton';
 // 적요1 100Byte 예산 계산 — 서버와 같은 모듈을 쓴다(lib/memoBudget.js).
 // 화면이 따로 세면 "여기서는 들어간다는데 실제로는 잘리는" 상태가 된다.
 import memoBudgetLib from '../../../../lib/memoBudget';
@@ -1088,7 +1089,15 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
           )}
 
           <div className="route-stop order-memo-stop">
-          <div className="route-stop-title"><span className="route-marker">요청 메모</span></div>
+          <div className="route-stop-title">
+            <span className="route-marker">요청 메모</span>
+            {/* 분석 대상이 바로 아래 요청사항이라, 그 글을 읽고 있는 자리에 버튼을 둔다.
+                예전에는 결과 카드를 페이지 맨 아래 두었는데 아무도 못 봤다.
+                고객에게는 안 보인다 — 청구 항목을 정하는 일이다. */}
+            {mode === 'edit' && !isClient && (
+              <MemoReanalyzeButton orderId={orderId} disabled={!state.memo_customer} />
+            )}
+          </div>
           {isClient ? (
             /* 고객은 한 칸에 다 쓴다(사용자 확정 2026-09-03).
                100Byte니 적요1이니 하는 것은 우리 사정이지 고객이 알아야 할 일이 아니다 —

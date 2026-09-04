@@ -950,3 +950,19 @@ tr.order-flash-indigo td { --flash-bg:#e7e9fd; }
 .memo-extra-echo ul{margin:0;padding-left:18px;}
 .memo-extra-echo li{margin-bottom:3px;}
 .memo-extra-echo-src{color:#777;}
+
+/* 요청사항 다시 분석 팝업 — 결과를 보고 그 자리에서 채택까지 하는 한 흐름이라, 페이지를
+   새로 그리지 않는다(수정 중이던 다른 칸이 날아간다). */
+.route-stop-title{display:flex;align-items:center;justify-content:space-between;gap:8px;}
+.memo-reanalyze-box{width:560px;height:auto;max-height:calc(100dvh - 60px);}
+.memo-reanalyze-body{overflow-y:auto;gap:8px;}
+.memo-reanalyze-postal{margin:0 0 10px;padding:8px 10px;border-radius:6px;
+  background:#eef6ff;color:#1a4d80;font-size:13px;}
+.memo-reanalyze-item{display:flex;gap:8px;align-items:flex-start;padding:10px 12px;
+  margin-bottom:8px;border:1px solid #e2e2e2;border-radius:6px;cursor:pointer;font-size:14px;}
+.memo-reanalyze-item em{display:block;margin-top:4px;font-size:12px;color:#666;font-style:normal;}
+.memo-reanalyze-included{padding:10px 12px;border-radius:6px;background:#f4f4f4;
+  font-size:13px;color:#555;}
+.memo-reanalyze-included ul{margin:6px 0 0;padding-left:18px;}
+.memo-reanalyze-actions{display:flex;align-items:center;gap:10px;margin-top:12px;flex-shrink:0;}
+.memo-reanalyze-actions .hint{font-size:12px;color:#888;}

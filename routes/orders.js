@@ -2068,8 +2068,15 @@ router.post('/:id/reanalyze-memo', asyncHandler(async (req, res) => {
   const order = await loadOrderForVoc(req, res);
   if (!order) return;
 
+  // 팝업에서 부르면 JSON으로 돌려준다 — 화면을 새로 그리지 않고 결과만 받아 띄운다.
+  const wantsJson = req.get('X-Requested-With') === 'fetch'
+    || (req.get('accept') || '').includes('application/json');
+
   const memo = String(order.memo_customer || '').trim();
-  if (!memo) return res.redirect('/orders/' + req.params.id + '?notice=memo_empty');
+  if (!memo) {
+    if (wantsJson) return res.json({ ok: true, candidates: [], postal: false, reason: 'memo_empty' });
+    return res.redirect('/orders/' + req.params.id + '?notice=memo_empty');
+  }
 
   // 등기우편 판정 — 규칙이라 즉시 끝난다. 이미 토큰이 있으면 새로 만들지 않는다(그 링크가
   // 이미 적요1로 기사에게 나갔을 수 있고, 바꾸면 기사가 든 링크가 죽는다).
@@ -2085,10 +2092,23 @@ router.post('/:id/reanalyze-memo', asyncHandler(async (req, res) => {
   // 응답 뒤로 미루면 화면을 새로고침해야 보인다.
   const feeExtra = await branchPolicy.findFareExtra(order.requester_group_id, order.branch_id).catch(() => null);
   const existing = await extraCharges.loadIntakeRows(req.params.id).catch(() => []);
-  await memoExtraCosts.analyzeAndStore(req.params.id, memo, feeExtra, {
+  const candidates = await memoExtraCosts.analyzeAndStore(req.params.id, memo, feeExtra, {
     existingChargeTypes: existing.map((r) => r.chargeType),
   });
 
+  if (wantsJson) {
+    // 팝업이 그대로 그릴 수 있는 모양으로 준다. 판정 문구는 서버가 만든다 —
+    // 화면이 다시 만들면 EJS·Next가 갈린다(lib/memoExtraCosts.js describe).
+    return res.json({
+      ok: true,
+      postal: !!(await db.get('SELECT receipt_upload_token FROM orders WHERE id = ?', [req.params.id])
+        .then((r) => r && r.receipt_upload_token).catch(() => null)),
+      candidates: candidates.map((c) => ({
+        code: c.code, label: c.label, amount: c.amount, evidence: c.evidence,
+        billable: c.billable, describe: memoExtraCosts.describe(c),
+      })),
+    });
+  }
   res.redirect('/orders/' + req.params.id);
 }));
 
@@ -2134,6 +2154,7 @@ router.post('/:id/memo-extra', asyncHandler(async (req, res) => {
     [JSON.stringify(decided), req.params.id]
   ).catch((e) => console.error('요청사항 부대비용 판단 기록 실패(줄은 저장됨):', e.message));
 
+  if (req.get('X-Requested-With') === 'fetch') return res.json({ ok: true, added: rows.length });
   res.redirect('/orders/' + req.params.id);
 }));
 

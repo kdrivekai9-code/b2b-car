@@ -181,11 +181,33 @@ const fake = (items) => async () => ({ items });
   // 그 링크가 이미 적요1로 기사에게 나갔을 수 있다. 바꾸면 기사가 든 링크가 죽는다.
   check('이미 있는 인수증 토큰은 안 바꾼다', /!order\.receipt_upload_token && postalReceipt\.isPostalRequested/.test(routesSrc2));
   // 관리자가 버튼을 누르고 결과를 보려는 자리다 — 응답 뒤로 미루면 새로고침해야 보인다.
-  check('결과를 기다렸다 돌려준다', /reanalyze-memo[\s\S]{0,1200}await memoExtraCosts\.analyzeAndStore/.test(routesSrc2));
-  // 후보가 없을 때 카드가 통째로 사라지면 다시 돌릴 방법이 있는 줄도 모른다.
-  ['views/orders/detail.ejs', 'src/app/orders/[id]/MemoExtraCandidates.js'].forEach((f) => {
-    check(`${f} — 후보가 없어도 버튼을 그린다`, /reanalyze-memo/.test(read(f)));
+  // 관리자가 버튼을 누르고 결과를 보려는 자리라 응답 뒤로 미루면 안 된다(접수 경로와 반대).
+  check('결과를 기다렸다 돌려준다',
+    /reanalyze-memo[\s\S]{0,1600}const candidates = await memoExtraCosts\.analyzeAndStore/.test(routesSrc2));
+  // 버튼은 요청 메모 칸 옆에 둔다. 분석 대상이 그 글이라 읽고 있는 자리에 있어야 하고,
+  // 페이지 맨 아래 카드에 두었더니 아무도 못 봤다(실측 2026-09-04).
+  check('EJS — 요청 메모 옆에 버튼', /memo-reanalyze-btn/.test(read('views/orders/detail.ejs')));
+  check('Next — 요청 메모 옆에 버튼',
+    /<MemoReanalyzeButton orderId=/.test(read('src/app/orders/new/OrderForm.js')));
+  // 고객에게는 안 보인다 — 청구 항목을 정하는 일이다.
+  check('EJS — 고객에게는 안 보인다',
+    /role !== 'client'[\s\S]{0,200}memo-reanalyze-btn/.test(read('views/orders/detail.ejs')));
+  check('Next — 고객에게는 안 보인다',
+    /mode === 'edit' && !isClient[\s\S]{0,80}MemoReanalyzeButton/.test(read('src/app/orders/new/OrderForm.js')));
+
+  // 눌러서 결과를 보고 그 자리에서 채택까지 하는 한 흐름이다. 페이지를 새로 그리면 관리자가
+  // 어디를 봐야 하는지 다시 찾아야 하고, 수정 중이던 다른 칸이 날아간다.
+  ['public/js/memo-reanalyze.js', 'src/app/orders/new/MemoReanalyzeButton.js'].forEach((f) => {
+    const src3 = read(f);
+    check(`${f} — 팝업으로 띄운다`, /map-modal-overlay/.test(src3));
+    check(`${f} — 근거 원문을 보여준다`, /evidence/.test(src3));
+    check(`${f} — 팝업에서 바로 채택한다`, /memo-extra/.test(src3));
+    // 부대비용 줄이 생겼으니 아래 정산 카드도 다시 읽어야 한다.
+    check(`${f} — 채택 후 새로 읽는다`, /location\.reload\(\)/.test(src3));
   });
+  // 서버가 JSON으로 돌려줘야 팝업이 화면을 새로 그리지 않고 결과만 받는다.
+  check('재분석이 JSON도 돌려준다', /wantsJson[\s\S]{0,600}candidates: candidates\.map/.test(routesSrc2));
+  check('채택도 JSON을 돌려준다', /X-Requested-With'\) === 'fetch'\) return res\.json\(\{ ok: true, added/.test(routesSrc2));
 
   console.log('\n[고객에게 되돌려 보여주는 것]');
   // 아무 반응이 없으면 고객은 우리가 알아들었는지 몰라 전화한다 — 이 채널이 없애려는 바로

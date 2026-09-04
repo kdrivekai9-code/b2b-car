@@ -33,24 +33,10 @@ export default function MemoExtraCandidates({ data, orderId }) {
     return init;
   });
 
-  // 후보가 없어도 "다시 분석" 버튼은 그린다 — 이 기능이 생기기 전에 접수된 오더는 요청사항에
-  // "주유 3만원"이 그대로 적혀 있어도 후보가 비어 있다(분석이 접수 시점에만 돌기 때문이다).
-  // 카드가 통째로 안 보이면 관리자는 다시 돌릴 방법이 있는 줄도 모른다.
-  if (!candidates.length) {
-    if (!data.order || !String(data.order.memo_customer || '').trim()) return null;
-    return (
-      <div className="card">
-        <h2>요청사항에서 찾은 부대비용</h2>
-        <p className="page-sub" style={{ margin: '4px 0 10px' }}>
-          찾은 것이 없거나 이미 판단을 마쳤습니다.
-          {data.order.memo_extra_checked_at ? ` (마지막 확인: ${data.order.memo_extra_checked_at})` : ' 아직 분석하지 않았습니다.'}
-        </p>
-        <form method="POST" action={`/orders/${orderId}/reanalyze-memo`}>
-          <button className="btn secondary" type="submit">요청사항 다시 분석</button>
-        </form>
-      </div>
-    );
-  }
+  // 후보가 없으면 아무것도 안 그린다. 다시 돌리는 버튼은 요청 메모 칸 옆에 있다
+  // (src/app/orders/new/MemoReanalyzeButton.js) — 분석 대상이 그 글이라 읽고 있는 자리에
+  // 있어야 하고, 여기 페이지 맨 아래에 두었더니 아무도 못 봤다.
+  if (!candidates.length) return null;
 
   const billable = candidates.filter((c) => c.billable);
   const included = candidates.filter((c) => !c.billable);
