@@ -61,9 +61,11 @@
   .task:last-child{border-bottom:0;padding-bottom:0}
   .taskline{line-height:1.5}
   /* 장갑 낀 손으로도 눌러야 한다 — 44px 아래로 내리지 않는다. */
+  /* label(사진 올리기)과 a(등기 화면으로 이동) 둘 다 이 모양을 쓴다 — 기사에게는 같은
+     "올리기" 버튼이라 생김새가 달라지면 하나는 버튼으로 안 보인다. */
   .upbtn{display:inline-flex;align-items:center;justify-content:center;margin-top:6px;
     min-height:44px;padding:0 14px;border:1px solid var(--me);border-radius:12px;
-    color:var(--me);font-size:14px;font-weight:600}
+    color:var(--me);font-size:14px;font-weight:600;text-decoration:none}
   .upbtn.busy{opacity:.5}
   .memo{margin:10px 14px 0;padding:12px 14px;background:var(--card);
         border:1px solid var(--line);border-radius:10px;white-space:pre-wrap}
