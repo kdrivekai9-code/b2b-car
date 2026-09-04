@@ -34,7 +34,13 @@
       <a href="/push/settings" class="<%= path.startsWith('/push') ? 'active' : '' %>" title="오더 알림 설정"><span class="nav-icon">🔔</span><span class="nav-label">오더 알림 설정</span></a>
       <a href="/faq" class="<%= path.startsWith('/faq') ? 'active' : '' %>" title="FAQ 문의"><span class="nav-icon">💬</span><span class="nav-label">FAQ 문의</span></a>
       <% if (currentUser && currentUser.role === 'client') { %>
+        <%# 개인 딜러에게는 안 보인다(사용자 확정 2026-09-04). 딜러는 본인 오더만 보는
+            자격이라 이 화면 자체가 막혀 있고(routes/orders.js), 메뉴만 남겨두면 눌러서
+            403을 보게 된다 — 갈 수 없는 곳으로 안내하지 않는다.
+            Next 네비도 같은 줄을 갖는다(src/app/_components/AppShell.js). %>
+        <% if (currentUser.client_type !== 'dealer') { %>
         <a href="/orders/team-feed" class="<%= path.startsWith('/orders/team-feed') ? 'active' : '' %>" title="팀 접수 현황 안내"><span class="nav-icon">🏷️</span><span class="nav-label">팀 접수 현황 안내</span></a>
+        <% } %>
         <%# 개인 딜러는 본인 접수분만, 본사 직원은 법인 전체가 보인다(lib/clientScope.js). %>
         <a href="/my/settlement" class="<%= path.startsWith('/my/settlement') ? 'active' : '' %>" title="정산내역"><span class="nav-icon">🧾</span><span class="nav-label">정산내역</span></a>
         <%# 사진 전송리스트 — 탁송사진·실비영수증을 오더별로 모아 본다. Next 네비도 같은 줄을

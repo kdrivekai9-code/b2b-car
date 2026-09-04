@@ -2128,6 +2128,12 @@ router.post('/:id/additional-request', asyncHandler(async (req, res) => {
 router.get('/team-feed', asyncHandler(async (req, res) => {
   const u = req.session.user;
   const groupId = u.group_id || null;
+  // 개인 딜러는 본인 오더만 보는 자격이라 이 화면도 열지 않는다(사용자 확정 2026-09-04).
+  // 알림을 안 보내는 것만으로는 부족하다 — 이 화면이 열려 있으면 주소만 알면 다 보인다.
+  // 요약에는 출발·도착 주소와 연락처가 들어 있어 그 자체로 영업 정보다.
+  if (clientScope.isDealer(u)) {
+    return res.status(403).render('403', { title: '접근 권한 없음' });
+  }
   const group = groupId ? await db.get('SELECT id, name, share_activity_feed FROM groups_tbl WHERE id = ?', [groupId]).catch(() => null) : null;
   const enabled = !!(group && group.share_activity_feed);
   const activities = enabled ? await listGroupActivity(groupId, 50) : [];

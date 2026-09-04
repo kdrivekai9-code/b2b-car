@@ -22,6 +22,9 @@ export default function AppShell({ currentUser, activePath, topNav = false, chil
     : '';
   const isAdmin = currentUser && currentUser.role === 'admin';
   const isClient = currentUser && currentUser.role === 'client';
+  // 개인 딜러 판정 — 값이 비어 있는 기존 계정은 본사 직원으로 본다(lib/clientScope.js와
+  // 같은 규칙). 마이그레이션만으로 누군가의 메뉴가 조용히 사라지면 안 된다.
+  const isDealer = isClient && currentUser.client_type === 'dealer';
   const isAdminOrBranchManager = currentUser && (currentUser.role === 'admin' || currentUser.role === 'branch_manager');
 
   return (
@@ -55,7 +58,11 @@ export default function AppShell({ currentUser, activePath, topNav = false, chil
               가는 길이 사라진다. 한쪽에만 메뉴를 넣지 않는다는 규칙을 여기서 맞춘다. */}
           {isClient && (
             <>
-              <a href="/orders/team-feed" className={isActive(activePath, '/orders/team-feed') ? 'active' : ''} title="팀 접수 현황 안내"><span className="nav-icon">🏷️</span><span className="nav-label">팀 접수 현황 안내</span></a>
+              {/* 개인 딜러에게는 안 보인다 — 화면 자체가 막혀 있어 메뉴만 남기면 403을
+                  보게 된다. EJS 네비도 같은 줄을 갖는다(views/partials/header.ejs). */}
+              {!isDealer && (
+                <a href="/orders/team-feed" className={isActive(activePath, '/orders/team-feed') ? 'active' : ''} title="팀 접수 현황 안내"><span className="nav-icon">🏷️</span><span className="nav-label">팀 접수 현황 안내</span></a>
+              )}
               <a href="/my/settlement" className={isActive(activePath, '/my/settlement') ? 'active' : ''} title="정산내역"><span className="nav-icon">🧾</span><span className="nav-label">정산내역</span></a>
               <a href="/my/photos" className={isActive(activePath, '/my/photos') ? 'active' : ''} title="사진 전송리스트"><span className="nav-icon">📷</span><span className="nav-label">사진 전송리스트</span></a>
             </>

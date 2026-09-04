@@ -111,5 +111,31 @@ check('나눠도 총합은 같다', totalSplit, totalAll);
 check('별도청구 딜러가 없으면 나누지 않는다',
   split(rows.filter((r) => !r.created_by_separate)).dealers, []);
 
+console.log('\n[팀 접수 현황 안내 — 딜러는 못 본다]');
+// 법인 단위 옵트인이지만 딜러는 본인 오더만 보는 자격이다. 같은 법인이라는 이유로 남의 접수
+// 내역을 보게 하면 오더 상세에 걸어둔 가림막이 이 피드로 새어버린다 — 요약에는 출발·도착
+// 주소와 연락처가 들어 있어 그 자체로 영업 정보다.
+//
+// 이 파일의 check는 값 비교식이라(actual, expected) 조건은 true와 맞춘다.
+const fs = require('fs');
+const path = require('path');
+const readFile = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
+const feed = readFile('lib/groupActivityFeed.js');
+const ordersSrc = readFile('routes/orders.js');
+
+// 세 겹으로 막아야 한다 — 하나만 빠져도 새는 길이 남는다.
+check('웹 수신 대상에서 뺀다', /client_type[\s\S]{0,40}<> 'dealer'/.test(feed), true);
+check('카카오 수신 대상에서도 뺀다', (feed.match(/<> 'dealer'/g) || []).length >= 2, true);
+check('화면 자체를 막는다',
+  /team-feed[\s\S]{0,400}clientScope\.isDealer\(u\)[\s\S]{0,80}403/.test(ordersSrc), true);
+// 값이 비어 있는 기존 계정은 본사 직원으로 본다 — 마이그레이션만으로 누가 조용히 빠지면 안 된다.
+check('빈 값은 본사 직원으로 본다', /COALESCE\(NULLIF\((u\.)?client_type, ''\), 'hq'\)/.test(feed), true);
+// 채널 전체 매핑은 누가 붙을지 알 수 없다 — 딜러가 그 통로로 들어오면 막을 방법이 없다.
+check('사용자가 안 걸린 카카오 매핑에는 안 보낸다', /u\.id IS NOT NULL/.test(feed), true);
+// 갈 수 없는 곳으로 안내하지 않는다.
+['views/partials/header.ejs', 'src/app/_components/AppShell.js'].forEach((f) => {
+  check(`${f} — 딜러에게 메뉴를 숨긴다`, /client_type !== 'dealer'|!isDealer/.test(readFile(f)), true);
+});
+
 console.log(failures ? `\n${failures}건 실패` : '\n모두 통과');
 process.exit(failures ? 1 : 0);
