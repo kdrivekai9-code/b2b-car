@@ -175,15 +175,19 @@ const fake = (items) => async () => ({ items });
   // 경우도 마찬가지다. 다시 돌릴 길이 없으면 그 오더는 영영 빈 채로 남는다.
   const routesSrc2 = read('routes/orders.js');
   check('다시 분석하는 라우트가 있다', /router\.post\('\/:id\/reanalyze-memo'/.test(routesSrc2));
-  check('고객은 못 쓴다', /reanalyze-memo[\s\S]{0,200}role === 'client'[\s\S]{0,40}403/.test(routesSrc2));
+  // 문자 수로 재면 라우트가 길어질 때마다 깨진다. 라우트 범위를 잘라서 본다.
+  const raStart = routesSrc2.indexOf("router.post('/:id/reanalyze-memo'");
+  const raEnd = routesSrc2.indexOf("router.post('", raStart + 10);
+  const raBody = raStart >= 0 ? routesSrc2.slice(raStart, raEnd > 0 ? raEnd : undefined) : '';
+  check('고객은 못 쓴다', /role === 'client'[\s\S]{0,40}403/.test(raBody));
   // 등기 판정도 함께 돌려야 한다 — 둘 다 접수 시점에만 돌던 것이라 같은 처지다.
-  check('등기우편 판정도 함께 돌린다', /reanalyze-memo[\s\S]{0,900}isPostalRequested/.test(routesSrc2));
+  check('등기우편 판정도 함께 돌린다', /isPostalRequested/.test(raBody));
   // 그 링크가 이미 적요1로 기사에게 나갔을 수 있다. 바꾸면 기사가 든 링크가 죽는다.
-  check('이미 있는 인수증 토큰은 안 바꾼다', /!order\.receipt_upload_token && postalReceipt\.isPostalRequested/.test(routesSrc2));
+  check('이미 있는 인수증 토큰은 안 바꾼다', /!order\.receipt_upload_token && postalReceipt\.isPostalRequested/.test(raBody));
   // 관리자가 버튼을 누르고 결과를 보려는 자리다 — 응답 뒤로 미루면 새로고침해야 보인다.
   // 관리자가 버튼을 누르고 결과를 보려는 자리라 응답 뒤로 미루면 안 된다(접수 경로와 반대).
   check('결과를 기다렸다 돌려준다',
-    /reanalyze-memo[\s\S]{0,1600}const candidates = await memoExtraCosts\.analyzeAndStore/.test(routesSrc2));
+    /const candidates = await memoExtraCosts\.analyzeAndStore/.test(raBody));
   // 버튼은 요청 메모 칸 옆에 둔다. 분석 대상이 그 글이라 읽고 있는 자리에 있어야 하고,
   // 페이지 맨 아래 카드에 두었더니 아무도 못 봤다(실측 2026-09-04).
   check('EJS — 요청 메모 옆에 버튼', /memo-reanalyze-btn/.test(read('views/orders/detail.ejs')));
@@ -206,7 +210,7 @@ const fake = (items) => async () => ({ items });
     check(`${f} — 채택 후 새로 읽는다`, /location\.reload\(\)/.test(src3));
   });
   // 서버가 JSON으로 돌려줘야 팝업이 화면을 새로 그리지 않고 결과만 받는다.
-  check('재분석이 JSON도 돌려준다', /wantsJson[\s\S]{0,600}candidates: candidates\.map/.test(routesSrc2));
+  check('재분석이 JSON도 돌려준다', /candidates: candidates\.map/.test(raBody));
   check('채택도 JSON을 돌려준다', /X-Requested-With'\) === 'fetch'\) return res\.json\(\{ ok: true, added/.test(routesSrc2));
 
   console.log('\n[고객에게 되돌려 보여주는 것]');

@@ -45,8 +45,14 @@ const ordersSrc = read('routes/orders.js');
 const analyzeHits = (ordersSrc.match(/analyzeAndStore/g) || []).length;
 check('접수 경로에서는 부르지 않는다', analyzeHits === 1,
   `routes/orders.js에 ${analyzeHits}번 — 재분석 버튼 하나만 있어야 한다`);
-check('그 한 번이 재분석 버튼이다',
-  /reanalyze-memo[\s\S]{0,1200}analyzeAndStore/.test(ordersSrc));
+// 문자 수로 재면 라우트가 길어질 때마다 깨진다. 라우트 범위를 잘라서 본다.
+const reanalyzeStart = ordersSrc.indexOf("router.post('/:id/reanalyze-memo'");
+const reanalyzeEnd = ordersSrc.indexOf("router.post('", reanalyzeStart + 10);
+const reanalyzeBody = reanalyzeStart >= 0
+  ? ordersSrc.slice(reanalyzeStart, reanalyzeEnd > 0 ? reanalyzeEnd : undefined)
+  : '';
+check('그 한 번이 재분석 라우트 안이다', /analyzeAndStore/.test(reanalyzeBody),
+  '접수 경로에 있으면 웹 폼 접수만 두 번 분석된다');
 
 console.log('\n[접수를 붙잡지 않는다]');
 // 모델 호출이라 실측 1.2~5.3초다. 접수 응답이 그만큼 늦으면 고객은 접수가 안 된 줄 안다.
