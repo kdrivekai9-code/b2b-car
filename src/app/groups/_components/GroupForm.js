@@ -71,6 +71,27 @@ export default function GroupForm({ mode, group, branches }) {
           </select>
         </div>
       </div>
+      {/* 소속 사용자 공유 — EJS 화면(views/groups/form.ejs)에는 있는데 여기에는 빠져 있었다.
+          플래그(NEXT_GROUPS_ENABLED)가 켜진 환경에서는 이 화면만 뜨므로, 설정 자체를 켤 수
+          없는 상태였다. 기능은 다 만들어져 있고(lib/groupActivityFeed.js, /orders/team-feed)
+          켜는 스위치만 없었다 — 화면에 안 보이는 기능은 없는 기능이다. */}
+      <div className="section-title">🔗 소속 사용자 공유</div>
+      <div className="field full">
+        <label className="checkline">
+          {/* 아래 route_search_enabled와 달리 숨은 필드를 두지 않는다. 서버가
+              `=== '1'`로 받으므로(routes/groups.js) 숨은 필드를 넣으면 체크했을 때 값이
+              배열 ['0','1']이 되어 오히려 꺼진다. 기본값이 꺼짐이라 "안 보냄 = 꺼짐"이
+              맞고, EJS 화면(views/groups/form.ejs)도 같은 모양이다. */}
+          <input type="checkbox" name="share_activity_feed" value="1" defaultChecked={!!group.share_activity_feed} />
+          같은 법인 소속 사용자들에게 서로의 접수·취소·변경 요청을 공유한다
+        </label>
+        <p className="page-sub">
+          켜면 이 법인 소속 사용자들이 서로의 대화 내용을 직접 보는 게 아니라,
+          접수·취소·변경이 있을 때마다 만들어지는 한 줄 요약만
+          &quot;팀 접수 현황 안내&quot;에서 함께 봅니다.
+        </p>
+      </div>
+
       <div className="section-title">🧭 AI 접수 경로/요금 안내</div>
       <div className="field full">
         <label className="checkline">
