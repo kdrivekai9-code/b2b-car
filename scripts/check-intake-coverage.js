@@ -39,8 +39,14 @@ console.log('\n[판정은 오더 생성 한 곳에서]');
 check('부대비용 판정이 orderCreate에 있다', /memoExtraCosts'\)\.analyzeAndStore/.test(create));
 check('우편발송 판정도 같은 곳에', /isPostalRequested\(postalSource\)/.test(create));
 // 경로마다 두면 한쪽만 고쳐진다 — 실제로 그랬다.
-check('웹 폼에 중복으로 남아 있지 않다', !/analyzeAndStore/.test(read('routes/orders.js')),
-  '두 곳에서 돌면 같은 오더를 두 번 분석한다');
+// 접수 경로에는 없어야 한다 — 있으면 웹 폼 접수만 두 번 분석한다(orderCreate에서 한 번,
+// 여기서 또 한 번). 다만 관리자가 누르는 "다시 분석" 버튼은 여기 있는 게 맞다.
+const ordersSrc = read('routes/orders.js');
+const analyzeHits = (ordersSrc.match(/analyzeAndStore/g) || []).length;
+check('접수 경로에서는 부르지 않는다', analyzeHits === 1,
+  `routes/orders.js에 ${analyzeHits}번 — 재분석 버튼 하나만 있어야 한다`);
+check('그 한 번이 재분석 버튼이다',
+  /reanalyze-memo[\s\S]{0,1200}analyzeAndStore/.test(ordersSrc));
 
 console.log('\n[접수를 붙잡지 않는다]');
 // 모델 호출이라 실측 1.2~5.3초다. 접수 응답이 그만큼 늦으면 고객은 접수가 안 된 줄 안다.
