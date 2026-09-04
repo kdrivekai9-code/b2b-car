@@ -10,6 +10,9 @@ require('dotenv').config();
 
 module.exports = {
   testDir: './tests/manual',
+  // DB 커넥션 풀은 여기서 한 번만 닫는다. 스펙마다 닫으면 같은 워커의 다음 스펙이 죽는다
+  // (tests/global-teardown.js 주석 참고).
+  globalTeardown: require.resolve('./tests/global-teardown.js'),
   // 이 스펙들은 운영과 같은 DB를 쓰고 실제 오더·세션을 만든다. 병렬로 돌리면 서로의 데이터를
   // 건드리고, 단일세션 때문에 같은 계정으로 동시에 로그인하면 서로를 로그아웃시킨다.
   workers: 1,

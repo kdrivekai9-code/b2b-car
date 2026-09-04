@@ -32,4 +32,15 @@ if (!PASSWORD) {
   );
 }
 
-module.exports = { LOGIN_ID, PASSWORD };
+// 고객(client) 역할 전용 계정. 고객 화면은 관리자 계정으로 열 수 없어(requireRole('client'))
+// 따로 필요하다. 관리자 계정처럼 없다고 즉시 멈추지는 않는다 — 이 값을 쓰는 스펙만 건너뛰게
+// 하고(clientCredentials()가 null을 돌려준다), 나머지 스펙은 그대로 돌아야 한다.
+const CLIENT_LOGIN_ID = String(process.env.E2E_CLIENT_LOGIN_ID || '').trim();
+const CLIENT_PASSWORD = String(process.env.E2E_CLIENT_PASSWORD || '').trim();
+
+function clientCredentials() {
+  if (!CLIENT_LOGIN_ID || !CLIENT_PASSWORD) return null;
+  return { loginId: CLIENT_LOGIN_ID, password: CLIENT_PASSWORD };
+}
+
+module.exports = { LOGIN_ID, PASSWORD, clientCredentials };

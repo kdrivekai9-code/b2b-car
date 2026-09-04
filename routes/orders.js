@@ -40,6 +40,7 @@ const { buildSummaryText } = require('../lib/intakeSummary');
 const callmanerPhotos = require('../lib/callmanerPhotos');
 // 대기·취소요금. 설정만 있고 계산이 없던 것을 채웠다(lib/tripFees.js).
 const tripFees = require('../lib/tripFees');
+const orderDisplay = require('../lib/orderDisplay');
 const branchPolicy = require('../lib/branchPolicy');
 // 기타 정산 내역(주유비·주차요금·톨게이트). 항목 정의를 법인 정산내역 화면과 공유한다.
 const extraCharges = require('../lib/extraCharges');
@@ -260,7 +261,10 @@ async function buildOrdersListData(scope, query) {
   };
 
   return {
-    orders, branches, ORDER_STATUSES, statusSummary,
+    // 담당자 표시 이름은 서버에서 한 번 만들어 내려보낸다 — EJS 표와 Next 표가 각자 가공하면
+    // 같은 오더가 화면에 따라 다르게 보인다(lib/orderDisplay.js).
+    orders: orders.map((o) => ({ ...o, created_by_display: orderDisplay.creatorLabel(o) })),
+    branches, ORDER_STATUSES, statusSummary,
     filters: { branch_id: branch_id || '', status: status || '', from: from || '', to: to || '', q: q || '' },
     pagination: { page, pageSize: ORDERS_PAGE_SIZE, totalCount, totalPages },
   };

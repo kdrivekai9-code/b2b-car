@@ -34,7 +34,8 @@ test.afterAll(async () => {
       await db.run('DELETE FROM app_settings WHERE key = ?', [key]).catch(() => {});
     }
   }
-  await db.pool.end().catch(() => {});
+  // 풀은 여기서 닫지 않는다 — workers: 1이라 같은 프로세스의 다음 스펙이 죽는다.
+  // 전부 끝난 뒤 한 번 닫는 일은 tests/global-teardown.js가 맡는다.
 });
 
 test.describe('AI 사용량 · 사용량 제한', () => {

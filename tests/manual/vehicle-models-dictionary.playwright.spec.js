@@ -20,7 +20,8 @@ const BASE_URL = process.env.E2E_BASE_URL || 'http://127.0.0.1:3000';
 const LOGIN_ID = process.env.E2E_LOGIN_ID || 'qa_test_bot';
 const PASSWORD = process.env.E2E_PASSWORD || '';
 
-test.afterAll(async () => { await db.pool.end().catch(() => {}); });
+// 풀은 여기서 닫지 않는다 — workers: 1이라 같은 프로세스의 다음 스펙이 죽는다.
+// 전부 끝난 뒤 한 번 닫는 일은 tests/global-teardown.js가 맡는다.
 
 test.describe('차종 관리 · 자동 인식 사전', () => {
   test.describe.configure({ timeout: 180000 });

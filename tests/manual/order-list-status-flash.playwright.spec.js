@@ -50,7 +50,8 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   await removeTestOrders();
-  await db.pool.end().catch(() => {});
+  // 풀은 여기서 닫지 않는다 — workers: 1이라 같은 프로세스의 다음 스펙이 죽는다.
+  // 전부 끝난 뒤 한 번 닫는 일은 tests/global-teardown.js가 맡는다.
 });
 
 test.describe('오더 리스트 · 상태변경 깜빡임', () => {

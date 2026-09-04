@@ -151,8 +151,9 @@ function cellValue(o, key) {
     case 'status': return o.status;
     case 'voc': return [o.voc_accident_note ? '사고' : null, o.voc_fine_note ? '과태료' : null, o.voc_claim_note ? '클레임' : null].filter(Boolean).join(', ') || '-';
     case 'photo': return Number(o.photo_count) > 0 ? `📷 ${o.photo_count}` : '-';
-    // 이름이 없으면 아이디로 대신한다 — 카카오로만 소통하는 계정은 이름이 비어 있을 수 있다.
-    case 'created_by': return o.created_by_name || o.created_by_login || '-';
+    // 회사명을 뗀 사람 이름. 서버가 만들어 내려준다(lib/orderDisplay.js creatorLabel) —
+    // 여기서 다시 가공하면 EJS 표와 다른 값이 나올 수 있다.
+    case 'created_by': return o.created_by_display || '-';
     case 'created_at': return formatDateTimeNoSeconds(o.created_at);
     default: return '';
   }
