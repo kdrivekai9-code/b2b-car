@@ -372,6 +372,15 @@ async function buildDriverTasks(order) {
   });
   // 요청사항에서 찾았지만 아직 관리자가 판단하지 않은 것은 보내지 않는다 — 확정되지 않은
   // 지시를 기사에게 흘리면, 채택되지 않았을 때 기사가 헛돈을 쓴다.
+  //
+  // "관리자가 늦게 확인하면 기사가 주유해야 하는 줄 모르고 출발하지 않나"는 걱정은 하지
+  // 않아도 된다(사용자 확인 2026-09-04). b2b-car에서 등록한 오더는 콜마너에 **대기(5)로만**
+  // 올라가고(lib/callmaner.js), 상담원이 대기를 풀어야 배차가 된다. 배차 전에는
+  // callmaner_driver_sabun이 비어 있어서 이 화면의 오더 목록에 애초에 뜨지 않는다 —
+  // 기사가 오더를 보는 시점에는 상담원이 이미 그 건을 손댄 뒤다.
+  //
+  // 그래서 "확정 전에도 보여주기"나 "확정 안 하면 경고하기" 같은 장치를 덧붙일 이유가 없다.
+  // 콜마너가 아닌 경로로 배차되는 오더가 생기면 그때 이 전제를 다시 봐야 한다.
   const included = memoExtraCosts.loadFromOrder(order)
     .filter((c) => c.decision === 'accepted' && !c.billable);
   included.forEach((c) => {
