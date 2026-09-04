@@ -137,5 +137,31 @@ check('사용자가 안 걸린 카카오 매핑에는 안 보낸다', /u\.id IS 
   check(`${f} — 딜러에게 메뉴를 숨긴다`, /client_type !== 'dealer'|!isDealer/.test(readFile(f)), true);
 });
 
+console.log('\n[관리자가 한 일은 피드에 안 실린다]');
+// 이 피드는 "같은 법인 동료가 무엇을 요청했는지"를 나누는 자리다. 관리자·지사장이 오더를
+// 손보는 것은 동료의 요청이 아니라 우리가 처리하는 일이라, 여기 실리면 고객에게
+// "시스템관리자님이 오더 내용을 변경했습니다"가 카카오톡으로 나간다(실측 2026-09-04).
+// 고객은 자기가 부탁한 적 없는 변경을 통보받고 무슨 일인지 되묻게 된다.
+check('작성자 확인 함수가 있다', /async function isGroupMember/.test(feed), true);
+check('client만 통과시킨다', /u\.role === 'client' && Number\(u\.group_id\) === Number\(groupId\)/.test(feed), true);
+// 시스템·크론·MCP 자동 처리는 사람이 한 일이 아니다.
+check('작성자가 없으면 안 보낸다', /if \(!actorUserId\) return false/.test(feed), true);
+// 안 보내서 생기는 손해보다 잘못 보내서 생기는 손해가 크다.
+check('확인이 안 되면 안 보낸다', /확인 실패\(보내지 않음\)[\s\S]{0,80}return false/.test(feed), true);
+// 기록 전에 막아야 한다 — 기록만 남고 알림이 안 가면 화면과 통보가 어긋난다.
+check('기록보다 먼저 막는다',
+  feed.indexOf('await isGroupMember(actorUserId, groupId)') < feed.indexOf('INSERT INTO group_activity_feed'), true);
+
+console.log('\n[바뀐 곳을 보여준다]');
+// 앞에서 20자만 잘라 양쪽에 찍으면, 정작 바뀐 부분이 그 뒤에 있을 때 같은 문장이 화살표
+// 양쪽에 그대로 나온다(실측). 읽는 사람은 무엇이 바뀐 건지 알 수 없다.
+const ordersFile = readFile('routes/orders.js');
+check('변경 지점을 찾아 보여준다', /function describeTextChange/.test(ordersFile), true);
+check('메모 diff가 그 함수를 쓴다',
+  /describeTextChange\('고객사 메모'/.test(ordersFile) && /describeTextChange\('업체요청사항'/.test(ordersFile), true);
+// 폼이 개행을 정리해 보내는 일이 흔한데, 그걸 변경으로 기록하면 아무도 손대지 않은 오더에
+// 변경 이력이 쌓이고 그 알림이 고객에게 나간다.
+check('공백만 다른 것은 변경이 아니다', /if \(a === b\) return null;/.test(ordersFile), true);
+
 console.log(failures ? `\n${failures}건 실패` : '\n모두 통과');
 process.exit(failures ? 1 : 0);

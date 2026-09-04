@@ -1720,6 +1720,33 @@ function truncateForHistory(text, max) {
   return s.length > max ? s.slice(0, max) + '…' : s;
 }
 
+// 긴 글이 바뀐 것을 한 줄로 적는다.
+//
+// 앞에서 20자만 잘라 양쪽에 찍으면, 정작 바뀐 부분이 그 뒤에 있을 때 **같은 문장이 화살표
+// 양쪽에 그대로** 나온다(실측 2026-09-04: "주유 3만원을 넣어주고 영수증을 보내… →
+// 주유 3만원을 넣어주고 영수증을 보내…"). 읽는 사람은 무엇이 바뀐 건지 알 수 없고,
+// 그 문장이 고객에게 카카오톡으로 나가면 되묻는 전화가 온다.
+//
+// 그래서 처음 달라지는 지점을 찾아 그 언저리를 보여준다. 앞뒤로 조금씩 붙여야 어디쯤인지
+// 감이 온다.
+//
+// 앞뒤 공백만 다른 것은 바뀐 것으로 치지 않는다 — 폼이 개행을 정리해 보내는 일이 흔한데,
+// 그걸 변경으로 기록하면 아무도 손대지 않은 오더에 변경 이력이 쌓인다.
+function describeTextChange(label, before, after, window = 16) {
+  const a = String(before == null ? '' : before).trim();
+  const b = String(after == null ? '' : after).trim();
+  if (a === b) return null;
+  if (!a) return `${label}: (빈 값) → ${truncateForHistory(b, 24)}`;
+  if (!b) return `${label}: ${truncateForHistory(a, 24)} → (빈 값)`;
+
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i += 1;
+  const from = Math.max(0, i - Math.floor(window / 2));
+  const cut = (s) => (from > 0 ? '…' : '') + s.slice(from, from + window)
+    + (from + window < s.length ? '…' : '');
+  return `${label}: ${cut(a)} → ${cut(b)}`;
+}
+
 router.post('/:id', asyncHandler(async (req, res) => {
   const order = await loadOrderForEdit(req, res);
   if (!order) return;
@@ -1837,12 +1864,11 @@ router.post('/:id', asyncHandler(async (req, res) => {
   if ((Number(ferry_fare_amount) || 0) !== (Number(order.ferry_fare_amount) || 0)) {
     diffs.push(`도선료: ${formatMoneyForHistory(order.ferry_fare_amount)} → ${formatMoneyForHistory(ferry_fare_amount)}`);
   }
-  if ((memo_customer || null) !== order.memo_customer) {
-    diffs.push(`고객사 메모: ${truncateForHistory(order.memo_customer, 20)} → ${truncateForHistory(memo_customer, 20)}`);
-  }
-  if ((memo_billing || null) !== order.memo_billing) {
-    diffs.push(`업체요청사항: ${truncateForHistory(order.memo_billing, 20)} → ${truncateForHistory(memo_billing, 20)}`);
-  }
+  // 앞뒤 공백만 다른 것은 변경이 아니다 — describeTextChange가 null을 돌려준다.
+  const memoDiff = describeTextChange('고객사 메모', order.memo_customer, memo_customer);
+  if (memoDiff) diffs.push(memoDiff);
+  const billingDiff = describeTextChange('업체요청사항', order.memo_billing, memo_billing);
+  if (billingDiff) diffs.push(billingDiff);
   if (
     existingWaypointsFull.length !== finalWaypoints.length
     || finalWaypoints.some((w, i) => {
