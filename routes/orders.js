@@ -193,6 +193,19 @@ const SEND_FAILED_SQL = 'o.callmaner_conf_slip IS NULL AND o.callmaner_last_erro
 // 판단 기준은 기준 라디오(reservation_basis) 하나다. 픽업 필드가 채워졌는지로 가르면 안 된다 —
 // '즉시'와 '출발지 픽업' 기준에서도 그 필드는 채워지므로(public/js/order-form.js
 // setPickupHiddenFields) 전부 인도시각으로 잘못 기록된다.
+// 폼이 그 칸을 **안 보낸 것**과 **비운 것**은 다르다.
+//
+// 오더 수정은 화면이 여럿이고, 그중 상담관리 카드 폼(IntakeMiniForm)은 업체요청사항·기사
+// 챗봇 전달사항을 아예 안 보낸다. 안 보낸 값을 빈 값으로 취급하면 그 칸이 null로 덮인다.
+// 실제로 그렇게 됐다(OID2075, 2026-09-07): 카드에서 예약일시만 고쳤는데 변경 이력에
+// "업체요청사항: … → (빈 값)"이 함께 남았다. 값은 뒤이어 도는 재분류(splitClientMemo)가
+// 다시 채워서 눈에 안 띄었을 뿐이고, 이력에는 일어나지 않은 변경이 세 번 기록됐다.
+//
+// 이력을 근거로 다투는 자리에서 거짓 변경은 아무것도 아닌 게 아니다 — 누가 지웠다고 읽힌다.
+function keepIfAbsent(value, current) {
+  return value === undefined ? (current == null ? null : current) : (value || null);
+}
+
 function deliveryReservedFrom(body) {
   if (String(body.reservation_basis || '').trim() !== 'delivery') return { date: null, time: null };
   const date = String(body.reserved_date || '').trim();
@@ -1909,10 +1922,19 @@ router.post('/:id', asyncHandler(async (req, res) => {
   if ((Number(ferry_fare_amount) || 0) !== (Number(order.ferry_fare_amount) || 0)) {
     diffs.push(`도선료: ${formatMoneyForHistory(order.ferry_fare_amount)} → ${formatMoneyForHistory(ferry_fare_amount)}`);
   }
+  // 안 보낸 칸은 그대로 둔다(위 keepIfAbsent 주석). 이력도 **실제로 쓸 값**과 비교해야
+  // 한다 — 보낸 값으로 비교하면 안 보낸 칸이 매번 "비웠다"로 기록된다.
+  const nextMemoCustomer = keepIfAbsent(memo_customer, order.memo_customer);
+  const nextMemoBilling = req.session.user.role === 'client'
+    ? order.memo_billing
+    : keepIfAbsent(memo_billing, order.memo_billing);
+  const nextMemoDriverChat = req.session.user.role === 'client'
+    ? order.memo_driver_chat
+    : keepIfAbsent(memo_driver_chat, order.memo_driver_chat);
   // 앞뒤 공백만 다른 것은 변경이 아니다 — describeTextChange가 null을 돌려준다.
-  const memoDiff = describeTextChange('고객사 메모', order.memo_customer, memo_customer);
+  const memoDiff = describeTextChange('고객사 메모', order.memo_customer, nextMemoCustomer);
   if (memoDiff) diffs.push(memoDiff);
-  const billingDiff = describeTextChange('업체요청사항', order.memo_billing, memo_billing);
+  const billingDiff = describeTextChange('업체요청사항', order.memo_billing, nextMemoBilling);
   if (billingDiff) diffs.push(billingDiff);
   if (
     existingWaypointsFull.length !== finalWaypoints.length
@@ -1947,12 +1969,12 @@ router.post('/:id', asyncHandler(async (req, res) => {
     finalBranch, finalGroup, finalOriginAddress, origin_detail_address || null, origin_contact || null,
     finalDestinationAddress, destination_detail_address || null, destination_contact || null, splitVehicle.vehicleNumber,
     splitVehicle.vehicleType, effectiveReservedDate, effectiveReservedTime, payment_method_id || null,
-    Number(fare_amount) || 0, Number(ferry_fare_amount) || 0, memo_customer || null,
-    // 고객 화면에는 이 두 칸이 없다. 안 보낸 값을 그대로 쓰면 null로 덮여서, 관리자가 적어둔
-    // 기사 챗봇 전달사항과 접수 때 나눠 넣은 업체전달사항이 통째로 사라진다.
-    // 업체전달사항은 아래 재분류가 다시 채운다(splitClientMemo).
-    req.session.user.role === 'client' ? order.memo_billing : (memo_billing || null),
-    req.session.user.role === 'client' ? order.memo_driver_chat : (memo_driver_chat || null),
+    Number(fare_amount) || 0, Number(ferry_fare_amount) || 0, nextMemoCustomer,
+    // 안 보낸 칸은 그대로 둔다(keepIfAbsent). 고객 화면에는 이 두 칸이 아예 없고, 상담관리
+    // 카드 폼도 안 보낸다 — 안 보낸 값을 빈 값으로 취급하면 관리자가 적어둔 기사 챗봇
+    // 전달사항과 접수 때 나눠 넣은 업체전달사항이 통째로 사라진다.
+    nextMemoBilling,
+    nextMemoDriverChat,
     toNumOrNullShared(req.body.origin_lat), toNumOrNullShared(req.body.origin_lon),
     req.body.origin_sido || null, req.body.origin_sigugun || null, req.body.origin_dong || null,
     toNumOrNullShared(req.body.destination_lat), toNumOrNullShared(req.body.destination_lon),
