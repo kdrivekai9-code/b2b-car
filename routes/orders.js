@@ -110,9 +110,12 @@ async function splitClientMemo(orderId, memo, plate, vehicleType) {
   // 차종·차량번호를 함께 넘긴다 — 나눈 결과를 저장할 때 그 값이 기사 전달사항 맨 앞에
   // 다시 붙어야 한다(withVehiclePrefix). 안 넘기면 이 재분류가 오더 생성 때 붙여둔 표시를
   // 덮어써서 지운다 — 콜마너 적요1이 차량번호를 전달하는 유일한 통로라 그러면 기사가 못 본다.
+  // 이미 저장된 업체 전달사항도 우편 판정에 함께 넣는다 — 그 문구가 그쪽으로 잘못 갔던
+  // 오더를 다시 나눌 때 스스로 되돌아오게 하려는 것이다(위 postalSource 주석).
+  const prev = await db.get('SELECT memo_billing FROM orders WHERE id = ?', [orderId]).catch(() => null);
   const split = await splitIntakeMemo(
     { memo: String(memo || ''), options: {} },
-    { plate: plate || null, vehicleType: vehicleType || null }
+    { plate: plate || null, vehicleType: vehicleType || null, postalSource: prev && prev.memo_billing }
   )
     .catch((e) => {
       console.error('고객 요청사항 분류 실패(원문을 그대로 둔다):', e.message);

@@ -84,6 +84,24 @@ const MARK = 'zzq등기분류검사';
     check('요약이 100Byte 안', byteLength(right.driverBrief) <= MEMO1_MAX_BYTES, true);
     check('요약 맨 앞이 차량 표시', right.driverBrief.startsWith(`토레스 ${PLATE}`), true);
 
+    // 이미 업체 쪽으로 잘못 간 오더를 다시 나눌 때 — 그 문구가 memo_customer에는 없고
+    // memo_billing에만 남아 있다. 판정이 그 칸을 못 보면 재저장해도 영영 안 고쳐진다
+    // (실제로 OID2075가 그랬다: 재분류를 돌려도 isPostalRequested가 false였다).
+    const healed = await splitIntakeMemo(
+      { memo: '회수서류 : 차량 인수증과 성능점검기록부에 고객 서명 받은 후 회수', options: {} },
+      {
+        plate: PLATE, vehicleType: '토레스',
+        postalSource: '판매 탁송 신청합니다. / 출발지 주소로 우편발송',
+        classify: async (m) => ({ driver: m, company: '', driverBrief: m.slice(0, 25) }),
+      }
+    );
+    check('업체 쪽에만 남은 문구도 되돌린다', mentionsPostal(healed.driver), true);
+    // 요약에까지 남는지는 단정하지 않는다. 요약은 100Byte를 나눠 쓰는 자리라, 앞쪽 내용이
+    // 예산을 다 먹으면 등기 안내가 떨어져 나간다 — 그게 의도한 우선순위다(POSTAL_BRIEF_NOTE
+    // 주석: 차키·주차 위치가 잘리면 기사가 차를 아예 못 가져간다). 여기서 보려는 것은
+    // "업체 쪽에만 있던 문구가 기사 쪽으로 돌아오는가"다.
+    check('요약은 예산 안에 든다', byteLength(healed.driverBrief) <= MEMO1_MAX_BYTES, true);
+
     // 우편발송 요청이 아닌 건에는 아무것도 덧붙이지 않는다.
     const plain = await splitIntakeMemo({ memo: '차키는 경비실에 맡겨주세요', options: {} }, {
       plate: PLATE, vehicleType: '토레스',
