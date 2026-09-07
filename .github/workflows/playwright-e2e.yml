@@ -33,7 +33,7 @@ on:
       login_id_client:
         description: '고객사 로그인 ID (QA 전용 계정)'
         required: false
-        default: 'qa_test_client'
+        default: 'qa_test_client_e2e'
       login_password_admin:
         description: '관리자 비밀번호(선택: 미입력 시 secret 우선)'
         required: false
@@ -76,10 +76,15 @@ jobs:
       # 반복해 계정이 로그인 제한에 걸린다. 지금은 scripts/check-login-all.js가 시도 전에 멈춘다.
       LOGIN_ID_ADMIN: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_id_admin || 'qa_test_bot' }}
       LOGIN_ID_BRANCH_MANAGER: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_id_branch_manager || 'qa_test_branch_manager' }}
-      LOGIN_ID_CLIENT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_id_client || 'qa_test_client' }}
+      LOGIN_ID_CLIENT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_id_client || 'qa_test_client_e2e' }}
       LOGIN_PASSWORD_ADMIN: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_password_admin != '' && github.event.inputs.login_password_admin || secrets.LOGIN_PASSWORD_ADMIN != '' && secrets.LOGIN_PASSWORD_ADMIN }}
       LOGIN_PASSWORD_BRANCH_MANAGER: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_password_branch_manager != '' && github.event.inputs.login_password_branch_manager || secrets.LOGIN_PASSWORD_BRANCH_MANAGER != '' && secrets.LOGIN_PASSWORD_BRANCH_MANAGER }}
       LOGIN_PASSWORD_CLIENT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_password_client != '' && github.event.inputs.login_password_client || secrets.LOGIN_PASSWORD_CLIENT != '' && secrets.LOGIN_PASSWORD_CLIENT }}
+      # 고객 역할 스펙이 자격을 얻는 경로. 이 둘을 안 주면 clientCredentials()가 null을
+      # 돌려주고 그 스펙들이 조용히 통째로 빠진다 — 통과처럼 보이지만 안 돈 것이다.
+      # 위 LOGIN_ID_CLIENT / LOGIN_PASSWORD_CLIENT와 같은 계정을 쓴다.
+      E2E_CLIENT_LOGIN_ID: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_id_client || 'qa_test_client_e2e' }}
+      E2E_CLIENT_PASSWORD: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_password_client != '' && github.event.inputs.login_password_client || secrets.LOGIN_PASSWORD_CLIENT != '' && secrets.LOGIN_PASSWORD_CLIENT }}
 
     steps:
       - name: Checkout
@@ -235,10 +240,15 @@ jobs:
       LOGIN_BASE_URL: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.base_url || 'http://127.0.0.1:3000' }}
       LOGIN_ID_ADMIN: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_id_branch_manager || 'qa_test_branch_manager' }}
       LOGIN_ID_BRANCH_MANAGER: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_id_branch_manager || 'qa_test_branch_manager' }}
-      LOGIN_ID_CLIENT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_id_client || 'qa_test_client' }}
+      LOGIN_ID_CLIENT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_id_client || 'qa_test_client_e2e' }}
       LOGIN_PASSWORD_ADMIN: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_password_branch_manager != '' && github.event.inputs.login_password_branch_manager || secrets.LOGIN_PASSWORD_BRANCH_MANAGER != '' && secrets.LOGIN_PASSWORD_BRANCH_MANAGER }}
       LOGIN_PASSWORD_BRANCH_MANAGER: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_password_branch_manager != '' && github.event.inputs.login_password_branch_manager || secrets.LOGIN_PASSWORD_BRANCH_MANAGER != '' && secrets.LOGIN_PASSWORD_BRANCH_MANAGER }}
       LOGIN_PASSWORD_CLIENT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_password_client != '' && github.event.inputs.login_password_client || secrets.LOGIN_PASSWORD_CLIENT != '' && secrets.LOGIN_PASSWORD_CLIENT }}
+      # 고객 역할 스펙이 자격을 얻는 경로. 이 둘을 안 주면 clientCredentials()가 null을
+      # 돌려주고 그 스펙들이 조용히 통째로 빠진다 — 통과처럼 보이지만 안 돈 것이다.
+      # 위 LOGIN_ID_CLIENT / LOGIN_PASSWORD_CLIENT와 같은 계정을 쓴다.
+      E2E_CLIENT_LOGIN_ID: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_id_client || 'qa_test_client_e2e' }}
+      E2E_CLIENT_PASSWORD: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_password_client != '' && github.event.inputs.login_password_client || secrets.LOGIN_PASSWORD_CLIENT != '' && secrets.LOGIN_PASSWORD_CLIENT }}
 
     steps:
       - name: Checkout

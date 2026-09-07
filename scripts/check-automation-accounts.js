@@ -42,8 +42,8 @@ for (const acct of HUMAN_ACCOUNTS) {
 
 // env 기본값과 workflow_dispatch 입력 기본값 양쪽을 본다. 예전에 env만 고치고 입력
 // 기본값을 두었더니 「Run workflow」를 누른 사람에게 admin이 미리 채워졌다.
-const qaDefaults = (wfCode.match(/\|\| '(qa_[a-z_]+)'/g) || []).length
-  + (wfCode.match(/default: '(qa_[a-z_]+)'/g) || []).length;
+const qaDefaults = (wfCode.match(/\|\| '(qa_[a-z0-9_]+)'/g) || []).length
+  + (wfCode.match(/default: '(qa_[a-z0-9_]+)'/g) || []).length;
 check('QA 계정을 기본값으로 쓴다', qaDefaults >= 9, `qa_* 기본값 ${qaDefaults}곳(9곳 이상이어야 한다)`);
 
 console.log('\n[비밀번호를 하드코딩하지 않는다]');
@@ -57,7 +57,7 @@ const gateCode = gate.split('\n').filter((l) => !l.trim().startsWith('//')).join
 for (const acct of HUMAN_ACCOUNTS) {
   check(`기본값이 '${acct}'이 아니다`, !new RegExp(`\\|\\| '${acct}'`).test(gateCode));
 }
-check('기본값이 qa_ 계정이다', (gateCode.match(/\|\| 'qa_[a-z_]+'/g) || []).length >= 3);
+check('기본값이 qa_ 계정이다', (gateCode.match(/\|\| 'qa_[a-z0-9_]+'/g) || []).length >= 3);
 // 시도 전에 멈춰야 한다. 시도한 뒤에 판정하면 이미 실패가 쌓인다.
 //
 // **호출**을 본다. 처음에는 /assertSafeAccounts\(accounts\)/로 봤는데, 그건 함수 정의

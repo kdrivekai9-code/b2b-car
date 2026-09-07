@@ -66,7 +66,10 @@ function getAccountsFromEnv() {
     },
     {
       label: 'client',
-      loginId: process.env.LOGIN_ID_CLIENT || 'qa_test_client',
+      // 스펙들이 쓰는 계정과 같은 것으로 둔다(tests/e2e-credentials.js의 E2E_CLIENT_LOGIN_ID).
+      // 고객 역할 계정이 게이트와 스펙에서 갈리면, 게이트는 통과하는데 스펙만 못 들어가는
+      // 상태가 생기고 원인을 계정에서 찾지 않는다.
+      loginId: process.env.LOGIN_ID_CLIENT || 'qa_test_client_e2e',
       password: process.env.LOGIN_PASSWORD_CLIENT || '',
     },
   ];
