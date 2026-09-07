@@ -2574,6 +2574,14 @@ async function updateOrderWithCallmaner(orderId, branchId) {
       postal_requested: order.postal_requested,
       receipt_upload_token: order.receipt_upload_token,
       order_type: order.order_type,
+      // 예약일시 변경도 여기로 나간다. **API로는 되읽을 수 없다** — 조회 세 개
+      // (OrderInfo·OrderHistory·OrderAllStatus) 어디에도 예약일 필드가 없어서, 우리가 보낸
+      // 값이 실제로 반영됐는지 코드로 확인할 방법이 없다.
+      //
+      // 반영된다는 것은 사람이 콜마너 화면에서 확인했다(2026-09-07, OID2075 /
+      // conf_slip 182353721: 예약일을 2027-09-08 → 2026-09-08로 고친 것이 콜마너에도
+      // 2026-09-08로 들어가 있었다). 같은 의문이 생겨도 API로는 답이 안 나오므로,
+      // 다시 조사하지 말고 이 기록을 근거로 삼는다. 의심되면 콜마너 화면을 봐야 한다.
       reserved_date: order.reserved_date, reserved_time: order.reserved_time,
     };
     await callmaner.orderModify(orderForCallmaner, branchRow, paymentMethodRow && paymentMethodRow.name, waypointRows, order.callmaner_conf_slip);
