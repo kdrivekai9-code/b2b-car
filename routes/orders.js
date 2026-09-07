@@ -1371,7 +1371,9 @@ router.post('/', asyncHandler(async (req, res) => {
     destinationSigugun: destination_sigugun || null,
     destinationDong: destination_dong || null,
     memoCustomer: memo_customer || null,
-    memoBilling: memo_billing || null,
+    // 고객이 보낸 업체 전달사항도 무시한다 — 고객 화면에는 그 칸이 없고, 요청사항을 나눈
+    // 결과가 접수 직후 여기에 채워진다(splitClientMemo). 받아두면 나눈 값을 덮어쓴다.
+    memoBilling: u.role === 'client' ? null : (memo_billing || null),
     // 화면에서 이미 고른 부대비용 항목. 요청사항 분석이 같은 항목을 또 후보로 올리지 않게
     // 넘긴다 — 같은 돈이 두 줄이면 두 번 청구된다. 여기서 바로 읽는 이유는 아래 부대비용
     // 저장이 오더 생성 뒤에 돌아서, 그때는 이미 분석이 시작됐기 때문이다.
@@ -1430,7 +1432,10 @@ router.post('/', asyncHandler(async (req, res) => {
 
     // 기사 챗봇 전달사항. INSERT는 위치 인자가 40개라 손대면 어긋날 위험이 커서 따로 쓴다.
     // 나뉜 건이라도 첫 건에만 붙인다 — 구간마다 같은 안내를 반복할 이유가 없다.
-    if (String(memo_driver_chat || '').trim()) {
+    // 고객이 보낸 것은 무시한다. 고객 화면에는 이 칸이 없고(요청사항 하나로 받는다),
+    // 이건 상담원이 기사에게 하는 말이라 고객이 쓸 자리가 아니다 — 화면에서 감춰도 서버가
+    // 받으면 조작된 요청으로 기사에게 아무 말이나 보낼 수 있다.
+    if (u.role !== 'client' && String(memo_driver_chat || '').trim()) {
       await db.run('UPDATE orders SET memo_driver_chat = ? WHERE id = ?', [String(memo_driver_chat).trim(), newId])
         .catch((e) => console.error('기사 챗봇 전달사항 저장 실패(오더 등록은 완료):', e.message));
     }

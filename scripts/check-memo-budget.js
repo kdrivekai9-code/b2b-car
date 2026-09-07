@@ -71,12 +71,29 @@ console.log('\n[고객 화면은 한 칸이다]');
 // 어디에 무엇을 써야 할지 고민하게 되고, 그 고민의 답을 우리가 더 잘 안다.
 const orderForm = read('src/app/orders/new/OrderForm.js');
 check('고객이면 한 칸으로 그린다', /isClient \? \(/.test(orderForm) && /<label>요청사항<\/label>/.test(orderForm));
+// EJS 두 화면에는 이 가드를 빠뜨려서, 고객이 관리자와 같은 세 칸을 그대로 보고 있었다
+// (실측 2026-09-07). Next만 고치면 플래그를 되돌렸을 때 그대로 돌아온다.
+['views/orders/form.ejs', 'views/orders/ai_intake.ejs'].forEach((f) => {
+  const src = read(f);
+  check(`${f} — 고객이면 요청사항 한 칸`,
+    /role === 'client'\) \{ %>[\s\S]{0,400}>요청사항</.test(src));
+  check(`${f} — 고객에게 콜마너 라벨을 안 보인다`,
+    /role === 'client'\) \{ %>[\s\S]{0,600}<% \} else \{ %>[\s\S]{0,200}메모\(콜마너 기사전달사항\)/.test(src),
+    '고객 분기 안에 그 라벨이 있으면 안 된다');
+});
 check('고객 칸에는 100Byte 안내가 없다',
   !/요청사항<\/label>[\s\S]{0,400}100Byte/.test(orderForm),
   '고객에게 우리 내부 제약을 설명할 이유가 없다');
 // 화면에 없는 칸이 값을 실어 보내면 서버가 나눠 넣은 결과를 덮어쓴다.
 check('고객은 업체전달사항을 안 보낸다', /if \(!isClient\) params\.set\('memo_billing'/.test(orderForm));
 check('고객은 챗봇 전달사항을 안 보낸다', /if \(!isClient\) params\.set\('memo_driver_chat'/.test(orderForm));
+// 화면에서 감춰도 서버가 받으면 조작된 요청으로 기사에게 아무 말이나 보낼 수 있다.
+const routesGuard = read('routes/orders.js');
+check('서버가 고객의 챗봇 전달사항을 무시한다',
+  /u\.role !== 'client' && String\(memo_driver_chat/.test(routesGuard));
+check('서버가 고객의 업체 전달사항도 무시한다',
+  /memoBilling: u\.role === 'client' \? null/.test(routesGuard),
+  '받아두면 서버가 나눈 값을 덮어쓴다');
 
 console.log('\n[서버가 나눈다]');
 const routesSrc = read('routes/orders.js');
