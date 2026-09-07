@@ -110,17 +110,22 @@ jobs:
         if: ${{ env.DATABASE_URL != '' }}
         run: npm run seed
 
-      - name: Clear test chat sessions
+      # 시험 데이터를 걷어낸다 — **테스트 시작 전에.**
+      #
+      # 여기 있던 코드는 `DELETE FROM chat_sessions`였다. 조건이 없다. 이 워크플로는 운영 DB에
+      # 붙으므로(위 'Print DATABASE_URL host/port' 참고) 그 한 줄이 실고객 카카오 상담톡까지
+      # 모든 대화를 지운다. 단계 이름은 'Clear test chat sessions'였으니 의도는 시험 세션이었고,
+      # 조건이 그 의도를 담지 못한 것이다. 남아 있는 가장 오래된 세션 날짜가 이 워크플로의
+      # 마지막 실행일과 같아서, 이미 한 번 일어난 것으로 보인다.
+      #
+      # 시작 전에 돌리는 것이 핵심이다. 각 검사와 스펙은 자기 데이터를 끝에서 지우지만,
+      # 프로세스가 중간에 죽으면 그 정리에 못 닿는다 — 실제로 오더 25건이 그렇게 남았다.
+      # 시작 전에 쓸면 지난번 실행이 죽어서 남긴 것을 이번 실행이 걷어낸다.
+      - name: 시험 데이터 쓸기(시작 전)
         if: ${{ env.DATABASE_URL != '' }}
         run: |
-          node -e "
-            require('dotenv').config();
-            const { pool, run } = require('./db');
-            run('DELETE FROM chat_sessions')
-              .then(() => console.log('chat_sessions 정리 완료'))
-              .catch(e => { console.error('chat_sessions 정리 실패:', e.message); process.exit(1); })
-              .finally(() => pool.end());
-          "
+          node scripts/clean-test-chat-sessions.js --apply
+          node scripts/clean-test-orders.js --apply
 
       - name: Start server
         if: ${{ env.DATABASE_URL != '' }}
@@ -192,6 +197,14 @@ jobs:
           path: artifacts/preflight-summary.md
           if-no-files-found: warn
 
+      # 이번 실행이 만든 것을 남기지 않는다. 테스트가 실패해도, 중간에 멈춰도 돈다.
+      # 시작 전 쓸기가 그물이고 이건 예의다 — 둘 다 있어야 목록이 깨끗하게 유지된다.
+      - name: 시험 데이터 쓸기(정리)
+        if: ${{ always() && env.DATABASE_URL != '' }}
+        run: |
+          node scripts/clean-test-chat-sessions.js --apply
+          node scripts/clean-test-orders.js --apply
+
       - name: Stop server
         if: ${{ always() && env.DATABASE_URL != '' }}
         run: |
@@ -251,17 +264,22 @@ jobs:
         if: ${{ env.DATABASE_URL != '' }}
         run: npm run seed
 
-      - name: Clear test chat sessions
+      # 시험 데이터를 걷어낸다 — **테스트 시작 전에.**
+      #
+      # 여기 있던 코드는 `DELETE FROM chat_sessions`였다. 조건이 없다. 이 워크플로는 운영 DB에
+      # 붙으므로(위 'Print DATABASE_URL host/port' 참고) 그 한 줄이 실고객 카카오 상담톡까지
+      # 모든 대화를 지운다. 단계 이름은 'Clear test chat sessions'였으니 의도는 시험 세션이었고,
+      # 조건이 그 의도를 담지 못한 것이다. 남아 있는 가장 오래된 세션 날짜가 이 워크플로의
+      # 마지막 실행일과 같아서, 이미 한 번 일어난 것으로 보인다.
+      #
+      # 시작 전에 돌리는 것이 핵심이다. 각 검사와 스펙은 자기 데이터를 끝에서 지우지만,
+      # 프로세스가 중간에 죽으면 그 정리에 못 닿는다 — 실제로 오더 25건이 그렇게 남았다.
+      # 시작 전에 쓸면 지난번 실행이 죽어서 남긴 것을 이번 실행이 걷어낸다.
+      - name: 시험 데이터 쓸기(시작 전)
         if: ${{ env.DATABASE_URL != '' }}
         run: |
-          node -e "
-            require('dotenv').config();
-            const { pool, run } = require('./db');
-            run('DELETE FROM chat_sessions')
-              .then(() => console.log('chat_sessions 정리 완료'))
-              .catch(e => { console.error('chat_sessions 정리 실패:', e.message); process.exit(1); })
-              .finally(() => pool.end());
-          "
+          node scripts/clean-test-chat-sessions.js --apply
+          node scripts/clean-test-orders.js --apply
 
       - name: Start server
         if: ${{ env.DATABASE_URL != '' }}
@@ -325,6 +343,14 @@ jobs:
           name: preflight-ai-intake-summary
           path: artifacts/preflight-ai-intake-summary.md
           if-no-files-found: warn
+
+      # 이번 실행이 만든 것을 남기지 않는다. 테스트가 실패해도, 중간에 멈춰도 돈다.
+      # 시작 전 쓸기가 그물이고 이건 예의다 — 둘 다 있어야 목록이 깨끗하게 유지된다.
+      - name: 시험 데이터 쓸기(정리)
+        if: ${{ always() && env.DATABASE_URL != '' }}
+        run: |
+          node scripts/clean-test-chat-sessions.js --apply
+          node scripts/clean-test-orders.js --apply
 
       - name: Stop server
         if: ${{ always() && env.DATABASE_URL != '' }}

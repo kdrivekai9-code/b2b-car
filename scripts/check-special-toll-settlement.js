@@ -24,8 +24,24 @@ function check(label, actual, expected) {
   console.log(`  ${ok ? 'OK  ' : 'FAIL'} ${label}${ok ? '' : `  (기대 ${JSON.stringify(expected)}, 실제 ${JSON.stringify(actual)})`}`);
 }
 
+// 정리를 oid로 하면 안 된다.
+//
+// 이 검사는 createOrder()로 오더를 만드는데, lib/orderCreate.js:165가 oid를
+// 'OID' + (1000 + orderId)로 **덮어쓴다.** 넘긴 `${MARK}-1`은 버려진다. 그래서 이 정리는
+// 한 건도 못 지웠고, finally에서 매번 불렸는데도 실행마다 오더 2건이 그대로 남았다 —
+// 22건이 쌓여 진행 중 오더 목록의 절반을 채웠다(2026-09-07에 정리).
+//
+// 대신 이 검사가 실제로 쓰는 주소로 찾는다. '검사로'는 실제로 없는 도로명이라 실데이터와
+// 겹치지 않는다(운영 DB 전수 확인 — 이 표식에 걸리는 25건 전부가 검사 잔해였다).
+// 주소는 우리가 넘긴 값 그대로 저장되므로, 프로세스가 중간에 죽어도 다음 실행이 쓸어간다.
+const TEST_ORIGIN = '서울 강남구 검사로 1';
+const TEST_DEST = '충남 당진시 검사로 2';
+
 async function cleanup() {
-  const rows = await db.all('SELECT id FROM orders WHERE oid LIKE ?', [`${MARK}%`]).catch(() => []);
+  const rows = await db.all(
+    'SELECT id FROM orders WHERE origin_address = ? AND destination_address = ?',
+    [TEST_ORIGIN, TEST_DEST]
+  ).catch(() => []);
   for (const r of rows) {
     await db.run('DELETE FROM order_extra_charges WHERE order_id = ?', [r.id]).catch(() => {});
     await db.run('DELETE FROM order_status_history WHERE order_id = ?', [r.id]).catch(() => {});
@@ -79,12 +95,12 @@ async function cleanup() {
     check('항목 이름은 정산 항목과 같다', found[0] && found[0].chargeType, '특수구간통행료');
 
     console.log('[접수하면 정산 항목이 생긴다 — 여기가 끊겨 있었다]');
+    // oid는 넘기지 않는다 — createOrder가 어차피 덮어쓴다(위 cleanup 주석).
     const created = await createOrder({
-      oid: `${MARK}-1`,
       branchId: group.branch_id,
       requesterGroupId: group.id,
-      originAddress: '서울 강남구 검사로 1',
-      destinationAddress: '충남 당진시 검사로 2',
+      originAddress: TEST_ORIGIN,
+      destinationAddress: TEST_DEST,
       reservedDate: '2026-08-29',
       reservedTime: '10:00',
       fareAmount: 100000,
@@ -106,11 +122,10 @@ async function cleanup() {
     console.log('[금액이 0인 규칙은 정산 줄을 만들지 않는다]');
     // 0원짜리 줄이 정산서에 늘어서면 읽는 사람이 무엇을 청구받는지 알 수 없다.
     const zero = await createOrder({
-      oid: `${MARK}-2`,
       branchId: group.branch_id,
       requesterGroupId: group.id,
-      originAddress: '서울 강남구 검사로 1',
-      destinationAddress: '충남 당진시 검사로 2',
+      originAddress: TEST_ORIGIN,
+      destinationAddress: TEST_DEST,
       reservedDate: '2026-08-29', reservedTime: '10:00', fareAmount: 100000,
       specialTolls: [{ chargeType: '특수구간통행료', name: '무료구간', amount: 0 }],
       status: '접수',

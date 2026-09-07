@@ -151,7 +151,8 @@ const CI_CHECKS = [
   'check-postal-receipt',
   'check-remote-area-fee',
   'check-shared-tabs',
-  'check-system-alert'
+  'check-system-alert',
+  'check-test-data-sweep'
 ];
 
 let checkOk = 0;
