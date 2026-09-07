@@ -100,6 +100,8 @@ export default function AppShell({ currentUser, activePath, topNav = false, chil
         <div className="content">{children}</div>
       </div>
       <Script src="/js/sidebar.js" strategy="afterInteractive" />
+      {/* 경고 표시(data-hint) 설명 풍선. EJS 푸터에도 같은 줄이 있다(views/partials/footer.ejs). */}
+      <Script src="/js/hint-tooltip.js" strategy="afterInteractive" />
     </div>
   );
 }

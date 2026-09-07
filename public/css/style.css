@@ -973,3 +973,11 @@ tr.order-flash-indigo td { --flash-bg:#e7e9fd; }
   width:18px;height:18px;margin-right:6px;border-radius:50%;
   background:#c7a008;color:#fff;font-size:12px;font-weight:700;line-height:1;
   vertical-align:middle;cursor:help;}
+
+/* 경고 표시 설명 풍선(public/js/hint-tooltip.js).
+   body 밑에 하나만 두고 좌표만 옮긴다 — 표는 .table-wrap(overflow-x:auto) 안이라
+   셀 안에서 만든 풍선은 그 경계에서 잘린다(마지막 줄에서 통째로 안 보인다). */
+.hint-bubble{position:fixed;z-index:1000;max-width:320px;padding:8px 10px;
+  background:#1f2937;color:#fff;font-size:12.5px;line-height:1.5;border-radius:6px;
+  box-shadow:0 4px 14px rgba(0,0,0,.22);pointer-events:none;white-space:pre-line;}
+.hint-bubble[hidden]{display:none;}

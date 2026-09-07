@@ -485,14 +485,18 @@ export default function OrderListTable({ orders, filters, statusSummary, current
                           상태만 보면 진행 중처럼 읽혀서 눈에 먼저 걸려야 한다. 고객에게는
                           서버가 send_failed를 false로 내려 아무것도 그리지 않는다.
                           views/orders/list.ejs에도 같은 표시가 있다. */}
+                      {/* 사유는 data-hint로 준다 — title은 브라우저 기본 툴팁이라 1초쯤
+                          기다려야 떠서 "사유를 안 알려준다"로 읽혔다(public/js/hint-tooltip.js).
+                          tabindex는 키보드로도 볼 수 있게 하려는 것이다. */}
                       {o.send_failed && (
-                        <span className="send-failed-mark" aria-label="전송 실패"
-                          title={`배차 시스템 전송 실패: ${o.callmaner_last_error || '사유 미상'}`}>?</span>
+                        <span className="send-failed-mark" aria-label="전송 실패" tabIndex={0}
+                          data-hint={`배차 시스템 전송 실패\n${o.callmaner_last_error || '사유 미상'}`}>?</span>
                       )}
                       {/* 예약일이 상식 밖인 건 — 목록에는 멀쩡히 보이니 접수된 줄 알지만
                           조회에는 안 잡힌다. views/orders/list.ejs에도 같은 표시가 있다. */}
                       {o.date_odd && (
-                        <span className="date-odd-mark" aria-label="예약일 확인" title={o.date_odd}>!</span>
+                        <span className="date-odd-mark" aria-label="예약일 확인" tabIndex={0}
+                          data-hint={o.date_odd}>!</span>
                       )}
                       <a href={`/orders/${o.id}`}>{value}</a>
                       {o.split_group_id && Number(o.split_total) > 1 && (
