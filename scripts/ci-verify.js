@@ -39,6 +39,9 @@ const EXCLUDED = {
   // 기사 쪽에 두기도 한다). 결정적이지 않은 검사는 배포를 막는 근거로 쓸 수 없다.
   // 분류 자체가 틀린 게 아니라 경계에 있는 문장이라, 검사를 고치는 것으로 해결되지 않는다.
   'check-intake-memo-split': '실제 모델을 부르고 결과가 회차마다 갈린다',
+  // 아래 둘은 .env 없이 + 더미 DATABASE_URL로도 실패한다 — 실제 모델을 부른다.
+  'check-escalation-judge': '상담원 연결 판정에 실제 모델을 부른다',
+  'check-intake-coverage': '요청사항 분석에 실제 모델을 부른다',
 };
 
 function walk(dir, out = []) {
@@ -94,15 +97,21 @@ console.log(`  ${ejsOk}/${ejsFiles.length} 통과`);
 console.log('\n[검사 스크립트]');
 const scriptDir = path.join(ROOT, 'scripts');
 
-// CI가 돌릴 검사는 **목록으로 못 박는다.** 추론으로 가리려다 두 번 틀렸다 —
-// 검사 파일만 grep해서 간접 의존을 놓쳤고(check-intake-memo-split이 lib/intakeMemoSplit을
-// 통해 모델을 부른다), require를 한 겹 따라가게 하니 이번엔 22개를 과하게 뺐다.
+// CI가 돌릴 검사는 **목록으로 못 박는다.** 추론으로 가리려다 세 번 틀렸다 —
+//   1. 검사 파일만 grep해서 간접 의존을 놓쳤다. check-intake-memo-split이 lib/intakeMemoSplit을
+//      통해 실제 모델을 부르는데 파일에는 vertexAi가 안 적혀 있었고, CI에 넣자 회차마다 결과가
+//      갈렸다(8회 중 2회 실패 — 모델이 "배정"을 기사 쪽에 두기도 한다).
+//   2. require를 한 겹 따라가게 하니 이번엔 22개를 과하게 뺐다.
+//   3. 로컬에서 3회 돌려 "안정"이라고 판단했는데, 로컬에는 .env가 있었다. CI에서 24개가
+//      한꺼번에 죽었다 — db.js가 DATABASE_URL 없이 **모듈 로드 시점에** 던지기 때문에,
+//      질의를 한 줄도 안 하는 검사까지 같이 죽었다.
 //
-// 목록에 들어가는 조건은 하나다: **빠르고, 외부에 안 기대고, 항상 같은 답을 낸다.**
-// 그래야 배포를 막는 근거로 쓸 수 있다. 아래 40개는 3회 연속 돌려 결과가 같은 것만 남겼다.
+// 3번은 워크플로에서 닿지 않는 더미 DATABASE_URL을 주어 풀었다. pg 풀은 첫 질의 때 연결하므로,
+// 모듈만 로드하고 끝나는 검사는 통과하고 실제로 질의하는 검사는 그대로 실패한다 — 즉 더미
+// URL이 "정말 DB가 필요한가"를 가려주는 체가 된다. 그래서 목록이 16개에서 38개로 늘었다.
 //
-// 새 검사를 만들면 여기 한 줄을 더한다. 안 더하면 CI가 안 돌린다 — 그게 조용한 누락으로
-// 이어지지 않도록, 목록에 없는 check-*.js가 몇 개인지 아래에서 세어 보여준다.
+// 아래는 **.env 없이 + 더미 URL로** 실제로 통과한 것만 남긴 것이다. 로컬에서 잰 값을 그대로
+// 쓰면 또 같은 실수를 한다.
 const CI_CHECKS = [
   'check-address-candidates',
   'check-address-spacing-geocode',
@@ -120,8 +129,6 @@ const CI_CHECKS = [
   'check-driver-location',
   'check-form-parity',
   'check-fare-surcharge',
-  'check-escalation-judge',
-  'check-intake-coverage',
   'check-intake-fields-shared',
   'check-intake-summary',
   'check-intake-expiry-notice',
