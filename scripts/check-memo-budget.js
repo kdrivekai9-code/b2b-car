@@ -105,9 +105,14 @@ check('검증된 분류를 재사용한다', /splitIntakeMemo/.test(routesSrc));
 check('분류 실패 시 아무것도 안 바꾼다',
   /if \(!split \|\| !String\(split\.driver \|\| ''\)\.trim\(\)\) return;/.test(routesSrc));
 // 고객이 수정할 때 안 보낸 칸이 null로 덮이면 관리자가 적어둔 내용이 통째로 사라진다.
+//
+// 줄바꿈을 허용한다. 처음에는 한 줄 삼항만 봤는데, 같은 로직이 이름 붙인 변수로 옮겨지자
+// (dc1f959에서 nextMemoBilling/nextMemoDriverChat) 조건이 다음 줄로 내려가 거짓 실패를 냈다.
+// 동작은 하나도 안 바뀌었는데 검사가 실패하면, 다음부터 실패를 안 믿게 된다 — 그게 검사가
+// 죽는 방식이다.
+const guardsAdminMemo = (col) => new RegExp(`role === 'client'\\s*\\?\\s*order\\.${col}\\b`).test(routesSrc);
 check('고객 수정이 관리자 칸을 덮지 않는다',
-  /role === 'client' \? order\.memo_billing/.test(routesSrc)
-  && /role === 'client' \? order\.memo_driver_chat/.test(routesSrc));
+  guardsAdminMemo('memo_billing') && guardsAdminMemo('memo_driver_chat'));
 
 console.log('\n[고객 상세에는 안 보인다]');
 const detail = read('views/orders/detail.ejs');
