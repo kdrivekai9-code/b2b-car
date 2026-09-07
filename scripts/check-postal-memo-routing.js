@@ -91,6 +91,33 @@ const MARK = 'zzq등기분류검사';
     });
     check('등기 요청이 아니면 안 붙인다', /우편|등기/.test(String(plain.driver)), false);
 
+    console.log('[기사 챗봇 전달사항 — 적요1 전문 사본]');
+    const { withDriverMemoCopy, stripDriverMemoCopy, DRIVER_MEMO_COPY_LABEL } = require('../lib/intakeMemoSplit');
+    // 적요1은 100Byte라 뒤가 말없이 잘린다(실측 24.4%). 잘린 뒤에 무엇이 전달됐는지 되짚을
+    // 근거가 있어야 한다 — 이 칸은 길이 제한이 없다(사용자 지시 2026-09-07).
+    const agentNote = '지하 3층 B구역, 키는 콘솔박스';
+    const full = '토레스 150두8774 / 회수서류 인수증 받아 출발지 주소로 등기발송';
+    const once = withDriverMemoCopy(agentNote, full);
+    check('상담원이 쓴 줄은 남는다', once.split('\n')[0], agentNote);
+    check('사본이 붙는다', once.includes(`${DRIVER_MEMO_COPY_LABEL} ${full}`), true);
+
+    // 오더를 고칠 때마다 한 줄씩 쌓이면 이 칸이 사본만으로 찬다.
+    const twice = withDriverMemoCopy(once, '토레스 150두8774 / 내용이 바뀌었습니다');
+    check('두 번 저장해도 사본은 한 줄',
+      twice.split('\n').filter((l) => l.indexOf(DRIVER_MEMO_COPY_LABEL) === 0).length, 1);
+    check('바뀐 내용으로 갱신된다', twice.includes('내용이 바뀌었습니다'), true);
+    check('상담원 줄은 그대로', twice.split('\n')[0], agentNote);
+
+    // 전문에 줄바꿈이 있으면 표시가 첫 줄에만 걸려 뒷줄이 다음 저장에서 안 걷힌다.
+    const multi = withDriverMemoCopy(agentNote, 'a\nb\nc');
+    check('여러 줄 전문은 한 줄로 눕힌다', multi.split('\n').length, 2);
+
+    // 기사 화면은 "고객 요청사항"으로 전문을 이미 보여준다 — 사본까지 내려보내면 두 번 뜬다.
+    check('기사 화면에서는 사본을 감춘다', stripDriverMemoCopy(once), agentNote);
+    check('사본만 있으면 빈 값', stripDriverMemoCopy(`${DRIVER_MEMO_COPY_LABEL} ${full}`), '');
+    // 저장에는 남는다 — 관리자 화면에서 되짚는 것이 이 사본의 목적이다.
+    check('저장값에는 사본이 남아 있다', once.includes(DRIVER_MEMO_COPY_LABEL), true);
+
     console.log('[접수 — 링크가 기사 챗봇 전달사항에 남는다]');
     const donor = await db.get(
       `SELECT branch_id, requester_group_id, created_by FROM orders
@@ -116,6 +143,12 @@ const MARK = 'zzq등기분류검사';
         // 뺐으니 기사는 인수증을 올릴 길이 없다.
         check('기사 챗봇 전달사항에 링크가 있다', String(o.memo_driver_chat || '').includes(RECEIPT_MEMO_LABEL), true);
         check('토큰이 그 링크에 들어간다', String(o.memo_driver_chat || '').includes(o.receipt_upload_token), true);
+        // 적요1 전문 사본도 같은 칸에 함께 있어야 한다. 예전에는 호출부가 이 칸을 폼 값으로
+        // 통째로 덮어써서 링크와 사본이 조용히 지워졌다(상담원이 뭔가 쓴 오더에서만 그랬다).
+        check('적요1 전문 사본도 함께 있다',
+          String(o.memo_driver_chat || '').includes(DRIVER_MEMO_COPY_LABEL), true);
+        check('사본 내용이 기사전달사항과 같다',
+          String(o.memo_driver_chat || '').includes(String(o.memo_customer || '').trim()), true);
       }
     }
   } finally {

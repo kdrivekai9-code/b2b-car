@@ -95,8 +95,11 @@ check('고객은 업체전달사항을 안 보낸다', /if \(!isClient\) params\
 check('고객은 챗봇 전달사항을 안 보낸다', /if \(!isClient\) params\.set\('memo_driver_chat'/.test(orderForm));
 // 화면에서 감춰도 서버가 받으면 조작된 요청으로 기사에게 아무 말이나 보낼 수 있다.
 const routesGuard = read('routes/orders.js');
+// 이 칸은 lib/orderCreate.js가 상담원이 쓴 말·적요1 전문 사본·우편발송 링크를 한 칸에
+// 합쳐 저장한다(2026-09-07) — 그래서 호출부는 createOrder 인자로만 넘긴다. 예전에는 생성
+// 뒤에 폼 값으로 통째로 덮어써서, 생성 중에 붙인 링크와 사본이 조용히 지워졌다.
 check('서버가 고객의 챗봇 전달사항을 무시한다',
-  /u\.role !== 'client' && String\(memo_driver_chat/.test(routesGuard));
+  /memoDriverChat: u\.role === 'client' \? null/.test(routesGuard));
 check('서버가 고객의 업체 전달사항도 무시한다',
   /memoBilling: u\.role === 'client' \? null/.test(routesGuard),
   '받아두면 서버가 나눈 값을 덮어쓴다');
@@ -127,10 +130,13 @@ check('업체요청사항·챗봇 전달사항을 관리자에게만',
 
 console.log('\n[저장과 전달]');
 const routes = read('routes/orders.js');
-check('접수에서 저장한다', /UPDATE orders SET memo_driver_chat = \?/.test(routes));
+// 접수 저장은 lib/orderCreate.js가 맡는다(위 주석 — 세 가지를 한 칸에 합친다).
+check('접수에서 저장한다', /UPDATE orders SET memo_driver_chat = \?/.test(read('lib/orderCreate.js')));
 check('수정에서 저장한다', /memo_customer = \?, memo_billing = \?, memo_driver_chat = \?/.test(routes));
 const driver = read('routes/driverChat.js');
-check('기사 화면에 내려준다', /driverMemo: current\.memo_driver_chat/.test(driver));
+// 사본 줄은 기사 화면에서 감춘다 — 그 화면은 "고객 요청사항"으로 전문을 이미 보여주므로
+// 그대로 내려보내면 같은 글이 두 번 뜬다. 저장에는 남는다(관리자 화면에서 되짚는 값이다).
+check('기사 화면에 내려준다', /driverMemo: memoSplit\.stripDriverMemoCopy\(current\.memo_driver_chat\)/.test(driver));
 // 없는 칸 하나 때문에 기사 화면이 통째로 죽으면 안 된다 — 기사는 다른 길이 없다.
 check('마이그레이션 전에도 화면이 산다', /e\.code === '42703'/.test(driver));
 

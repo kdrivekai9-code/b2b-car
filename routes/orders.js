@@ -106,7 +106,7 @@ async function getCurrentOperatingMomentFromDb() {
 // 나누는 규칙은 카카오 접수가 이미 쓰고 있는 것을 그대로 쓴다(lib/intakeMemoSplit.js) —
 // 실사용으로 검증된 분류를 채널마다 다시 만들 이유가 없다.
 async function splitClientMemo(orderId, memo, plate, vehicleType) {
-  const { splitIntakeMemo } = require('../lib/intakeMemoSplit');
+  const { splitIntakeMemo, withDriverMemoCopy } = require('../lib/intakeMemoSplit');
   // 차종·차량번호를 함께 넘긴다 — 나눈 결과를 저장할 때 그 값이 기사 전달사항 맨 앞에
   // 다시 붙어야 한다(withVehiclePrefix). 안 넘기면 이 재분류가 오더 생성 때 붙여둔 표시를
   // 덮어써서 지운다 — 콜마너 적요1이 차량번호를 전달하는 유일한 통로라 그러면 기사가 못 본다.
@@ -126,6 +126,18 @@ async function splitClientMemo(orderId, memo, plate, vehicleType) {
     `UPDATE orders SET memo_customer = ?, memo_billing = ?, memo_driver_brief = ? WHERE id = ?`,
     [split.driver || null, split.company || null, split.driverBrief || null, orderId]
   ).catch((e) => console.error('요청사항 분류 저장 실패(원문은 남아 있음):', e.message));
+
+  // 기사 챗봇 전달사항에 남겨둔 적요1 전문도 따라 바꾼다. 재분류가 memo_customer를 다시
+  // 쓰므로 그대로 두면 사본이 분류 전 문장으로 남아, 두 칸이 서로 다른 말을 한다.
+  // 상담원이 쓴 줄과 우편발송 링크는 withDriverMemoCopy가 보존한다.
+  const current = await db.get('SELECT memo_driver_chat FROM orders WHERE id = ?', [orderId]).catch(() => null);
+  await db.run(
+    'UPDATE orders SET memo_driver_chat = ? WHERE id = ?',
+    [withDriverMemoCopy(current && current.memo_driver_chat, split.driver), orderId]
+  ).catch((e) => {
+    if (e && e.code === '42703') return;
+    console.error('기사 챗봇 전달사항 갱신 실패(분류는 저장됨):', e.message);
+  });
 }
 
 // 응답 뒤에 돌릴 작업. Vercel 서버리스는 응답을 보낸 뒤 인스턴스를 얼려버려서, 그냥
@@ -1418,6 +1430,10 @@ router.post('/', asyncHandler(async (req, res) => {
     // 넘긴다 — 같은 돈이 두 줄이면 두 번 청구된다. 여기서 바로 읽는 이유는 아래 부대비용
     // 저장이 오더 생성 뒤에 돌아서, 그때는 이미 분석이 시작됐기 때문이다.
     intakeChargeTypes: [].concat(req.body.intake_extra_type || []).filter(Boolean),
+    // 고객이 보낸 것은 무시한다. 고객 화면에는 이 칸이 없고(요청사항 하나로 받는다), 이건
+    // 상담원이 기사에게 하는 말이라 고객이 쓸 자리가 아니다 — 화면에서 감춰도 서버가 받으면
+    // 조작된 요청으로 기사에게 아무 말이나 보낼 수 있다.
+    memoDriverChat: u.role === 'client' ? null : (String(memo_driver_chat || '').trim() || null),
     createdBy: u.id,
     // 나뉜 건에는 그 구간에 남은 경유지만 실린다(같은 날 이어 도는 곳). 나뉘지 않았으면 전부.
     waypoints: part.waypoints || [],
@@ -1489,15 +1505,11 @@ router.post('/', asyncHandler(async (req, res) => {
       );
     }
 
-    // 기사 챗봇 전달사항. INSERT는 위치 인자가 40개라 손대면 어긋날 위험이 커서 따로 쓴다.
-    // 나뉜 건이라도 첫 건에만 붙인다 — 구간마다 같은 안내를 반복할 이유가 없다.
-    // 고객이 보낸 것은 무시한다. 고객 화면에는 이 칸이 없고(요청사항 하나로 받는다),
-    // 이건 상담원이 기사에게 하는 말이라 고객이 쓸 자리가 아니다 — 화면에서 감춰도 서버가
-    // 받으면 조작된 요청으로 기사에게 아무 말이나 보낼 수 있다.
-    if (u.role !== 'client' && String(memo_driver_chat || '').trim()) {
-      await db.run('UPDATE orders SET memo_driver_chat = ? WHERE id = ?', [String(memo_driver_chat).trim(), newId])
-        .catch((e) => console.error('기사 챗봇 전달사항 저장 실패(오더 등록은 완료):', e.message));
-    }
+    // 기사 챗봇 전달사항은 여기서 쓰지 않는다 — lib/orderCreate.js가 상담원이 쓴 말·적요1
+    // 전문·우편발송 링크를 한 칸에 합쳐 저장한다(memoDriverChat 인자로 넘긴다).
+    //
+    // 예전에는 이 자리에서 폼 값으로 통째로 덮어썼다. 그러면 생성 중에 붙인 링크와 전문이
+    // 조용히 지워진다 — 상담원이 그 칸에 한 글자라도 쓴 오더에서만 그래서 눈에 안 띄었다.
   } catch (e) {
     console.error('접수 부대비용 저장 실패(오더 등록은 완료):', e.message);
   }
@@ -1987,6 +1999,22 @@ router.post('/:id', asyncHandler(async (req, res) => {
     req.body.destination_sido || null, req.body.destination_sigugun || null, req.body.destination_dong || null,
     req.params.id,
   ]);
+
+  // 기사 챗봇 전달사항의 적요1 전문 사본을 방금 저장한 값으로 맞춘다.
+  //
+  // 위 UPDATE에 끼우지 않는 이유: nextMemoDriverChat은 상담원이 이번에 쓴 값이고, 여기서
+  // 붙이는 것은 그 위에 얹는 사본이라 순서가 있어야 한다. 마이그레이션 전이면 칸이 없어
+  // 오더 수정 전체가 실패하는 것도 막는다.
+  {
+    const { withDriverMemoCopy } = require('../lib/intakeMemoSplit');
+    await db.run(
+      'UPDATE orders SET memo_driver_chat = ? WHERE id = ?',
+      [withDriverMemoCopy(nextMemoDriverChat, nextMemoCustomer), req.params.id]
+    ).catch((e) => {
+      if (e && e.code === '42703') return;
+      console.error('기사 챗봇 전달사항 갱신 실패(오더 수정은 완료):', e.message);
+    });
+  }
 
   // 도착지 인도시각도 함께 맞춘다. 위 UPDATE에 끼우지 않는 이유는 마이그레이션 전이면 그 칸이
   // 없어서 오더 수정 전체가 실패하기 때문이다(등록 쪽과 같은 이유).

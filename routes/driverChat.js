@@ -16,6 +16,7 @@ const memoExtraCosts = require('../lib/memoExtraCosts');
 const multer = require('multer');
 const receiptOcr = require('../lib/receiptOcr');
 const postalReceipt = require('../lib/postalReceipt');
+const memoSplit = require('../lib/intakeMemoSplit');
 const { ensureBucket, uploadPhoto } = require('../lib/storage');
 const { notify } = require('../lib/push');
 const { logIntegrationErrorAsync } = require('../lib/integrationLog');
@@ -320,7 +321,13 @@ router.get('/chat/data.json', requireDriver, asyncHandler(async (req, res) => {
       branchName: current.branch_name || '',
       memo: current.memo_customer || '',
       // 상담원이 기사에게 직접 쓴 안내. 길이 제한이 없다.
-      driverMemo: current.memo_driver_chat || '',
+      //
+      // 적요1 전문 사본 줄([기사전달사항] …)은 여기서 뺀다. 그 값은 바로 위 memo와 같은
+      // 글이고(lib/intakeMemoSplit.js withDriverMemoCopy가 memo_customer를 복사해 둔다),
+      // 이 화면은 "고객 요청사항"으로 이미 전문을 보여준다 — 그대로 내려보내면 한 화면에
+      // 같은 글이 두 번 뜬다. 사본은 적요1이 잘렸을 때 관리자 화면에서 되짚기 위한 것이라
+      // 저장에는 남기고 기사 화면에서만 감춘다.
+      driverMemo: memoSplit.stripDriverMemoCopy(current.memo_driver_chat),
       originContact: current.origin_contact || '',
       destinationContact: current.destination_contact || '',
       tasks: extras,
