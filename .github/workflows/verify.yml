@@ -29,7 +29,8 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 배포 확인이 최대 10분을 기다리므로(설치·검사·빌드 뒤에 시작한다) 15분으로는 모자란다.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
 
@@ -65,3 +66,26 @@ jobs:
       # 컴파일한다. 실제로 이 스크립트가 플래그 없이 그 JSX 사고를 잡았다.
       - name: Next 빌드
         run: node scripts/check-next-build.js
+
+      # 이 커밋이 정말 프로덕션에 올라갔는지 확인한다.
+      #
+      # 배포를 **막는 것이 아니다.** 막는 것으로는 그 사고를 못 잡는다 — JSX 오류로 빌드가
+      # 실패했을 때 이미 배포가 안 됐고, 실패한 배포는 alias를 못 받으니 이전 배포가 그대로
+      # 서비스됐다. 깨진 코드가 나간 게 아니라 프로덕션이 옛 코드에 멈춘 것이고, 저장소만
+      # 보면 다 끝난 것처럼 보였다. 빠져 있던 것은 "안 올라갔다"를 알아채는 수단이다.
+      #
+      # 검사가 실패해도 이건 돈다. 우리 검사가 깨진 것과 배포가 안 된 것은 별개이고,
+      # 둘이 겹칠 때 오히려 배포 상태를 알아야 한다.
+      #
+      # always()가 아니라 !cancelled()다 — always()는 **취소된 실행에서도** 돈다. 위의
+      # cancel-in-progress로 앞선 푸시가 취소될 때마다 이 단계가 남아 10분을 기다리게 된다.
+      # 그 커밋의 배포는 이미 무의미하다.
+      #
+      # Vercel 토큰이 필요 없다 — Vercel GitHub 앱이 배포 상태를 GitHub deployments API에
+      # 올려주므로 기본 GITHUB_TOKEN으로 읽는다.
+      - name: 배포 확인
+        if: ${{ !cancelled() }}
+        run: node scripts/check-deployment.js
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOY_WAIT_MS: '600000'
