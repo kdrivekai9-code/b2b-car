@@ -42,24 +42,66 @@ function computeRetryDelayMs(attempt, meta, baseMs, maxMs) {
   return expBackoff;
 }
 
+// 자동화는 QA 전용 계정만 쓴다.
+//
+// 예전 기본값은 admin / seoul_manager / seoulmotors였다 — 사람이 실제로 쓰는 계정이다.
+// 로그인은 단일 세션이라 이 게이트가 돌면 **그 계정을 쓰던 사람이 로그아웃된다.** 2026-08-25에
+// 같은 일이 실제로 났고(접속기록에 admin LOGIN_BLOCKED 5건), 그때 tests/e2e-credentials.js는
+// 기본값을 qa_test_bot으로 바꿔 고쳤다. 이 게이트만 옛 기본값에 남아 있었다.
+//
+// 이 값이 중요한 이유가 하나 더 있다: 이 게이트를 푸시마다 돌리려면 낮에도 돌아야 하고,
+// 낮에 실사용 계정으로 로그인하면 작업 중인 사람을 계속 튕겨낸다. 계정을 QA로 옮기는 것이
+// 그 전제조건이다.
 function getAccountsFromEnv() {
   return [
     {
       label: 'admin',
-      loginId: process.env.LOGIN_ID_ADMIN || 'admin',
+      loginId: process.env.LOGIN_ID_ADMIN || 'qa_test_bot',
       password: process.env.LOGIN_PASSWORD_ADMIN || '',
     },
     {
       label: 'branch_manager',
-      loginId: process.env.LOGIN_ID_BRANCH_MANAGER || 'seoul_manager',
+      loginId: process.env.LOGIN_ID_BRANCH_MANAGER || 'qa_test_branch_manager',
       password: process.env.LOGIN_PASSWORD_BRANCH_MANAGER || '',
     },
     {
       label: 'client',
-      loginId: process.env.LOGIN_ID_CLIENT || 'seoulmotors',
+      loginId: process.env.LOGIN_ID_CLIENT || 'qa_test_client',
       password: process.env.LOGIN_PASSWORD_CLIENT || '',
     },
   ];
+}
+
+// 한 번이라도 시도하기 전에 막는다.
+//
+// 비밀번호가 비어 있으면 그대로 로그인을 시도해 LOGIN_FAILURE가 쌓인다. 2026-08-25에 그렇게
+// qa_test_bot에 실패 18건이 쌓이고 이어서 LOGIN_RATE_LIMITED 78건이 찍혀 정상 계정까지
+// 잠겼다. 값이 없으면 조용히 틀린 값을 쓰는 대신 **즉시 멈추는 것**이 맞다.
+//
+// 계정 이름도 본다. QA 계정만 쓴다는 것이 주석에만 적혀 있으면 다음에 누가 워크플로에서
+// 다시 admin을 넣는다 — 실제로 그렇게 됐다. 일부러 실계정으로 확인해야 하는 경우
+// (workflow_dispatch로 프로덕션 로그인을 점검할 때)는 ALLOW_NON_QA_LOGIN=1로 넘긴다.
+function assertSafeAccounts(accounts) {
+  const problems = [];
+  const allowNonQa = String(process.env.ALLOW_NON_QA_LOGIN || '') === '1';
+
+  for (const a of accounts) {
+    if (!a.password) {
+      problems.push(`${a.label}: 비밀번호가 없습니다(LOGIN_PASSWORD_${a.label.toUpperCase()}).`
+        + ' 빈 값으로 시도하면 로그인 실패가 쌓여 계정이 잠깁니다.');
+    }
+    if (!allowNonQa && !/^qa_/.test(a.loginId)) {
+      problems.push(`${a.label}: '${a.loginId}'는 QA 전용 계정이 아닙니다.`
+        + ' 로그인은 단일 세션이라 이 계정을 쓰던 사람이 로그아웃됩니다.'
+        + ` QA 계정을 LOGIN_ID_${a.label.toUpperCase()}로 지정하거나,`
+        + ' 일부러 실계정을 점검하려면 ALLOW_NON_QA_LOGIN=1을 주세요.');
+    }
+  }
+
+  if (!problems.length) return;
+  console.error('로그인 게이트를 시작하지 않았습니다 — 계정 설정을 먼저 고쳐주세요.\n');
+  problems.forEach((p) => console.error(`  · ${p}`));
+  process.exit(1);
 }
 
 async function checkOne(baseUrl, account, options) {
@@ -215,6 +257,7 @@ function writeSummaryIfNeeded(report, summaryPath) {
 async function main() {
   const baseUrl = (process.env.LOGIN_BASE_URL || DEFAULT_BASE_URL).replace(/\/$/, '');
   const accounts = getAccountsFromEnv();
+  assertSafeAccounts(accounts);
   const reportPath = process.env.PREFLIGHT_REPORT_PATH || '';
   const summaryPath = process.env.PREFLIGHT_SUMMARY_PATH || '';
   const retryOn429 = String(process.env.PREFLIGHT_RETRY_ON_429 || 'true') !== 'false';

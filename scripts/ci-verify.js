@@ -114,6 +114,7 @@ const scriptDir = path.join(ROOT, 'scripts');
 // 쓰면 또 같은 실수를 한다.
 const CI_CHECKS = [
   'check-address-candidates',
+  'check-automation-accounts',
   'check-address-spacing-geocode',
   'check-agent-request',
   'check-agent-idle-release',

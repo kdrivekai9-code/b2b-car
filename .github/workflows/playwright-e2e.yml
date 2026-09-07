@@ -19,18 +19,21 @@ on:
         description: 'Preflight/E2E 대상 URL'
         required: false
         default: 'http://127.0.0.1:3000'
+      # 수동 실행에서도 QA 계정이 미리 채워져야 한다. 「Run workflow」를 눌렀을 때 admin이
+      # 들어가 있으면, 아무것도 안 바꾸고 실행한 사람이 실사용 계정을 로그아웃시킨다.
+      # 일부러 실계정을 점검하려면 여기 직접 적고 ALLOW_NON_QA_LOGIN=1을 함께 줘야 한다.
       login_id_admin:
-        description: '관리자 로그인 ID'
+        description: '관리자 로그인 ID (QA 전용 계정)'
         required: false
-        default: 'admin'
+        default: 'qa_test_bot'
       login_id_branch_manager:
-        description: '지사장 로그인 ID'
+        description: '지사장 로그인 ID (QA 전용 계정)'
         required: false
-        default: 'seoul_manager'
+        default: 'qa_test_branch_manager'
       login_id_client:
-        description: '고객사 로그인 ID'
+        description: '고객사 로그인 ID (QA 전용 계정)'
         required: false
-        default: 'seoulmotors'
+        default: 'qa_test_client'
       login_password_admin:
         description: '관리자 비밀번호(선택: 미입력 시 secret 우선)'
         required: false
@@ -62,12 +65,21 @@ jobs:
       PLAYWRIGHT_BROWSERS_PATH: .playwright-browsers
       E2E_BASE_URL: http://127.0.0.1:3000
       LOGIN_BASE_URL: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.base_url || 'http://127.0.0.1:3000' }}
-      LOGIN_ID_ADMIN: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_id_admin || 'admin' }}
-      LOGIN_ID_BRANCH_MANAGER: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_id_branch_manager || 'seoul_manager' }}
-      LOGIN_ID_CLIENT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_id_client || 'seoulmotors' }}
-      LOGIN_PASSWORD_ADMIN: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_password_admin != '' && github.event.inputs.login_password_admin || secrets.LOGIN_PASSWORD_ADMIN != '' && secrets.LOGIN_PASSWORD_ADMIN || 'Admin!2345' }}
-      LOGIN_PASSWORD_BRANCH_MANAGER: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_password_branch_manager != '' && github.event.inputs.login_password_branch_manager || secrets.LOGIN_PASSWORD_BRANCH_MANAGER != '' && secrets.LOGIN_PASSWORD_BRANCH_MANAGER || 'Manager!2345' }}
-      LOGIN_PASSWORD_CLIENT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_password_client != '' && github.event.inputs.login_password_client || secrets.LOGIN_PASSWORD_CLIENT != '' && secrets.LOGIN_PASSWORD_CLIENT || 'Client!2345' }}
+      # 자동화는 QA 전용 계정만 쓴다. 예전 기본값(admin / seoul_manager / seoulmotors)은
+      # 사람이 실제로 쓰는 계정이고, 로그인은 단일 세션이라 이 잡이 돌면 그 계정을 쓰던 사람이
+      # 로그아웃된다 — 2026-08-25에 실제로 났다(접속기록에 admin LOGIN_BLOCKED 5건).
+      #
+      # 푸시마다 돌리려면 낮에도 돌아야 하고, 낮에 실사용 계정으로 로그인하면 작업 중인 사람을
+      # 계속 튕겨낸다. 계정을 옮기는 것이 그 전제조건이다.
+      #
+      # 비밀번호 폴백('Admin!2345' 같은 값)도 없앴다. 시크릿이 없으면 조용히 틀린 값으로 로그인을
+      # 반복해 계정이 로그인 제한에 걸린다. 지금은 scripts/check-login-all.js가 시도 전에 멈춘다.
+      LOGIN_ID_ADMIN: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_id_admin || 'qa_test_bot' }}
+      LOGIN_ID_BRANCH_MANAGER: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_id_branch_manager || 'qa_test_branch_manager' }}
+      LOGIN_ID_CLIENT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_id_client || 'qa_test_client' }}
+      LOGIN_PASSWORD_ADMIN: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_password_admin != '' && github.event.inputs.login_password_admin || secrets.LOGIN_PASSWORD_ADMIN != '' && secrets.LOGIN_PASSWORD_ADMIN }}
+      LOGIN_PASSWORD_BRANCH_MANAGER: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_password_branch_manager != '' && github.event.inputs.login_password_branch_manager || secrets.LOGIN_PASSWORD_BRANCH_MANAGER != '' && secrets.LOGIN_PASSWORD_BRANCH_MANAGER }}
+      LOGIN_PASSWORD_CLIENT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_password_client != '' && github.event.inputs.login_password_client || secrets.LOGIN_PASSWORD_CLIENT != '' && secrets.LOGIN_PASSWORD_CLIENT }}
 
     steps:
       - name: Checkout
@@ -205,15 +217,15 @@ jobs:
       TEST_SESSION_CREATE_LIMIT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.test_session_create_limit != '' && github.event.inputs.test_session_create_limit || vars.TEST_SESSION_CREATE_LIMIT != '' && vars.TEST_SESSION_CREATE_LIMIT || '200' }}
       PLAYWRIGHT_BROWSERS_PATH: .playwright-browsers
       E2E_BASE_URL: http://127.0.0.1:3000
-      E2E_LOGIN_ID: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_id_branch_manager || 'seoul_manager' }}
-      E2E_PASSWORD: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_password_branch_manager != '' && github.event.inputs.login_password_branch_manager || secrets.LOGIN_PASSWORD_BRANCH_MANAGER != '' && secrets.LOGIN_PASSWORD_BRANCH_MANAGER || 'Manager!2345' }}
+      E2E_LOGIN_ID: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_id_branch_manager || 'qa_test_branch_manager' }}
+      E2E_PASSWORD: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_password_branch_manager != '' && github.event.inputs.login_password_branch_manager || secrets.LOGIN_PASSWORD_BRANCH_MANAGER != '' && secrets.LOGIN_PASSWORD_BRANCH_MANAGER }}
       LOGIN_BASE_URL: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.base_url || 'http://127.0.0.1:3000' }}
-      LOGIN_ID_ADMIN: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_id_branch_manager || 'seoul_manager' }}
-      LOGIN_ID_BRANCH_MANAGER: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_id_branch_manager || 'seoul_manager' }}
-      LOGIN_ID_CLIENT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_id_client || 'seoulmotors' }}
-      LOGIN_PASSWORD_ADMIN: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_password_branch_manager != '' && github.event.inputs.login_password_branch_manager || secrets.LOGIN_PASSWORD_BRANCH_MANAGER != '' && secrets.LOGIN_PASSWORD_BRANCH_MANAGER || 'Manager!2345' }}
-      LOGIN_PASSWORD_BRANCH_MANAGER: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_password_branch_manager != '' && github.event.inputs.login_password_branch_manager || secrets.LOGIN_PASSWORD_BRANCH_MANAGER != '' && secrets.LOGIN_PASSWORD_BRANCH_MANAGER || 'Manager!2345' }}
-      LOGIN_PASSWORD_CLIENT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_password_client != '' && github.event.inputs.login_password_client || secrets.LOGIN_PASSWORD_CLIENT != '' && secrets.LOGIN_PASSWORD_CLIENT || 'Client!2345' }}
+      LOGIN_ID_ADMIN: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_id_branch_manager || 'qa_test_branch_manager' }}
+      LOGIN_ID_BRANCH_MANAGER: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_id_branch_manager || 'qa_test_branch_manager' }}
+      LOGIN_ID_CLIENT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_id_client || 'qa_test_client' }}
+      LOGIN_PASSWORD_ADMIN: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_password_branch_manager != '' && github.event.inputs.login_password_branch_manager || secrets.LOGIN_PASSWORD_BRANCH_MANAGER != '' && secrets.LOGIN_PASSWORD_BRANCH_MANAGER }}
+      LOGIN_PASSWORD_BRANCH_MANAGER: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_password_branch_manager != '' && github.event.inputs.login_password_branch_manager || secrets.LOGIN_PASSWORD_BRANCH_MANAGER != '' && secrets.LOGIN_PASSWORD_BRANCH_MANAGER }}
+      LOGIN_PASSWORD_CLIENT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.login_password_client != '' && github.event.inputs.login_password_client || secrets.LOGIN_PASSWORD_CLIENT != '' && secrets.LOGIN_PASSWORD_CLIENT }}
 
     steps:
       - name: Checkout

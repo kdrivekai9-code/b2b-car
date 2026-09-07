@@ -15,10 +15,10 @@ const db = require('../../db');
 const { IMPORT_BRANDS, EV_KEYWORDS, classifyVehicleModel } = require('../../lib/vehicleClass');
 
 const BASE_URL = process.env.E2E_BASE_URL || 'http://127.0.0.1:3000';
-// 로그인 계정: 실사용 admin으로 로그인하면 단일 세션 강제 때문에 그 계정을 쓰던 사람이
-// 로그아웃된다 — QA 전용 계정을 쓴다. 비밀번호는 .env(E2E_PASSWORD)에서 온다.
-const LOGIN_ID = process.env.E2E_LOGIN_ID || 'qa_test_bot';
-const PASSWORD = process.env.E2E_PASSWORD || '';
+// 계정과 비밀번호는 tests/e2e-credentials.js 하나만 본다. 여기서 직접 읽으면 비밀번호가
+// 없을 때 ''로 그냥 로그인을 시도하게 되고, 그러면 실패가 쌓여 계정이 로그인 제한에
+// 걸린다(2026-08-25에 실제로 났다). 그 모듈은 값이 없으면 즉시 던진다.
+const { LOGIN_ID, PASSWORD } = require('../e2e-credentials');
 
 // 풀은 여기서 닫지 않는다 — workers: 1이라 같은 프로세스의 다음 스펙이 죽는다.
 // 전부 끝난 뒤 한 번 닫는 일은 tests/global-teardown.js가 맡는다.
