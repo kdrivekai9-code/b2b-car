@@ -2236,8 +2236,9 @@
 // 잘리는" 상태가 된다. Next 폼은 그 모듈을 그대로 import한다.
 (function () {
   var MEMO1_MAX_BYTES = 100;
-  var SEPARATOR_BYTES = 3;     // 차량번호와 본문 사이 " / "
-  var ASSUMED_PLATE_BYTES = 11; // 번호판을 모를 때 잡아두는 자리
+  var SEPARATOR_BYTES = 3;      // 차량 표시와 본문 사이 " / "
+  // "토레스 150두8774"가 19Byte다. 번호만 있던 시절의 11Byte로는 차종이 붙는 순간 넘긴다.
+  var ASSUMED_PLATE_BYTES = 20;
 
   var memoEl = document.getElementById('memo_customer');
   var previewEl = document.getElementById('memoBudgetPreview');
@@ -2250,15 +2251,22 @@
 
   function byteLength(s) { return new TextEncoder().encode(String(s || '')).length; }
 
-  function plateValue() {
-    var el = document.getElementById('vehicle_number') || document.querySelector('[name="vehicle_number"]');
+  function fieldValue(name) {
+    var el = document.getElementById(name) || document.querySelector('[name="' + name + '"]');
     return el ? String(el.value || '').trim() : '';
   }
 
+  // 맨 앞에 붙는 것은 번호만이 아니라 **차종·차량번호**다(2026-09-07부터, 저장 시점에 붙는다 —
+  // lib/intakeMemoSplit.js withVehiclePrefix). 번호만 빼서 계산하면 화면은 "들어간다"고 하는데
+  // 실제로는 차종 길이만큼 잘린다.
+  function prefixValue() {
+    return [fieldValue('vehicle_type'), fieldValue('vehicle_number')].filter(Boolean).join(' ');
+  }
+
   function budget() {
-    var plate = plateValue();
-    var plateBytes = plate ? byteLength(plate) : ASSUMED_PLATE_BYTES;
-    return Math.max(20, MEMO1_MAX_BYTES - plateBytes - SEPARATOR_BYTES);
+    var head = prefixValue();
+    var headBytes = head ? byteLength(head) : ASSUMED_PLATE_BYTES;
+    return Math.max(20, MEMO1_MAX_BYTES - headBytes - SEPARATOR_BYTES);
   }
 
   function render() {
@@ -2284,9 +2292,9 @@
   }
 
   memoEl.addEventListener('input', render);
-  // 번호판이 바뀌면 예산도 바뀐다 — 맨 앞에 번호판이 붙기 때문이다.
+  // 차종·번호판이 바뀌면 예산도 바뀐다 — 맨 앞에 그 표시가 붙기 때문이다.
   document.addEventListener('input', function (e) {
-    if (e.target && e.target.name === 'vehicle_number') render();
+    if (e.target && (e.target.name === 'vehicle_number' || e.target.name === 'vehicle_type')) render();
   });
   render();
 })();

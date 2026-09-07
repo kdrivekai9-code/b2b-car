@@ -502,8 +502,14 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
   // 맨 앞에 번호판이 붙기 때문이다(lib/callmaner.js memoWithVehicle).
   // 계산은 서버와 같은 모듈을 쓴다. 화면이 따로 세면 "여기서는 들어간다는데 실제로는
   // 잘리는" 상태가 된다.
+  // 예산에서 빼는 것은 차량번호만이 아니라 **차종까지 포함한 표시** 전체다 — 저장할 때 그
+  // 모양으로 맨 앞에 붙는다(lib/intakeMemoSplit.js withVehiclePrefix). 번호만 넘기면
+  // 화면은 "들어간다"고 하는데 실제로는 차종 길이만큼 잘린다.
   const memoBudget = useMemo(
-    () => memoBudgetLib.describe(state.memo_customer, state.vehicle_number),
+    () => memoBudgetLib.describe(
+      state.memo_customer,
+      [state.vehicle_type, state.vehicle_number].map((v) => String(v || '').trim()).filter(Boolean).join(' ')
+    ),
     [state.memo_customer, state.vehicle_number]
   );
 
@@ -1147,7 +1153,7 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
                 쓰는 사람은 다 갔다고 믿고, 기사는 안 온 줄도 모른다. */}
             <p className="hint" style={{ margin: '0 0 6px' }}>
               콜마너 적요1(기사메모)로 나가며 <b>100Byte까지만</b> 전달됩니다.
-              맨 앞에 차량번호가 붙어 본문에 쓸 수 있는 건 <b>{memoBudget.budget}Byte</b>
+              맨 앞에 차종·차량번호가 붙어 본문에 쓸 수 있는 건 <b>{memoBudget.budget}Byte</b>
               (한글 {Math.floor(memoBudget.budget / 3)}자쯤)입니다.
               더 긴 내용은 아래 <b>기사 챗봇 전달사항</b>에 쓰시면 길이 제한 없이 전달됩니다.
             </p>

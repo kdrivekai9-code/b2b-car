@@ -49,9 +49,15 @@ console.log('\n[화면 두 벌이 같은 규칙을 쓰는가]');
 const sharedJs = read('public/js/order-form.js');
 check('공유 JS 상한이 100', /MEMO1_MAX_BYTES = 100/.test(sharedJs));
 check('공유 JS 구분자가 3', /SEPARATOR_BYTES = 3/.test(sharedJs));
-check('공유 JS 가정 번호판이 11', /ASSUMED_PLATE_BYTES = 11/.test(sharedJs));
+// 맨 앞에 붙는 것이 차량번호에서 **차종·차량번호**로 늘었다(2026-09-07) — "토레스 150두8774"가
+// 19Byte라 20으로 잡는다. 번호만 있던 시절의 11로는 차종이 붙는 순간 예산을 넘긴다.
+check('공유 JS 가정 차량표시가 20', /ASSUMED_PLATE_BYTES = 20/.test(sharedJs));
 check('상수가 lib과 일치',
-  memoBudget.SEPARATOR_BYTES === 3 && memoBudget.ASSUMED_PLATE_BYTES === 11);
+  memoBudget.SEPARATOR_BYTES === 3 && memoBudget.ASSUMED_PLATE_BYTES === 20);
+// 예산에서 빼는 값에 차종이 들어가야 한다. 번호만 보면 화면은 "들어간다"고 하는데 실제로는
+// 차종 길이만큼 잘린다 — 이 검사가 있는 이유가 정확히 그 어긋남이다.
+check('공유 JS가 차종도 뺀다', /vehicle_type/.test(sharedJs), 'prefixValue가 차종을 포함해야 한다');
+check('Next 폼도 차종을 뺀다', /vehicle_type/.test(read('src/app/orders/new/OrderForm.js')));
 const nextForm = read('src/app/orders/new/OrderForm.js');
 check('Next 폼은 lib을 그대로 쓴다', /memoBudgetLib\.describe/.test(nextForm),
   '복제하면 갈린다');

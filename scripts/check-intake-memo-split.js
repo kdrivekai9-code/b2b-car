@@ -55,7 +55,11 @@ async function main() {
     console.log(`      요약: ${r.driverBrief || '(없음)'}  [${B(r.driverBrief)}B / 예산 ${r.budget}B]`);
     for (const w of wantDriver) check(`기사 쪽에 "${w}"가 남는다`, driver.includes(w), `기사: ${driver}`);
     for (const w of wantCompany) check(`업체 쪽으로 "${w}"가 간다`, company.includes(w), `업체: ${company}`);
-    check('요약이 예산 안에 든다', B(r.driverBrief) <= r.budget, `${B(r.driverBrief)}B > ${r.budget}B`);
+    // budget은 **차량 표시를 뺀 나머지** 자리다. driverBrief에는 그 표시가 앞에 붙어 있으므로
+    // (2026-09-07부터 저장값에 붙는다) budget과 직접 비교하면 안 된다 — 봐야 할 것은
+    // 적요1 전체가 100Byte 안에 드는가다. 그게 콜마너가 자르는 기준이다.
+    check('요약 전체가 100Byte 안에 든다',
+      B(r.driverBrief) <= split.MEMO1_MAX_BYTES, `${B(r.driverBrief)}B > ${split.MEMO1_MAX_BYTES}B`);
   }
 
   console.log('\n[옵션은 규칙으로 나눈다 — 모델을 타지 않는다]');

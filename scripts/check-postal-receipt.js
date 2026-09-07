@@ -52,14 +52,18 @@ console.log('\n[기사메모(적요1) 조합]');
 {
   const order = {
     vehicle_number: '335모6328',
-    memo_driver_brief: '경비실 키 전달',
+    vehicle_type: '토레스',
+    // 차량 표시는 저장할 때 붙는다(2026-09-07, lib/intakeMemoSplit.js withVehiclePrefix).
+    // 전송은 저장값을 그대로 보내므로, 여기서는 이미 붙은 모양을 넣는다.
+    memo_driver_brief: '토레스 335모6328 / 경비실 키 전달',
     postal_requested: true,
     receipt_upload_token: 'Ab3xK9pQ',
   };
   const memo = callmaner.memoWithVehicle(order);
   console.log(`      ${memo}`);
   console.log(`      (${B(memo)}byte / 상한 100byte)`);
-  check('차량번호가 맨 앞', memo.startsWith('335모6328'), true);
+  check('차량 표시가 맨 앞', memo.startsWith('토레스 335모6328'), true);
+  check('저장값을 그대로 보낸다', memo, order.memo_driver_brief);
 
   // 업로드 링크는 적요1에서 뺐다(2026-09-07, 사용자 지시). 38Byte짜리 링크가 100Byte 예산의
   // 3분의 1을 넘게 먹는데, 예산 계산은 차량번호만 빼고 있어서(intakeMemoSplit briefBudgetBytes)
@@ -76,7 +80,6 @@ console.log('\n[기사메모(적요1) 조합]');
   // 우편발송 여부와 무관하게 적요1 모양이 같아야 한다.
   const plain = callmaner.memoWithVehicle({ ...order, postal_requested: false });
   check('우편발송 여부와 무관하게 같다', plain, memo);
-  check('적요1 모양', plain, '335모6328 / 경비실 키 전달');
 }
 
 console.log('\n[통보 문구]');

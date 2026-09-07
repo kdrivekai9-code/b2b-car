@@ -16,6 +16,9 @@ require('dotenv').config();
 const db = require('../db');
 const { splitIntakeMemo, byteLength, MEMO1_MAX_BYTES } = require('../lib/intakeMemoSplit');
 const { isPostalRequested, RECEIPT_MEMO_LABEL } = require('../lib/postalReceipt');
+// "등기·우편 이야기가 남아 있나"는 mentionsPostal로 본다 — isPostalRequested는 "발송 요청인가"를
+// 보는 함수라 동사가 없는 요약 문구('출발지 등기')에는 안 걸린다.
+const { mentionsPostal } = require('../lib/intakeMemoSplit');
 
 let failures = 0;
 function check(name, got, want) {
@@ -39,51 +42,51 @@ const MARK = 'zzq등기분류검사';
     check('memoWithVehicle이 링크를 안 붙인다', /receiptMemoLine/.test(cmSrc), false);
 
     const cm = require('../lib/callmaner');
-    const memo1 = cm.memoWithVehicle
-      ? cm.memoWithVehicle({ vehicle_number: PLATE, memo_driver_brief: '차량 인수증 회수 / 출발지로 등기발송', postal_requested: true, receipt_upload_token: 'tok' })
-      : null;
-    if (memo1 !== null) {
-      check('적요1에 업로드 문구가 없다', memo1.includes(RECEIPT_MEMO_LABEL), false);
-      check('차량번호는 맨 앞에 남는다', memo1.startsWith(PLATE), true);
-    } else {
-      console.log('  건너뜀 — memoWithVehicle이 노출돼 있지 않다(위 소스 검사가 대신 본다)');
-    }
+    // 차량 표시는 저장할 때 붙는다(2026-09-07) — 전송은 저장값을 그대로 보낸다.
+    const storedBrief = `토레스 ${PLATE} / 차량 인수증 회수 / 출발지로 등기발송`;
+    const memo1 = cm.memoWithVehicle({
+      vehicle_number: PLATE, vehicle_type: '토레스', memo_driver_brief: storedBrief,
+      postal_requested: true, receipt_upload_token: 'tok',
+    });
+    check('적요1에 업로드 문구가 없다', memo1.includes(RECEIPT_MEMO_LABEL), false);
+    check('차량 표시가 맨 앞에 남는다', memo1.startsWith(`토레스 ${PLATE}`), true);
+    check('저장값을 그대로 보낸다', memo1, storedBrief);
 
     console.log('[분류 — 우편발송은 기사 쪽]');
     // LLM을 태우지 않고 "업체로 잘못 보낸" 상황을 만들어 규칙이 되돌리는지 본다.
     const wrong = await splitIntakeMemo({ memo: MEMO, options: {} }, {
-      plate: PLATE,
+      plate: PLATE, vehicleType: '토레스',
       classify: async () => ({
         driver: '회수서류 : 인수증',
         company: '판매 탁송 신청합니다. / 출발지 주소로 우편발송',
         driverBrief: '회수서류: 인수증',
       }),
     });
-    check('기사 쪽으로 되돌린다', isPostalRequested(wrong.driver), true);
+    check('기사 쪽으로 되돌린다', mentionsPostal(wrong.driver), true);
     // 양쪽에 두면 상담원이 "누가 하는 일인지"를 다시 묻는다.
-    check('업체 쪽에서 뗀다', isPostalRequested(wrong.company), false);
+    check('업체 쪽에서 뗀다', mentionsPostal(wrong.company), false);
     check('업체 쪽 나머지는 남는다', wrong.company, '판매 탁송 신청합니다.');
     // 적요1이 기사 앱에 보이는 유일한 칸이라, 요약에서 빠지면 기사는 못 본다.
-    check('요약에도 남긴다', isPostalRequested(wrong.driverBrief), true);
+    check('요약에도 남긴다', mentionsPostal(wrong.driverBrief), true);
 
     // LLM이 제대로 나눈 경우에도 요약에서 빠지지 않아야 한다(고치기 전에는 빠졌다).
     const right = await splitIntakeMemo({ memo: MEMO, options: {} }, {
-      plate: PLATE,
+      plate: PLATE, vehicleType: '토레스',
       classify: async () => ({
         driver: '회수서류 : 차량 인수증과 성능점검기록부에 고객 서명 받은 후 회수 및 출발지 주소로 우편발송',
         company: '판매 탁송 신청합니다.',
         driverBrief: '회수서류: 인수증, 성능점검기록부 서명',
       }),
     });
-    check('제대로 나뉜 경우에도 요약에 남는다', isPostalRequested(right.driverBrief), true);
-    // 요약은 예산 안이어야 한다. 넘치면 콜마너 쪽에서 잘려 뒤쪽이 사라진다.
-    check('요약이 예산 안', byteLength(right.driverBrief) <= right.budget, true);
-    const finalMemo1 = `${PLATE} / ${right.driverBrief}`;
-    check('적요1 전체가 100Byte 안', byteLength(finalMemo1) <= MEMO1_MAX_BYTES, true);
+    check('제대로 나뉜 경우에도 요약에 남는다', mentionsPostal(right.driverBrief), true);
+    // 요약에는 차량 표시가 이미 붙어 있고 그 값이 그대로 적요1이 된다 — 100Byte 기준으로 본다.
+    // budget은 차량 표시를 뺀 나머지 자리라 직접 비교하면 안 된다.
+    check('요약이 100Byte 안', byteLength(right.driverBrief) <= MEMO1_MAX_BYTES, true);
+    check('요약 맨 앞이 차량 표시', right.driverBrief.startsWith(`토레스 ${PLATE}`), true);
 
     // 우편발송 요청이 아닌 건에는 아무것도 덧붙이지 않는다.
     const plain = await splitIntakeMemo({ memo: '차키는 경비실에 맡겨주세요', options: {} }, {
-      plate: PLATE,
+      plate: PLATE, vehicleType: '토레스',
       classify: async () => ({ driver: '차키는 경비실에 맡겨주세요', company: '', driverBrief: '차키 경비실' }),
     });
     check('등기 요청이 아니면 안 붙인다', /우편|등기/.test(String(plain.driver)), false);

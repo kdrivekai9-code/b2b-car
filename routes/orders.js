@@ -105,9 +105,15 @@ async function getCurrentOperatingMomentFromDb() {
 //
 // 나누는 규칙은 카카오 접수가 이미 쓰고 있는 것을 그대로 쓴다(lib/intakeMemoSplit.js) —
 // 실사용으로 검증된 분류를 채널마다 다시 만들 이유가 없다.
-async function splitClientMemo(orderId, memo, plate) {
+async function splitClientMemo(orderId, memo, plate, vehicleType) {
   const { splitIntakeMemo } = require('../lib/intakeMemoSplit');
-  const split = await splitIntakeMemo({ memo: String(memo || ''), options: {} }, { plate: plate || null })
+  // 차종·차량번호를 함께 넘긴다 — 나눈 결과를 저장할 때 그 값이 기사 전달사항 맨 앞에
+  // 다시 붙어야 한다(withVehiclePrefix). 안 넘기면 이 재분류가 오더 생성 때 붙여둔 표시를
+  // 덮어써서 지운다 — 콜마너 적요1이 차량번호를 전달하는 유일한 통로라 그러면 기사가 못 본다.
+  const split = await splitIntakeMemo(
+    { memo: String(memo || ''), options: {} },
+    { plate: plate || null, vehicleType: vehicleType || null }
+  )
     .catch((e) => {
       console.error('고객 요청사항 분류 실패(원문을 그대로 둔다):', e.message);
       return null;
@@ -1478,7 +1484,7 @@ router.post('/', asyncHandler(async (req, res) => {
     // 남아 지금까지와 같은 상태이고, 그게 접수가 실패하는 것보다 낫다.
     if (u.role === 'client' && String(memo_customer || '').trim()) {
       runAfterResponse(
-        splitClientMemo(newId, memo_customer, vehicle_number),
+        splitClientMemo(newId, memo_customer, splitVehicle.vehicleNumber, splitVehicle.vehicleType),
         '고객 요청사항 분류'
       );
     }
@@ -2081,7 +2087,10 @@ router.post('/:id', asyncHandler(async (req, res) => {
   // 적요1 요약은 여기서만 갱신된다. 안 하면 처음 접수 때 나눈 값이 그대로 남아, 고친 내용이
   // 기사에게도 정산에도 안 간다.
   if (asClient && String(memo_customer || '').trim() && (memo_customer || null) !== order.memo_customer) {
-    runAfterResponse(splitClientMemo(req.params.id, memo_customer, vehicle_number), '고객 요청사항 재분류');
+    runAfterResponse(
+    splitClientMemo(req.params.id, memo_customer, splitVehicle.vehicleNumber, splitVehicle.vehicleType),
+    '고객 요청사항 재분류'
+  );
   }
 
   broadcastOrderListChangedAsync();
