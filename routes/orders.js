@@ -183,6 +183,22 @@ const CALLMANER_TRIGGER_STATUSES = ['접수', '대기'];
 // 없는 숫자가 매일 떠 있게 되고, 그러면 아무도 안 본다. 사유가 남은 것만 센다.
 const SEND_FAILED_SQL = 'o.callmaner_conf_slip IS NULL AND o.callmaner_last_error IS NOT NULL';
 
+// 도착지 인도시간 기준으로 접수한 건의 "원래 요청 시각".
+//
+// reserved_date/time에는 픽업 시각이 들어간다(아래 effectiveReservedDate) — 콜마너가 예약시각을
+// 출발 기준으로 받기 때문이다. 그러면 고객이 말한 "18시 30분 도착"이 어디에도 안 남아서,
+// 상세 화면에도 수정 화면에도 되살릴 근거가 없다. 그 값을 따로 담는다.
+//
+// 판단 기준은 기준 라디오(reservation_basis) 하나다. 픽업 필드가 채워졌는지로 가르면 안 된다 —
+// '즉시'와 '출발지 픽업' 기준에서도 그 필드는 채워지므로(public/js/order-form.js
+// setPickupHiddenFields) 전부 인도시각으로 잘못 기록된다.
+function deliveryReservedFrom(body) {
+  if (String(body.reservation_basis || '').trim() !== 'delivery') return { date: null, time: null };
+  const date = String(body.reserved_date || '').trim();
+  const time = String(body.reserved_time || '').trim();
+  return { date: date || null, time: time || null };
+}
+
 async function buildOrdersListData(scope, query, role) {
   const { branch_id, status, from, to, q } = query;
   // 고객에게는 이 필터도 배지도 주지 않는다 — 우리 연동 사정이라 고객이 할 수 있는 게 없고,
@@ -1389,6 +1405,25 @@ router.post('/', asyncHandler(async (req, res) => {
     createdRows.push(created);
   }
 
+  // 도착지 인도시간 기준이면 고객이 말한 인도 시각을 따로 남긴다(위 deliveryReservedFrom 주석).
+  //
+  // INSERT에 끼우지 않고 따로 쓰는 이유는 lib/orderCreate.js의 postal_requested·memo_driver_brief와
+  // 같다 — 마이그레이션 전이면 그 칸이 없는데, INSERT에 넣으면 오더 등록 자체가 실패한다.
+  //
+  // 나뉜 건에는 **마지막 구간에만** 붙인다. 인도 시각은 최종 도착지에 닿는 시각이라, 앞 구간에
+  // 붙이면 그 구간을 그 시각까지 끝내야 하는 것으로 읽힌다.
+  const deliveryReserved = deliveryReservedFrom(req.body);
+  if (deliveryReserved.date && deliveryReserved.time && createdRows.length) {
+    const last = createdRows[createdRows.length - 1];
+    await db.run(
+      'UPDATE orders SET delivery_reserved_date = ?, delivery_reserved_time = ? WHERE id = ?',
+      [deliveryReserved.date, deliveryReserved.time, last.orderId || last.id]
+    ).catch((e) => {
+      if (e && e.code === '42703') return; // 마이그레이션 20260907010000 전 — 조용히 넘어간다
+      console.error('도착지 인도시각 저장 실패(오더 등록은 완료):', e.message);
+    });
+  }
+
   // 이후 처리(콜마너 접수·자동승격·응답)는 첫 건을 기준으로 이어간다. 나뉜 나머지 건은
   // 아래에서 따로 콜마너에 올린다.
   const created = createdRows[0];
@@ -1919,6 +1954,22 @@ router.post('/:id', asyncHandler(async (req, res) => {
     req.body.destination_sido || null, req.body.destination_sigugun || null, req.body.destination_dong || null,
     req.params.id,
   ]);
+
+  // 도착지 인도시각도 함께 맞춘다. 위 UPDATE에 끼우지 않는 이유는 마이그레이션 전이면 그 칸이
+  // 없어서 오더 수정 전체가 실패하기 때문이다(등록 쪽과 같은 이유).
+  //
+  // 기준을 '출발지 픽업'으로 되돌린 수정이면 값을 지운다 — 남겨두면 화면에 없는 인도시각이
+  // 계속 붙어 다니고, 고객이 기준을 바꾼 사실이 반영되지 않는다.
+  {
+    const d = deliveryReservedFrom(req.body);
+    await db.run(
+      'UPDATE orders SET delivery_reserved_date = ?, delivery_reserved_time = ? WHERE id = ?',
+      [d.date, d.time, req.params.id]
+    ).catch((e) => {
+      if (e && e.code === '42703') return; // 마이그레이션 20260907010000 전
+      console.error('도착지 인도시각 저장 실패(오더 수정은 완료):', e.message);
+    });
+  }
 
   // 기사 전달사항을 사람이 고쳤으면 접수 때 만들어둔 요약은 그 내용이 아니다. 비워서 콜마너가
   // 새 원문을 잘라 쓰게 한다(lib/callmaner.js memoWithVehicle) — 옛 요약을 그대로 두면 기사
@@ -2693,3 +2744,6 @@ module.exports = router;
 module.exports.updateOrderWithCallmaner = updateOrderWithCallmaner;
 // 도우미 사전 실행 여부 판단 — 순수함수라 검사에서 직접 부른다(scripts/check-mcp-speculative.js).
 module.exports.shouldProbeDispatch = shouldProbeDispatch;
+// 검사에서 쓴다(scripts/check-delivery-reservation.js) — 기준 판정이 어긋나면 픽업 시각이
+// 인도 시각으로 기록되고, 그 값이 화면과 기사메모에 그대로 나간다.
+module.exports.deliveryReservedFrom = deliveryReservedFrom;

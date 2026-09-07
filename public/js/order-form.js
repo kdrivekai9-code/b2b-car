@@ -78,7 +78,13 @@
   var routeDurationFormulaHeader = document.getElementById('routeDurationFormulaHeader');
   var memoCustomerInput = form ? form.querySelector('textarea[name="memo_customer"]') : null;
   var currentRouteDurationSec = null;
-  var DELIVERY_RESERVATION_MEMO_PREFIX = '일시:';
+  // 기사메모에 붙이는 도착 요청 시각 한 줄.
+  //
+  // 문구를 '일시:'에서 '도착지 인도시간 :'으로 바꿨다. 기사가 읽는 칸인데 "일시"는 무슨 일시인지
+  // 알 수 없었다 — 픽업 시각으로 읽으면 두 시간쯤 일찍 도착해 기다리거나, 반대로 늦는다.
+  // 옛 문구로 저장된 오더가 있으므로 지울 때는 둘 다 걷어낸다(안 그러면 수정할 때마다 한 줄씩 쌓인다).
+  var DELIVERY_RESERVATION_MEMO_PREFIX = '도착지 인도시간 :';
+  var DELIVERY_RESERVATION_MEMO_PREFIXES = ['도착지 인도시간 :', '도착지 인도시간:', '일시:'];
 
   function isDeliveryReservationBasis() {
     return !!(reservationBasisDelivery && reservationBasisDelivery.checked);
@@ -116,9 +122,18 @@
     return new Date(roundedMs);
   }
 
+  // 날짜는 **픽업 날짜와 다를 때만** 붙인다.
+  //
+  // 같은 날이면 날짜가 군더더기라 정작 시각이 눈에 안 들어온다. 다른 날이면 반드시 있어야 한다 —
+  // 밤에 출발해 다음날 아침 인도하는 건에서 날짜가 없으면 기사는 당일 인도로 읽는다.
+  // 픽업 날짜를 모르면(경로 미확정) 붙여둔다 — 없어서 틀리는 쪽이 있어서 군더더기인 쪽보다 나쁘다.
   function formatDeliveryReservationMemoDateTime(dt) {
     if (!dt || isNaN(dt.getTime())) return '';
-    return pad2(dt.getMonth() + 1) + '/' + pad2(dt.getDate()) + ' ' + pad2(dt.getHours()) + '시' + pad2(dt.getMinutes()) + '분 도착요망';
+    var time = pad2(dt.getHours()) + '시 ' + pad2(dt.getMinutes()) + '분';
+    var pickupDate = pickupReservedDateInput ? String(pickupReservedDateInput.value || '') : '';
+    var sameDay = pickupDate === (dt.getFullYear() + '-' + pad2(dt.getMonth() + 1) + '-' + pad2(dt.getDate()));
+    if (sameDay) return time;
+    return pad2(dt.getMonth() + 1) + '/' + pad2(dt.getDate()) + ' ' + time;
   }
 
   function syncDeliveryReservationMemo() {
@@ -126,13 +141,15 @@
     var hasMemo = String(memoCustomerInput.value || '').trim().length > 0;
     var rawLines = hasMemo ? String(memoCustomerInput.value).split(/\r?\n/) : [];
     var keptLines = rawLines.filter(function (line) {
-      return String(line || '').trim().indexOf(DELIVERY_RESERVATION_MEMO_PREFIX) !== 0;
+      var t = String(line || '').trim();
+      return !DELIVERY_RESERVATION_MEMO_PREFIXES.some(function (p) { return t.indexOf(p) === 0; });
     });
 
     if (isDeliveryReservationBasis()) {
       var deliveryDateTime = parseVisibleReservedDateTime();
       var memoDateTime = formatDeliveryReservationMemoDateTime(deliveryDateTime);
       if (memoDateTime) keptLines.push(DELIVERY_RESERVATION_MEMO_PREFIX + ' ' + memoDateTime);
+      // 이 줄은 기사에게 가는 지시다 — 픽업 시각이 아니라 도착 시각이라는 것이 문구로 드러나야 한다.
     }
 
     memoCustomerInput.value = keptLines.join('\n').replace(/^\n+|\n+$/g, '');

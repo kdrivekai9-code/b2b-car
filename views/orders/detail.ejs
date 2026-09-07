@@ -65,7 +65,15 @@
         </p>
       </div>
     <% } %>
-    <div class="kv"><span class="k">예약일시</span><span><%= order.reserved_date %> <%= order.reserved_time %></span></div>
+    <%# 예약일시는 **픽업 시각**이다. 도착지 인도시간 기준으로 접수한 건은 그 값이 경로
+        소요시간을 역산해 나온 값이라, 고객이 실제로 말한 시각("18시 30분 도착")과 다르다.
+        그 오더에만 원래 요청 시각을 옆에 붙인다 — 고객이 다시 물었을 때 대조할 값이다. %>
+    <div class="kv"><span class="k">예약일시</span><span>
+      <%= order.reserved_date %> <%= order.reserved_time %>
+      <% if (order.delivery_reserved_date && order.delivery_reserved_time) { %>
+        <span class="badge gray" title="고객이 요청한 도착지 인도 시각. 예약일시는 여기서 경로 소요시간을 역산한 출발지 픽업 시각입니다.">도착지 인도 <%= order.delivery_reserved_time %><% if (order.delivery_reserved_date !== order.reserved_date) { %> (<%= order.delivery_reserved_date %>)<% } %></span>
+      <% } %>
+    </span></div>
     <div class="kv"><span class="k">결제방식</span><span><%= order.payment_method_name || '-' %></span></div>
     <div class="kv"><span class="k">요금</span><span><%= formatMoney(order.fare_amount) %></span></div>
     <div class="kv"><span class="k">도선료</span><span><%= formatMoney(order.ferry_fare_amount || 0) %></span></div>

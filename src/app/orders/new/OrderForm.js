@@ -919,7 +919,21 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
           <div className="route-stop order-schedule-stop">
           <div className="route-stop-title"><span className="route-marker">운행일정</span></div>
           <div className="field full">
-            <label>예약일시 <span className="required-mark" aria-hidden="true">*</span></label>
+            {/* 예약일시 칸에 들어가는 값은 **픽업 시각**이다. 도착지 인도시간 기준으로 접수한
+                건은 그게 경로 소요시간을 역산해 나온 값이라, 고객이 말한 시각과 다르다.
+                그 오더에만 원래 요청 시각을 라벨 옆에 붙인다 — 고객이 다시 물었을 때 대조할
+                값이다. 기준 라디오는 건드리지 않는다: 라디오를 delivery로 되돌리면 화면의
+                시각(픽업)을 인도시각으로 보고 소요시간을 한 번 더 빼버린다. */}
+            <label>
+              예약일시 <span className="required-mark" aria-hidden="true">*</span>
+              {order.delivery_reserved_date && order.delivery_reserved_time && (
+                <span className="badge gray" style={{ marginLeft: 8, fontWeight: 400 }}
+                  title="고객이 요청한 도착지 인도 시각입니다. 예약일시는 여기서 경로 소요시간을 역산한 출발지 픽업 시각입니다.">
+                  도착지 인도 {order.delivery_reserved_time}
+                  {order.delivery_reserved_date !== order.reserved_date ? ` (${order.delivery_reserved_date})` : ''}
+                </span>
+              )}
+            </label>
             <div className="inline-duo" style={{ marginBottom: 8, alignItems: 'center' }}>
               <label className="checkline">
                 <input type="radio" name="reservation_basis" checked={state.reservation_basis === 'immediate'}
