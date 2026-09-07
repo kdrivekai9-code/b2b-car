@@ -60,15 +60,23 @@ console.log('\n[기사메모(적요1) 조합]');
   console.log(`      ${memo}`);
   console.log(`      (${B(memo)}byte / 상한 100byte)`);
   check('차량번호가 맨 앞', memo.startsWith('335모6328'), true);
-  // 링크가 잘리면 아예 못 누른다 — 기사 전달사항보다 앞에 둔다.
-  check('링크가 기사 전달사항보다 앞', memo.indexOf('/r/Ab3xK9pQ') < memo.indexOf('경비실'), true);
-  check('"영수증 업로드" 표기', memo.includes('영수증 업로드'), true);
-  check('100byte를 넘지 않는다', B(callmaner.truncateBytes(memo, 100)) <= 100, true);
-  check('잘라도 링크가 살아남는다', callmaner.truncateBytes(memo, 100).includes('/r/Ab3xK9pQ'), true);
 
-  // 우편발송 건이 아니면 예전 그대로 — 다른 오더의 기사 전달사항을 축내면 안 된다.
+  // 업로드 링크는 적요1에서 뺐다(2026-09-07, 사용자 지시). 38Byte짜리 링크가 100Byte 예산의
+  // 3분의 1을 넘게 먹는데, 예산 계산은 차량번호만 빼고 있어서(intakeMemoSplit briefBudgetBytes)
+  // "들어간다"고 판단한 뒤 실제로는 잘렸다 — 정작 기사가 봐야 할 서류·키 위치가 사라지는 쪽이다.
+  // 링크는 길이 제한이 없는 기사 챗봇 전달사항(memo_driver_chat)에 남고, 기사 화면의
+  // "해주실 일" 목록도 같은 링크를 버튼으로 띄운다(routes/driverChat.js buildDriverTasks).
+  // 그 경로는 scripts/check-postal-memo-routing.js가 본다.
+  check('적요1에 링크가 없다', memo.includes('/r/Ab3xK9pQ'), false);
+  check('적요1에 업로드 표기가 없다', memo.includes('영수증 업로드'), false);
+  check('100byte를 넘지 않는다', B(callmaner.truncateBytes(memo, 100)) <= 100, true);
+  // 링크가 빠진 만큼 기사 전달사항이 그대로 실린다 — 이게 링크를 뺀 이유다.
+  check('기사 전달사항이 그대로 실린다', memo.includes('경비실 키 전달'), true);
+
+  // 우편발송 여부와 무관하게 적요1 모양이 같아야 한다.
   const plain = callmaner.memoWithVehicle({ ...order, postal_requested: false });
-  check('우편발송이 아니면 링크 없음', plain, '335모6328 / 경비실 키 전달');
+  check('우편발송 여부와 무관하게 같다', plain, memo);
+  check('적요1 모양', plain, '335모6328 / 경비실 키 전달');
 }
 
 console.log('\n[통보 문구]');
