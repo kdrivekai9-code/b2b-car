@@ -1,0 +1,59 @@
+# 배포 전 검사 — main 푸시마다.
+#
+# 왜 필요한가: main에 푸시하면 Vercel이 GitHub 연동으로 곧바로 빌드·배포한다. PR을 안 거치니
+# 기존 Playwright 워크플로(playwright-e2e.yml)는 pull_request 트리거라 한 번도 돌지 않고,
+# scripts/check-*.js 97개도 사람이 손으로 돌리는 것뿐이었다.
+#
+# 그 구멍으로 실제 사고가 났다: JSX 오류 하나가 Vercel 배포를 통째로 막았는데 Express는
+# 로컬에서 멀쩡했고 검사도 다 통과해서 안 보였다. 프로덕션 크론이 302를 돌려주는 것을 보고서야
+# 알았다.
+#
+# 이 워크플로는 **배포를 막지 못한다** — Vercel은 GitHub 앱이 직접 트리거하므로 이 잡의 결과를
+# 기다리지 않는다. 그래도 값어치가 있다: 깨진 채로 나갔다는 사실을 몇 분 안에 알려준다.
+# 지금은 프로덕션에서 이상을 발견하기 전까지 알 방법이 아예 없다.
+#
+# 정말로 막으려면 Vercel의 자동 배포를 끄고 이 잡이 통과한 뒤 CLI로 배포해야 한다. 그건 배포
+# 흐름을 바꾸는 일이라 따로 정할 문제다.
+name: Verify
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# 같은 브랜치에 연달아 푸시하면 앞의 것은 의미가 없다 — 취소해서 큐를 비운다.
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 의존성 설치
+        run: npm ci
+
+      # 문법 + EJS 템플릿 + 결정적인 검사 40개. 외부 서비스에 붙지 않으므로 시크릿이 필요 없다
+      # (scripts/ci-verify.js의 주석 참고 — DB·모델을 쓰는 검사는 일부러 뺐다. CI가 매 푸시마다
+      # 운영 DB를 읽고 쓰게 되고, 외부 장애가 우리 배포 판단을 막게 된다).
+      - name: 검사
+        run: node scripts/ci-verify.js
+
+      # JSX는 node --check가 못 읽는다. 배포를 막았던 그 오류를 잡는 유일한 단계라 반드시 돈다.
+      #
+      # 기존 스크립트를 그대로 쓴다 — CI와 로컬이 같은 명령을 쓰고, 실패 로그에서 원인 줄만
+      # 추리는 처리가 이미 그 안에 있다(next build 로그는 길다).
+      #
+      # NEXT_* 플래그는 주지 않는다. 그 값들은 src/proxy.js가 **요청 시점에** 보고 Next로
+      # 보낼지 Express로 보낼지 가르는 것이고, 빌드는 플래그와 무관하게 src/app/** 전부를
+      # 컴파일한다. 실제로 이 스크립트가 플래그 없이 그 JSX 사고를 잡았다.
+      - name: Next 빌드
+        run: node scripts/check-next-build.js
