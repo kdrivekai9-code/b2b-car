@@ -20,6 +20,7 @@ function dispatchAgentLib() {
 const { buildFareSuggestion } = require('../lib/agentAssist');
 const memoExtraCosts = require('../lib/memoExtraCosts');
 const postalReceipt = require('../lib/postalReceipt');
+const reservationSanity = require('../lib/reservationSanity');
 // 인사·자기소개 응답은 카카오 상담톡(routes/kakaoConsult.js)과 같은 규칙을 써야 해서 공용 모듈로 뺐다.
 const { isGreeting, getSmalltalkMessage } = require('../lib/smallTalk');
 const { broadcastMessage, broadcastSessionListChanged, broadcastOrderListChanged, openOrderListStream, closeChannel } = require('../lib/realtimeChat');
@@ -303,6 +304,10 @@ async function buildOrdersListData(scope, query, role) {
       // 고객에게는 사유 원문도 주지 않는다(콜마너 내부 메시지가 그대로 들어 있다).
       send_failed: isAdminView && !o.callmaner_conf_slip && !!o.callmaner_last_error,
       callmaner_last_error: isAdminView ? o.callmaner_last_error : null,
+      // 예약일이 상식 밖인 건(연도 오타 등). 목록에는 멀쩡히 보이니 접수된 줄 알지만
+      // "오늘·내일 예약 콜"에는 안 잡히고 그 날짜가 올 때까지 아무도 모른다.
+      // 고객에게도 보여준다 — 자기가 잘못 고른 날짜이고, 빨리 알수록 고치기 쉽다.
+      date_odd: reservationSanity.describe(o.reserved_date),
     })),
     branches, ORDER_STATUSES, statusSummary,
     filters: {

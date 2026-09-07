@@ -7,6 +7,9 @@ import RouteCalculator from './RouteCalculator';
 import OrderSidePanel from '../[id]/OrderSidePanel';
 import ExtraCostSection from './ExtraCostSection';
 import MemoReanalyzeButton from './MemoReanalyzeButton';
+// 예약일 상식 검사 — 서버와 같은 모듈을 쓴다(lib/reservationSanity.js).
+// 화면이 따로 재면 "여기서는 통과하는데 서버는 경고하는" 상태가 된다.
+import reservationSanity from '../../../../lib/reservationSanity';
 // 적요1 100Byte 예산 계산 — 서버와 같은 모듈을 쓴다(lib/memoBudget.js).
 // 화면이 따로 세면 "여기서는 들어간다는데 실제로는 잘리는" 상태가 된다.
 import memoBudgetLib from '../../../../lib/memoBudget';
@@ -615,6 +618,15 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
     const reservedTime = `${state.reservedTimeHour}:${state.reservedTimeMinute}`;
     const pickupDate = state.reservation_basis === 'delivery' ? state.pickup_reserved_date : reservedDate;
     const pickupTime = state.reservation_basis === 'delivery' ? state.pickup_reserved_time : reservedTime;
+
+    // 예약일이 상식 밖이면 한 번 되묻는다. 막지는 않는다 — 몇 달 뒤 출고 예정 차량을 미리
+    // 잡는 일이 실제로 있고, 그 판단을 우리가 대신할 수는 없다.
+    //
+    // 실측: 연도를 잘못 골라 2027-09-08로 접수된 건이 콜마너까지 그대로 등록됐다. 목록에는
+    // 멀쩡히 보이니 접수된 줄 알지만 "오늘·내일 예약 콜"에는 안 잡히고, 그 날짜가 올 때까지
+    // 아무도 모른다.
+    const sanity = reservationSanity.describe(reservedDate);
+    if (sanity && !window.confirm(`${sanity}\n\n이대로 접수할까요?`)) return;
 
     // 좌표/행정구역이 아직 비어 있으면(챗봇이 주소를 밀어넣은 직후 바로 등록을 누른 경우 등)
     // 제출 직전에 마지막으로 한 번 더 채운다 — 콜마너 오더접수는 이 값이 없으면 아예 호출도

@@ -489,6 +489,11 @@ export default function OrderListTable({ orders, filters, statusSummary, current
                         <span className="send-failed-mark" aria-label="전송 실패"
                           title={`배차 시스템 전송 실패: ${o.callmaner_last_error || '사유 미상'}`}>?</span>
                       )}
+                      {/* 예약일이 상식 밖인 건 — 목록에는 멀쩡히 보이니 접수된 줄 알지만
+                          조회에는 안 잡힌다. views/orders/list.ejs에도 같은 표시가 있다. */}
+                      {o.date_odd && (
+                        <span className="date-odd-mark" aria-label="예약일 확인" title={o.date_odd}>!</span>
+                      )}
                       <a href={`/orders/${o.id}`}>{value}</a>
                       {o.split_group_id && Number(o.split_total) > 1 && (
                         <span className="split-mark" title={`분리접수 ${o.split_seq}/${o.split_total}건`}>{o.split_seq}/{o.split_total}</span>
