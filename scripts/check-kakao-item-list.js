@@ -58,6 +58,26 @@ check('첫 말풍선은 안내 문장', [multi[0].rows.length, multi[0].body], [
 check('접수번호도 표의 첫 행', multi[1].rows[0], { title: '접수번호', description: 'OID2075(182353721)' });
 // 한 줄에 두 항목이 붙어 오면 쪼갠다("상태: 운행시작, 요금: 0원") — 안 쪼개면 표가 어긋난다.
 check('한 줄 두 항목을 쪼갠다', multi[1].rows.map((r) => r.title), ['접수번호', '예약시간', '상태', '요금']);
+// 금액의 천단위 콤마에서 쪼개지면 안 된다. 그냥 콤마로 자르면 "요금: 10,000원"이
+// ["요금: 10","000원"]이 되어 쪼개기가 실패하고 "상태" 한 칸에 요금까지 들어간다(실측).
+const money = k.splitForItemList('머리말\n접수번호 X1\n상태: 대기, 요금: 1,234,567원');
+check('천단위 콤마를 지킨다', money[money.length - 1].rows.map((r) => `${r.title}=${r.description}`),
+  ['접수번호=X1', '상태=대기', '요금=1,234,567원']);
+// 콤마가 있어도 뒤에 라벨이 없으면 한 항목이다("메모: 커피, 담배").
+const memo = k.splitForItemList('머리말\n접수번호 X1\n메모: 커피, 담배 사다주세요');
+check('라벨 없는 콤마는 안 쪼갠다',
+  memo[memo.length - 1].rows.some((r) => r.description === '커피, 담배 사다주세요'), true);
+
+// 오더가 여럿일 때 모든 오더가 같은 행 수를 갖는다 — 하나만 행이 빠지면 값이 밀린 것이다.
+const four = k.splitForItemList(['총 4건입니다.'].concat(
+  Array.from({ length: 4 }, (_, i) => [
+    `접수번호 OID${2000 + i}(1800${i})`,
+    `예약시간: 2026-09-0${i + 1} 10:00`,
+    `상태: 대기, 요금: ${(i + 1) * 10},000원`,
+  ].join('\n'))
+).join('\n'));
+check('오더 넷 = 말풍선 다섯(안내 포함)', four.length, 5);
+check('모든 오더가 같은 행 수', four.slice(1).map((b) => b.rows.length), [4, 4, 4, 4]);
 // 라벨 붙은 긴 줄(주소)은 그 오더 값이라 같은 말풍선 본문에 남는다.
 check('긴 주소는 그 말풍선 본문에', multi[1].body.includes('KGM인증중고차'), true);
 // 라벨 없는 문장은 다음 오더의 머리말이다 — 앞 말풍선에 섞이면 안 된다.
@@ -85,9 +105,11 @@ check('항목 하나는 평문', k.splitForItemList('안내\n상태: 완료'), n
 check('라벨이 없으면 평문', k.splitForItemList('접수하겠습니다.\n· 2026-09-20 18:30\n· 토레스'), null);
 check('빈 글도 안전', k.splitForItemList(''), null);
 // 말풍선이 너무 많으면(오더 다섯 건 초과) 표로 나누지 않는다 — 알림이 도배된다.
-const manyOrders = Array.from({ length: 6 }, (_, i) =>
-  `접수번호 OID${i}\n예약시간: 2026-09-0${i + 1} 10:00\n상태: 대기`).join('\n');
-check('말풍선 다섯 개 초과는 평문', k.splitForItemList(manyOrders), null);
+// 오더 다섯 건부터는 평문이다(안내 + 다섯 = 말풍선 여섯). 말풍선이 그보다 많으면 카카오톡이
+// 도배되고, 한 번에 보내는 요청도 커진다 — 그때는 지금처럼 평문 한 통이 읽기 낫다.
+const fiveOrders = ['총 5건입니다.'].concat(Array.from({ length: 5 }, (_, i) =>
+  `접수번호 OID${i}\n예약시간: 2026-09-0${i + 1} 10:00\n상태: 대기, 요금: 0원`)).join('\n');
+check('오더 다섯 건은 평문', k.splitForItemList(fiveOrders), null);
 // 한 오더의 항목이 열 개를 넘으면 그 오더는 표로 만들지 않는다(정의서 최대 10개).
 const manyRows = ['접수번호 OID1'].concat(Array.from({ length: 11 }, (_, i) => `항목${i}: 값${i}`)).join('\n');
 const over = k.splitForItemList(manyRows);
