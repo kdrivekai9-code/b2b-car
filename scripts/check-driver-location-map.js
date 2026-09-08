@@ -59,7 +59,7 @@ check('Next가 두 섹션을 한 줄에 둔다', /className="detail-pair"/.test(
 check('EJS 순서 — 위치가 먼저',
   ejs.indexOf('기사님 위치</h2>') < ejs.indexOf('기사 업로드 사진</h2>'), true);
 check('Next 순서 — 위치가 먼저',
-  page.indexOf('<DriverLocationMap') < page.indexOf('기사 업로드 사진'), true);
+  page.indexOf('<DriverLocationMap orderId') < page.indexOf('<h2>📷 기사 업로드 사진</h2>'), true);
 // 격자(.detail-grid) 안에 두면 왼쪽 칸이 화면 절반이라 좌우로 못 서고 위아래로 접힌다.
 check('EJS는 격자 밖에 둔다', ejs.indexOf('class="detail-pair"') > ejs.lastIndexOf('class="detail-grid"'), true);
 // 한쪽만 있을 때 남은 하나가 전체 폭을 쓰려면 grid가 아니라 flex여야 한다.
@@ -74,8 +74,13 @@ check('Next 지도 높이 420', /ref=\{boxRef\}[\s\S]{0,90}height: 420/.test(nex
 console.log('\n[기사 위치는 사진 권한과 무관하다]');
 // 예전에는 위치 블록이 canViewPhotos 안에 중첩돼 있어, 사진 열람이 막힌 고객은 지도도 못 봤다.
 // 주석에는 "고객도 본다"고 적혀 있었는데 실제로는 아니었다.
-const pairBlock = ejs.slice(ejs.indexOf('class="detail-pair"'), ejs.indexOf('기사 업로드 사진</h2>'));
-check('위치는 상태만 보고 그린다', /showDriverLoc/.test(pairBlock) && !/canViewPhotos/.test(pairBlock), true);
+// 위치 칸이 열리는 조건과, 그 칸에 이르는 길에 사진 권한 검사가 끼어 있지 않은지를 본다.
+const toMap = ejs.slice(ejs.indexOf('class="detail-pair"'), ejs.indexOf('id="driverLocMap"'));
+check('위치 칸은 상태로만 열린다', /<% if \(showDriverLoc\) \{ %>/.test(toMap), true);
+check('가는 길에 사진 권한 검사가 없다', /canViewPhotos/.test(toMap), false);
+// 사진 칸은 여전히 권한을 본다(청구·증빙 사진이라 권한이 있어야 한다).
+check('사진 칸은 권한을 본다',
+  /<% if \(canViewPhotos\) \{ %>[\s\S]{0,200}기사 업로드 사진/.test(ejs), true);
 
 console.log('\n[로컬 dev에서 화면이 굳지 않게]');
 // Next dev는 자기가 뜬 호스트가 아닌 오리진의 /_next/* 요청을 403으로 막는다. 127.0.0.1로
