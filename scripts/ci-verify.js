@@ -130,6 +130,7 @@ const CI_CHECKS = [
   'check-dispatch-lookup-tool',
   'check-env-example-flags',
   'check-driver-chat',
+  'check-driver-contact-in-answer',
   'check-driver-location-map',
   'check-driver-location-source',
   'check-driver-trip-steps',
