@@ -22,6 +22,11 @@ const snapshot = require('./notifySnapshot');
 
 const MARK = 'e2e-web-notify-check';
 
+// 오늘(KST). 굳은 날짜를 쓰면 그날이 지나는 순간 검사가 무너진다.
+function todayKst() {
+  return new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+}
+
 let failed = 0;
 function check(label, actual, expected) {
   const ok = JSON.stringify(actual) === JSON.stringify(expected);
@@ -75,7 +80,13 @@ async function main() {
       [
         `${MARK}-oid`, branch.id, created.sessionId, MARK,
         '서울 강서구 양천로53길 30', '3층', '경기 성남시 분당구 판교역로 160', 'B동 로비',
-        '2026-08-20', '14:00',
+        // 예약일을 굳은 날짜로 두면 안 된다.
+        //
+        // '2026-08-20'이 박혀 있었는데, 그날이 지나자 이 검사가 영구히 실패했다 — 통보 쪽에
+        // "예약일에서 며칠 넘게 지나 감지된 것은 뒤늦은 것으로 본다"는 규칙이 있어서
+        // (lib/kakaoOrderNotify.js isBackfilled), 검사가 만드는 오더가 매일 조금씩 더
+        // 과거가 되다가 그 문턱을 넘었다. 빨간 검사는 진짜 회귀를 가린다.
+        todayKst(), '14:00',
       ]
     );
     created.orderId = order.id;
@@ -156,7 +167,7 @@ async function main() {
         `INSERT INTO orders (oid, branch_id, status, chat_session_id, order_type, memo_customer,
                              origin_address, destination_address, reserved_date, reserved_time)
          VALUES (?, ?, '기사배정', ?, 'dispatch', ?, ?, ?, ?, ?) RETURNING id`,
-        [`${MARK}-oid3`, branch.id, created.sessionId, MARK, '대전', '대구', '2026-08-22', '10:00']
+        [`${MARK}-oid3`, branch.id, created.sessionId, MARK, '대전', '대구', todayKst(), '10:00']
       );
       created.orderId3 = busyOrder.id;
       await transition(created.orderId3, '기사배정', '완료');
@@ -209,7 +220,7 @@ async function main() {
         `INSERT INTO orders (oid, branch_id, status, chat_session_id, order_type, memo_customer,
                              origin_address, destination_address, reserved_date, reserved_time)
          VALUES (?, ?, '기사배정', ?, 'dispatch', ?, ?, ?, ?, ?) RETURNING id`,
-        [`${MARK}-oid5`, branch.id, created.sessionId, MARK, '울산', '창원', '2026-08-24', '13:00']
+        [`${MARK}-oid5`, branch.id, created.sessionId, MARK, '울산', '창원', todayKst(), '13:00']
       );
       created.orderId5 = photoOrder.id;
       // 일부러 MAX_NOTIFY_PHOTOS(5)보다 많이 넣는다 — 웹은 썸네일을 5장에서 자르므로,
@@ -258,7 +269,7 @@ async function main() {
         `INSERT INTO orders (oid, branch_id, status, chat_session_id, order_type, memo_customer,
                              origin_address, destination_address, reserved_date, reserved_time)
          VALUES (?, ?, '접수', ?, 'dispatch', ?, ?, ?, ?, ?) RETURNING id`,
-        [`${MARK}-oid4`, branch.id, created.sessionId, MARK, '광주', '전주', '2026-08-23', '11:00']
+        [`${MARK}-oid4`, branch.id, created.sessionId, MARK, '광주', '전주', todayKst(), '11:00']
       );
       created.orderId4 = urgentOrder.id;
       // 봇이 질문을 던져놓고 답을 기다리는 상태를 만든다(위 운행완료는 이 상태에서 미뤄졌다).
@@ -294,7 +305,7 @@ async function main() {
       `INSERT INTO orders (oid, branch_id, status, chat_session_id, order_type, memo_customer,
                            origin_address, destination_address, reserved_date, reserved_time)
        VALUES (?, ?, '접수', ?, 'dispatch', ?, ?, ?, ?, ?) RETURNING id`,
-      [`${MARK}-oid2`, branch.id, created.sessionId, MARK, '서울', '부산', '2026-08-21', '09:00']
+      [`${MARK}-oid2`, branch.id, created.sessionId, MARK, '서울', '부산', todayKst(), '09:00']
     );
     created.orderId2 = order2.id;
     await transition(created.orderId2, '접수', '기사배정');
