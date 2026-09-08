@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import ChatHistoryMenu from './ChatHistoryMenu';
 import { renderChatText } from './formatChatText';
 
 const STATUS_LABEL = {
@@ -1312,6 +1313,9 @@ export default function AiIntakeClient({
   return (
     <div className="card ai-chat-card" style={{ height: 'auto', minHeight: 520 }}>
       <div className="ai-chat-header">
+        {/* 햄버거 메뉴(새 채팅 / 검색 / 최근 항목) — EJS에만 있던 것을 이식했다. 배지가
+            가리키는 세션으로 갈 길이 없으면 배지가 오히려 답답하다(ChatHistoryMenu 주석). */}
+        <ChatHistoryMenu sessionId={sessionId} />
         <span className="ai-chat-title">
           🤖 AI 챗봇 + 👤 상담원 채팅 (Next)
           {unreadTotal > 0 && (

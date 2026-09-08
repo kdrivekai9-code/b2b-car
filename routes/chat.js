@@ -417,6 +417,17 @@ async function notifyWaitingSessions() {
 //
 // 반드시 아래 '/:sessionId/...' 와일드카드보다 먼저 등록해야 한다. 순서가 바뀌면
 // 'unread.json'이 세션 id로 해석된다(이 파일 agent-presence 주석과 같은 함정).
+// 배지에서 셈에 넣지 않는 시스템 메시지.
+//
+// "N분 동안 대화가 없어 봇 응대로 돌아갔습니다"는 새 소식이 아니라 봇이 응대를 되받았다는
+// 상태 표시다. 배지를 보고 들어가면 볼 것이 없다 — 실측으로 전체 system 메시지 중 13건이
+// 이것이고, 통보(16건)와 맞먹는 양이라 그냥 두면 배지의 절반이 헛걸음이 된다.
+//
+// 문구로 가른다. 이 메시지는 sender만으로는 구분할 수 없고(전부 'system'), 종류를 담는 칸이
+// 없다. 문구가 바뀌면 이 조건도 같이 고쳐야 하므로 생성하는 곳(routes/chat.js의 유휴 복귀
+// 처리)과 이 상수를 함께 봐야 한다 — check-chat-unread-badge가 둘이 어긋나면 잡는다.
+const UNREAD_SKIP_LIKE = '%대화가 없어 봇 응대로 돌아갔습니다%';
+
 router.get('/unread.json', asyncHandler(async (req, res) => {
   const u = req.session.user;
   if (!u) return res.status(401).json({ error: '로그인이 필요합니다.' });
@@ -426,8 +437,9 @@ router.get('/unread.json', asyncHandler(async (req, res) => {
        JOIN chat_sessions s ON s.id = m.session_id
       WHERE s.user_id = ? AND s.user_hidden_at IS NULL
         AND m.sender IN ('system', 'agent') AND m.read_by_user_at IS NULL
+        AND m.message NOT LIKE ?
       GROUP BY 1`,
-    [u.id]
+    [u.id, UNREAD_SKIP_LIKE]
   ).catch((e) => {
     console.error('안읽음 집계 실패(0으로 진행):', e.message);
     return [];

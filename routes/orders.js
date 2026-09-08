@@ -747,8 +747,9 @@ router.get('/ai-intake/sessions', asyncHandler(async (req, res) => {
          FROM chat_messages
         WHERE session_id IN (${placeholders})
           AND sender IN ('system', 'agent') AND read_by_user_at IS NULL
+          AND message NOT LIKE ?
         GROUP BY 1`,
-      ids
+      ids.concat(['%대화가 없어 봇 응대로 돌아갔습니다%'])
     ).catch((e) => {
       console.error('최근 항목 안읽음 집계 실패(0으로 진행):', e.message);
       return [];

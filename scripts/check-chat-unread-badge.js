@@ -49,6 +49,30 @@ check('EJS가 읽은 뒤 배지를 다시 묻는다',
 check('Next도 읽은 뒤 배지를 다시 묻는다',
   /chat-unread-refresh/.test(read('src/app/orders/ai-intake/AiIntakeClient.js')));
 
+console.log('\n[셈에서 빼는 것]');
+// "N분 동안 대화가 없어 봇 응대로 돌아갔습니다"는 새 소식이 아니라 봇이 응대를 되받았다는
+// 상태 표시다. 배지를 보고 들어가면 볼 것이 없다 — 실측 13건으로 통보(16건)와 맞먹어,
+// 그냥 두면 배지의 절반이 헛걸음이 된다.
+const SKIP = /대화가 없어 봇 응대로 돌아갔습니다/;
+check('메뉴·상단이 봇 응대 복귀를 빼고 센다', /message NOT LIKE \?/.test(chatRoutes) && SKIP.test(chatRoutes));
+check('최근 항목도 같이 뺀다', /message NOT LIKE \?/.test(orderRoutes) && SKIP.test(orderRoutes));
+// 문구로 가르는 조건이므로, 만드는 쪽 문구가 바뀌면 여기도 바뀌어야 한다.
+check('제외 문구가 생성하는 쪽과 같다',
+  SKIP.test(chatRoutes) && /분 동안 대화가 없어 봇 응대로 돌아갔습니다/.test(chatRoutes));
+
+console.log('\n[Next에도 최근 항목이 있다]');
+// 배지가 가리키는 세션으로 갈 길이 없으면 배지가 오히려 답답하다.
+const nextMenu = read('src/app/orders/ai-intake/ChatHistoryMenu.js');
+const nextClient = read('src/app/orders/ai-intake/AiIntakeClient.js');
+check('메뉴 컴포넌트가 챗봇 화면에 붙어 있다', /<ChatHistoryMenu sessionId=\{sessionId\}/.test(nextClient));
+check('EJS와 같은 서버 계약을 쓴다', /\/orders\/ai-intake\/sessions\?/.test(nextMenu));
+check('삭제도 같은 경로', /\/orders\/ai-intake\/sessions\/'/.test(nextMenu));
+check('세션별 배지를 그린다', /className="unread-badge"/.test(nextMenu));
+check('공용 CSS 클래스를 그대로 쓴다',
+  /ai-chat-recent-item/.test(nextMenu) && /ai-chat-recent-summary/.test(nextMenu));
+// EJS는 스크롤로 더 불러온다. 한쪽만 버튼을 두면 두 화면의 조작이 달라진다.
+check('EJS처럼 스크롤로 더 불러온다', /scrollHeight - 40/.test(nextMenu));
+
 console.log('\n[세 자리에 붙는다]');
 const badgeJs = read('public/js/chat-unread-badge.js');
 check('메뉴(AI 챗봇) 옆', /a\[href="\/orders\/ai-intake"\]/.test(badgeJs));
