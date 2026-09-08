@@ -144,6 +144,7 @@ const CI_CHECKS = [
   'check-intake-summary',
   'check-intake-expiry-notice',
   'check-intake-restart',
+  'check-kakao-item-list',
   'check-kakao-order-notify',
   'check-kakao-repeat-guard',
   'check-mcp-followup-guard',
