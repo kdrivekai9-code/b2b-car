@@ -17,6 +17,7 @@ const multer = require('multer');
 const receiptOcr = require('../lib/receiptOcr');
 const postalReceipt = require('../lib/postalReceipt');
 const memoSplit = require('../lib/intakeMemoSplit');
+const tripSteps = require('../lib/tripSteps');
 const { ensureBucket, uploadPhoto } = require('../lib/storage');
 const { notify } = require('../lib/push');
 const { logIntegrationErrorAsync } = require('../lib/integrationLog');
@@ -278,6 +279,33 @@ router.get('/chat', requireDriver, (req, res) => {
 // ── 화면이 쓰는 데이터 ───────────────────────────────────────────────────────
 // 오더 목록 + 선택한 오더의 대화. 한 번에 주는 이유는 기사 화면이 목록과 대화를 같이 그리기
 // 때문이다 — 왕복이 늘면 지하주차장에서 그만큼 더 기다린다.
+// 이 오더의 운행 단계 — 사슬(경유지 개수로 정해진다) + 기사가 누른 기록.
+//
+// 표가 아직 없을 수 있다(마이그레이션 수동). 그때는 기록 없이 사슬만 돌려준다 — 기사 화면이
+// 통째로 죽는 것보다 낫고, 화면은 "기록 안 됨"을 버튼을 눌러본 뒤에 알게 된다.
+async function loadTripView(orderId) {
+  const waypoints = await db.get(
+    'SELECT count(*)::int AS c FROM order_waypoints WHERE order_id = ?', [orderId]
+  ).catch(() => ({ c: 0 }));
+  const chain = tripSteps.buildChain(waypoints ? waypoints.c : 0);
+
+  let rows = [];
+  let stored = true;
+  try {
+    rows = await db.all(
+      `SELECT step_key, seq, wait_minutes, occurred_at FROM order_trip_steps
+        WHERE order_id = ? ORDER BY id ASC`, [orderId]
+    );
+  } catch (e) {
+    // 42P01 = 없는 표.
+    if (!(e && (e.code === '42P01' || e.code === '42703'))) throw e;
+    console.error('운행 단계 조회 — 표가 아직 없다:', e.message);
+    stored = false;
+  }
+
+  return { ...tripSteps.decorate(chain, rows, new Date()), stored };
+}
+
 router.get('/chat/data.json', requireDriver, asyncHandler(async (req, res) => {
   const driver = req.session.driver;
   const orders = await loadDriverOrders(driver.sabun);
@@ -289,6 +317,7 @@ router.get('/chat/data.json', requireDriver, asyncHandler(async (req, res) => {
   let messages = [];
   let session = null;
   let extras = [];
+  let trip = null;
   if (current) {
     session = await findOrCreateSession(current.id, driver);
     messages = await db.all(
@@ -298,6 +327,7 @@ router.get('/chat/data.json', requireDriver, asyncHandler(async (req, res) => {
     ).catch(() => []);
     // 이 오더에서 기사가 해야 할 일 — 접수 때 정해진 부대비용과, 요청사항에서 채택된 것.
     extras = await buildDriverTasks(current);
+    trip = await loadTripView(current.id);
   }
 
   res.json({
@@ -331,6 +361,8 @@ router.get('/chat/data.json', requireDriver, asyncHandler(async (req, res) => {
       originContact: current.origin_contact || '',
       destinationContact: current.destination_contact || '',
       tasks: extras,
+      // 운행 단계 — 화면 아래 버튼 줄이 이걸로 그려진다.
+      trip,
     } : null,
     sessionId: session ? session.id : null,
     messages: messages.map((m) => ({
@@ -448,6 +480,89 @@ router.post('/chat/message', requireDriver, asyncHandler(async (req, res) => {
   ).catch(() => {});
 
   res.json({ ok: true, id: inserted.lastInsertRowid });
+}));
+
+// ── 운행 단계 기록 ──────────────────────────────────────────────────────────
+// 기사가 화면 아래 버튼을 누르면 그 시각을 남긴다.
+//
+// 오더 상태(orders.status)는 바꾸지 않는다 — 배차 상태의 주인은 콜마너다(사용자 확정 규칙:
+// 배차·알림톡은 콜마너 그대로). 우리가 '운행시작'으로 바꿔두면 콜마너 동기화가 다시 덮거나,
+// 반대로 우리 값이 콜마너보다 앞서 고객 통보가 두 번 나갈 수 있다.
+//
+// 대신 대화에 한 줄 남긴다. 상담원은 이 화면을 못 보지만 대화는 상담 화면에 그대로 보인다 —
+// "지금 어디예요"를 묻지 않아도 되는 것이 이 기능의 값어치다.
+router.post('/chat/step', requireDriver, asyncHandler(async (req, res) => {
+  const driver = req.session.driver;
+  const orderId = Number(req.body.orderId);
+  const stepKey = String(req.body.stepKey || '').trim();
+  const seq = Number(req.body.seq) || 0;
+  if (!tripSteps.STEP_KEYS.includes(stepKey)) return res.status(400).json({ error: '알 수 없는 단계입니다.' });
+
+  // 이 기사 오더가 맞는지 다시 본다 — 화면이 보낸 값을 그대로 믿으면 남의 오더에 기록이 남는다.
+  const order = await db.get(
+    "SELECT id, oid FROM orders WHERE id = ? AND callmaner_driver_sabun = ? AND status NOT IN ('완료','취소')",
+    [orderId, driver.sabun]
+  ).catch(() => null);
+  if (!order) return res.status(403).json({ error: '이 오더에는 기록할 수 없습니다.' });
+
+  const waypoints = await db.get(
+    'SELECT count(*)::int AS c FROM order_waypoints WHERE order_id = ?', [order.id]
+  ).catch(() => ({ c: 0 }));
+  const chain = tripSteps.buildChain(waypoints ? waypoints.c : 0);
+
+  let rows;
+  try {
+    rows = await db.all(
+      `SELECT step_key, seq, wait_minutes, occurred_at FROM order_trip_steps
+        WHERE order_id = ? ORDER BY id ASC`, [order.id]
+    );
+  } catch (e) {
+    if (!(e && (e.code === '42P01' || e.code === '42703'))) throw e;
+    return res.status(503).json({ error: '운행 단계 기록이 아직 준비되지 않았습니다. 담당자에게 알려주세요.' });
+  }
+
+  // 순서는 서버가 다시 판정한다 — 화면이 오래된 상태로 보내거나 두 화면에서 동시에 누를 수 있다.
+  const allowed = tripSteps.canTake(chain, rows, stepKey, seq);
+  if (!allowed.ok) return res.status(409).json({ error: allowed.error });
+
+  const occurredAt = tripSteps.kstStamp(new Date());
+  // 경유지에서 다시 출발할 때만 대기시간을 계산한다. 대기 시작 기록이 없으면(있을 수 없지만)
+  // 0으로 만들지 않고 비워둔다 — "대기 0분"은 실제로 안 기다린 것과 구분이 안 된다.
+  let waitMinutes = null;
+  if (stepKey === 'waypoint_resume') {
+    const started = rows.find((r) => r.step_key === 'waypoint_wait' && Number(r.seq) === seq);
+    waitMinutes = started ? tripSteps.minutesBetween(started.occurred_at, occurredAt) : null;
+  }
+
+  try {
+    await db.run(
+      `INSERT INTO order_trip_steps (order_id, step_key, seq, wait_minutes, driver_id, occurred_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [order.id, stepKey, seq, waitMinutes, driver.id || null, occurredAt]
+    );
+  } catch (e) {
+    // 유일 인덱스에 걸렸다 = 같은 단계를 두 번 눌렀다(장갑 낀 손, 느린 응답). 오류가 아니다.
+    if (!(e && e.code === '23505')) throw e;
+    console.error('운행 단계 중복 기록 무시:', e.message);
+  }
+
+  // 대화에 남기는 한 줄. 실패해도 기록 자체는 남는다 — 알림이 기록을 막을 이유가 없다.
+  try {
+    const session = await findOrCreateSession(order.id, driver);
+    const waitText = waitMinutes != null ? ` (대기 ${waitMinutes}분)` : '';
+    await db.run(
+      "INSERT INTO chat_messages (session_id, sender, message) VALUES (?, 'system', ?)",
+      [session.id, `[운행] ${allowed.step.label} — ${occurredAt.slice(11, 16)}${waitText}`]
+    );
+    await db.run(
+      `UPDATE chat_sessions SET updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS')
+       WHERE id = ?`, [session.id]
+    ).catch(() => {});
+  } catch (e) {
+    console.error('운행 단계 대화 기록 실패(기록은 남았다):', e.message);
+  }
+
+  res.json({ ok: true, trip: await loadTripView(order.id) });
 }));
 
 // ── 영수증 업로드 ───────────────────────────────────────────────────────────
