@@ -2,7 +2,7 @@
 
 import { useEffect } from 'react';
 
-export default function PushSettingsClient({ currentUser, branches }) {
+export default function PushSettingsClient({ currentUser, branches, eventTypes = [] }) {
   const isAdmin = currentUser && currentUser.role === 'admin';
   const isClient = currentUser && currentUser.role === 'client';
 
@@ -26,10 +26,43 @@ export default function PushSettingsClient({ currentUser, branches }) {
           unsubscribeBtn.style.display = 'none';
           return;
         }
-        const sub = await window.__push.getSubscription();
-        statusEl.textContent = sub ? '✅ 이 브라우저는 알림을 받도록 설정되어 있습니다.' : '이 브라우저는 아직 알림을 받지 않습니다.';
-        subscribeBtn.style.display = sub ? 'none' : '';
+        // 구독 조회가 실패하면(서비스워커 등록 실패·비공개 모드 등) 화면이 "확인 중..."에
+        // 영원히 멎는다 — 고장난 것으로 보인다(EJS 화면도 같은 처리를 한다).
+        let sub = null;
+        try {
+          sub = await window.__push.getSubscription();
+        } catch (e) {
+          statusEl.textContent = '알림 구독 상태를 확인할 수 없습니다. 브라우저 설정에서 알림을 허용했는지 확인해주세요.';
+          return;
+        }
+        // 구독 중에도 이 버튼을 숨기지 않는다. 이름이 "알림 켜기 / 설정 저장"이고, 종류별
+        // 선택을 저장하는 유일한 버튼이다 — 숨기면 골라도 저장할 방법이 없다(예전에는
+        // 구독 중이면 사라져서, 세부 설정을 넣는 순간 저장이 불가능해질 자리였다).
+        subscribeBtn.style.display = '';
         unsubscribeBtn.style.display = sub ? '' : 'none';
+        if (!sub) { statusEl.textContent = '이 브라우저는 아직 알림을 받지 않습니다.'; return; }
+
+        // 저장된 값을 되읽어 체크 상태를 맞춘다. 이게 없으면 화면은 늘 "전부 켜짐"으로 보이고,
+        // 종류를 골라 저장해도 다시 들어오면 전부 켜진 것처럼 나온다 — 저장이 안 된 줄로 읽힌다.
+        let saved = null;
+        try {
+          const res = await fetch(`/push/status?endpoint=${encodeURIComponent(sub.endpoint)}`, { credentials: 'same-origin' });
+          if (res.ok) saved = await res.json();
+        } catch (e) { /* 상태를 못 읽어도 화면은 열려야 한다 */ }
+
+        statusEl.textContent = (saved && saved.effective === false)
+          ? '⚠️ 구독은 있지만 켜진 알림이 없어 실제로는 오지 않습니다.'
+          : '✅ 이 브라우저는 알림을 받도록 설정되어 있습니다.';
+
+        if (saved && saved.sub) {
+          const oe = document.getElementById('notifyOrderEvents');
+          if (oe) oe.checked = Number(saved.sub.notify_order_events) === 1;
+          // event_types가 비어 있으면 전부 켜짐이다(고르지 않았다는 뜻 — routes/push.js 주석).
+          const picked = String(saved.sub.event_types || '').split(',').map((v) => v.trim()).filter(Boolean);
+          document.querySelectorAll('#eventTypeRow .evt').forEach((el) => {
+            el.checked = picked.length === 0 || picked.includes(el.value);
+          });
+        }
       }
       await refreshStatus();
 
@@ -49,6 +82,11 @@ export default function PushSettingsClient({ currentUser, branches }) {
           notify_plate_mismatch: notifyPlateMismatchEl ? notifyPlateMismatchEl.checked : true,
           branch_id: branchScope ? (branchScope.value || null) : null,
         };
+        // 고른 종류를 함께 보낸다(EJS 화면과 같은 규칙) — 이 줄이 없으면 골라도 저장되지 않는다.
+        const evtEls = document.querySelectorAll('#eventTypeRow .evt');
+        if (evtEls.length) {
+          prefs.event_types = Array.prototype.filter.call(evtEls, (el) => el.checked).map((el) => el.value);
+        }
         await window.__push.subscribe(prefs);
         await refreshStatus();
       });
@@ -132,7 +170,7 @@ export default function PushSettingsClient({ currentUser, branches }) {
           {/* 고객에게는 종류가 하나다. 서버는 이 값을 notify_order_events로 읽는다
               (lib/push.js notifyUser). 기사 배정 알림은 지사 범위로 도는 관리자용이라 뺀다. */}
           {isClient ? (
-            <div className="field"><label className="checkline"><input type="checkbox" id="notifyOrderEvents" defaultChecked /> 내 오더 진행 알림 (배차 · 운행시작 · 운행완료 · 취소)</label></div>
+            <div className="field"><label className="checkline"><input type="checkbox" id="notifyOrderEvents" defaultChecked /> <strong>내 오더 진행 알림</strong> (전체 스위치)</label></div>
           ) : (
             <>
               <div className="field"><label className="checkline"><input type="checkbox" id="notifyOrderEvents" defaultChecked /> 오더 등록/수정 알림</label></div>
@@ -150,6 +188,28 @@ export default function PushSettingsClient({ currentUser, branches }) {
             </>
           )}
         </div>
+
+        {/* 종류별 선택(고객). 목록·이름은 통보 모듈이 주인이다 — page.js가 넘긴다.
+            전부 체크한 상태는 "고르지 않음"과 같게 저장한다(NULL) — 종류가 늘어나면 새 종류까지
+            자동으로 받는다. 하나도 안 고르면 위 전체 스위치를 끈 것과 같다.
+            EJS 화면(views/push_settings.ejs)에도 같은 블록이 있다 — 한쪽만 고치면 플래그를
+            되돌렸을 때 세부 설정이 사라진다. */}
+        {isClient && eventTypes.length > 0 && (
+          <>
+            <p className="page-sub" style={{ margin: '2px 0 6px' }}>
+              받고 싶은 종류만 고를 수 있습니다. 전체 스위치를 끄면 아래 선택과 무관하게 오지 않습니다.
+            </p>
+            <div className="row" id="eventTypeRow">
+              {eventTypes.map((t) => (
+                <div className="field" key={t.key}>
+                  <label className="checkline">
+                    <input type="checkbox" className="evt" value={t.key} defaultChecked /> {t.label}
+                  </label>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
 
         {isAdmin && (
           <>

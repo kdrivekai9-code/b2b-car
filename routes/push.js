@@ -2,6 +2,8 @@ const express = require('express');
 const db = require('../db');
 const { requireAuth } = require('../middleware/auth');
 const asyncHandler = require('../middleware/asyncHandler');
+// 통보 종류 목록·이름은 통보 모듈이 주인이다 — 화면에 따로 적으면 종류가 늘 때 갈린다.
+const { EVENT_TYPES, DEFAULT_EVENT_SETTINGS } = require('../lib/kakaoOrderNotify');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -19,7 +21,8 @@ router.get('/settings/data.json', asyncHandler(async (req, res) => {
 
 router.get('/settings', asyncHandler(async (req, res) => {
   const branches = req.session.user.role === 'admin' ? await db.all('SELECT * FROM branches ORDER BY name') : [];
-  res.render('push_settings', { title: '오더 알림 설정', branches });
+  // 고객 화면이 종류별 체크박스를 그린다.
+  res.render('push_settings', { title: '오더 알림 설정', branches, eventTypes: clientEventTypes() });
 }));
 
 // 이 브라우저의 구독 상태.
@@ -36,6 +39,31 @@ router.get('/status', asyncHandler(async (req, res) => {
   res.json({ subscribed: !!sub, effective: isEffective(req.session.user, sub), sub: sub || null });
 }));
 
+// 고객이 고른 통보 종류를 저장 가능한 문자열로 만든다.
+//
+// 화면이 보낸 값을 그대로 믿지 않는다 — 아는 종류(EVENT_TYPES)만 남기고 정해진 순서로 담는다.
+// 오타나 없어진 종류가 칸에 남으면 "왜 안 오지"를 데이터에서 읽을 수 없게 된다.
+//
+// 전부 고른 경우와 아무것도 안 고른 경우는 **모두 NULL**이다:
+//  · 전부 = 고르지 않은 것과 같은 뜻이고, 종류가 늘어났을 때 새 종류까지 자동으로 받는다.
+//  · 아무것도 = 그 상태는 notify_order_events=0(전체 끄기)으로 표현한다. 빈 문자열을 남기면
+//    "전부 켜짐"으로 읽히는 규칙과 부딪친다(lib/push.js wantsEvent).
+function sanitizeEventTypes(raw) {
+  if (raw == null) return null;
+  const list = (Array.isArray(raw) ? raw : String(raw).split(',')).map((v) => String(v).trim());
+  const picked = EVENT_TYPES.filter((t) => list.includes(t));
+  if (!picked.length || picked.length === EVENT_TYPES.length) return null;
+  return picked.join(',');
+}
+
+// 고객이 고를 수 있는 통보 종류와 이름.
+function clientEventTypes() {
+  return EVENT_TYPES.map((key) => ({
+    key,
+    label: (DEFAULT_EVENT_SETTINGS[key] && DEFAULT_EVENT_SETTINGS[key].label) || key,
+  }));
+}
+
 // 이 사용자에게 **실제로 알림이 갈 수 있는가**. 켜진 칸이 하나도 없으면 구독이 있어도 안 온다.
 function isEffective(user, sub) {
   if (!sub) return false;
@@ -47,7 +75,10 @@ function isEffective(user, sub) {
 }
 
 router.post('/subscribe', asyncHandler(async (req, res) => {
-  const { endpoint, keys, notify_order_events, notify_driver_assign, notify_agent_call, notify_system_alert, notify_plate_mismatch, branch_id } = req.body;
+  const {
+    endpoint, keys, notify_order_events, notify_driver_assign, notify_agent_call,
+    notify_system_alert, notify_plate_mismatch, branch_id, event_types,
+  } = req.body;
   if (!endpoint || !keys) return res.status(400).json({ error: 'invalid subscription' });
   // 컬럼과 플레이스홀더 수를 손으로 맞추지 않는다.
   //
@@ -61,6 +92,8 @@ router.post('/subscribe', asyncHandler(async (req, res) => {
     'user_id', 'endpoint', 'p256dh', 'auth', 'branch_id',
     'notify_order_events', 'notify_driver_assign',
     'notify_agent_call', 'notify_system_alert', 'notify_plate_mismatch',
+    // 고객이 고른 통보 종류(쉼표로 이음). NULL이면 전부 — sanitizeEventTypes 주석 참고.
+    'event_types',
   ];
   const assignments = COLUMNS.slice(1).filter((c) => c !== 'endpoint')
     .map((c) => `${c}=excluded.${c}`).join(', ');
@@ -90,6 +123,7 @@ router.post('/subscribe', asyncHandler(async (req, res) => {
     internalOn(notify_agent_call),
     internalOn(notify_system_alert),
     internalOn(notify_plate_mismatch),
+    sanitizeEventTypes(event_types),
   ]);
   res.json({ ok: true });
 }));

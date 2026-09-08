@@ -40,7 +40,9 @@ check('갱신 목록도 같은 배열에서 만든다', /excluded\.\$\{c\}|=excl
 console.log('\n[고객 한 사람에게 보내는 길이 있다]');
 const pushLib = read('lib/push.js');
 check('notifyUser가 있다', /async function notifyUser\(/.test(pushLib));
-check('내보낸다', /module\.exports = \{ notify, notifyUser \}/.test(pushLib));
+// 내보내는 이름이 늘어날 수 있다(2026-09-08에 wantsEvent가 붙었다) — 목록을 통째로 박지 않고
+// notifyUser가 들어 있는지만 본다.
+check('내보낸다', /module\.exports = \{[^}]*\bnotifyUser\b/.test(pushLib));
 // 지사·이벤트 조건은 관리자용이다. 고객은 자기 구독만 봐야 한다.
 check('사용자 구독만 고른다',
   /WHERE user_id = \? AND notify_order_events = 1/.test(pushLib));
@@ -48,7 +50,9 @@ check('사용자 구독만 고른다',
 check('만료된 구독을 지운다',
   /statusCode === 404 \|\| err\.statusCode === 410[\s\S]{0,200}DELETE FROM push_subscriptions/.test(pushLib));
 // 구독자마다 독립적인 외부 요청이다 — 순차로 보내면 기기 수만큼 왕복이 곱해진다.
-check('병렬로 보낸다', /notifyUser[\s\S]{0,1200}Promise\.all\(subs\.map/.test(pushLib));
+// 배열 이름은 바뀔 수 있다(종류별 선택을 걸러낸 뒤 보내므로 지금은 wanted다) — Promise.all로
+// 한꺼번에 보내는지만 본다.
+check('병렬로 보낸다', /async function notifyUser[\s\S]{0,2000}Promise\.all\(\w+\.map/.test(pushLib));
 check('VAPID 미설정이면 조용히 건너뛴다', /notifyUser[\s\S]{0,300}VAPID_PUBLIC_KEY/.test(pushLib));
 
 console.log('\n[통보가 나갈 때 함께 보낸다]');

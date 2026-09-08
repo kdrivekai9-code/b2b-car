@@ -2,6 +2,9 @@ import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import AppShell from '../../_components/AppShell';
 import PushSettingsClient from './PushSettingsClient';
+// 통보 종류 목록·이름은 통보 모듈이 주인이다 — 화면에 따로 적으면 종류가 늘 때 갈린다
+// (EJS 화면도 routes/push.js clientEventTypes로 같은 값을 받는다).
+import { EVENT_TYPES, DEFAULT_EVENT_SETTINGS } from '../../../../lib/kakaoOrderNotify';
 
 export const dynamic = 'force-dynamic';
 export const preferredRegion = 'icn1';
@@ -38,7 +41,7 @@ export default async function PushSettingsPage() {
           )}
         </div>
       </div>
-      <PushSettingsClient currentUser={currentUser} branches={branches} />
+      <PushSettingsClient currentUser={currentUser} branches={branches} eventTypes={EVENT_TYPES.map((key) => ({ key, label: (DEFAULT_EVENT_SETTINGS[key] || {}).label || key }))} />
     </AppShell>
   );
 }

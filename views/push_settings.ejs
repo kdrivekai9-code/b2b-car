@@ -22,7 +22,17 @@
       <%# 고객에게는 종류가 하나다. 서버는 이 값을 notify_order_events로 읽는다
           (lib/push.js notifyUser) — 칸을 새로 만들지 않아 마이그레이션이 필요 없다.
           기사 배정 알림은 지사 범위로 도는 관리자용이라 고객 화면에서 뺀다. %>
-      <div class="field"><label class="checkline"><input type="checkbox" id="notifyOrderEvents" checked> 내 오더 진행 알림 (배차 · 운행시작 · 운행완료 · 취소)</label></div>
+      <div class="field"><label class="checkline"><input type="checkbox" id="notifyOrderEvents" checked> <strong>내 오더 진행 알림</strong> (전체 스위치)</label></div>
+    </div>
+    <%# 종류별 선택. 목록·이름은 통보 모듈이 정한 것을 그대로 받는다(routes/push.js
+        clientEventTypes) — 화면에 따로 적으면 종류가 늘거나 이름이 바뀔 때 둘이 갈린다.
+        전부 체크한 상태는 "고르지 않음"과 같게 저장한다(NULL) — 종류가 늘어나면 새 종류까지
+        자동으로 받는다. 하나도 안 고르면 위 전체 스위치를 끈 것과 같다. %>
+    <p class="page-sub" style="margin:2px 0 6px;">받고 싶은 종류만 고를 수 있습니다. 전체 스위치를 끄면 아래 선택과 무관하게 오지 않습니다.</p>
+    <div class="row" id="eventTypeRow">
+      <% (typeof eventTypes !== 'undefined' ? eventTypes : []).forEach(function (t) { %>
+        <div class="field"><label class="checkline"><input type="checkbox" class="evt" value="<%= t.key %>" checked> <%= t.label %></label></div>
+      <% }) %>
     <% } else { %>
       <div class="field"><label class="checkline"><input type="checkbox" id="notifyOrderEvents" checked> 오더 등록/수정 알림</label></div>
       <div class="field"><label class="checkline"><input type="checkbox" id="notifyDriverAssign" checked> 기사 배정 알림</label></div>
@@ -129,8 +139,38 @@
       statusEl.textContent = '이 브라우저는 푸시 알림을 지원하지 않습니다.';
       return;
     }
-    var sub = await window.__push.getSubscription();
-    statusEl.textContent = sub ? '✅ 이 브라우저는 알림을 받도록 설정되어 있습니다.' : '이 브라우저는 아직 알림을 받지 않습니다.';
+    // 구독 조회가 실패하면(서비스워커 등록 실패·비공개 모드 등) 여기서 예외가 나고, 위에서
+    // 잡지 않으면 화면이 "확인 중..."에 영원히 멎는다 — 고장난 것으로 보인다.
+    var sub = null;
+    try {
+      sub = await window.__push.getSubscription();
+    } catch (e) {
+      statusEl.textContent = '알림 구독 상태를 확인할 수 없습니다. 브라우저 설정에서 알림을 허용했는지 확인해주세요.';
+      return;
+    }
+    if (!sub) { statusEl.textContent = '이 브라우저는 아직 알림을 받지 않습니다.'; return; }
+
+    // 저장된 값을 되읽어 체크 상태를 맞춘다. 이게 없으면 화면은 늘 "전부 켜짐"으로 보이고,
+    // 종류를 골라 저장해도 다시 들어오면 전부 켜진 것처럼 나온다 — 저장이 안 된 줄로 읽힌다.
+    var saved = null;
+    try {
+      var res = await fetch('/push/status?endpoint=' + encodeURIComponent(sub.endpoint), { credentials: 'same-origin' });
+      if (res.ok) saved = await res.json();
+    } catch (e) { /* 상태를 못 읽어도 화면은 열려야 한다 */ }
+
+    statusEl.textContent = (saved && saved.effective === false)
+      ? '⚠️ 구독은 있지만 켜진 알림이 없어 실제로는 오지 않습니다.'
+      : '✅ 이 브라우저는 알림을 받도록 설정되어 있습니다.';
+
+    if (saved && saved.sub) {
+      var oe = document.getElementById('notifyOrderEvents');
+      if (oe) oe.checked = Number(saved.sub.notify_order_events) === 1;
+      // event_types가 비어 있으면 전부 켜짐이다(고르지 않았다는 뜻 — routes/push.js 주석).
+      var picked = String(saved.sub.event_types || '').split(',').map(function (v) { return v.trim(); }).filter(Boolean);
+      document.querySelectorAll('#eventTypeRow .evt').forEach(function (el) {
+        el.checked = picked.length === 0 || picked.indexOf(el.value) >= 0;
+      });
+    }
   }
   await refreshStatus();
 
@@ -150,6 +190,13 @@
     };
     var branchScope = document.getElementById('branchScope');
     if (branchScope) prefs.branch_id = branchScope.value || null;
+    // 고른 종류를 함께 보낸다. 서버가 아는 종류만 남기고, 전부/아무것도는 NULL로 저장한다
+    // (routes/push.js sanitizeEventTypes). 이 줄이 없으면 화면에서 골라도 저장되지 않는다.
+    var evtEls = document.querySelectorAll('#eventTypeRow .evt');
+    if (evtEls.length) {
+      prefs.event_types = Array.prototype.filter.call(evtEls, function (el) { return el.checked; })
+        .map(function (el) { return el.value; });
+    }
     await window.__push.subscribe(prefs);
     await refreshStatus();
   });

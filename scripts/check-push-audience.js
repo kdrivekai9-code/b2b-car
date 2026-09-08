@@ -64,6 +64,45 @@ check('고객 구독에는 지사를 매지 않는다', /isClient \? null : \(br
 check('화면은 그대로여도 된다(서버가 끊는다)',
   /notify_agent_call: notifyAgentCallEl \? notifyAgentCallEl\.checked : true/.test(read('views/push_settings.ejs')), true);
 
+console.log('\n[고객이 종류별로 고를 수 있다]');
+const notifyModule = require('../lib/kakaoOrderNotify');
+const pushLib = require('../lib/push');
+// 고객에게 실제로 가는 알림은 오더 통보 여섯 가지가 전부다(notifyUser는 그 발송 경로에서만
+// 불린다). 화면에 종류를 따로 적지 않고 이 목록을 그대로 받는다 — 종류가 늘면 화면도 늘어난다.
+check('통보 종류가 여섯 가지', notifyModule.EVENT_TYPES.length, 6);
+check('목록·이름을 통보 모듈에서 받는다',
+  /const \{ EVENT_TYPES, DEFAULT_EVENT_SETTINGS \} = require\('\.\.\/lib\/kakaoOrderNotify'\)/.test(routes), true);
+check('Next 화면도 같은 목록을 받는다',
+  /import \{ EVENT_TYPES, DEFAULT_EVENT_SETTINGS \} from/.test(read('src/app/push/settings/page.js')), true);
+
+// 선택 없음(NULL·빈 값)은 전부 켜짐이다 — 이미 있는 구독이 그대로 동작해야 한다.
+check('선택이 없으면 전부 켜짐', pushLib.wantsEvent({ event_types: null }, 'started'), true);
+check('컬럼이 없어도 전부 켜짐', pushLib.wantsEvent({}, 'started'), true);
+check('고른 것만 통과', [pushLib.wantsEvent({ event_types: 'dispatched,started' }, 'started'),
+  pushLib.wantsEvent({ event_types: 'dispatched,completed' }, 'started')], [true, false]);
+// 사건 종류를 안 넘긴 호출부는 예전처럼 전부 보낸다(호환).
+check('종류를 안 넘기면 가리지 않는다', pushLib.wantsEvent({ event_types: 'dispatched' }, undefined), true);
+// 발송 경로가 종류를 실제로 넘겨야 선택이 적용된다.
+check('통보가 종류를 넘긴다', /eventType: notification\.event_type/.test(read('lib/kakaoOrderNotify.js')), true);
+
+// 저장은 아는 종류만 남긴다(오타·없어진 종류가 칸에 남으면 데이터를 읽을 수 없다).
+check('아는 종류만 저장한다', /const picked = EVENT_TYPES\.filter\(\(t\) => list\.includes\(t\)\);/.test(routes), true);
+// 전부·아무것도는 NULL로 — 빈 문자열을 남기면 "전부 켜짐" 규칙과 부딪친다.
+check('전부/아무것도는 NULL', /if \(!picked\.length \|\| picked\.length === EVENT_TYPES\.length\) return null;/.test(routes), true);
+
+console.log('\n[두 화면이 같은 세부 설정을 준다]');
+const ejsView = read('views/push_settings.ejs');
+const nextView = read('src/app/push/settings/PushSettingsClient.js');
+[['EJS', ejsView], ['Next', nextView]].forEach(([label, code]) => {
+  check(`${label} — 종류별 체크박스`, /id="eventTypeRow"|id="eventTypeRow"/.test(code) || /eventTypeRow/.test(code), true);
+  check(`${label} — 고른 값을 보낸다`, /prefs\.event_types = /.test(code), true);
+  // 저장된 값을 되읽지 않으면 화면은 늘 "전부 켜짐"으로 보인다 — 저장이 안 된 줄로 읽힌다.
+  check(`${label} — 저장된 값을 되읽는다`, /saved\.sub\.event_types/.test(code), true);
+  check(`${label} — 켜진 게 없으면 그렇다고 적는다`, /켜진 알림이 없어 실제로는 오지 않습니다/.test(code), true);
+});
+// Next 화면은 구독 중이면 저장 버튼을 숨기고 있었다 — 그러면 세부 선택을 저장할 방법이 없다.
+check('Next 저장 버튼을 숨기지 않는다', /subscribeBtn\.style\.display = '';/.test(nextView), true);
+
 console.log('\n[알림 끄기는 구독을 지운다]');
 // 체크 해제+저장과 다른 동작이다. 끄기는 행을 삭제하므로 어떤 알림도 오지 않는다.
 check('끄기는 DELETE다', /DELETE FROM push_subscriptions WHERE endpoint = \? AND user_id = \?/.test(routes), true);
