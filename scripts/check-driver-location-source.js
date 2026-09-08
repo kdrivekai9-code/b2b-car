@@ -59,6 +59,31 @@ check('출처를 함께 돌려준다', /source: real \? 'callmaner' : \(xy \? 'm
 // TrackingDriver는 시각을 주지 않는다 — 모르면 새것이라고도, 오래됐다고도 하지 않는다.
 check('REST 좌표에는 나이를 붙이지 않는다', /stale: !real &&/.test(src) && /ageMinutes: !real &&/.test(src), true);
 
+console.log('\n[네 갈래가 모두 같은 좌표를 본다]');
+// 같은 질문에 채널마다 다른 답을 하면, 어느 쪽이 맞는지 아무도 모른다.
+const consumers = {
+  '오더상세 API(routes/orders.js)': read('routes/orders.js'),
+  '공개 추적 페이지(routes/driverTracking.js)': read('routes/driverTracking.js'),
+  '고객 통보(lib/kakaoOrderNotify.js)': read('lib/kakaoOrderNotify.js'),
+  '상담 챗봇(lib/mcpDispatchAgent.js)': read('lib/mcpDispatchAgent.js'),
+};
+Object.entries(consumers).forEach(([label, code]) => {
+  check(`${label}가 공용 모듈을 쓴다`, /driverLocation'\)|driverLocationLib\(\)/.test(code) && /loadForOrder\(/.test(code), true);
+});
+// 챗봇이 MCP의 xy를 그대로 역지오코딩하던 자리 — 그 값이 7km 틀린 곳이었다.
+const agent = consumers['상담 챗봇(lib/mcpDispatchAgent.js)'];
+check('챗봇이 우리 오더를 찾아 위치를 묻는다', /const loc = ourOrder \? await driverLocationLib\(\)\.loadForOrder\(ourOrder\)/.test(agent), true);
+check('챗봇도 보간값이면 위치를 말하지 않는다', /\(synthesized \? null : driver\.xy\)/.test(agent), true);
+check('챗봇도 보간값이면 ETA·거리를 버린다',
+  /synthesized \? null : formatEtaMinutes/.test(agent) && /synthesized \? NaN : Number\(driver\.distanceKmToPickup\)/.test(agent), true);
+// MCP 좌표를 쓸 때만 "기준 시각"을 붙인다(REST는 시각을 주지 않는다).
+check('챗봇의 기준 시각은 MCP 좌표에만', /if \(!\(loc && loc\.available\) && driver\.lastFixAt\)/.test(agent), true);
+
+console.log('\n[MCP에는 위치 전용 도구가 없다]');
+// 도구 카탈로그에 위치 도구가 생기면 이 주석과 판단을 다시 봐야 한다. 지금은 없다 —
+// 위치는 call.list.active 응답에 얹혀 오는 보간값뿐이다(실측 2026-09-08, 도구 12개).
+check('위치 도구를 부르지 않는다(없으므로)', /callTool\('(driver|tracking)[^']*'/.test(agent), false);
+
 console.log('\n[옛 설명이 남아 있지 않다]');
 // "위치는 MCP 경로에만 있다"가 남아 있으면 다음 사람이 다시 MCP만 본다.
 check('MCP 전용이라는 설명이 없다', /위치는 \*\*MCP 경로에만 있다/.test(src), false);
