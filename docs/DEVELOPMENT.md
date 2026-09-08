@@ -90,10 +90,13 @@ Express 함수로 디스패치됩니다. 로컬에는 그 동작이 없어 `http
 | `tests/manual/` | Playwright 스펙. 계정은 `tests/e2e-credentials.js` 하나만 본다 |
 | `docs/` | 설계·체크리스트와 **외부 API 스펙**(콜마너·카카오 상담톡). 연동을 건드리기 전에 확인 |
 
-> **프로덕션은 지금 모든 화면이 EJS다**(2026-09-08 확인 — 경로 20개 전수, Next 0개).
-> `NEXT_*` 플래그가 로컬에는 26개 켜져 있지만 프로덕션에는 반영돼 있지 않다. 의도한 것이
-> 아니어서 단계적으로 켜는 중이다. 지금 무엇이 서비스되는지는 `node scripts/check-prod-flags.js`로
-> 확인한다. AI 챗봇 화면은 이식 격차가 남아 보류 중이다 — [ai-intake-next-gap.md](ai-intake-next-gap.md).
+> **프로덕션은 화면 절반 이상이 이미 Next다**(2026-09-08 실측 — 경로 20개 중 Next 11 / EJS 9).
+> 지금 무엇이 서비스되는지는 `node scripts/check-prod-flags.js`로 확인한다.
+> AI 챗봇 화면은 이식 격차가 남아 보류 중이다 — [ai-intake-next-gap.md](ai-intake-next-gap.md).
+>
+> 재는 방법에 함정이 있다. **반드시 GET으로 찍어야 한다** — `src/proxy.js` 첫 줄이 GET이 아닌
+> 요청을 플래그와 무관하게 전부 Express로 보낸다. HEAD로 찍으면 무엇을 켜도 "전부 EJS"로
+> 보이고, 실제로 그 오측으로 잘못된 결론을 내린 적이 있다.
 
 ### db.js 규약
 

@@ -10,8 +10,10 @@
    `/orders/ai-intake`를 먼저 잡고, "ai-intake"는 숫자가 아니므로 무조건 Express로 보냈다.
    맨 아래 `PATH_FLAGS` 검사까지 도달하지 못했다. (커밋 `c3829bd`에서 고쳤고
    `scripts/check-proxy-named-paths.js`가 재발을 막는다.)
-2. **프로덕션은 모든 화면이 EJS다.** 경로 20개를 전수 확인했다 — Next 0개, EJS 20개
-   (`node scripts/check-prod-flags.js`). 의도한 상태가 아니라는 확인을 받았다.
+2. **프로덕션에서 이 화면만 EJS로 남아 있다.** 경로 20개 중 11개는 이미 Next다
+   (`node scripts/check-prod-flags.js`). 처음에 "전부 EJS"라고 적었는데 그건 오측이었다 —
+   그 도구가 HEAD로 찍고 있었고, `src/proxy.js` 첫 줄이 비-GET을 플래그와 무관하게 전부
+   Express로 보낸다. GET으로 다시 재서 고쳤다.
 
 그래서 "Next로 켠다"는 결정에 필요한 것이 이 격차 목록이다.
 
