@@ -151,6 +151,7 @@ const CI_CHECKS = [
   'check-order-list-columns',
   'check-order-split',
   'check-plate-check',
+  'check-proxy-named-paths',
   'check-premium-immediate',
   'check-premium-step-questions',
   'check-receipt-ocr',

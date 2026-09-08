@@ -107,8 +107,19 @@ export function proxy(req) {
   // "new"는 숫자가 아니므로) 무조건 toExpress()로 빠지고, 맨 아래 PATH_FLAGS['/orders/new']
   // 검사(NEXT_STAGE2_ORDER_FORM_ENABLED)까지 도달하지 못한 채 항상 legacy로 가버리는
   // 버그가 있었다(실제로 겪음 — 플래그를 켜도 /orders/new는 계속 legacy로 서빙됐다).
+  //
+  // 'ai-intake'도 같은 이유로 제외한다. 제외하지 않아서 실제로 그 버그가 났다 —
+  // NEXT_STAGE3_AI_INTAKE_ENABLED를 true로 둬도 /orders/ai-intake는 이 블록에서
+  // ("ai-intake"는 숫자가 아니므로) 무조건 toExpress()로 빠졌고, 맨 아래
+  // PATH_FLAGS['/orders/ai-intake'] 검사까지 도달하지 못했다. 즉 그 플래그는 만들어진 뒤로
+  // 한 번도 효과가 없었다(2026-09-08 확인 — :3001로 요청해도 EJS가 응답한다).
+  //
+  // 'new'를 제외할 때 같은 함정을 이미 겪었는데 형제 경로를 함께 보지 않은 것이다. 앞으로
+  // /orders/ 아래 이름 있는 경로를 Next로 옮길 때마다 여기에 더해야 한다 —
+  // scripts/check-proxy-named-paths.js가 PATH_FLAGS와 이 목록을 대조해 잡는다.
+  const ORDERS_NAMED_PATHS = ['new', 'ai-intake'];
   const orderIdMatch = pathname.match(/^\/orders\/([^/]+)$/);
-  if (orderIdMatch && orderIdMatch[1] !== 'new') {
+  if (orderIdMatch && ORDERS_NAMED_PATHS.indexOf(orderIdMatch[1]) < 0) {
     const isNumericId = /^\d+$/.test(orderIdMatch[1]);
     if (isNumericId && process.env.NEXT_ORDER_DETAIL_EDIT_ENABLED === 'true') {
       return NextResponse.next();
