@@ -184,17 +184,22 @@
             <div class="rail-strip">
               <% pairs.forEach(function (p) { %>
                 <% var shot = p[ph[0]]; %>
-                <% if (shot) { %>
-                  <a class="photo-cell" href="<%= shot.url %>" target="_blank" rel="noopener"
-                     data-lightbox="callmaner" data-caption="<%= p.label %> · <%= ph[1] %>">
-                    <img src="<%= shot.url %>" alt="<%= p.label %> <%= ph[1] %>" loading="lazy"
-                         onerror="this.style.display='none'">
-                    <span class="photo-phase"><%= p.seq %></span>
-                  </a>
-                <% } else { %>
-                  <%# 빠진 자리를 남긴다 — 보여야 "안 찍었다"를 알 수 있고, 열도 어긋나지 않는다. %>
-                  <div class="photo-cell empty"><span><%= p.seq %><br>없음</span></div>
-                <% } %>
+                <%# 항목 이름을 사진 위에 적는다. 이름을 모르는 자리는 "3번"으로 나온다 —
+                    모르는 것에 그럴듯한 이름을 붙이면 그 이름이 사고 처리의 근거가 된다
+                    (lib/callmanerPhotos.js PHOTO_LABELS 머리말). %>
+                <div class="photo-item">
+                  <div class="photo-name" title="<%= p.label %>"><%= p.label %></div>
+                  <% if (shot) { %>
+                    <a class="photo-cell" href="<%= shot.url %>" target="_blank" rel="noopener"
+                       data-lightbox="callmaner" data-caption="<%= p.label %> · <%= ph[1] %>">
+                      <img src="<%= shot.url %>" alt="<%= p.label %> <%= ph[1] %>" loading="lazy"
+                           onerror="this.style.display='none'">
+                    </a>
+                  <% } else { %>
+                    <%# 빠진 자리를 남긴다 — 보여야 "안 찍었다"를 알 수 있고, 열도 어긋나지 않는다. %>
+                    <div class="photo-cell empty"><span>없음</span></div>
+                  <% } %>
+                </div>
               <% }) %>
             </div>
           </div>

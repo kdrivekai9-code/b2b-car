@@ -20,9 +20,22 @@ const read = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
 console.log('[항목 이름]');
 // 확인된 자리만 이름을 붙인다. 모르는 자리에 그럴듯한 이름을 넣으면 "운전석 휠"이라고 적힌
 // 자리에 뒷범퍼 사진이 뜨고, 사고 처리에서 그 이름을 근거로 다투게 된다.
+//
+// 이름은 2026-09-08에 실제 사진 두 오더(OID1455·OID2075)를 눈으로 대조해 채웠다.
+// 그때 2번의 기존 이름('운전석 휠')이 **틀린 것**으로 드러났다 — 2번은 차량 앞 사선 전경이다.
 check('1번은 전면', photos.photoLabel(1) === '1. 전면');
+check('7번은 후면', photos.photoLabel(7) === '7. 후면', photos.photoLabel(7));
 check('13번은 계기판', photos.photoLabel(13) === '13. 계기판');
-check('모르는 자리는 번호만', photos.photoLabel(7) === '7번', photos.photoLabel(7));
+// 2번은 휠이 아니다. 이 검사가 그 오해를 다시 들이지 않게 막는다.
+check('2번은 휠이 아니다', !/휠/.test(photos.photoLabel(2)), photos.photoLabel(2));
+// 휠은 네 자리(5·6·11·12)뿐이다.
+check('휠은 네 자리', [5, 6, 11, 12].every((n) => /휠/.test(photos.photoLabel(n)))
+  && [1, 2, 3, 4, 7, 8, 9, 10, 13].every((n) => !/휠/.test(photos.photoLabel(n))));
+// 좌/우는 사진만으로 가릴 수 없다 — 이름에 넣으면 틀린 자리를 근거로 다투게 된다.
+check('좌우를 적지 않는다',
+  Array.from({ length: 13 }, (_, i) => photos.photoLabel(i + 1)).every((l) => !/운전석|조수석|좌|우/.test(l)));
+// 두 오더가 서로 달라 보인 자리는 비워 둔다.
+check('확인 안 된 자리는 번호만', photos.photoLabel(4) === '4번', photos.photoLabel(4));
 // 이 두 자리는 코드가 실제로 쓰고 있다 — 이름과 동작이 어긋나면 안 된다.
 check('1번이 번호판 대조가 보는 자리', photos.DEFAULT_PLATE_PHOTO_INDEX === 1);
 check('13번이 주행거리가 보는 자리', photos.DEFAULT_ODOMETER_PHOTO_INDEX === 13);
@@ -50,7 +63,11 @@ check('서버가 짝을 지어 내려준다',
   '두 화면 모두에 필요하다');
 ['views/orders/detail.ejs', 'src/app/orders/[id]/CallmanerPhotos.js'].forEach((f) => {
   const src = read(f);
-  check(`${f} — 짝을 그대로 그린다`, /photo-pair/.test(src) && /운행전/.test(src) && /운행후/.test(src));
+  // 2026-09-08부터 배치가 가로 두 줄이다(줄 하나가 운행전, 하나가 운행후, 열이 곧 짝) —
+  // 예전의 photo-pair(짝마다 한 행)는 없다. 서버가 지은 짝을 그대로 훑는지만 본다.
+  check(`${f} — 짝을 그대로 그린다`,
+    /photo-rails/.test(src) && /운행전/.test(src) && /운행후/.test(src)
+    && /pairs\.forEach|rows\.map/.test(src));
   check(`${f} — 빠진 자리를 남긴다`, /photo-cell empty|photo-cell\.empty|className="photo-cell empty"/.test(src));
 });
 

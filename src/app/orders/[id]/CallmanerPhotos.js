@@ -19,29 +19,35 @@ import { useCallback, useRef } from 'react';
 // 처음에 page.js 안에 그대로 뒀다가 "Event handlers cannot be passed to Client Component props"
 // 런타임 오류가 났다 — next build는 통과하고 화면을 열 때 터지는 종류라 빌드로는 못 잡는다.
 
-// 한 칸. 사진이 없으면 빈 자리를 남긴다 — 빠진 것이 보여야 "안 찍었다"를 알 수 있고,
-// 열도 어긋나지 않는다.
-function Shot({ photo, phase, label, seq }) {
-  if (!photo) {
-    return <div className="photo-cell empty"><span>{seq}<br />없음</span></div>;
-  }
+// 한 칸. 항목 이름을 사진 **위에** 적는다(사용자 지정 2026-09-08) — 순번만 얹어두면 "1"이
+// 무엇을 찍은 것인지 알 수 없다. 이름을 모르는 자리는 "3번"으로 나온다: 모르는 것에 그럴듯한
+// 이름을 붙이면 그 이름이 사고 처리의 근거가 된다(lib/callmanerPhotos.js PHOTO_LABELS 머리말).
+//
+// 사진이 없으면 빈 자리를 남긴다 — 빠진 것이 보여야 "안 찍었다"를 알 수 있고, 열도 어긋나지 않는다.
+function Shot({ photo, phase, label }) {
   return (
-    <a
-      className="photo-cell"
-      href={photo.url}
-      target="_blank"
-      rel="noreferrer"
-      data-lightbox="callmaner"
-      data-caption={`${label} · ${phase}`}
-    >
-      <img
-        src={photo.url}
-        alt={`${label} ${phase}`}
-        loading="lazy"
-        onError={(e) => { e.currentTarget.style.display = 'none'; }}
-      />
-      <span className="photo-phase">{seq}</span>
-    </a>
+    <div className="photo-item">
+      <div className="photo-name" title={label}>{label}</div>
+      {photo ? (
+        <a
+          className="photo-cell"
+          href={photo.url}
+          target="_blank"
+          rel="noreferrer"
+          data-lightbox="callmaner"
+          data-caption={`${label} · ${phase}`}
+        >
+          <img
+            src={photo.url}
+            alt={`${label} ${phase}`}
+            loading="lazy"
+            onError={(e) => { e.currentTarget.style.display = 'none'; }}
+          />
+        </a>
+      ) : (
+        <div className="photo-cell empty"><span>없음</span></div>
+      )}
+    </div>
   );
 }
 
@@ -81,7 +87,7 @@ export default function CallmanerPhotos({ photos, pairs }) {
               onScroll={onScroll}
             >
               {rows.map((p) => (
-                <Shot key={p.seq} photo={p[key]} phase={phase} label={p.label} seq={p.seq} />
+                <Shot key={p.seq} photo={p[key]} phase={phase} label={p.label} />
               ))}
             </div>
           </div>

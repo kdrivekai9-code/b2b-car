@@ -39,6 +39,10 @@ console.log('[두 화면이 같은 배치를 쓴다]');
   check(`${label} — 두 줄 스크롤을 맞춘다`, /scrollLeft/.test(src), true);
   // 빠진 자리를 남겨야 "안 찍었다"를 알 수 있고 열도 안 밀린다.
   check(`${label} — 빈 자리를 남긴다`, /photo-cell empty/.test(src), true);
+  // 항목 이름을 사진 위에 적는다 — 순번만 있으면 "1"이 무엇을 찍은 것인지 알 수 없다.
+  check(`${label} — 항목 이름을 사진 위에`, /photo-name/.test(src), true);
+  // 잘렸을 때 전문을 볼 길을 남긴다(96px에 "13. 계기판"이 두 줄로 접힌다).
+  check(`${label} — 잘린 이름은 title로`, /title=/.test(src), true);
 });
 
 console.log('\n[CSS]');
@@ -48,7 +52,11 @@ check('줄이 줄어들 수 있다(min-width:0)', /\.photo-rail \.rail-strip\{[^
 // 격자 칸이 안 줄어들면 카드가 화면보다 넓어지고, .app{overflow-x:clip}이 넘친 부분을
 // 잘라내 뒤쪽 사진에 아예 닿을 수 없다(실측으로 잡았다).
 check('격자 칸도 줄어들 수 있다', /\.detail-grid > \*\{min-width:0;\}/.test(css), true);
-check('칸이 작다(84px)', /\.photo-rail \.photo-cell\{[^}]*width:84px/.test(css), true);
+check('칸이 작다(96px)', /\.photo-rail \.photo-cell\{[^}]*width:96px/.test(css), true);
+// 이름 칸 높이를 고정한다 — 한 줄짜리와 두 줄짜리가 섞이면 사진 윗변이 들쭉날쭉해져
+// 열로 비교하기 어려워진다.
+check('이름 칸 높이가 고정', /\.photo-name\{[^}]*height:25px/.test(css), true);
+check('이름은 두 줄까지', /\.photo-name\{[^}]*-webkit-line-clamp:2/.test(css), true);
 check('확대 창이 있다', /\.lightbox\{/.test(css), true);
 // 콜마너 원본이 400x300이라 화면을 채우게 늘리면 뭉개진다 — 두 배까지만.
 check('확대는 원본 두 배까지', /\.lightbox \.lb-img\{width:min\(90vw, 800px\)/.test(css), true);

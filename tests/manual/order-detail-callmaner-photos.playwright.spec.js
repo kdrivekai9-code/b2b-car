@@ -84,25 +84,34 @@ test.describe('오더 상세 · 콜마너 탁송사진', () => {
     // 빠진 자리가 보여야 "안 찍었다"를 알 수 있고, 열도 어긋나지 않는다.
     await expect(page.locator('.photo-cell.empty')).toHaveCount(1);
 
-    // 열이 짝이다 — 두 줄의 n번째 칸이 같은 순번을 가리켜야 흠집을 엉뚱한 사진으로 따지지 않는다.
-    const before = page.locator('.photo-rail').nth(0).locator('.photo-cell');
-    const after = page.locator('.photo-rail').nth(1).locator('.photo-cell');
-    await expect(before).toHaveCount(2);
-    await expect(after).toHaveCount(2);
-    await expect(before.nth(0)).toContainText('1');
-    await expect(after.nth(0)).toContainText('1');
-    // 2번 운행후는 없는 자리라 빈 칸으로 남는다(열이 밀리면 이 검사가 깨진다).
-    await expect(after.nth(1)).toHaveClass(/empty/);
+    // 열이 짝이다 — 두 줄의 n번째 칸이 같은 항목을 가리켜야 흠집을 엉뚱한 사진으로 따지지 않는다.
+    const before = page.locator('.photo-rail').nth(0);
+    const after = page.locator('.photo-rail').nth(1);
+    await expect(before.locator('.photo-cell')).toHaveCount(2);
+    await expect(after.locator('.photo-cell')).toHaveCount(2);
 
-    // 작아야 한다 — 이 배치의 이유가 "한 줄에 작게"다. 84px 칸 기준으로 넉넉한 상한을 둔다.
-    const cell = await before.nth(0).boundingBox();
+    // 항목 이름이 사진 **위에** 있어야 한다(사용자 지정 2026-09-08) — 순번만 있으면 "1"이
+    // 무엇을 찍은 것인지 알 수 없다. 두 줄 모두에 적는다: 위 줄에만 적으면 아래 줄 사진의
+    // 이름이 위 사진에 붙은 것으로 읽힌다.
+    await expect(before.locator('.photo-name')).toHaveText(['1. 전면', '2. 앞 사선']);
+    await expect(after.locator('.photo-name')).toHaveText(['1. 전면', '2. 앞 사선']);
+    // 이름 칸은 사진보다 위에 온다.
+    const nameBox = await before.locator('.photo-name').first().boundingBox();
+    const cellBox = await before.locator('.photo-cell').first().boundingBox();
+    expect(nameBox.y + nameBox.height).toBeLessThanOrEqual(cellBox.y + 1);
+
+    // 2번 운행후는 없는 자리라 빈 칸으로 남는다(열이 밀리면 이 검사가 깨진다).
+    await expect(after.locator('.photo-cell').nth(1)).toHaveClass(/empty/);
+
+    // 작아야 한다 — 이 배치의 이유가 "한 줄에 작게"다. 96px 칸 기준으로 넉넉한 상한을 둔다.
+    const cell = await before.locator('.photo-cell').nth(0).boundingBox();
     expect(cell.width).toBeLessThanOrEqual(120);
     // 두 줄 전체가 한 화면에 들어와야 한다(예전에는 짝마다 한 행이라 그럴 수 없었다).
     const rails = await page.locator('.photo-rails').boundingBox();
-    expect(rails.height).toBeLessThanOrEqual(260);
+    expect(rails.height).toBeLessThanOrEqual(300);
 
     // 클릭하면 새 탭이 아니라 그 자리에서 크게 열린다. 13쌍을 새 탭으로 열면 탭이 열세 개 생긴다.
-    await before.nth(0).click();
+    await before.locator('.photo-cell').nth(0).click();
     const lb = page.locator('.lightbox');
     await expect(lb).toBeVisible();
     await expect(lb.locator('.lb-cap')).toContainText('운행전');
