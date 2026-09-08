@@ -157,6 +157,7 @@ const CI_CHECKS = [
   'check-reserved-date-reask',
   'check-reserved-year-guess',
   'check-shared-tabs',
+  'check-sync-live-window',
   'check-system-alert',
   'check-test-data-sweep'
 ];

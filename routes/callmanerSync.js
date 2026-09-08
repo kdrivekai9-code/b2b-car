@@ -122,6 +122,22 @@ async function syncFare(order, item) {
 // 맨 앞으로 온다. 대상 N건·상한 L일 때 모든 오더가 ceil(N/L)분 안에 한 번은 확인된다.
 const SYNC_BY_CONF_SLIP_LIMIT = Number(process.env.CALLMANER_SYNC_ORDER_LIMIT || 500);
 const SYNC_LOOKBACK_DAYS = Number(process.env.CALLMANER_SYNC_LOOKBACK_DAYS || 3);
+
+// 아직 끝나지 않은 오더는 접수한 지 오래돼도 계속 확인한다.
+//
+// 왜(실측 2026-09-08, OID1455): 접수 8/24, 예약 8/25 건이 우리 쪽에 '기사배정'으로 굳어
+// 있었다. 콜마너에서는 그 뒤 운행시작(OrderInfo baecha_status=2, 8/25 14:50:01)을 거쳐
+// 완료(OrderHistory endTime 9/8 14:46:27)까지 갔는데, 우리 조회 대상 조건이 **접수일**
+// 기준 3일이라 8/27에 창을 벗어나 그 뒤로는 아무리 바뀌어도 우리가 묻지 않았다.
+//
+// "3일"은 매분 도는 폴링의 호출량을 묶기 위한 값이었다. 그런데 묶어야 할 것은 **끝난 오더**다 —
+// 진행 중인 오더는 애초에 얼마 없다(실측: 지사 전체 4건, 연락처 3개). 끝나지 않은 건을 계속
+// 보는 비용은 무시할 만하고, 안 보는 비용은 "콜마너에서는 운행 중인데 우리만 모르는 오더"다.
+//
+// 상한을 두는 이유: 취소도 완료도 아닌 채 영원히 남는 오더가 실제로 있다(콜마너에서 손으로
+// 정리된 건 등). 그것까지 무한히 끌면 대상이 계속 자란다. 예약일이 한참 지난 건은 상태 변화가
+// 더 일어날 여지가 없으므로 여기서 놓는다.
+const LIVE_LOOKBACK_DAYS = Number(process.env.CALLMANER_SYNC_LIVE_LOOKBACK_DAYS || 45);
 // 동시 호출 수. 상한을 올릴 때 여기를 같이 올려야 의미가 있다 — 걸리는 시간은
 // (건수 ÷ 동시성) × 응답시간이라, 동시성이 그대로면 상한만 올려도 시간만 길어진다.
 const SYNC_CONCURRENCY = Number(process.env.CALLMANER_SYNC_CONCURRENCY || 10);
@@ -192,6 +208,51 @@ function isBackwardTransition(currentStatus, nextStatus) {
   return currentStatus === STARTED_LOCAL_STATUS && nextStatus === DISPATCHED_LOCAL_STATUS;
 }
 
+// 콜마너가 준 "그 상태가 된 시각"을 KST 'YYYY-MM-DD HH:MM:SS'로 맞춘다.
+// OrderInfo는 status_time('20260825145001'), OrderHistory는 end_time('2026-09-08 14:46:27')로
+// 서로 다른 모양으로 준다. 없으면 null — 없는 값을 지금 시각으로 채우면 "방금 일어난 일"로
+// 둔갑해, 뒤늦게 알아낸 사건을 걸러낼 근거가 사라진다.
+function callmanerEventAt(info) {
+  const raw = String((info && (info.statusTime || info.endTime)) || '').trim();
+  if (!raw) return null;
+  const digits = raw.replace(/\D/g, '');
+  if (digits.length >= 14) {
+    return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)} `
+      + `${digits.slice(8, 10)}:${digits.slice(10, 12)}:${digits.slice(12, 14)}`;
+  }
+  const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}:${m[6] || '00'}`;
+  return null;
+}
+
+// 상태 변화를 기록할 때 콜마너 사건 시각도 함께 남긴다. 컬럼이 아직 없는 DB(마이그레이션 전)
+// 에서는 상태 갱신 자체가 막히지 않도록 그 칸만 빼고 다시 쓴다.
+let supportsStatusAtColumn = true;
+async function updateStatusWithEventAt(orderId, mappedStatus, callmanerStatus, eventAt) {
+  const nowKst = "to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS')";
+  if (eventAt && supportsStatusAtColumn) {
+    try {
+      await db.run(
+        `UPDATE orders SET status = ?, callmaner_status = ?, callmaner_status_at = ?,
+         callmaner_synced_at = ${nowKst}, callmaner_last_error = NULL, updated_at = ${nowKst}
+         WHERE id = ?`,
+        [mappedStatus, callmanerStatus, eventAt, orderId]
+      );
+      return;
+    } catch (e) {
+      if (!(e && e.code === '42703')) throw e;
+      console.error('콜마너 사건 시각 컬럼이 아직 없다 — 그 칸만 빼고 저장한다:', e.message);
+      supportsStatusAtColumn = false;
+    }
+  }
+  await db.run(
+    `UPDATE orders SET status = ?, callmaner_status = ?,
+     callmaner_synced_at = ${nowKst}, callmaner_last_error = NULL, updated_at = ${nowKst}
+     WHERE id = ?`,
+    [mappedStatus, callmanerStatus, orderId]
+  );
+}
+
 async function syncOrdersByConfSlip(branch) {
   const placeholders = TERMINAL_LOCAL_STATUSES.map(() => '?').join(',');
   // 1분마다 도는 폴링이라 대상 건수를 묶어둔다 — 최근 접수된 오더만 본다(오래된 건까지 매분
@@ -210,8 +271,9 @@ async function syncOrdersByConfSlip(branch) {
   //  2) 그다음은 **오래 확인 안 된 순서**(callmaner_synced_at ASC)다. 예전에는 id DESC였는데,
   //     그러면 대상이 LIMIT을 넘는 순간 조용히 굶는 오더가 생긴다. id DESC는 매분 같은 결과를
   //     주므로 최신 N건만 영원히 확인되고, N번째 뒤로 밀린 오더는 **한 번도** 조회되지 않는다.
-  //     그 상태로 3일이 지나면 조회 대상(created_at 조건)에서 아예 빠져 영영 미완료로 남는다 —
-  //     배차·완료 감지도, 고객 통보도 나가지 않는다. "밀린다"가 아니라 "버려진다"였다.
+  //     그 상태로 3일이 지나면 조회 대상에서 아예 빠져 영영 미완료로 남았다 — 배차·완료 감지도,
+  //     고객 통보도 나가지 않았다. "밀린다"가 아니라 "버려진다"였다. (그 창 자체도 아래에서
+  //     넓혔다 — 끝나지 않은 오더는 접수일이 오래돼도 계속 본다.)
   //
   //     확인 시각순으로 돌리면 대상이 N건이고 상한이 L일 때 모든 오더가 ceil(N/L)분마다 한 번은
   //     확인된다. 늦어지기는 해도 빠지지는 않는다. 한 번도 확인 안 된 건(NULL)이 가장 먼저다.
@@ -220,9 +282,17 @@ async function syncOrdersByConfSlip(branch) {
   const orders = await db.all(
     `SELECT * FROM orders
      WHERE branch_id = ? AND callmaner_conf_slip IS NOT NULL
-       AND created_at >= to_char((now() at time zone 'Asia/Seoul') - interval '${SYNC_LOOKBACK_DAYS} days', 'YYYY-MM-DD HH24:MI:SS')
        AND (
-         status NOT IN (${placeholders})
+         -- ① 최근 접수건 — 상태가 무엇이든 본다.
+         created_at >= to_char((now() at time zone 'Asia/Seoul') - interval '${SYNC_LOOKBACK_DAYS} days', 'YYYY-MM-DD HH24:MI:SS')
+         -- ② 아직 끝나지 않은 건 — 접수일이 오래돼도 계속 본다(LIVE_LOOKBACK_DAYS 주석 참고).
+         --    예약일 기준으로 놓는다: 접수는 하루뿐이지만 오더가 살아 있는 기간은 예약일이 정한다.
+         OR (
+           status NOT IN (${placeholders})
+           AND COALESCE(reserved_date, to_char(created_at::timestamp, 'YYYY-MM-DD'))
+               >= to_char((now() at time zone 'Asia/Seoul') - interval '${LIVE_LOOKBACK_DAYS} days', 'YYYY-MM-DD')
+         )
+         -- ③ 방금 종료된 건 — 콜마너가 취소를 잠깐 주고 되돌리는 경우를 잡는다.
          OR updated_at >= to_char((now() at time zone 'Asia/Seoul') - interval '${TERMINAL_RECHECK_MINUTES} minutes', 'YYYY-MM-DD HH24:MI:SS')
        )
      ORDER BY (status IN (${placeholders})) ASC, callmaner_synced_at ASC NULLS FIRST, id DESC
@@ -362,13 +432,7 @@ async function syncOrdersByConfSlip(branch) {
       if (mappedStatus === '취소' && order.status !== '취소') {
         await tripFees.applyCancelFee(db, order, order.status);
       }
-      await db.run(
-        `UPDATE orders SET status = ?, callmaner_status = ?,
-         callmaner_synced_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS'), callmaner_last_error = NULL,
-         updated_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS')
-         WHERE id = ?`,
-        [mappedStatus, info.status || null, order.id]
-      );
+      await updateStatusWithEventAt(order.id, mappedStatus, info.status || null, callmanerEventAt(info));
       await db.run(
         `INSERT INTO order_status_history (order_id, actor_user_id, old_status, new_status, note) VALUES (?, NULL, ?, ?, ?)`,
         [order.id, order.status, mappedStatus, note]
@@ -600,3 +664,5 @@ module.exports = router;
 // (scripts/check-callmaner-drive-started.js).
 module.exports.resolveLocalStatus = resolveLocalStatus;
 module.exports.isBackwardTransition = isBackwardTransition;
+// 콜마너가 준 사건 시각 정규화 — 두 API가 서로 다른 모양으로 준다(scripts/check-sync-live-window.js).
+module.exports.callmanerEventAt = callmanerEventAt;

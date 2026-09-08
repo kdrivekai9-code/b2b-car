@@ -51,7 +51,12 @@ async function main() {
        VALUES (?, ?, '접수', ?, '홍길동', '010-1111-2222', ?, ?, ?, ?, ?) RETURNING id`,
       [
         `${MARK}-oid`, branch.id, created.sessionId, MARK,
-        '서울 강서구 양천로53길 30', '경기 성남시 분당구 판교역로 160', '2026-08-20', '14:00',
+        // 예약일은 **오늘**이어야 한다. 굳은 과거 날짜를 쓰면 뒤늦은 상태변화 억제
+        // (lib/kakaoOrderNotify.js isBackfilled)에 걸려 통보가 예약되지 않는다 —
+        // 이 검사가 보려는 것은 그 억제가 아니라 정상 전이의 통보다. (2026-09-08: 실제로
+        // '2026-08-20'이 박혀 있어 억제 규칙을 넣자마자 이 검사가 깨졌다.)
+        '서울 강서구 양천로53길 30', '경기 성남시 분당구 판교역로 160',
+        new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10), '14:00',
       ]
     );
     created.orderId = order.id;
