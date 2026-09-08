@@ -46,11 +46,19 @@ router.get('/:token', asyncHandler(async (req, res) => {
     });
   }
 
-  // 계기판이 몇 번째인지는 지사 설정을 따른다 — 그 번호에만 표시를 붙인다.
-  const odometerIndex = callmanerPhotos.odometerPhotoIndex(branch);
+  // 계기판은 단계마다 순번이 다르다(운행전 13, 운행후 1 — lib/callmanerPhotos.js PHOTO_ITEMS).
+  // 그래서 번호로 가리지 않고 항목으로 가린다. odometerIndex는 화면 호환을 위해 남긴다.
+  const odometerIndex = callmanerPhotos.odometerPhotoIndex(branch, callmanerPhotos.PHASE_START);
+  const withLabels = (phase) => photos
+    .filter((p) => p.phase === phase)
+    .map((p) => ({
+      ...p,
+      label: callmanerPhotos.photoLabel(p.seq, phase),
+      isOdometer: callmanerPhotos.photoItem(p.seq, phase) === '계기판',
+    }));
   const groups = [
-    { phase: callmanerPhotos.PHASE_START, label: '운행 전', items: photos.filter((p) => p.phase === callmanerPhotos.PHASE_START) },
-    { phase: callmanerPhotos.PHASE_END, label: '운행 후', items: photos.filter((p) => p.phase === callmanerPhotos.PHASE_END) },
+    { phase: callmanerPhotos.PHASE_START, label: '운행 전', items: withLabels(callmanerPhotos.PHASE_START) },
+    { phase: callmanerPhotos.PHASE_END, label: '운행 후', items: withLabels(callmanerPhotos.PHASE_END) },
   ].filter((g) => g.items.length);
 
   res.render('photo_view', {

@@ -7,6 +7,8 @@ import { useCallback, useRef } from 'react';
 //
 // 운행전·운행후를 **가로 두 줄**로 놓는다(사용자 지정 2026-09-08). 줄 하나가 운행전, 줄 하나가
 // 운행후이고 같은 열이 같은 항목이다 — 열이 곧 짝이라 흠집이 언제 생겼는지 눈으로 바로 잡힌다.
+// 짝은 순번이 아니라 **항목**으로 짓는다(서버가 한다) — 콜마너 촬영 순서가 단계마다 달라서
+// 순번으로 맞추면 전면과 계기판을 나란히 놓게 된다.
 // 예전에는 짝마다 한 행을 만들어 큰 사진 두 장을 넣었는데, 13쌍이면 화면이 열세 번 스크롤되고
 // 한 장이 화면 절반을 차지해 목록으로도 비교용으로도 못 썼다.
 //
@@ -20,14 +22,15 @@ import { useCallback, useRef } from 'react';
 // 런타임 오류가 났다 — next build는 통과하고 화면을 열 때 터지는 종류라 빌드로는 못 잡는다.
 
 // 한 칸. 항목 이름을 사진 **위에** 적는다(사용자 지정 2026-09-08) — 순번만 얹어두면 "1"이
-// 무엇을 찍은 것인지 알 수 없다. 이름을 모르는 자리는 "3번"으로 나온다: 모르는 것에 그럴듯한
-// 이름을 붙이면 그 이름이 사고 처리의 근거가 된다(lib/callmanerPhotos.js PHOTO_LABELS 머리말).
+// 무엇을 찍은 것인지 알 수 없다. 순번은 이름에 안 붙인다: 같은 항목인데 운행전·운행후 번호가
+// 달라(운행후는 계기판이 1번으로 앞에 붙는다 — lib/callmanerPhotos.js PHOTO_ITEMS) 번호를
+// 나란히 보여주면 열이 어긋난 것처럼 읽힌다. 번호는 title에 둔다.
 //
 // 사진이 없으면 빈 자리를 남긴다 — 빠진 것이 보여야 "안 찍었다"를 알 수 있고, 열도 어긋나지 않는다.
-function Shot({ photo, phase, label }) {
+function Shot({ photo, phase, label, seq }) {
   return (
     <div className="photo-item">
-      <div className="photo-name" title={label}>{label}</div>
+      <div className="photo-name" title={`${label} (${phase} ${seq}번)`}>{label}</div>
       {photo ? (
         <a
           className="photo-cell"
@@ -78,7 +81,7 @@ export default function CallmanerPhotos({ photos, pairs }) {
       </p>
 
       <div className="photo-rails">
-        {[['start', '운행전'], ['end', '운행후']].map(([key, phase], railIndex) => (
+        {[['start', '운행전', 'startSeq'], ['end', '운행후', 'endSeq']].map(([key, phase, seqKey], railIndex) => (
           <div className="photo-rail" key={key}>
             <div className="rail-label">{phase}</div>
             <div
@@ -87,7 +90,7 @@ export default function CallmanerPhotos({ photos, pairs }) {
               onScroll={onScroll}
             >
               {rows.map((p) => (
-                <Shot key={p.seq} photo={p[key]} phase={phase} label={p.label} />
+                <Shot key={p.seq} photo={p[key]} phase={phase} label={p.label} seq={p[seqKey]} />
               ))}
             </div>
           </div>

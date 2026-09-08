@@ -28,11 +28,18 @@ check('없는 필드면 빈 배열', pictureLinks([{ other: 'x' }]), []);
 
 console.log('[계기판 사진 인덱스]');
 check('기본값은 13', DEFAULT_ODOMETER_PHOTO_INDEX, 13);
-check('지사 설정이 없으면 기본값', odometerPhotoIndex({}), 13);
-check('지사 설정을 쓴다', odometerPhotoIndex({ odometer_photo_index: 5 }), 5);
-check('0 이하는 기본값으로 되돌린다', odometerPhotoIndex({ odometer_photo_index: 0 }), 13);
-check('음수도 기본값', odometerPhotoIndex({ odometer_photo_index: -3 }), 13);
-check('숫자가 아니면 기본값', odometerPhotoIndex({ odometer_photo_index: 'abc' }), 13);
+// 계기판 순번은 **단계마다 다르다**(운행전 13, 운행후 1) — 콜마너 촬영 순서가 운행후에는
+// 계기판을 맨 앞에 두기 때문이다(사용자 확정 2026-09-08). 단계를 안 넘기면 운행전 기준이다.
+check('지사 설정이 없으면 기본값(운행전)', odometerPhotoIndex({}, 'start'), 13);
+check('운행후는 1번', odometerPhotoIndex({}, 'end'), 1);
+check('단계를 안 주면 운행전 기준', odometerPhotoIndex({}), 13);
+check('지사 설정을 쓴다', odometerPhotoIndex({ odometer_photo_index: 5 }, 'start'), 5);
+// 지사 재정의는 그 칸이 생길 때 운행후 순서가 다른 줄 몰라 **운행전 기준**으로 적혔다.
+// 운행후에 그대로 쓰면 보조석 앞바퀴를 계기판으로 읽는 버그가 돌아온다.
+check('재정의를 운행후에 쓰지 않는다', odometerPhotoIndex({ odometer_photo_index: 5 }, 'end'), 1);
+check('0 이하는 기본값으로 되돌린다', odometerPhotoIndex({ odometer_photo_index: 0 }, 'start'), 13);
+check('음수도 기본값', odometerPhotoIndex({ odometer_photo_index: -3 }, 'start'), 13);
+check('숫자가 아니면 기본값', odometerPhotoIndex({ odometer_photo_index: 'abc' }, 'start'), 13);
 
 console.log('[계기판 사진 찾기]');
 const photos = Array.from({ length: 15 }, (_, i) => ({ id: i + 1, seq: i + 1, url: `p${i + 1}.jpg` }));

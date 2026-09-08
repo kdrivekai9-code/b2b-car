@@ -17,42 +17,64 @@ function check(label, ok, detail) {
 }
 const read = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
 
-console.log('[항목 이름]');
-// 확인된 자리만 이름을 붙인다. 모르는 자리에 그럴듯한 이름을 넣으면 "운전석 휠"이라고 적힌
-// 자리에 뒷범퍼 사진이 뜨고, 사고 처리에서 그 이름을 근거로 다투게 된다.
-//
-// 이름은 2026-09-08에 실제 사진 두 오더(OID1455·OID2075)를 눈으로 대조해 채웠다.
-// 그때 2번의 기존 이름('운전석 휠')이 **틀린 것**으로 드러났다 — 2번은 차량 앞 사선 전경이다.
-check('1번은 전면', photos.photoLabel(1) === '1. 전면');
-check('7번은 후면', photos.photoLabel(7) === '7. 후면', photos.photoLabel(7));
-check('13번은 계기판', photos.photoLabel(13) === '13. 계기판');
-// 2번은 휠이 아니다. 이 검사가 그 오해를 다시 들이지 않게 막는다.
-check('2번은 휠이 아니다', !/휠/.test(photos.photoLabel(2)), photos.photoLabel(2));
-// 휠은 네 자리(5·6·11·12)뿐이다.
-check('휠은 네 자리', [5, 6, 11, 12].every((n) => /휠/.test(photos.photoLabel(n)))
-  && [1, 2, 3, 4, 7, 8, 9, 10, 13].every((n) => !/휠/.test(photos.photoLabel(n))));
-// 좌/우는 사진만으로 가릴 수 없다 — 이름에 넣으면 틀린 자리를 근거로 다투게 된다.
-check('좌우를 적지 않는다',
-  Array.from({ length: 13 }, (_, i) => photos.photoLabel(i + 1)).every((l) => !/운전석|조수석|좌|우/.test(l)));
-// 두 오더가 서로 달라 보인 자리는 비워 둔다.
-check('확인 안 된 자리는 번호만', photos.photoLabel(4) === '4번', photos.photoLabel(4));
-// 이 두 자리는 코드가 실제로 쓰고 있다 — 이름과 동작이 어긋나면 안 된다.
-check('1번이 번호판 대조가 보는 자리', photos.DEFAULT_PLATE_PHOTO_INDEX === 1);
-check('13번이 주행거리가 보는 자리', photos.DEFAULT_ODOMETER_PHOTO_INDEX === 13);
+console.log('[항목 이름 — 단계마다 다르다]');
+// 콜마너 촬영 순서는 운행전과 운행후가 다르다(사용자 확정 2026-09-08): 운행후에는 계기판이
+// **맨 앞**으로 오고 나머지가 한 칸씩 밀린다. 이걸 몰라서 두 가지가 조용히 틀려 있었다 —
+// 주행거리 종료값을 보조석 앞바퀴 사진에서 읽으려 했고(그래서 전부 실패),
+// 운행전 전면과 운행후 계기판을 나란히 놓고 비교했다.
+check('운행전 1번은 전면', photos.photoLabel(1, 'start') === '1. 전면', photos.photoLabel(1, 'start'));
+check('운행후 1번은 계기판', photos.photoLabel(1, 'end') === '1. 계기판', photos.photoLabel(1, 'end'));
+check('운행전 13번은 계기판', photos.photoLabel(13, 'start') === '13. 계기판');
+check('운행후 13번은 보조석 앞 바퀴', photos.photoLabel(13, 'end') === '13. 보조석 앞 바퀴', photos.photoLabel(13, 'end'));
+check('운행후는 운행전보다 한 칸 밀린다',
+  [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].every((n) => photos.photoItem(n, 'start') === photos.photoItem(n + 1, 'end')));
+check('운행후 1번이 운행전 마지막', photos.photoItem(1, 'end') === photos.photoItem(13, 'start'));
+// 두 단계 모두 같은 열세 항목을 찍는다 — 하나라도 빠지면 짝지을 수 없는 항목이 생긴다.
+check('두 단계의 항목 집합이 같다',
+  JSON.stringify([...photos.PHOTO_ITEMS.start].sort()) === JSON.stringify([...photos.PHOTO_ITEMS.end].sort()));
+check('열세 장씩', photos.PHOTO_ITEMS.start.length === 13 && photos.PHOTO_ITEMS.end.length === 13);
+// 표 밖은 아는 척하지 않는다.
+check('표 밖은 번호만', photos.photoLabel(14, 'start') === '14번', photos.photoLabel(14, 'start'));
 
-console.log('\n[짝짓기]');
+console.log('\n[순번을 코드에 박지 않는다]');
+// 계기판·전면 순번을 상수로 박으면 표와 어긋나는 순간 조용히 틀린 사진을 읽는다 —
+// 주행거리 버그가 정확히 그것이었다.
+check('계기판 순번을 표에서 가져온다',
+  photos.seqOfItem('계기판', 'start') === 13 && photos.seqOfItem('계기판', 'end') === 1);
+check('전면 순번도 표에서', photos.seqOfItem('전면', 'start') === 1 && photos.seqOfItem('전면', 'end') === 2);
+// 주행거리는 단계별로 다른 자리를 봐야 한다.
+check('주행거리 자리 — 운행전 13', photos.odometerPhotoIndex({}, 'start') === 13);
+check('주행거리 자리 — 운행후 1', photos.odometerPhotoIndex({}, 'end') === 1, String(photos.odometerPhotoIndex({}, 'end')));
+// 지사 재정의는 운행전 기준으로 적힌 값이라, 운행후에 그대로 쓰면 버그가 돌아온다.
+check('지사 재정의는 운행전에만', photos.odometerPhotoIndex({ odometer_photo_index: 5 }, 'start') === 5
+  && photos.odometerPhotoIndex({ odometer_photo_index: 5 }, 'end') === 1);
+// 번호판은 운행전 전면에서 읽는다.
+check('번호판 자리는 운행전 전면', photos.platePhotoIndex({}) === photos.seqOfItem('전면', 'start'));
+check('1번이 번호판 대조가 보는 자리', photos.DEFAULT_PLATE_PHOTO_INDEX === 1);
+check('13번이 주행거리가 보는 자리(운행전)', photos.DEFAULT_ODOMETER_PHOTO_INDEX === 13);
+
+console.log('\n[짝짓기 — 순번이 아니라 항목으로]');
+// 운행전 전면(1)과 운행후 전면(2)이 한 줄이어야 한다. 순번으로 지으면 운행전 전면(1)과
+// 운행후 계기판(1)이 한 줄이 된다 — 실제로 그렇게 나가고 있었다.
 const rows = [
-  { id: 1, phase: 'start', seq: 1, url: 'a' }, { id: 2, phase: 'end', seq: 1, url: 'b' },
+  { id: 1, phase: 'start', seq: 1, url: 'a' }, { id: 2, phase: 'end', seq: 2, url: 'b' },
   { id: 3, phase: 'start', seq: 3, url: 'c' },
-  { id: 4, phase: 'end', seq: 2, url: 'd' },
+  { id: 4, phase: 'end', seq: 1, url: 'd' },
 ];
 const pairs = photos.pairByPhase(rows);
-check('순번마다 한 줄', pairs.length === 3, String(pairs.length));
-check('순번 오름차순', pairs.map((p) => p.seq).join(',') === '1,2,3');
-check('같은 순번끼리 짝', pairs[0].start.url === 'a' && pairs[0].end.url === 'b');
+check('항목마다 한 줄', pairs.length === 3, String(pairs.length));
+// 줄 순서는 운행전 촬영 순서를 따른다(전면 → 보조석 측면 → 운전석 측면 → … → 계기판).
+check('운행전 순서대로', pairs.map((p) => p.label).join(',') === '전면,운전석 측면,계기판',
+  pairs.map((p) => p.label).join(','));
+// 전면끼리 짝지어야 한다 — 운행전 1번과 운행후 **2번**이다.
+check('전면끼리 짝', pairs[0].start.url === 'a' && pairs[0].end.url === 'b');
+check('단계별 순번을 함께 준다', pairs[0].startSeq === 1 && pairs[0].endSeq === 2,
+  `${pairs[0].startSeq}/${pairs[0].endSeq}`);
+// 계기판은 운행후 1번이다 — 순번으로 지었다면 이 자리에 전면 사진이 붙었다.
+check('계기판은 운행후 1번과 짝', pairs[2].label === '계기판' && pairs[2].end.url === 'd');
 // 한쪽만 있는 자리도 남긴다 — 빠진 것이 보여야 "안 찍었다"를 알 수 있다.
-check('운행전만 있어도 줄이 남는다', pairs[2].start && pairs[2].end === null);
-check('운행후만 있어도 줄이 남는다', pairs[1].end && pairs[1].start === null);
+check('운행전만 있어도 줄이 남는다', pairs[1].start && pairs[1].end === null);
+check('운행후만 있어도 줄이 남는다', pairs[2].start === null && !!pairs[2].end);
 check('빈 입력도 안전', photos.pairByPhase([]).length === 0 && photos.pairByPhase(null).length === 0);
 
 console.log('\n[두 화면이 같은 짝을 본다]');

@@ -43,9 +43,9 @@
           <%# 원본은 새 창에서 연다 — 목록 안 썸네일로는 흠집을 확인할 수 없다. %>
           <a class="photo-cell" href="<%= p.url %>" target="_blank" rel="noopener noreferrer">
             <img src="<%= p.url %>" alt="<%= g.label %> <%= p.label %>" loading="lazy">
-            <span class="photo-cap<%= (odometerIndex && Number(p.seq) === Number(odometerIndex)) ? ' odo' : '' %>">
+            <span class="photo-cap<%= p.isOdometer ? ' odo' : '' %>">
               <%= p.label %>
-              <% if (odometerIndex && Number(p.seq) === Number(odometerIndex) && p.odometer_km) { %>
+              <% if (p.isOdometer && p.odometer_km) { %>
                 <br><%= Number(p.odometer_km).toLocaleString('ko-KR') %>km
               <% } %>
             </span>

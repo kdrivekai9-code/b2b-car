@@ -28,12 +28,17 @@ test.beforeAll(async () => {
   orderId = Number(order.id);
   token = order.photo_view_token;
 
-  // 계기판 표시가 붙는지 보려면 지사 설정 순번(기본 13)만큼 사진이 있어야 한다.
-  for (let seq = 1; seq <= 13; seq += 1) {
-    await db.run(
-      `INSERT INTO order_callmaner_photos (order_id, phase, seq, url) VALUES (?, 'start', ?, ?)`,
-      [orderId, seq, `https://example.invalid/${MARK}_1_${seq}.jpg`]
-    );
+  // 계기판 표시가 붙는지 보려면 열세 장이 다 있어야 한다.
+  //
+  // 운행후도 함께 넣는다. 촬영 순서가 단계마다 달라(운행후는 계기판이 **1번**) 단계를 무시하고
+  // 번호로 계기판을 가리면 고객이 바퀴 사진을 계기판으로 본다 — 실제로 그렇게 되어 있었다.
+  for (const phase of ['start', 'end']) {
+    for (let seq = 1; seq <= 13; seq += 1) {
+      await db.run(
+        `INSERT INTO order_callmaner_photos (order_id, phase, seq, url) VALUES (?, ?, ?, ?)`,
+        [orderId, phase, seq, `https://example.invalid/${MARK}_${phase}_${seq}.jpg`]
+      );
+    }
   }
   // 열람 허용 상태에서 시작한다(막힘 검사는 테스트 안에서 직접 끈다).
   // client_can_view는 boolean이 아니라 integer(0/1)다 — 이 스키마의 다른 플래그들과 같다.
@@ -60,14 +65,26 @@ test.afterAll(async () => {
 test.describe('고객용 사진 모아보기', () => {
   test.describe.configure({ timeout: 90000 });
 
-  test('번호와 계기판 표시가 붙어 사진이 나온다', async ({ page }) => {
+  test('항목 이름과 계기판 표시가 붙어 사진이 나온다', async ({ page }) => {
     await page.goto(`${BASE_URL}/photos/${token}`, { waitUntil: 'domcontentloaded' });
 
-    await expect(page.locator('.group-title')).toContainText('운행 전 · 13장');
-    await expect(page.locator('.cell')).toHaveCount(13);
-    // 13번만 계기판으로 표시된다 — 이 번호가 틀리면 고객이 엉뚱한 사진을 계기판으로 본다.
-    await expect(page.locator('.cap.odo')).toHaveCount(1);
-    await expect(page.locator('.cap.odo')).toContainText('13 계기판');
+    await expect(page.locator('.group-title').first()).toContainText('운행 전 · 13장');
+    await expect(page.locator('.cell')).toHaveCount(26);
+
+    // 번호가 아니라 **항목 이름**이 붙는다. 고객이 "3번"만 보고는 무엇을 찍은 것인지 모른다.
+    const before = page.locator('.group').nth(0);
+    const after = page.locator('.group').nth(1);
+    await expect(before.locator('.cap').first()).toContainText('1. 전면');
+    // 운행후는 계기판이 1번이라 이름이 한 칸씩 밀린다 — 여기서 번호로 이름을 붙이면 전부 어긋난다.
+    await expect(after.locator('.cap').first()).toContainText('1. 계기판');
+    await expect(after.locator('.cap').nth(1)).toContainText('2. 전면');
+
+    // 계기판 표시는 단계마다 다른 자리에 붙는다: 운행전 13번, 운행후 1번.
+    // 번호로 가리면 고객이 보조석 앞바퀴를 계기판으로 본다(실제로 그랬다).
+    await expect(page.locator('.cap.odo')).toHaveCount(2);
+    await expect(before.locator('.cap.odo')).toContainText('13. 계기판');
+    await expect(after.locator('.cap.odo')).toContainText('1. 계기판');
+
     // 원본은 새 탭으로 열되 opener를 넘기지 않는다(외부 링크).
     await expect(page.locator('.cell').first()).toHaveAttribute('rel', /noopener/);
   });

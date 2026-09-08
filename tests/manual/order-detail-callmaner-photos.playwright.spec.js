@@ -27,7 +27,9 @@ test.beforeAll(async () => {
     [`${MARK}-oid`, branch.id, MARK, '서울 강서구', '경기 성남시']
   );
   orderId = Number(order.id);
-  for (const [phase, seq] of [['start', 1], ['start', 2], ['end', 1]]) {
+  // 순번이 아니라 **항목**으로 짝지어지는지 보려면 단계별 순번이 어긋난 표본이 필요하다.
+  // 운행전 1(전면) ↔ 운행후 2(전면)가 한 줄이어야 하고, 운행후 1(계기판)은 운행전 13과 짝이다.
+  for (const [phase, seq] of [['start', 1], ['start', 2], ['end', 2]]) {
     await db.run(
       `INSERT INTO order_callmaner_photos (order_id, phase, seq, url) VALUES (?, ?, ?, ?)`,
       [orderId, phase, seq, `https://example.invalid/${MARK}_${phase}_${seq}.jpg`]
@@ -76,8 +78,8 @@ test.describe('오더 상세 · 콜마너 탁송사진', () => {
     await expect(page.locator('.photo-rail')).toHaveCount(2);
     await expect(page.locator('.photo-rail .rail-label')).toHaveText(['운행전', '운행후']);
 
-    // 넣어둔 사진은 start/1, start/2, end/1 세 장이다. 열은 1·2 두 개, 줄은 둘이라 칸은 넷,
-    // 그중 하나(2번 운행후)는 빈 자리다.
+    // 넣어둔 사진은 운행전 1(전면)·2(보조석 측면), 운행후 2(전면) 세 장이다. 항목은 전면·
+    // 보조석 측면 두 개, 줄은 둘이라 칸은 넷, 그중 하나(보조석 측면의 운행후)는 빈 자리다.
     await expect(page.locator('.photo-cell')).toHaveCount(4);
     // 링크는 만료될 수 있어 썸네일이 깨져도 되지만, 링크 자체는 남아야 한다.
     await expect(page.locator('a.photo-cell')).toHaveCount(3);
@@ -93,14 +95,18 @@ test.describe('오더 상세 · 콜마너 탁송사진', () => {
     // 항목 이름이 사진 **위에** 있어야 한다(사용자 지정 2026-09-08) — 순번만 있으면 "1"이
     // 무엇을 찍은 것인지 알 수 없다. 두 줄 모두에 적는다: 위 줄에만 적으면 아래 줄 사진의
     // 이름이 위 사진에 붙은 것으로 읽힌다.
-    await expect(before.locator('.photo-name')).toHaveText(['1. 전면', '2. 앞 사선']);
-    await expect(after.locator('.photo-name')).toHaveText(['1. 전면', '2. 앞 사선']);
+    // 이름은 **항목**이다(순번은 안 붙인다 — 단계마다 번호가 달라 헷갈린다).
+    await expect(before.locator('.photo-name')).toHaveText(['전면', '보조석 측면']);
+    await expect(after.locator('.photo-name')).toHaveText(['전면', '보조석 측면']);
+    // 번호는 title에 둔다 — 운행전 전면은 1번, 운행후 전면은 2번이다.
+    await expect(before.locator('.photo-name').first()).toHaveAttribute('title', '전면 (운행전 1번)');
+    await expect(after.locator('.photo-name').first()).toHaveAttribute('title', '전면 (운행후 2번)');
     // 이름 칸은 사진보다 위에 온다.
     const nameBox = await before.locator('.photo-name').first().boundingBox();
     const cellBox = await before.locator('.photo-cell').first().boundingBox();
     expect(nameBox.y + nameBox.height).toBeLessThanOrEqual(cellBox.y + 1);
 
-    // 2번 운행후는 없는 자리라 빈 칸으로 남는다(열이 밀리면 이 검사가 깨진다).
+    // 보조석 측면의 운행후는 없는 자리라 빈 칸으로 남는다(열이 밀리면 이 검사가 깨진다).
     await expect(after.locator('.photo-cell').nth(1)).toHaveClass(/empty/);
 
     // 작아야 한다 — 이 배치의 이유가 "한 줄에 작게"다. 96px 칸 기준으로 넉넉한 상한을 둔다.
@@ -114,7 +120,7 @@ test.describe('오더 상세 · 콜마너 탁송사진', () => {
     await before.locator('.photo-cell').nth(0).click();
     const lb = page.locator('.lightbox');
     await expect(lb).toBeVisible();
-    await expect(lb.locator('.lb-cap')).toContainText('운행전');
+    await expect(lb.locator('.lb-cap')).toContainText('전면 · 운행전');
     // ← → 로 넘어간다.
     await page.keyboard.press('ArrowRight');
     await expect(lb.locator('.lb-cap')).toContainText('2/3');

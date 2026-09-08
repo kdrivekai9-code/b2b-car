@@ -75,8 +75,9 @@
               <a class="cell" href="<%= p.url %>" target="_blank" rel="noopener">
                 <img src="<%= p.url %>" alt="<%= g.label %> <%= p.seq %>번째 사진" loading="lazy"
                      onerror="this.dataset.failed='1';this.style.display='none'">
-                <div class="cap<%= Number(p.seq) === Number(odometerIndex) ? ' odo' : '' %>">
-                  <%= p.seq %><% if (Number(p.seq) === Number(odometerIndex)) { %> 계기판<% } %>
+                <%# 항목 이름은 단계마다 다르다(운행후는 계기판이 1번) — 서버가 붙여 내려준다. %>
+                <div class="cap<%= p.isOdometer ? ' odo' : '' %>">
+                  <%= p.label || p.seq %>
                 </div>
               </a>
             <% }) %>

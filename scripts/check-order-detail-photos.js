@@ -27,7 +27,11 @@ const lightbox = read('public/js/photo-lightbox.js');
 console.log('[두 화면이 같은 배치를 쓴다]');
 [['EJS', ejs], ['Next', next]].forEach(([label, src]) => {
   check(`${label} — 가로 두 줄`, /photo-rails/.test(src) && /rail-strip/.test(src), true);
-  check(`${label} — 줄 이름은 운행전·운행후`, /\['start', ?'운행전'\], ?\['end', ?'운행후'\]/.test(src.replace(/"/g, "'")), true);
+  // 줄 정의에 단계별 순번 키가 함께 있어야 한다 — 같은 항목인데 운행전·운행후 번호가 달라
+  // (운행후는 계기판이 1번) title에 그 번호를 적으려면 필요하다.
+  check(`${label} — 줄 이름은 운행전·운행후`,
+    /'start', ?'운행전', ?'startSeq'/.test(src.replace(/"/g, "'"))
+    && /'end', ?'운행후', ?'endSeq'/.test(src.replace(/"/g, "'")), true);
   // 예전 배치(짝마다 한 행)가 남아 있으면 한쪽만 고친 것이다.
   check(`${label} — 예전 배치가 남지 않았다`, /photo-row\b|photo-pair\b/.test(src), false);
   // 확대는 공용 스크립트가 맡는다 — 화면마다 따로 만들면 동작이 갈린다.
@@ -41,8 +45,9 @@ console.log('[두 화면이 같은 배치를 쓴다]');
   check(`${label} — 빈 자리를 남긴다`, /photo-cell empty/.test(src), true);
   // 항목 이름을 사진 위에 적는다 — 순번만 있으면 "1"이 무엇을 찍은 것인지 알 수 없다.
   check(`${label} — 항목 이름을 사진 위에`, /photo-name/.test(src), true);
-  // 잘렸을 때 전문을 볼 길을 남긴다(96px에 "13. 계기판"이 두 줄로 접힌다).
-  check(`${label} — 잘린 이름은 title로`, /title=/.test(src), true);
+  // 잘렸을 때 전문을 볼 길을 남긴다(96px에 "운전석 뒤 측면"이 두 줄로 접힌다).
+  // title에는 단계별 순번도 함께 적는다 — 이름만으로는 콜마너 화면에서 그 사진을 못 찾는다.
+  check(`${label} — 잘린 이름은 title로`, /title=/.test(src) && /번\)/.test(src), true);
 });
 
 console.log('\n[CSS]');
