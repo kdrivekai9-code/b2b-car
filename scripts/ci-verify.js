@@ -129,6 +129,7 @@ const CI_CHECKS = [
   'check-dispatch-lookup-tool',
   'check-driver-chat',
   'check-driver-location-map',
+  'check-driver-location-source',
   'check-driver-trip-steps',
   'check-driver-push',
   'check-driver-token',

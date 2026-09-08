@@ -45,7 +45,7 @@
 | 완료오더조회 | `FinishOrderList` | order.do. userHp + page/page_size. **전일 기준**으로 내려주며 오전 9~10시는 피해달라는 주석 있음 |
 | 타사 배차/해제 | `OtherStatusChange` | order.do |
 | 탁송사진 이미지 | `ConsPicture` | **picture.do** |
-| 배차기사 현위치 조회 | `TrackingDriver` | order.do |
+| 배차기사 현위치 조회 | `TrackingDriver` | order.do. **구현됨**(lib/callmaner.js trackingDriver) — `userHp` + `providerId` + `conf_slip`, 응답 `rs:{lat,lng,wk_name}`. 사번만 보내면 "배차된 정보가 없습니다"(rc=NG). 배차 전에도 같은 NG다. **기사 위치의 진실은 이 전문이다** — MCP의 `driver.xy`는 `source='route_interpolated'`인 보간값일 수 있고, 실측에서 실제 좌표와 7.04km 떨어져 있었다(2026-09-08, OID2075) |
 | **기준시점 콜목록조회** | **`CallListSince`** | order.do. **userHp 없이 `providerId` + `sinceDt`만** — 지사 단위 조회 |
 
 ## 상태 폴링 — 왜 OrderAllStatus를 쓰지 않는가
