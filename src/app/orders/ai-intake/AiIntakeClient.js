@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ChatHistoryMenu from './ChatHistoryMenu';
 import { renderChatText } from './formatChatText';
 
@@ -294,6 +294,20 @@ async function fetchJson(url, options) {
   return data;
 }
 
+// AI 연결 상태 문구. EJS(public/js/ai-intake.js AI_HEALTH_REASON_MESSAGES)와 같은 문장을 쓴다 —
+// 같은 상황에 화면마다 다른 말이 나오면 고객이 무엇이 문제인지 판단할 수 없다.
+const AI_HEALTH_REASON_MESSAGES = {
+  session_missing: '로그인이 필요합니다. 다시 로그인해주세요.',
+  idle: '세션이 만료되었습니다. 다시 로그인해주세요.',
+  absolute: '장시간 사용하지 않아 세션이 만료되었습니다.',
+  replaced: '다른 곳에서 로그인되어 종료되었습니다.',
+  ai_server: 'AI 서버 응답이 지연되고 있습니다.',
+  ai_unavailable: 'AI 서버에 일시적인 문제가 있습니다.',
+};
+const AI_HEALTH_POLL_INTERVAL_MS = 60000;
+// 입력할 때마다 서버를 부르지 않는다 — 15초에 한 번으로 묶는다(EJS와 같은 값).
+const AI_ACTIVITY_PING_INTERVAL_MS = 15000;
+
 export default function AiIntakeClient({
   initialSession,
   initialMessages,
@@ -318,6 +332,10 @@ export default function AiIntakeClient({
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState('');
   const [streamOnline, setStreamOnline] = useState(false);
+  // 모델이 실제로 닿는지. SSE 연결 여부(streamOnline)와 **뜻이 다르다** — 예전에는 SSE만 보고
+  // "실시간 연결중"이라고 적었는데, 모델이 죽어 있어도 그 문구가 그대로 떠서 고객은 정상인 줄
+  // 알고 계속 입력했다. 두 값을 따로 들고 아래에서 함께 보여준다.
+  const [aiHealth, setAiHealth] = useState({ state: 'checking', message: '' });
   const [phase, setPhase] = useState(initialDraftState && initialDraftState.phase ? initialDraftState.phase : 'collecting');
   const [pendingField, setPendingField] = useState(initialDraftState && initialDraftState.pendingField ? initialDraftState.pendingField : null);
   const [collectedFields, setCollectedFields] = useState(initialDraftFields);
@@ -1158,6 +1176,8 @@ export default function AiIntakeClient({
   handleSendRef.current = handleSend;
 
   async function handleSend(replayText) {
+    // 보내는 순간이 가장 확실한 활동이다 — 간격을 무시하고 바로 알린다.
+    touchAiActivity(true);
     const isReplay = typeof replayText === 'string' && !!replayText.trim();
     const text = isReplay ? replayText.trim() : input.trim();
     if (!text) return;
@@ -1201,6 +1221,9 @@ export default function AiIntakeClient({
     } catch (e) {
       setError(e.message || '메시지 전송에 실패했습니다.');
       pushMessage('bot', '요청 처리 중 문제가 발생했습니다. 잠시 후 다시 시도해주세요.');
+      // 실패했으면 지금 확인한다 — 60초 주기를 기다리면 그동안 표시가 "정상"으로 남아,
+      // 고객은 자기 입력이 잘못된 줄 알고 같은 말을 다시 쓴다(EJS도 같은 시점에 확인한다).
+      checkAiHealth();
     } finally {
       setIsSending(false);
     }
@@ -1298,6 +1321,60 @@ export default function AiIntakeClient({
     };
   }, [sessionId]);
 
+  // 활동 핑 — 고객이 입력하는 동안 세션을 살려둔다.
+  //
+  // 없으면 입력 중인데 유휴로 판정돼 봇 응대로 돌아간다(routes/chat.js의 유휴 복귀 처리).
+  // 고객은 답을 쓰고 있었는데 화면이 "10분 동안 대화가 없어…"로 바뀐다.
+  //
+  // 15초에 한 번으로 묶는다 — 타이핑마다 부르면 글자 수만큼 요청이 나간다. 보낼 때는 force로
+  // 그 간격을 무시한다(그 순간이 가장 확실한 활동이다).
+  const lastActivityPingRef = useRef(0);
+  const touchAiActivity = useCallback((force) => {
+    const now = Date.now();
+    if (!force && now - lastActivityPingRef.current < AI_ACTIVITY_PING_INTERVAL_MS) return;
+    lastActivityPingRef.current = now;
+    // 실패해도 대화를 막지 않는다 — 세션 유지는 부가 처리다.
+    fetch('/orders/ai-intake/activity', { method: 'POST', headers: { 'X-Requested-With': 'fetch' } })
+      .catch(() => {});
+  }, []);
+
+  // AI 연결 확인 — **모델이 실제로 닿는지** 본다.
+  //
+  // /orders/ai-intake/health는 서버가 60초 캐시로 모델을 찔러본 결과를 돌려준다. SSE 연결
+  // 여부와 다른 값이라 따로 봐야 한다 — 그게 이 격차의 핵심이었다.
+  const checkAiHealth = useCallback(async () => {
+    setAiHealth((prev) => (prev.state === 'online' ? prev : { state: 'checking', message: '' }));
+    try {
+      const res = await fetch('/orders/ai-intake/health', {
+        method: 'GET',
+        headers: { 'X-Requested-With': 'fetch' },
+      });
+      const data = await res.json().catch(() => ({ ok: false }));
+      if (res.ok && data && data.ok) {
+        setAiHealth({ state: 'online', message: '' });
+        return true;
+      }
+      const reason = data && data.reason ? String(data.reason) : 'ai_unavailable';
+      setAiHealth({
+        state: 'offline',
+        message: (data && data.message) || AI_HEALTH_REASON_MESSAGES[reason] || AI_HEALTH_REASON_MESSAGES.ai_unavailable,
+      });
+      return false;
+    } catch {
+      setAiHealth({ state: 'offline', message: AI_HEALTH_REASON_MESSAGES.ai_unavailable });
+      return false;
+    }
+  }, []);
+
+  useEffect(() => {
+    checkAiHealth();
+    // 탭이 안 보일 때는 묻지 않는다 — 보이지 않는 화면의 상태 표시를 갱신할 이유가 없다.
+    const timer = setInterval(() => {
+      if (!document.hidden) checkAiHealth();
+    }, AI_HEALTH_POLL_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [checkAiHealth]);
+
   // 안읽음 합계는 공용 스크립트(/js/chat-unread-badge.js)가 물어보고 이벤트로 알려준다.
   // 여기서 또 fetch하면 같은 것을 두 번 묻고, 두 숫자가 어긋나는 순간이 생긴다.
   //
@@ -1327,9 +1404,23 @@ export default function AiIntakeClient({
             </span>
           )}
         </span>
-        <div className={'ai-chat-connection ' + (streamOnline ? 'online' : 'offline')} aria-live="polite">
+        {/* 모델 상태를 앞세운다.
+            예전에는 SSE 연결 여부만 "실시간 연결중"으로 보여줬는데, 모델이 죽어 있어도 그
+            문구가 그대로 떠서 고객은 정상인 줄 알고 계속 입력했다. 고객이 알아야 하는 것은
+            "내 말이 처리되는가"이고 그건 모델 쪽이다. 실시간 연결은 그다음이다.
+            문구는 EJS(public/js/ai-intake-render.js)와 같게 맞췄다. */}
+        <div
+          className={'ai-chat-connection ' + (aiHealth.state === 'online' ? 'online' : (aiHealth.state === 'offline' ? 'offline' : ''))}
+          aria-live="polite"
+          title={aiHealth.state === 'offline' ? (aiHealth.message || 'AI 연결 실패') : undefined}
+          aria-label={aiHealth.state === 'offline' ? `AI 연결 실패: ${aiHealth.message || ''}` : undefined}
+        >
           <span className="ai-chat-connection-dot" aria-hidden="true"></span>
-          <span className="ai-chat-connection-text">{streamOnline ? '실시간 연결중' : '재연결중'}</span>
+          <span className="ai-chat-connection-text">
+            {aiHealth.state === 'online' ? 'AI 연결 정상' : (aiHealth.state === 'offline' ? 'AI 연결 실패' : 'AI 연결 확인중')}
+            {/* 실시간 수신이 끊긴 것도 알려준다 — 답이 늦게 오는 이유가 될 수 있다. */}
+            {aiHealth.state === 'online' && !streamOnline ? ' · 재연결중' : ''}
+          </span>
         </div>
       </div>
 
@@ -1363,7 +1454,11 @@ export default function AiIntakeClient({
       <div className="ai-chat-input-row">
         <textarea
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={(e) => {
+            setInput(e.target.value);
+            // 입력 중에도 세션을 살려둔다 — 없으면 답을 쓰는 동안 유휴로 판정된다.
+            touchAiActivity(false);
+          }}
           placeholder="예) 내일 오후 4시 판교역에서 강남역까지 차량 이동 예약"
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
