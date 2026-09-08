@@ -40,7 +40,19 @@ export default function PushSettingsClient({ currentUser, branches, eventTypes =
         // 구독 중이면 사라져서, 세부 설정을 넣는 순간 저장이 불가능해질 자리였다).
         subscribeBtn.style.display = '';
         unsubscribeBtn.style.display = sub ? '' : 'none';
-        if (!sub) { statusEl.textContent = '이 브라우저는 아직 알림을 받지 않습니다.'; return; }
+        if (!sub) {
+          // 다른 기기에서 받고 있으면 그렇다고 말한다(EJS 화면과 같은 문구) — "이 브라우저"만
+          // 말하면 알림이 오는데도 안 온다고 적힌 것으로 읽힌다.
+          let otherCount = 0;
+          try {
+            const st = await fetch('/push/status', { credentials: 'same-origin' });
+            if (st.ok) otherCount = (await st.json()).otherDevices || 0;
+          } catch (e) { /* 못 세도 아래 문구는 나간다 */ }
+          statusEl.textContent = otherCount
+            ? `이 브라우저에서는 받지 않습니다. 다른 브라우저·기기 ${otherCount}대에서 받는 중입니다.`
+            : '이 브라우저는 아직 알림을 받지 않습니다.';
+          return;
+        }
 
         // 저장된 값을 되읽어 체크 상태를 맞춘다. 이게 없으면 화면은 늘 "전부 켜짐"으로 보이고,
         // 종류를 골라 저장해도 다시 들어오면 전부 켜진 것처럼 나온다 — 저장이 안 된 줄로 읽힌다.

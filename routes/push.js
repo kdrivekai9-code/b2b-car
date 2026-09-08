@@ -34,9 +34,26 @@ router.get('/settings', asyncHandler(async (req, res) => {
 // notify_order_events 하나뿐이고, 나머지는 애초에 고객에게 보내지 않는다(lib/push.js notify).
 router.get('/status', asyncHandler(async (req, res) => {
   const { endpoint } = req.query;
-  if (!endpoint) return res.json({ subscribed: false, effective: false });
+  // 다른 기기 수를 함께 준다.
+  //
+  // 왜(실사용 지적 2026-09-08): 사파리에서 "이 브라우저는 아직 알림을 받지 않습니다"가
+  // 떴는데 알림은 실제로 오고 있었다. 구독은 **브라우저마다 따로**라서 둘 다 사실이었다 —
+  // 그 사파리에는 구독이 없고(당시 저장된 구독 5건 전부 크롬 계열이었다), 알림은 예전에
+  // 크롬에서 만든 구독으로 가고 있었다. 화면이 "이 브라우저"만 말하면 고장난 것으로 읽힌다.
+  const others = await db.get(
+    'SELECT count(*)::int AS c FROM push_subscriptions WHERE user_id = ? AND endpoint <> ?',
+    [req.session.user.id, String(endpoint || '')]
+  ).catch(() => ({ c: 0 }));
+  const otherDevices = others ? others.c : 0;
+
+  if (!endpoint) return res.json({ subscribed: false, effective: false, otherDevices });
   const sub = await db.get('SELECT * FROM push_subscriptions WHERE endpoint = ? AND user_id = ?', [endpoint, req.session.user.id]);
-  res.json({ subscribed: !!sub, effective: isEffective(req.session.user, sub), sub: sub || null });
+  res.json({
+    subscribed: !!sub,
+    effective: isEffective(req.session.user, sub),
+    otherDevices,
+    sub: sub || null,
+  });
 }));
 
 // 고객이 고른 통보 종류를 저장 가능한 문자열로 만든다.

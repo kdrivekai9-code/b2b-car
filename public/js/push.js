@@ -9,7 +9,11 @@
 
   async function getSubscription() {
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) return null;
-    var reg = await navigator.serviceWorker.register('/sw.js');
+    await navigator.serviceWorker.register('/sw.js');
+    // **ready를 기다린다.** register()가 돌려주는 등록은 아직 활성화 전일 수 있고, 그 상태에서
+    // pushManager.getSubscription()이 null을 주는 브라우저가 있다(사파리에서 겪었다) —
+    // 구독이 있는데 "아직 알림을 받지 않습니다"로 보인다. subscribe()는 이미 ready를 쓴다.
+    var reg = await navigator.serviceWorker.ready;
     return reg.pushManager.getSubscription();
   }
 
@@ -41,6 +45,19 @@
   }
 
   window.__push = { getSubscription: getSubscription, subscribe: subscribe, unsubscribe: unsubscribe };
+
+  // 차단 안내 문구.
+  //
+  // "브라우저 설정에서 허용해주세요"만으로는 사파리에서 길을 못 찾는다 — 크롬은 주소창 왼쪽
+  // 자물쇠지만 사파리는 메뉴의 설정 > 웹사이트 > 알림에 있다. 한 번 "허용 안 함"을 누르면
+  // 사파리가 그것을 기억해서, 그 목록에서 바꾸기 전까지는 버튼을 눌러도 계속 막힌다.
+  function blockedMessage() {
+    var isSafari = /^((?!chrome|android|crios|fxios).)*safari/i.test(navigator.userAgent);
+    if (isSafari) {
+      return '브라우저 알림이 차단되어 있습니다. 사파리 메뉴 > 설정 > 웹사이트 > 알림에서 이 사이트를 "허용"으로 바꿔주세요.';
+    }
+    return '브라우저 알림이 차단되어 있습니다. 주소창 왼쪽의 사이트 설정에서 알림을 허용해주세요.';
+  }
 
   function showToast(message) {
     var el = document.createElement('div');
@@ -124,7 +141,7 @@
           } else if (Notification.permission === 'denied') {
             // 이미 차단된 상태면 subscribe()를 시도조차 하지 않는다 — 브라우저에 따라 이 경우
             // subscribe()가 거부되지 않고 계속 멈춰있는 걸 직접 확인했다.
-            showToast('브라우저 알림이 차단되어 있습니다. 브라우저 설정에서 이 사이트의 알림을 허용해주세요.');
+            showToast(blockedMessage());
           } else {
             await withTimeout(subscribe(), 10000);
             btn.textContent = '🔔 알림 켜짐';
@@ -132,7 +149,7 @@
           }
         } catch (e) {
           if (Notification.permission === 'denied') {
-            showToast('브라우저 알림이 차단되어 있습니다. 브라우저 설정에서 이 사이트의 알림을 허용해주세요.');
+            showToast(blockedMessage());
           } else if (e && e.message === 'timeout') {
             showToast('알림 설정 요청이 응답하지 않습니다. 잠시 후 다시 시도해주세요.');
           } else {

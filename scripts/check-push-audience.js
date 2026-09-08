@@ -114,7 +114,29 @@ console.log('\n["켜짐" 표시가 사실인가]');
 check('서버가 effective를 준다', /effective: isEffective\(req\.session\.user, sub\)/.test(routes), true);
 check('고객 기준은 오더 알림 하나', /if \(user\.role === 'client'\) return on\(sub\.notify_order_events\);/.test(routes), true);
 check('내부 사용자는 하나라도 켜져 있으면', /\.some\(\(k\) => on\(sub\[k\]\)\)/.test(routes), true);
-check('엔드포인트가 없으면 꺼짐', /return res\.json\(\{ subscribed: false, effective: false \}\)/.test(routes), true);
+// 엔드포인트 없이 물으면(다른 기기 수만 세러 오는 호출) 이 브라우저는 꺼짐이다.
+check('엔드포인트가 없으면 꺼짐', /if \(!endpoint\) return res\.json\(\{ subscribed: false, effective: false, otherDevices \}\)/.test(routes), true);
+
+console.log('\n[브라우저마다 따로라는 사실을 화면이 말한다]');
+// 실사용 지적(2026-09-08, 사파리): "이 브라우저는 아직 알림을 받지 않습니다"가 떴는데
+// 알림은 실제로 오고 있었다. 둘 다 사실이었다 — 구독은 브라우저마다 따로라서, 그 사파리에는
+// 구독이 없고(당시 저장된 구독 5건 전부 크롬 계열) 알림은 예전 크롬 구독으로 가고 있었다.
+// 화면이 "이 브라우저"만 말하면 고장난 것으로 읽힌다.
+check('상태가 다른 기기 수를 함께 준다', /otherDevices/.test(routes), true);
+check('엔드포인트 없이도 센다', /if \(!endpoint\) return res\.json\(\{ subscribed: false, effective: false, otherDevices \}\)/.test(routes), true);
+[['EJS', read('views/push_settings.ejs')], ['Next', read('src/app/push/settings/PushSettingsClient.js')]].forEach(([label, code]) => {
+  check(`${label} — 다른 기기에서 받는 중임을 알린다`, /다른 브라우저·기기 /.test(code), true);
+});
+
+console.log('\n[사파리에서 막혔을 때 길을 알려준다]');
+// "브라우저 설정에서 허용해주세요"만으로는 사파리에서 길을 못 찾는다 — 크롬은 주소창 왼쪽
+// 자물쇠지만 사파리는 메뉴의 설정 > 웹사이트 > 알림이다. 한 번 "허용 안 함"을 누르면
+// 사파리가 기억해서 그 목록에서 바꾸기 전까지 계속 막힌다.
+check('사파리 경로를 안내한다', /사파리 메뉴 > 설정 > 웹사이트 > 알림/.test(client), true);
+check('한 곳에서 문구를 만든다', (client.match(/showToast\(blockedMessage\(\)\)/g) || []).length, 2);
+// 활성화 전 등록에서 getSubscription이 null을 주는 브라우저가 있다(사파리) — 구독이 있는데
+// "아직 받지 않습니다"로 보인다.
+check('구독 조회가 활성화를 기다린다', /await navigator\.serviceWorker\.ready;\n    return reg\.pushManager\.getSubscription\(\)/.test(client), true);
 
 console.log('\n[사이드바 버튼]');
 check('라벨을 서버 판정으로 정한다', /await isNotifyOn\(sub\)\) \? '🔔 알림 켜짐' : '🔕 알림 받기'/.test(client), true);
