@@ -69,8 +69,16 @@ console.log('\n[발송 규약]');
 check('제목·설명 한도가 상수로', /ITEM_TITLE_MAX = 6/.test(src) && /ITEM_DESC_MAX = 23/.test(src), true);
 check('최소·최대 개수도', /ITEM_MIN = 2/.test(src) && /ITEM_MAX = 10/.test(src), true);
 // 리치 발송이 실패해도 통보는 나가야 한다 — 서식 하나 때문에 통째로 안 나가는 쪽이 훨씬 나쁘다.
+// 성공 경로에 진단 로그가 끼어들어도(2026-09-08) 이 관계는 유지돼야 한다 — 리치를 먼저
+// 시도하고, 실패하면 같은 함수 안에서 평문으로 되돌아간다.
 check('리치 실패 시 평문으로 다시 보낸다',
-  /postJson\('\/send\/rich'[\s\S]{0,200}if \(rich\.ok\) return rich;[\s\S]{0,200}postJson\('\/send\/plain'/.test(src), true);
+  /postJson\('\/send\/rich'[\s\S]{0,1200}postJson\('\/send\/plain'/.test(src)
+  && /return postJson\('\/send\/plain', session, textBody\(text, buttons\)\);/.test(src), true);
+// 실패 이유를 DB에 남겨야 운영에서 읽을 수 있다 — 콘솔만 남기면 "표가 안 나온다"의 원인을
+// 알 수 없다(실제로 그 상태였다).
+check('실패 이유를 DB에 남긴다', /operation: 'send_item_list'/.test(src), true);
+// 성공도 한 번은 남긴다: 카카오가 받아줬는데 평문으로 보이는 경우와 거절당한 경우를 가른다.
+check('성공도 한 번은 남긴다', /operation: 'send_item_list_ok'/.test(src) && /loggedRichAccepted/.test(src), true);
 check('평문 강제 옵션이 있다', /options && options\.plain/.test(src), true);
 // 리치 섹션 모양이 정의서와 같아야 한다(attachment.item.list).
 const body = k.itemListBody('본문', [{ title: '상태', description: '완료' }, { title: '요금', description: '0원' }]);
