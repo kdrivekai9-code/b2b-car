@@ -17,6 +17,13 @@ const EXPRESS_FALLBACK = process.env.VERCEL ? '/api/index' : 'http://localhost:3
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // dev 서버는 자기가 뜬 호스트(localhost)가 아닌 오리진에서 오는 /_next/* 요청을 **403으로
+  // 막는다**(Next 공식 동작, node_modules/next/dist/docs/.../allowedDevOrigins.md).
+  // 그래서 127.0.0.1:3001로 열면 클라이언트 청크가 전부 403이 되고, 화면은 서버 렌더 그대로
+  // 굳어버린다 — 응답 본문이 비어 있어 원인이 전혀 드러나지 않는다. 로컬 검사가 두 주소를
+  // 섞어 쓰므로(스펙은 localhost, 헬퍼는 127.0.0.1) 둘 다 허용한다. 배포에는 영향이 없다.
+  allowedDevOrigins: ['127.0.0.1', 'localhost'],
+
   async rewrites() {
     return {
       beforeFiles: [],

@@ -127,6 +127,7 @@ const CI_CHECKS = [
   'check-client-scope',
   'check-dispatch-lookup-tool',
   'check-driver-chat',
+  'check-driver-location-map',
   'check-driver-trip-steps',
   'check-driver-push',
   'check-driver-token',

@@ -1764,6 +1764,20 @@ router.get('/:id/data.json', asyncHandler(async (req, res) => {
     },
     rawWaypoints: waypoints,
     history, drivers, photos, callmanerPhotos: callmanerPhotoRows, canViewPhotos, legs,
+    // 기사 위치의 **첫 값**. 화면(DriverLocationMap)이 붙기 전에도 사실을 말하게 하려고
+    // 같이 내려준다 — 예전에는 첫 화면이 항상 "위치를 확인하는 중입니다…"였고, 클라이언트가
+    // 못 붙는 상황에서는 그 문구가 영원히 남아 "위치가 안 나온다"로 보였다(2026-09-08).
+    // 이후 갱신은 그 컴포넌트가 30초마다 /driver-location.json으로 직접 받는다.
+    driverLocation: await (async () => {
+      const loc = await driverLocation.loadForOrder(order).catch(() => null);
+      if (!loc) return null;
+      return {
+        ...loc,
+        trackingUrl: driverLocation.trackingLink(order),
+        origin: { lat: order.origin_lat, lon: order.origin_lon, address: order.origin_address },
+        destination: { lat: order.destination_lat, lon: order.destination_lon, address: order.destination_address },
+      };
+    })(),
     // 운행전·운행후를 순번으로 짝지어 내려준다 — 화면이 다시 세면 EJS와 Next가 갈린다.
     callmanerPhotoPairs: callmanerPhotos.pairByPhase(callmanerPhotoRows),
     // 실비 영수증. 청구 금액이라 고객에게는 아예 내려주지 않는다(extraChargeRows와 같은 규칙).

@@ -123,7 +123,10 @@ export default async function OrderDetailPage({ params }) {
           "지금 어디쯤이에요?"가 상담 문의의 큰 몫이라, 화면에서 스스로 확인하면 그만큼 줄어든다.
           배차 전·완료 후에는 컴포넌트가 스스로 아무것도 그리지 않는다. */}
       <div style={{ marginTop: 18 }}>
-        <DriverLocationMap orderId={id} status={data.order.status} />
+        {/* 첫 값은 서버가 함께 내려준다(data.json의 driverLocation) — 클라이언트가 붙기 전에도
+            사실을 말한다. 예전에는 첫 화면이 항상 "위치를 확인하는 중입니다…"였고, 클라이언트가
+            못 붙는 상황에서는 그 문구가 영원히 남아 "위치가 안 나온다"로 보였다. */}
+        <DriverLocationMap orderId={id} status={data.order.status} initial={data.driverLocation || null} />
       </div>
 
       {/* 콜마너 탁송사진 — 썸네일 깨짐 처리(onError)를 위해 클라이언트 컴포넌트로 뺐다.

@@ -8,6 +8,7 @@
 // 배차 전·완료 후에는 아예 그리지 않는다. 완료 뒤에는 콜마너가 위치를 더는 수집하지 않으므로
 // 보여줄 것이 없고, 빈 지도를 띄우면 "위치가 안 뜬다"는 문의가 늘 뿐이다.
 import { useEffect, useRef, useState } from 'react';
+import Script from 'next/script';
 
 const POLL_MS = 30000;
 
@@ -29,8 +30,12 @@ const REASON_TEXT = {
 // 여기서 넓게 잡으면 완료된 오더마다 쓸데없이 MCP를 두드린다.
 const TRACKABLE = new Set(['기사배정', '운행시작']);
 
-export default function DriverLocationMap({ orderId, status }) {
-  const [data, setData] = useState(null);
+export default function DriverLocationMap({ orderId, status, initial = null }) {
+  // 서버가 처음 값을 함께 내려준다(page.js) — 그래야 첫 화면부터 사실을 말한다. 이게 없으면
+  // 클라이언트가 붙기 전까지 "위치를 확인하는 중입니다…"만 떠 있고, 클라이언트가 못 붙는
+  // 상황에서는 그 문구가 영원히 남는다(실측 2026-09-08: 그 상태를 "위치가 안 나온다"로 봤다).
+  const [data, setData] = useState(initial);
+  const [sdkReady, setSdkReady] = useState(false);
   const mapRef = useRef(null);
   const boxRef = useRef(null);
   const markerRef = useRef(null);
@@ -67,17 +72,17 @@ export default function DriverLocationMap({ orderId, status }) {
     };
   }, [orderId, trackable]);
 
-  // 지도는 좌표가 실제로 생겼을 때 만든다. 카카오 SDK는 오더 폼(RouteMap)이 이미 싣고 있고,
-  // 이 화면에는 없을 수 있어 있을 때만 그린다 — 없다고 화면 전체가 깨지면 안 된다.
+  // 지도는 좌표가 실제로 생겼을 때 만든다.
+  //
+  // **카카오 SDK를 이 컴포넌트가 직접 싣는다.** 예전에는 "오더 폼(RouteMap)이 이미 싣고
+  // 있다"고 보고 있을 때만 그렸는데, RouteMap은 /orders/new 화면의 것이고 오더 상세에는
+  // 없다 — 즉 이 화면에서 window.kakao는 **영원히** 없었고 지도는 한 번도 그려지지 않았다
+  // (실측 2026-09-08, OID2075: 좌표는 서버에서 정상으로 왔는데 지도만 안 떴다).
+  // EJS 상세화면은 자기 화면에서 SDK를 싣고 있어 잘 나왔다 — 두 화면이 갈려 있었다.
   useEffect(() => {
-    if (!data || !data.available || !boxRef.current) return;
-    // 카카오 SDK는 같은 화면의 오더 폼(RouteMap)이 비동기로 싣는다. 아직 안 왔으면 잠깐 뒤
-    // 다시 본다 — 다음 폴링(30초)까지 기다리면 그동안 지도가 빈 채로 남는다.
+    if (!data || !data.available || !boxRef.current || !sdkReady) return undefined;
     const kakao = typeof window !== 'undefined' ? window.kakao : null;
-    if (!kakao || !kakao.maps || !kakao.maps.Map) {
-      const retry = setTimeout(() => setData((d) => (d ? { ...d } : d)), 800);
-      return () => clearTimeout(retry);
-    }
+    if (!kakao || !kakao.maps || !kakao.maps.Map) return undefined;
 
     const pos = new kakao.maps.LatLng(data.lat, data.lon);
     if (!mapRef.current) {
@@ -111,7 +116,8 @@ export default function DriverLocationMap({ orderId, status }) {
       markerRef.current.setPosition(pos);
       map.panTo(pos);
     }
-  }, [data]);
+    return undefined;
+  }, [data, sdkReady]);
 
   if (!trackable) return null;
 
@@ -146,6 +152,24 @@ export default function DriverLocationMap({ orderId, status }) {
             </p>
           )}
         </>
+      )}
+
+      {/* 지도 SDK — 이 화면이 직접 싣는다(위 useEffect 주석 참고). autoload=false + maps.load는
+          오더 폼의 RouteMap과 같은 방식이다: 스크립트가 왔다고 바로 kakao.maps가 준비된 것이
+          아니라, load 콜백을 받아야 Map을 만들 수 있다.
+          좌표가 없으면(배차 전·신호 없음) 굳이 싣지 않는다 — 볼 지도가 없다. */}
+      {data && data.available && (
+        <Script
+          src={`//dapi.kakao.com/v2/maps/sdk.js?appkey=${process.env.NEXT_PUBLIC_KAKAO_JS_KEY}&autoload=false`}
+          strategy="afterInteractive"
+          onLoad={() => {
+            if (window.kakao && window.kakao.maps) window.kakao.maps.load(() => setSdkReady(true));
+          }}
+          onReady={() => {
+            // 이미 실려 있던 경우(같은 화면을 되돌아왔을 때) onLoad가 다시 오지 않는다.
+            if (window.kakao && window.kakao.maps) window.kakao.maps.load(() => setSdkReady(true));
+          }}
+        />
       )}
     </div>
   );
