@@ -110,5 +110,45 @@ console.log('\n[대기 안내가 모델 이력에 안 들어간다]');
     cleaned.filter((r) => r.sender === 'user').length === 2);
 }
 
+console.log('\n[창을 날짜 경계에서 끊는다]');
+{
+  const { trimToConversationDay } = require(path.join(ROOT, 'lib/chatHistoryWindow'));
+  // chat_messages.created_at은 **text**이고 KST 벽시계가 그대로 들어 있다(timestamptz가 아니다).
+  // 그래서 아래 사례도 그 형식 그대로 쓴다 — 형식이 다르면 검사가 실제와 다른 것을 재게 된다.
+  const kstToReal = (wall) => new Date(Date.parse(`${wall.replace(' ', 'T')}Z`) - 9 * 3600 * 1000);
+
+  // 사고 당시 창 그대로.
+  const kept = trimToConversationDay([
+    { sender: 'user', message: '그럼 내일 예약한콜은?', created_at: '2026-09-07 10:22:00' },
+    { sender: 'bot', message: '내일 예약된 주문은 없습니다.', created_at: '2026-09-07 10:22:10' },
+    { sender: 'user', message: '내일 예약건 보여줘', created_at: '2026-09-08 11:56:00' },
+  ], kstToReal('2026-09-08 11:56:00'));
+  check('어제 문답이 빠진다', kept.length === 1 && kept[0].message === '내일 예약건 보여줘',
+    JSON.stringify(kept.map((r) => r.message)));
+
+  // 자정을 갓 넘긴 대화까지 자르면 맥락이 끊긴다 — 23:55에 묻고 00:05에 이어 묻는 사람은
+  // 같은 대화 중이다.
+  const midnight = trimToConversationDay([
+    { sender: 'user', message: '23:55 질문', created_at: '2026-09-09 23:55:00' },
+    { sender: 'user', message: '00:05 질문', created_at: '2026-09-10 00:05:00' },
+  ], kstToReal('2026-09-10 00:05:00'));
+  check('자정 직후에는 앞 turn을 남긴다', midnight.length === 2, `${midnight.length}개`);
+
+  // 판단할 수 없으면 남긴다 — 버려서 맥락이 사라지는 쪽이 나쁘다.
+  check('created_at이 없으면 남긴다',
+    trimToConversationDay([{ sender: 'user', message: 'x' }], new Date()).length === 1);
+  check('읽을 수 없는 값도 남긴다',
+    trimToConversationDay([{ sender: 'user', message: 'y', created_at: '몰라' }], new Date()).length === 1);
+
+  // 두 채널 모두 걸어야 한다. 한쪽만 걸면 채널에 따라 답이 갈린다.
+  const kakao = fs.readFileSync(path.join(ROOT, 'routes/kakaoConsult.js'), 'utf8');
+  const web = fs.readFileSync(path.join(ROOT, 'routes/orders.js'), 'utf8');
+  check('카카오가 창을 끊는다', /history = trimToConversationDay\(history\)/.test(kakao));
+  check('웹도 창을 끊는다', /history = trimToConversationDay\(history\)/.test(web));
+  // created_at을 안 읽어오면 끊을 근거가 없다 — 전부 "판단 불가"로 남는다.
+  check('카카오가 created_at을 읽어온다', /SELECT sender, message, created_at FROM chat_messages/.test(kakao));
+  check('웹도 created_at을 읽어온다', /SELECT sender, message, created_at FROM chat_messages/.test(web));
+}
+
 console.log(failed ? `\n${failed}건 실패` : '\n모두 통과');
 process.exit(failed ? 1 : 0);

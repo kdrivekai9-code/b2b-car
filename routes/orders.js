@@ -21,6 +21,7 @@ const { buildFareSuggestion } = require('../lib/agentAssist');
 const memoExtraCosts = require('../lib/memoExtraCosts');
 const postalReceipt = require('../lib/postalReceipt');
 const reservationSanity = require('../lib/reservationSanity');
+const { trimToConversationDay } = require('../lib/chatHistoryWindow');
 // 인사·자기소개 응답은 카카오 상담톡(routes/kakaoConsult.js)과 같은 규칙을 써야 해서 공용 모듈로 뺐다.
 const { isGreeting, getSmalltalkMessage } = require('../lib/smallTalk');
 const { broadcastMessage, broadcastSessionListChanged, broadcastOrderListChanged, openOrderListStream, closeChannel } = require('../lib/realtimeChat');
@@ -832,13 +833,16 @@ function startDispatchProbe(req, { text, pendingField, chatSessionId }) {
     if (!session || session.user_id !== req.session.user.id) return null;
     if (session.status !== 'bot') return null; // 상담원이 붙은 세션에는 봇이 끼어들지 않는다
 
-    const history = await db.all(
-      `SELECT sender, message FROM chat_messages
+    let history = await db.all(
+      `SELECT sender, message, created_at FROM chat_messages
        WHERE session_id = ? AND sender IN ('user', 'bot') AND message IS NOT NULL
        ORDER BY id DESC LIMIT 12`,
       [chatSessionId]
     );
     history.reverse();
+    // 웹은 방문마다 세션이 새로 열려 창이 날짜를 넘는 일이 드물지만, 창을 띄워둔 채 자정을
+    // 넘기면 같은 일이 난다 — 카카오와 같은 규칙을 쓴다(lib/chatHistoryWindow.js).
+    history = trimToConversationDay(history);
     // 방금 저장된 이번 메시지는 text로 따로 넘기므로 히스토리 끝에서 뺀다(/dispatch-agent와 동일).
     if (history.length && history[history.length - 1].sender === 'user' && history[history.length - 1].message === text) {
       history.pop();

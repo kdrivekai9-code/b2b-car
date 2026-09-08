@@ -34,6 +34,7 @@ const { geocodeAddress } = require('../lib/geocode');
 const { buildScheduleQuestion } = require('../lib/orderSplit');
 const { needsDateReask, buildDateQuestion, applyDateAnswer, buildRetryQuestion } = require('../lib/reservationReask');
 const { applyCorrection } = require('../lib/intakeCorrection');
+const { trimToConversationDay } = require('../lib/chatHistoryWindow');
 const { runKakaoOrderNotifications } = require('../lib/kakaoOrderNotify');
 const kakaoOrderPhotos = require('../lib/kakaoOrderPhotos');
 const { sendOrderPhotos, isPhotoRequest, isOdometerRequest, answerOdometer, countNoPhotoAnswers } = kakaoOrderPhotos;
@@ -1778,12 +1779,15 @@ async function prepareDispatchRun(session, text) {
   // 어떤게 있지?"에 오늘 건까지 붙어 나왔다). 초안 경로에서는 상담원이 곧 응답자이므로
   // 그 발화가 모델 쪽 차례에 오는 것이 사실과도 맞다.
   let history = await db.all(
-    `SELECT sender, message FROM chat_messages
+    `SELECT sender, message, created_at FROM chat_messages
      WHERE session_id = ? AND sender IN ('user','bot','agent') AND message IS NOT NULL
      ORDER BY id DESC LIMIT 10`,
     [session.id]
   ).catch(() => []);
   history.reverse();
+  // 어제 대화는 넘기지 않는다 — "내일"이 어제와 오늘 서로 다른 날을 가리킨다
+  // (lib/chatHistoryWindow.js에 실측 사례). 카카오 세션은 안 닫혀서 창이 날짜를 넘는다.
+  history = trimToConversationDay(history);
   // 대기 안내는 모델에게 넘기지 않는다.
   //
   // 왜(실사용 2026-09-08): 이 안내가 chat_messages에 남아 이력 10개 중 절반을 차지했다.
