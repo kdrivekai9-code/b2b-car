@@ -58,6 +58,33 @@ check('프롬프트가 형식을 지정한다', /"기사: \{기사명\} \{기사
 check('프롬프트가 배차 전에는 빼라고 한다', /배차 전 상태\(접수·대기·예약\)에서도 이 줄을 넣지 마세요/.test(src), true);
 check('상세 안내 순서에도 자리가 있다', /상태 →\n  기사\(배차 이후에만\) → 요금/.test(src), true);
 
+console.log('\n[질문에 맞는 답이 나가는가]');
+// 실사용 사고(2026-09-08): "OID2075 배차기사 전화번호와 이름은?", "첫번째오더 배차기사정보
+// 알려줘"에 **진행 중 주문 목록 전체**가 답으로 왔다. 기사 정보는 get_my_orders 결과에 있어
+// 모델이 그 도구를 부른 것은 옳았는데, 서버가 "목록만 물어본 턴"으로 보고 모델 답변을 버리고
+// 목록 문장으로 갈아치웠다. 그 장치 자체는 필요하다(모델이 기사배정 여부를 뒤집은 사고가
+// 있었다) — 다만 **목록을 물어본 턴에만** 적용해야 한다.
+check('특정 항목을 물은 턴은 모델이 답한다',
+  /const askedSomethingSpecific = FIXED_QUERY_BLOCKERS_RE\.test\(String\(text \|\| ''\)\);/.test(src), true);
+check('목록 갈아치우기에 그 조건이 걸려 있다',
+  /const listOnly = lastOrderList && usedTools\.length > 0[\s\S]{0,160}&& !askedSomethingSpecific;/.test(src), true);
+// 판정 규칙을 새로 만들지 않고 고정 빠른 응답이 쓰는 것을 재사용한다 — 두 벌이 되면 한쪽만
+// 고쳐져서 "어떤 질문이 목록이냐"가 화면마다 달라진다.
+check('판정 규칙을 재사용한다', /FIXED_QUERY_BLOCKERS_RE = new RegExp/.test(src), true);
+// 그 규칙에 기사·연락처·요금·위치·순번·접수번호가 들어 있어야 이 사고가 다시 안 난다.
+const blockers = (src.match(/FIXED_QUERY_BLOCKERS_RE = new RegExp\(\[([\s\S]*?)\]\.join/) || [, ''])[1];
+['기사', '연락처', '전화번호', '요금', '위치', '접수번호'].forEach((w) => {
+  check(`"${w}"가 판정에 들어 있다`, blockers.includes(w), true);
+});
+
+console.log('\n[순번 지목은 직전 답변 기준]');
+// 도구가 돌려주는 목록 순서는 직전 답변 순서와 다르다. 실측에서 "두번째 오더"를 물었을 때
+// 도구 결과의 두 번째(=직전 답변의 첫 번째)를 골라 **엉뚱한 오더의 기사 연락처**를 안내했다.
+check('도구 순서와 다르다고 못 박는다',
+  /\*\*도구가 돌려주는 목록의 순서는 직전 답변의 순서와 다릅니다\.\*\*/.test(src), true);
+check('방금 보낸 답변 기준으로 세라고 한다', /당신이 방금\n  보낸 답변에 적은 순서로 세세요/.test(src), true);
+check('고른 접수번호를 밝히라고 한다', /답변 첫머리에 그 주문의\n  접수번호를 밝혀/.test(src), true);
+
 console.log('\n[카카오 항목표에 한 행으로 들어간다]');
 const bubbles = kakao.splitForItemList([
   '오늘 예약된 주문은 총 1건입니다.',
