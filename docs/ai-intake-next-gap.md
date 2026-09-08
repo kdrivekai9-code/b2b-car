@@ -77,10 +77,11 @@ wc -l public/js/ai-intake*.js src/app/orders/ai-intake/*.js
 
 | | 항목 | 무엇이 없나 | 없으면 |
 |---|---|---|---|
-| ○ | **요금 문의 흐름** | "판교에서 강남 얼마예요?" 같은 질문을 접수와 구분해 요금만 답하는 경로. EJS는 이 흐름에 함수 15개 이상을 쓴다(`detectFareInquiryType`, `handleFareInquiryFlowFromText`, `buildFareSentence`, `startBackgroundFareGuide` …) | 요금만 묻는 고객이 접수 흐름으로 끌려간다 |
+| ✔ | ~~요금 문의 흐름~~ | **2026-09-08 이식 완료 — 다만 방식이 다르다.** EJS는 이 흐름을 클라이언트에서 함수 32개·약 933줄로 한다. 그걸 옮기지 않고, 카카오가 이미 쓰는 서버 계산(`lib/agentAssist.js buildFareSuggestion`)을 엔드포인트(`POST /orders/ai-intake/fare-inquiry`)로 열어 Next가 부른다 — 옮기면 같은 계산이 세 벌이 된다.<br>**남은 차이: 여러 턴에 걸친 수집이 없다.** 출발·도착이 한 문장에 다 있으면 답하고, 없으면 기존 경로(FAQ → 상담원)로 넘어간다. EJS는 차종·경유지까지 되물어 모은다 — 그 부분은 아래 `△`로 내렸다 |
 | ○ | **프리미엄 / 일일기사 수집** | 카테고리 개념 자체가 없다. Next 코드가 그렇게 적어 뒀다 — *"이 파일에는 프리미엄/일일기사 카테고리 자체가 없어(orderCategory 개념이 없다)"*. 서버 턴을 켜도 안 메워진다(아래) | `order_type='premium'` 접수를 챗봇으로 못 받는다 |
 | ✔ | ~~활동 핑~~ | **2026-09-08 이식 완료.** 입력할 때 15초 간격으로, 보낼 때는 간격 무시. EJS와 같은 값 |
 | ✔ | ~~AI 연결 상태~~ | **2026-09-08 이식 완료.** 모델 상태를 앞세우고 SSE 끊김은 뒤에 덧붙인다(`AI 연결 정상 · 재연결중`). 실패하면 60초를 기다리지 않고 즉시 다시 확인 |
+| △ | **요금 문의의 여러 턴 수집** | 출발·도착이 한 문장에 없을 때 되물어 모으는 흐름(`askFareInquiryMissingField`, `handleFareInquiryPendingReply`, 차종·경유지 되묻기) | 구간을 나눠 말하는 고객은 요금을 못 받고 상담원으로 간다 |
 | △ | **빠른 응답** | `aiQuickReplies` — 상황에 맞는 버튼(연락처 재사용 등) | 매번 직접 타이핑 |
 | △ | **FAQ 응답** | `handleFaqIntent` — 접수가 아닌 질문을 지식베이스로 답하기 | 일반 질문이 상담원으로 넘어간다 |
 | △ | **좌절 감지 → 상담원 제안** | `looksFrustrated`, `maybeOfferForFrustration` | 막힌 고객이 스스로 "상담원"이라고 쳐야 한다 |
@@ -93,17 +94,17 @@ wc -l public/js/ai-intake*.js src/app/orders/ai-intake/*.js
 
 ## 판단
 
-**아직 켤 수 없다.** 작은 둘(활동 핑·AI 연결 상태)은 2026-09-08에 채웠다. 남은 `○` 둘은
-요금 문의 흐름과 프리미엄/일일기사 수집이고, 둘 다 고객이 실제로 쓰는 접수 경로다 —
-없으면 그 요청을 챗봇으로 받을 수 없다.
+**남은 필수는 하나다.** 2026-09-08에 셋을 채웠다(활동 핑, AI 연결 상태, 요금 문의).
+남은 `○`는 **프리미엄/일일기사 수집** 하나다 — 카테고리 개념 자체가 Next에 없고, 서버 턴을
+켜도 안 메워진다. `order_type='premium'` 접수를 챗봇으로 받을 수 없다.
 
 **순서 제안**
 
 1. **`AI_INTAKE_SERVER_TURN_ENABLED`를 먼저 켤지 정한다.** 켜면 탁송 대화 판단이 서버로
    가면서 격차가 크게 줄고, 두 클라이언트가 같은 판단을 쓰게 된다(지금은 각자 판단한다).
    단 프리미엄/일일기사는 그래도 남는다.
-2. 남은 `○` 둘(요금 문의·프리미엄 수집)을 채운다. 작은 둘은 완료했다
-   (`scripts/check-ai-intake-liveness.js`가 지킨다).
+2. 남은 `○` 하나(프리미엄/일일기사 수집)를 채운다. 셋은 완료했다 —
+   `scripts/check-ai-intake-liveness.js`와 `scripts/check-fare-inquiry-shared.js`가 지킨다.
 3. `(Next)` 표식을 지운다.
 4. `NEXT_STAGE2_ORDER_FORM_ENABLED`와 함께 켠다(폼이 없으면 접수를 끝낼 수 없다).
 5. `node scripts/check-prod-flags.js`로 확인한다.

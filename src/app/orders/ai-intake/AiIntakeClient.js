@@ -294,6 +294,15 @@ async function fetchJson(url, options) {
   return data;
 }
 
+// 요금 문의를 값싸게 걸러내는 관문. 서버(lib/agentAssist.js FARE_QUESTION_RE)와 같은 낱말이다 —
+// 여기서 통과시켜도 서버가 다시 보므로 이 관문은 **부르지 않아도 되는 요청을 줄이는 용도**다.
+//
+// 접수 문장을 가로채지 않는지 실제 문장으로 확인했다:
+//   "사당역에서 강남역까지 얼마예요?"        → 요금 문의
+//   "사당역에서 판교까지 탁송해주세요"        → 통과(접수)
+//   "내일 3시 사당역에서 판교로 12가1234 예약" → 통과(접수)
+const FARE_QUESTION_RE = /(요금|얼마|비용|가격|견적|단가)/;
+
 // AI 연결 상태 문구. EJS(public/js/ai-intake.js AI_HEALTH_REASON_MESSAGES)와 같은 문장을 쓴다 —
 // 같은 상황에 화면마다 다른 말이 나오면 고객이 무엇이 문제인지 판단할 수 없다.
 const AI_HEALTH_REASON_MESSAGES = {
@@ -599,8 +608,37 @@ export default function AiIntakeClient({
   // pendingFieldOverride: 상담원 연결 제안을 접고 곧바로 답을 처리할 때 쓴다. React 상태
   // 갱신(setPendingField)은 즉시 반영되지 않아서, 복구된 값을 인자로 넘겨야 이번 호출이
   // 옛 pendingField를 보고 엉뚱하게 처리하는 것을 막을 수 있다.
+  // 구간이 붙은 요금 문의를 실제 요금표로 답한다.
+  //
+  // 서버가 이미 그 계산을 갖고 있다(POST /orders/ai-intake/fare-inquiry → lib/agentAssist.js
+  // buildFareSuggestion). 카카오 채널도 같은 함수를 쓴다 — 여기서 클라이언트로 다시 구현하면
+  // 같은 계산이 세 벌이 된다.
+  //
+  // 답을 못 만들면 false를 돌려주고 기존 경로(FAQ → 상담원)로 넘어간다. 구간이 없는
+  // "요금조회 되나요?" 같은 안내성 질문이 그 경우다.
+  async function tryAnswerFare(sid, text) {
+    if (!sid || !FARE_QUESTION_RE.test(text)) return false;
+    try {
+      const data = await fetchJson('/orders/ai-intake/fare-inquiry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+      if (!data || !data.ok || !data.text) return false;
+      // 배차 도우미와 같은 방식으로 답을 남긴다 — 저장·중계·초안 상태가 그 함수에 모여 있다.
+      await replyWithMessage(sid, data.text, { needsAgent: false, requestedFeature: null });
+      return true;
+    } catch {
+      // 요금 안내가 실패해도 대화는 이어져야 한다 — 기존 경로가 받는다.
+      return false;
+    }
+  }
+
   async function handleCollectingPhase(sid, text, pendingFieldOverride) {
     const activePendingField = pendingFieldOverride !== undefined ? pendingFieldOverride : pendingField;
+    // 되묻는 질문에 답하는 중이면 요금 문의로 새지 않는다 — 그때의 "얼마"는 대개 그 답의
+    // 일부다(배차 도우미도 같은 이유로 pendingField 중에는 안 끼어든다).
+    if (!activePendingField && await tryAnswerFare(sid, text)) return;
     if (activePendingField === 'origin_contact' || activePendingField === 'destination_contact') {
       const directPhone = extractPhone(text);
       if (directPhone) {

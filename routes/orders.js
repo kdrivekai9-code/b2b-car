@@ -638,6 +638,35 @@ router.get('/ai-intake', asyncHandler(async (req, res) => {
   });
 }));
 
+// 구간이 붙은 요금 문의("사당역에서 강남역까지 얼마예요?")를 실제 요금표로 계산해 답한다.
+//
+// **이미 있는 서버 경로를 그대로 쓴다.** lib/agentAssist.js buildFareSuggestion을 카카오 채널이
+// 같은 목적으로 부르고 있다(routes/kakaoConsult.js tryAnswerFare). 웹 EJS 위젯은 같은 일을
+// 클라이언트에서 933줄로 따로 하고 있는데, 그걸 Next로 또 옮기면 같은 계산이 **세 벌**이 된다.
+// 이 저장소는 그 실수를 이미 한 번 했다 — 접수 확인 요약을 세 곳이 각자 만들어서 옵션이
+// 카카오 요약에만 들어가는 식으로 항목이 갈렸고, 그래서 lib/intakeSummary.js로 모았다.
+//
+// 요금을 고객에게 안 보여주는 지사·법인 설정이면 buildFareSuggestion이 null을 돌려준다 —
+// 그 판단도 그쪽에 이미 있으니 여기서 다시 하지 않는다.
+//
+// 답을 못 만들면 { ok: false }다. 구간이 없는 "요금조회 되나요?" 같은 안내성 질문이 그렇고,
+// 그때는 호출부가 기존 경로(FAQ → 상담원)로 그대로 넘어가야 한다.
+router.post('/ai-intake/fare-inquiry', aiRateLimit, asyncHandler(async (req, res) => {
+  const text = String((req.body && req.body.text) || '').trim();
+  if (!text) return res.json({ ok: false, reason: 'empty' });
+  const scope = scopeFilter(req);
+  const draft = await require('../lib/agentAssist').buildFareSuggestion(text, {
+    branchId: scope.branch_id || req.session.user.branch_id || null,
+    // 법인 요금표를 먼저 본다(없으면 지사 표) — 카카오 호출부와 같은 순서다.
+    groupId: scope.group_id || req.session.user.group_id || null,
+  }).catch((e) => {
+    console.error('웹 요금 안내 실패:', e.message);
+    return null;
+  });
+  if (!draft) return res.json({ ok: false, reason: 'no_answer' });
+  res.json({ ok: true, text: draft.text, fare: draft.fare || null });
+}));
+
 router.post('/ai-intake/activity', asyncHandler(async (req, res) => {
   req.session.aiLastInputAt = Date.now();
   req.session.lastSeenAt = req.session.aiLastInputAt;

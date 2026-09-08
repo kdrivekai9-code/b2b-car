@@ -137,6 +137,7 @@ const CI_CHECKS = [
   'check-driver-token',
   'check-driver-location',
   'check-form-parity',
+  'check-fare-inquiry-shared',
   'check-fare-surcharge',
   'check-intake-correction',
   'check-intake-fields-shared',
