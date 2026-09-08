@@ -22,12 +22,29 @@ router.get('/settings', asyncHandler(async (req, res) => {
   res.render('push_settings', { title: '오더 알림 설정', branches });
 }));
 
+// 이 브라우저의 구독 상태.
+//
+// effective를 함께 준다 — "구독이 있다"와 "알림이 실제로 온다"는 다르다. 오더 알림 설정에서
+// 체크를 끄고 저장하면 구독은 남고 플래그만 0이 되는데, 사이드바 버튼은 브라우저 구독 유무만
+// 보고 "🔔 알림 켜짐"이라고 적고 있었다(실사용 지적 2026-09-08: 두 곳이 다른 말을 한다).
+// 판정을 서버에 두는 이유는 역할마다 기준이 다르기 때문이다 — 고객에게 의미 있는 칸은
+// notify_order_events 하나뿐이고, 나머지는 애초에 고객에게 보내지 않는다(lib/push.js notify).
 router.get('/status', asyncHandler(async (req, res) => {
   const { endpoint } = req.query;
-  if (!endpoint) return res.json({ subscribed: false });
+  if (!endpoint) return res.json({ subscribed: false, effective: false });
   const sub = await db.get('SELECT * FROM push_subscriptions WHERE endpoint = ? AND user_id = ?', [endpoint, req.session.user.id]);
-  res.json({ subscribed: !!sub, sub: sub || null });
+  res.json({ subscribed: !!sub, effective: isEffective(req.session.user, sub), sub: sub || null });
 }));
+
+// 이 사용자에게 **실제로 알림이 갈 수 있는가**. 켜진 칸이 하나도 없으면 구독이 있어도 안 온다.
+function isEffective(user, sub) {
+  if (!sub) return false;
+  const on = (v) => Number(v) === 1;
+  if (user.role === 'client') return on(sub.notify_order_events);
+  // 내부 사용자는 종류가 여럿이라 하나라도 켜져 있으면 "켜짐"이다.
+  return ['notify_order_events', 'notify_driver_assign', 'notify_agent_call',
+    'notify_system_alert', 'notify_plate_mismatch'].some((k) => on(sub[k]));
+}
 
 router.post('/subscribe', asyncHandler(async (req, res) => {
   const { endpoint, keys, notify_order_events, notify_driver_assign, notify_agent_call, notify_system_alert, notify_plate_mismatch, branch_id } = req.body;

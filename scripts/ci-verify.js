@@ -157,6 +157,7 @@ const CI_CHECKS = [
   'check-plate-check',
   'check-proxy-named-paths',
   'check-public-base-url',
+  'check-push-audience',
   'check-premium-immediate',
   'check-premium-step-questions',
   'check-receipt-ocr',

@@ -74,13 +74,34 @@
     }
   }
 
+  // 라벨은 **서버 판정**을 따른다.
+  //
+  // 브라우저 구독 유무만 보면 두 화면이 다른 말을 한다: 오더 알림 설정에서 체크를 끄고
+  // 저장하면 구독은 남고 플래그만 0이 되는데(그러면 알림은 안 온다), 여기 라벨은 계속
+  // "🔔 알림 켜짐"이었다(실사용 지적 2026-09-08). /push/status의 effective가 "실제로 알림이
+  // 갈 수 있는가"를 알려준다 — 역할마다 기준이 달라 서버가 판정한다.
+  //
+  // 서버에 못 물어보면(네트워크 실패) 브라우저 구독 유무로 되돌아간다. 라벨 하나 때문에
+  // 버튼이 사라지는 쪽이 더 나쁘다.
+  async function isNotifyOn(sub) {
+    if (!sub) return false;
+    try {
+      var res = await fetch('/push/status?endpoint=' + encodeURIComponent(sub.endpoint), { credentials: 'same-origin' });
+      if (!res.ok) return true;
+      var d = await res.json();
+      return !!d.effective;
+    } catch (e) {
+      return true;
+    }
+  }
+
   whenReady(async function () {
     var btn = document.getElementById('pushToggleBtn');
     if (!btn) return;
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) { btn.style.display = 'none'; return; }
     try {
       var sub = await getSubscription();
-      btn.textContent = sub ? '🔔 알림 켜짐' : '🔕 알림 받기';
+      btn.textContent = (await isNotifyOn(sub)) ? '🔔 알림 켜짐' : '🔕 알림 받기';
       btn.addEventListener('click', async function () {
         // 이전에는 subscribe()/unsubscribe() 실패(대표적으로 브라우저에서 알림 권한을 이미
         // 차단해둔 경우 pushManager.subscribe()가 거부됨)를 아무 데서도 잡지 않아서, 버튼을
@@ -89,7 +110,14 @@
         btn.disabled = true;
         try {
           var current = await getSubscription();
-          if (current) {
+          // 구독은 있는데 설정에서 꺼둔 상태(라벨이 "알림 받기")라면, 누른 뜻은 "끄기"가 아니라
+          // "켜기"다. 다시 구독하면 서버가 플래그를 켜짐으로 되돌린다(routes/push.js subscribe는
+          // 지정되지 않은 칸을 1로 저장한다) — 여기서 끄면 누를 때마다 꺼지기만 한다.
+          if (current && !(await isNotifyOn(current))) {
+            await withTimeout(subscribe(), 10000);
+            btn.textContent = '🔔 알림 켜짐';
+            showToast('알림을 받도록 설정했습니다.');
+          } else if (current) {
             await withTimeout(unsubscribe(), 10000);
             btn.textContent = '🔕 알림 받기';
             showToast('알림을 껐습니다.');
