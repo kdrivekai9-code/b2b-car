@@ -127,6 +127,7 @@ const CI_CHECKS = [
   'check-delivery-reservation',
   'check-client-scope',
   'check-dispatch-lookup-tool',
+  'check-env-example-flags',
   'check-driver-chat',
   'check-driver-location-map',
   'check-driver-location-source',
