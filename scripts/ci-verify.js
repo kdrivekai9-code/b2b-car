@@ -124,6 +124,7 @@ const CI_CHECKS = [
   'check-callmaner-memo',
   'check-delivery-reservation',
   'check-client-scope',
+  'check-dispatch-lookup-tool',
   'check-driver-chat',
   'check-driver-push',
   'check-driver-token',

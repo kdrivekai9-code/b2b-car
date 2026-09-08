@@ -1740,6 +1740,10 @@ const SMALL_TALK_RE = /^[\s]*(네+[~\s.!ㅣ]*|넵+[~\s.!]*|예[.,\s]*|응+[\s.!]
 // 봇 응대(tryDispatchAgent)와 상담원 도우미 초안(createAgentSuggestion)이 같은 것을 쓴다 —
 // 조회 범위 판정은 "남의 주문이 보이면 안 된다"가 걸린 부분이라 두 곳에 따로 두면 한쪽만
 // 고쳐질 위험이 크다.
+// 조회 대기 안내. 카카오는 보낸 말풍선을 고칠 수 없어서(발신 API에 수정·삭제가 없다) 웹 위젯의
+// 점 깜빡임 대신 이 문장을 먼저 보낸다. **내용이 아니라 진행 표시다** — 아래 이력에서 뺀다.
+const DISPATCH_WAIT_NOTICE = '요청하신 내용을 확인하고 있습니다. 잠시만 기다려주세요.';
+
 async function prepareDispatchRun(session, text) {
   const account = await resolveIntakeContextCached(session).catch(() => null);
   if (!account || !account.user_id) return null;
@@ -1773,13 +1777,33 @@ async function prepareDispatchRun(session, text) {
   // 이번 질문 하나가 아니라 밀린 것까지 한꺼번에 답한다(실측 2026-09-02: "내일 예약건은
   // 어떤게 있지?"에 오늘 건까지 붙어 나왔다). 초안 경로에서는 상담원이 곧 응답자이므로
   // 그 발화가 모델 쪽 차례에 오는 것이 사실과도 맞다.
-  const history = await db.all(
+  let history = await db.all(
     `SELECT sender, message FROM chat_messages
      WHERE session_id = ? AND sender IN ('user','bot','agent') AND message IS NOT NULL
      ORDER BY id DESC LIMIT 10`,
     [session.id]
   ).catch(() => []);
   history.reverse();
+  // 대기 안내는 모델에게 넘기지 않는다.
+  //
+  // 왜(실사용 2026-09-08): 이 안내가 chat_messages에 남아 이력 10개 중 절반을 차지했다.
+  // 실제 맥락이 그만큼 밀려나고, 남은 자리를 "내일 예약된 주문은 없습니다" 같은 **옛 답**이
+  // 채웠다. 모델은 그 답을 그대로 베끼고 도구를 부르지 않았다 — 같은 세션에서 "오늘"은
+  // 도구를 불러 맞게 답했는데 "내일"만 틀렸다.
+  //
+  // 안내가 답변과 한 메시지로 붙어 저장된 것도 있어서(발신 타이밍), 앞부분만 떼어낸다.
+  const cleaned = [];
+  for (const row of history) {
+    if (row.sender !== 'bot') { cleaned.push(row); continue; }
+    const msg = String(row.message || '');
+    // 안내가 여러 번 붙은 경우까지 전부 떼어낸다.
+    let body = msg;
+    while (body.startsWith(DISPATCH_WAIT_NOTICE)) body = body.slice(DISPATCH_WAIT_NOTICE.length);
+    body = body.trim();
+    if (!body) continue; // 안내만 있는 메시지는 통째로 뺀다
+    cleaned.push({ ...row, message: body });
+  }
+  history = cleaned;
   if (history.length && history[history.length - 1].sender === 'user' && history[history.length - 1].message === text) {
     history.pop();
   }
@@ -1799,7 +1823,7 @@ async function tryDispatchAgent(session, text) {
   //
   // 카카오는 보낸 말풍선을 고칠 수 없어서(발신 API에 메시지 수정·삭제가 없다) 이 안내는 그대로
   // 남고 결과가 새 말풍선으로 온다. 웹 위젯처럼 점이 깜빡이는 표시를 쓸 방법은 없다.
-  await botSay(session, '요청하신 내용을 확인하고 있습니다. 잠시만 기다려주세요.', '조회 대기 안내');
+  await botSay(session, DISPATCH_WAIT_NOTICE, '조회 대기 안내');
 
   const result = await runDispatchAgent({
     user: prep.user, sessionId: session.id, text, history: prep.history,
