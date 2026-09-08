@@ -100,33 +100,39 @@ export default async function OrderDetailPage({ params }) {
 
       <OrderForm initialData={data} mode="edit" orderId={id} />
 
-      {data.canViewPhotos && (
-        <div className="card" style={{ marginTop: 18 }}>
-          <h2>📷 기사 업로드 사진</h2>
-          {data.photos.length === 0 ? (
-            <p className="page-sub" style={{ margin: 0 }}>업로드된 사진이 없습니다.</p>
-          ) : (
-            <>
-              <div className="upload-gallery">
-                {data.photos.map((p) => (
-                  <a key={p.id} href={p.url} target="_blank" rel="noreferrer"><img src={p.url} alt="업로드된 사진" /></a>
-                ))}
-              </div>
-              {/* 기사가 계기판 사진과 함께 적어둔 값. views/orders/detail.ejs에도 같은 요약이 있다. */}
-              <OdometerSummary photos={data.photos} />
-            </>
-          )}
-        </div>
-      )}
+      {/* 기사님 위치(왼쪽) · 기사 업로드 사진(오른쪽) — 나란히 둔다(사용자 지정 2026-09-08).
+          위치 지도는 가로로 길고 세로가 짧아 폭을 다 쓰고도 허전했고, 사진은 그 위에서 따로
+          한 칸을 먹어 화면이 길어졌다. 한쪽만 있을 때는 남은 하나가 전체 폭을 쓴다(.detail-pair).
+          EJS 상세화면(views/orders/detail.ejs)에도 같은 배치가 있다 — 한쪽만 고치면 플래그를
+          되돌렸을 때 배치가 달라진다.
 
-      {/* 기사 위치 — 관리자·지사뿐 아니라 고객도 자기 오더의 기사 위치를 본다(사용자 지시).
-          "지금 어디쯤이에요?"가 상담 문의의 큰 몫이라, 화면에서 스스로 확인하면 그만큼 줄어든다.
-          배차 전·완료 후에는 컴포넌트가 스스로 아무것도 그리지 않는다. */}
-      <div style={{ marginTop: 18 }}>
+          기사 위치는 관리자·지사뿐 아니라 고객도 본다(사용자 지시). "지금 어디쯤이에요?"가
+          상담 문의의 큰 몫이라, 화면에서 스스로 확인하면 그만큼 줄어든다. 배차 전·완료 후에는
+          컴포넌트가 스스로 아무것도 그리지 않는다. */}
+      <div className="detail-pair" style={{ marginTop: 18 }}>
         {/* 첫 값은 서버가 함께 내려준다(data.json의 driverLocation) — 클라이언트가 붙기 전에도
             사실을 말한다. 예전에는 첫 화면이 항상 "위치를 확인하는 중입니다…"였고, 클라이언트가
             못 붙는 상황에서는 그 문구가 영원히 남아 "위치가 안 나온다"로 보였다. */}
         <DriverLocationMap orderId={id} status={data.order.status} initial={data.driverLocation || null} />
+
+        {data.canViewPhotos && (
+          <div className="card">
+            <h2>📷 기사 업로드 사진</h2>
+            {data.photos.length === 0 ? (
+              <p className="page-sub" style={{ margin: 0 }}>업로드된 사진이 없습니다.</p>
+            ) : (
+              <>
+                <div className="upload-gallery">
+                  {data.photos.map((p) => (
+                    <a key={p.id} href={p.url} target="_blank" rel="noreferrer"><img src={p.url} alt="업로드된 사진" /></a>
+                  ))}
+                </div>
+                {/* 기사가 계기판 사진과 함께 적어둔 값. views/orders/detail.ejs에도 같은 요약이 있다. */}
+                <OdometerSummary photos={data.photos} />
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       {/* 콜마너 탁송사진 — 썸네일 깨짐 처리(onError)를 위해 클라이언트 컴포넌트로 뺐다.

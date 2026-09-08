@@ -90,6 +90,11 @@ Express 함수로 디스패치됩니다. 로컬에는 그 동작이 없어 `http
 | `tests/manual/` | Playwright 스펙. 계정은 `tests/e2e-credentials.js` 하나만 본다 |
 | `docs/` | 설계·체크리스트와 **외부 API 스펙**(콜마너·카카오 상담톡). 연동을 건드리기 전에 확인 |
 
+> **프로덕션은 지금 모든 화면이 EJS다**(2026-09-08 확인 — 경로 20개 전수, Next 0개).
+> `NEXT_*` 플래그가 로컬에는 26개 켜져 있지만 프로덕션에는 반영돼 있지 않다. 의도한 것이
+> 아니어서 단계적으로 켜는 중이다. 지금 무엇이 서비스되는지는 `node scripts/check-prod-flags.js`로
+> 확인한다. AI 챗봇 화면은 이식 격차가 남아 보류 중이다 — [ai-intake-next-gap.md](ai-intake-next-gap.md).
+
 ### db.js 규약
 
 `?` 플레이스홀더를 쓰면 내부에서 `$1, $2 …`로 바꿔줍니다(SQLite에서 옮겨온 흔적).

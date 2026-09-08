@@ -117,50 +117,6 @@
     <% } %>
     <div class="kv"><span class="k">관리자 메모</span><span><%= order.memo_admin || '작성된 메모가 없습니다.' %></span></div>
 
-    <% if (canViewPhotos) { %>
-    <div class="section-title">📷 기사 업로드 사진</div>
-    <% if (photos.length === 0) { %>
-      <p class="page-sub" style="margin:0;">업로드된 사진이 없습니다.</p>
-    <% } else { %>
-      <div class="upload-gallery">
-        <% photos.forEach(function(p){ %>
-          <%# 구간 링크로 올라온 사진은 어느 구간인지 표시한다 — 인수 시점과 인도 시점 사진이
-              섞이면 분쟁 때 어느 쪽 증빙인지 가릴 수 없다. %>
-          <a href="<%= p.url %>" target="_blank" class="upload-photo-item">
-            <img src="<%= p.url %>" alt="업로드된 사진">
-            <% if (p.leg_seq) { %><span class="upload-photo-leg"><%= p.leg_seq %>구간</span><% } %>
-          </a>
-        <% }) %>
-      </div>
-      <%
-        // 기사가 계기판 사진과 함께 적어둔 값. 사진을 열어 숫자를 읽지 않아도 되도록 여기 요약한다.
-        // 같은 계산을 챗봇도 쓴다(lib/kakaoOrderPhotos.js의 summarizeOdometer).
-        const odometerValues = photos.map(function (p) { return Number(p.odometer_km); })
-          .filter(function (v) { return Number.isFinite(v) && v > 0; })
-          .sort(function (a, b) { return a - b; });
-      %>
-      <% if (odometerValues.length) { %>
-        <p class="page-sub" style="margin:8px 0 0;">
-          계기판 <%= odometerValues[0].toLocaleString('ko-KR') %>km
-          <% if (odometerValues.length > 1) { %>
-            → <%= odometerValues[odometerValues.length - 1].toLocaleString('ko-KR') %>km
-            (주행 <%= (odometerValues[odometerValues.length - 1] - odometerValues[0]).toLocaleString('ko-KR') %>km)
-          <% } %>
-        </p>
-      <% } %>
-    <% } %>
-
-    <%# 기사 위치 — Next 오더상세(src/app/orders/[id]/DriverLocationMap.js)와 같은 화면이다.
-        한쪽만 고치면 플래그를 되돌렸을 때 조용히 사라진다. 관리자·지사·고객 모두 본다.
-        배차 전·완료 후에는 아예 그리지 않는다 — 완료 뒤에는 위치를 더는 수집하지 않는다. %>
-    <% if (['기사배정', '운행시작'].indexOf(order.status) !== -1) { %>
-      <div class="section-title">📍 기사님 위치</div>
-      <div id="driverLoc" data-order-id="<%= order.id %>">
-        <p class="hint" id="driverLocText">위치를 확인하는 중입니다…</p>
-        <div id="driverLocMap" style="width:100%;height:280px;background:#e9ecef;border-radius:4px;display:none;"></div>
-      </div>
-    <% } %>
-
     <%# 콜마너 탁송사진 — 기사 업로드 사진과 별도다(외부 CDN 링크만 보관). 링크가 만료되면
         썸네일이 깨질 수 있어 onerror로 썸네일만 숨기고 링크는 남긴다. %>
     <% if (typeof callmanerPhotos !== 'undefined' && callmanerPhotos.length) { %>
@@ -228,7 +184,6 @@
       <p class="page-sub" style="margin:10px 0 0;">
         콜마너가 제공하는 링크를 그대로 보여줍니다 — 콜마너 쪽에서 만료되면 열리지 않을 수 있습니다.
       </p>
-    <% } %>
     <% } %>
 
     <%# 실비 영수증 — 사진 바로 아래. 같은 운행에서 나온 근거라 함께 본다.
@@ -584,6 +539,76 @@
     </div>
   </div>
 </div>
+
+<%# 기사님 위치(왼쪽) · 기사 업로드 사진(오른쪽) — 나란히 둔다(사용자 지정 2026-09-08).
+    위치 지도는 가로로 길고 세로가 짧아 폭을 다 쓰고도 허전했고, 사진은 그 위에서 따로 한 칸을
+    먹어 화면이 길어졌다. 나란히 두면 지도가 세로를 더 쓰고 사진은 옆에서 함께 보인다.
+
+    **격자 밖**에 둔 이유: 위 .detail-grid의 왼쪽 칸은 화면 절반(≈500px)이라 그 안에서는
+    두 섹션이 좌우로 놓이지 못하고 위아래로 접힌다(실측: 둘 다 x=288로 겹쳐 내려왔다).
+    전체 폭을 쓰는 자리로 내려야 나란히 선다.
+
+    한쪽만 있을 때는 남은 하나가 전체 폭을 쓴다(.detail-pair는 grid가 아니라 flex다).
+    Next 상세화면(src/app/orders/[id]/page.js)에도 같은 배치가 있다 — 한쪽만 고치면 플래그를
+    되돌렸을 때 배치가 달라진다.
+
+    기사 위치는 예전에 canViewPhotos(사진 열람 권한) 안에 중첩돼 있었다. 그래서 사진 열람이
+    막힌 고객은 지도도 못 봤다 — 주석에는 "관리자·지사·고객 모두 본다"고 적혀 있었는데
+    실제로는 아니었다. 이제 상태만 보고 그린다(서버 판정과 같은 목록). %>
+<% var showDriverLoc = ['기사배정', '운행시작'].indexOf(order.status) !== -1; %>
+<% if (showDriverLoc || canViewPhotos) { %>
+<div class="detail-pair">
+  <%# 배차 전·완료 후에는 아예 그리지 않는다 — 완료 뒤에는 위치를 더는 수집하지 않는다. %>
+  <% if (showDriverLoc) { %>
+    <div class="card">
+      <h2>📍 기사님 위치</h2>
+      <div id="driverLoc" data-order-id="<%= order.id %>">
+        <p class="hint" id="driverLocText">위치를 확인하는 중입니다…</p>
+        <%# 세로를 1.5배로(280 → 420px, 사용자 지정) — 지도가 납작해서 어디로 가는 중인지
+            가늠하기 어려웠다. Next 화면도 같은 값이다. %>
+        <div id="driverLocMap" style="width:100%;height:420px;background:#e9ecef;border-radius:4px;display:none;"></div>
+      </div>
+    </div>
+  <% } %>
+
+  <% if (canViewPhotos) { %>
+    <div class="card">
+      <h2>📷 기사 업로드 사진</h2>
+      <% if (photos.length === 0) { %>
+        <p class="page-sub" style="margin:0;">업로드된 사진이 없습니다.</p>
+      <% } else { %>
+        <div class="upload-gallery">
+          <% photos.forEach(function(p){ %>
+            <%# 구간 링크로 올라온 사진은 어느 구간인지 표시한다 — 인수 시점과 인도 시점 사진이
+                섞이면 분쟁 때 어느 쪽 증빙인지 가릴 수 없다. %>
+            <a href="<%= p.url %>" target="_blank" class="upload-photo-item">
+              <img src="<%= p.url %>" alt="업로드된 사진">
+              <% if (p.leg_seq) { %><span class="upload-photo-leg"><%= p.leg_seq %>구간</span><% } %>
+            </a>
+          <% }) %>
+        </div>
+        <%
+          // 기사가 계기판 사진과 함께 적어둔 값. 사진을 열어 숫자를 읽지 않아도 되도록 여기 요약한다.
+          // 같은 계산을 챗봇도 쓴다(lib/kakaoOrderPhotos.js의 summarizeOdometer).
+          const odometerValues = photos.map(function (p) { return Number(p.odometer_km); })
+            .filter(function (v) { return Number.isFinite(v) && v > 0; })
+            .sort(function (a, b) { return a - b; });
+        %>
+        <% if (odometerValues.length) { %>
+          <p class="page-sub" style="margin:8px 0 0;">
+            계기판 <%= odometerValues[0].toLocaleString('ko-KR') %>km
+            <% if (odometerValues.length > 1) { %>
+              → <%= odometerValues[odometerValues.length - 1].toLocaleString('ko-KR') %>km
+              (주행 <%= (odometerValues[odometerValues.length - 1] - odometerValues[0]).toLocaleString('ko-KR') %>km)
+            <% } %>
+          </p>
+        <% } %>
+      <% } %>
+    </div>
+  <% } %>
+</div>
+<% } %>
+
 <% if (order.callmaner_last_error) { %>
 <%# data-error-signature 형식은 callmaner-alert.js의 errorSignature()와 맞춰야 한다 — 폴링이
     "이미 화면에 보여주고 있는 실패"인지 판단해 팝업 중복을 피하는 데 쓴다. %>

@@ -144,7 +144,9 @@ export default function DriverLocationMap({ orderId, status, initial = null }) {
               ? `${data.ageMinutes}분 전에 확인된 위치입니다.`
               : '위치는 30초마다 갱신됩니다.'}
           </p>
-          <div ref={boxRef} style={{ width: '100%', height: 280, background: '#e9ecef', borderRadius: 4 }} />
+          {/* 세로를 1.5배로(280 → 420, 사용자 지정 2026-09-08) — 지도가 납작해서 어디로 가는
+              중인지 가늠하기 어려웠다. EJS 화면도 같은 값이다. */}
+          <div ref={boxRef} style={{ width: '100%', height: 420, background: '#e9ecef', borderRadius: 4 }} />
           {data.trackingUrl && (
             <p className="hint" style={{ margin: '8px 0 0' }}>
               고객 안내용 링크:{' '}

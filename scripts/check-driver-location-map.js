@@ -50,6 +50,33 @@ check('서버 목록', /TRACKABLE_STATUSES = new Set\(\['기사배정', '운행�
 check('Next 목록', /TRACKABLE = new Set\(\['기사배정', '운행시작'\]\)/.test(next), true);
 check('EJS 목록', /\['기사배정', '운행시작'\]\.indexOf\(order\.status\)/.test(ejs), true);
 
+console.log('\n[배치 — 왼쪽 위치, 오른쪽 업로드 사진]');
+// 사용자 지정 2026-09-08. 지도는 가로로 길고 세로가 짧아 폭을 다 쓰고도 허전했고, 사진은
+// 그 위에서 따로 한 칸을 먹어 화면이 길어졌다.
+check('EJS가 두 섹션을 한 줄에 둔다', /class="detail-pair"/.test(ejs), true);
+check('Next가 두 섹션을 한 줄에 둔다', /className="detail-pair"/.test(page), true);
+// 순서가 뒤집히면 요청과 반대가 된다(왼쪽이 사진, 오른쪽이 지도).
+check('EJS 순서 — 위치가 먼저',
+  ejs.indexOf('기사님 위치</h2>') < ejs.indexOf('기사 업로드 사진</h2>'), true);
+check('Next 순서 — 위치가 먼저',
+  page.indexOf('<DriverLocationMap') < page.indexOf('기사 업로드 사진'), true);
+// 격자(.detail-grid) 안에 두면 왼쪽 칸이 화면 절반이라 좌우로 못 서고 위아래로 접힌다.
+check('EJS는 격자 밖에 둔다', ejs.indexOf('class="detail-pair"') > ejs.lastIndexOf('class="detail-grid"'), true);
+// 한쪽만 있을 때 남은 하나가 전체 폭을 쓰려면 grid가 아니라 flex여야 한다.
+const css = read('public/css/style.css');
+check('flex+wrap으로 접힌다', /\.detail-pair\{display:flex;flex-wrap:wrap/.test(css), true);
+check('안쪽 갤러리가 칸을 밀지 못한다', /\.detail-pair > \*\{flex:1 1 320px;min-width:0;\}/.test(css), true);
+
+// 세로 1.5배(280 → 420). 두 화면이 같은 값이어야 한다 — 한쪽만 고치면 플래그에 따라 높이가 다르다.
+check('EJS 지도 높이 420', /id="driverLocMap"[^>]*height:420px/.test(ejs), true);
+check('Next 지도 높이 420', /ref=\{boxRef\}[\s\S]{0,90}height: 420/.test(next), true);
+
+console.log('\n[기사 위치는 사진 권한과 무관하다]');
+// 예전에는 위치 블록이 canViewPhotos 안에 중첩돼 있어, 사진 열람이 막힌 고객은 지도도 못 봤다.
+// 주석에는 "고객도 본다"고 적혀 있었는데 실제로는 아니었다.
+const pairBlock = ejs.slice(ejs.indexOf('class="detail-pair"'), ejs.indexOf('기사 업로드 사진</h2>'));
+check('위치는 상태만 보고 그린다', /showDriverLoc/.test(pairBlock) && !/canViewPhotos/.test(pairBlock), true);
+
 console.log('\n[로컬 dev에서 화면이 굳지 않게]');
 // Next dev는 자기가 뜬 호스트가 아닌 오리진의 /_next/* 요청을 403으로 막는다. 127.0.0.1로
 // 열면 클라이언트 청크가 전부 막혀 서버 렌더 그대로 굳는다(빈 403이라 원인이 안 드러난다).

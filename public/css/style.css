@@ -745,6 +745,17 @@ textarea.single-line-textarea{min-height:36px;height:36px;padding:8px 10px;resiz
 /* 계기판 주행거리는 선택 입력이라 파일 선택보다 눈에 덜 띄게 둔다 — 필수처럼 보이면 기사가 매번 채우려 한다. */
 .upload-odometer{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted,#6b7280);}
 .upload-odometer input{padding:8px 10px;font-size:15px;}
+/* 오더상세 — 기사님 위치(왼쪽)와 기사 업로드 사진(오른쪽)을 나란히 둔다(사용자 지정 2026-09-08).
+   위치 지도는 가로로 길고 세로가 짧아 폭을 다 쓰고도 허전했고, 업로드 사진은 그 위에서 따로
+   한 칸을 먹어 화면이 길어졌다. 나란히 두면 지도가 세로를 더 쓰고 사진은 옆에서 함께 보인다.
+
+   grid가 아니라 flex+wrap인 이유: 한쪽만 있는 경우가 흔하다(배차 전에는 위치 섹션이 아예
+   없고, 사진 열람 권한이 없으면 사진 섹션이 없다). grid 1fr 1fr이면 남은 하나가 반쪽만
+   쓰고 옆이 빈다. flex는 남은 하나가 전체 폭을 쓰고, 좁은 화면에서는 자연히 위아래로 접힌다.
+   min-width:0이 없으면 안쪽 갤러리 폭 때문에 칸이 화면을 넘긴다(탁송사진 줄에서 겪은 것). */
+.detail-pair{display:flex;flex-wrap:wrap;gap:18px;align-items:flex-start;}
+.detail-pair > *{flex:1 1 320px;min-width:0;}
+
 .upload-gallery{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}
 .upload-gallery img{width:100%;height:80px;object-fit:cover;border-radius:6px;border:1px solid var(--border);}
 
