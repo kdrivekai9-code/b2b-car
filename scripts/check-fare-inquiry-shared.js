@@ -57,6 +57,19 @@ check('실패해도 대화를 막지 않는다', /tryAnswerFare[\s\S]{0,700}catc
 // 답은 배차 도우미와 같은 경로로 남긴다(저장·중계·초안 상태가 거기 모여 있다).
 check('답을 replyWithMessage로 남긴다', /tryAnswerFare[\s\S]{0,800}replyWithMessage\(sid, data\.text/.test(nextClient));
 
+console.log('\n[어느 상품의 요금인지 밝힌다]');
+// 실사용(2026-09-08): 금액만 답했더니 고객이 곧바로 "탁송요금이나요?"라고 되물었다 —
+// 화면이 답해야 할 것을 고객이 물어야 했다. 이 계산은 거리 기준 탁송 요금표만 본다.
+check('답변에 상품명이 있다', /탁송 예상 요금은/.test(assist));
+// 프리미엄대리는 시간 기준(premium_fare_rules base_hours)이라 출발·도착만으로는 금액이
+// 나오지 않는다. 거리를 시간으로 환산해 추정하면 우리가 만든 숫자가 되므로 하지 않는다.
+check('프리미엄 요금을 거리로 추정하지 않는다',
+  !/calculatePremiumFare/.test(assist), '시간 기준 요금을 거리로 만들면 실제 청구와 어긋난다');
+// 접수 후 안내(routes/kakaoConsult.js)는 상품이 이미 정해져 있어 여기서 이름을 박으면 안 된다 —
+// 그 경로는 탁송 등록에서만 불리므로 지금은 문제가 없지만, 프리미엄으로 확장되면 갈린다.
+check('접수 후 안내에는 상품명을 박지 않았다',
+  !/탁송 예상 요금/.test(kakao), '그 경로가 프리미엄으로 확장되면 잘못된 이름이 나간다');
+
 console.log('\n[엔드포인트가 지켜야 할 것]');
 const block = orders.slice(orders.indexOf("router.post('/ai-intake/fare-inquiry'"), orders.indexOf("router.post('/ai-intake/activity'"));
 check('모델을 부르므로 사용량 제한을 건다', /aiRateLimit/.test(block));
