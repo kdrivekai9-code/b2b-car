@@ -145,6 +145,7 @@ const CI_CHECKS = [
   'check-next-build',
   'check-offer-agent-answer',
   'check-odometer-ocr',
+  'check-order-detail-photos',
   'check-order-history-basis',
   'check-order-list-columns',
   'check-order-split',

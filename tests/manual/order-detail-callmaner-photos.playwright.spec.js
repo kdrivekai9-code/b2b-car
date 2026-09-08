@@ -68,26 +68,49 @@ test.describe('오더 상세 · 콜마너 탁송사진', () => {
 
     await expect(page.getByText('콜마너 탁송사진')).toBeVisible();
 
-    // 8308a98부터 운행전·운행후를 **순번으로 짝지어** 놓는다. 그래서 "운행전"이라는 글자가
-    // 안내문과 칸마다 여럿 나온다 — getByText('운행전')은 strict mode에서 걸린다.
-    // 무엇을 보려는지에 맞춰 자리를 지목한다.
     await expect(page.getByText('운행전 · 운행후')).toBeVisible();
 
-    // 넣어둔 사진은 start/1, start/2, end/1 세 장이다. 순번은 1·2 두 줄이 되고,
-    // 줄마다 운행전·운행후 두 칸이라 칸은 넷, 그중 하나(2번 운행후)는 빈 자리다.
-    await expect(page.locator('.photo-row')).toHaveCount(2);
+    // 2026-09-08부터 **가로 두 줄**이다(사용자 지정) — 줄 하나가 운행전, 줄 하나가 운행후이고
+    // 같은 열이 같은 항목이다. 예전에는 짝마다 한 행에 큰 사진 두 장이라, 13쌍이면 화면이
+    // 열세 번 스크롤되고 한 장이 화면 절반을 차지했다.
+    await expect(page.locator('.photo-rail')).toHaveCount(2);
+    await expect(page.locator('.photo-rail .rail-label')).toHaveText(['운행전', '운행후']);
+
+    // 넣어둔 사진은 start/1, start/2, end/1 세 장이다. 열은 1·2 두 개, 줄은 둘이라 칸은 넷,
+    // 그중 하나(2번 운행후)는 빈 자리다.
     await expect(page.locator('.photo-cell')).toHaveCount(4);
     // 링크는 만료될 수 있어 썸네일이 깨져도 되지만, 링크 자체는 남아야 한다.
     await expect(page.locator('a.photo-cell')).toHaveCount(3);
-    // 빠진 자리가 보여야 "안 찍었다"를 알 수 있다 — 그게 이 배치의 목적이다.
+    // 빠진 자리가 보여야 "안 찍었다"를 알 수 있고, 열도 어긋나지 않는다.
     await expect(page.locator('.photo-cell.empty')).toHaveCount(1);
-    await expect(page.getByText('운행후 없음')).toBeVisible();
 
-    // 같은 줄에 같은 항목의 운행전·운행후가 놓여야 비교가 된다. 순번이 어긋나면
-    // 흠집이 언제 생겼는지를 엉뚱한 사진으로 따지게 된다.
-    const firstRow = page.locator('.photo-row').first();
-    await expect(firstRow.locator('.photo-label')).toHaveText('1. 전면');
-    await expect(firstRow.locator('.photo-phase')).toHaveText(['운행전', '운행후']);
+    // 열이 짝이다 — 두 줄의 n번째 칸이 같은 순번을 가리켜야 흠집을 엉뚱한 사진으로 따지지 않는다.
+    const before = page.locator('.photo-rail').nth(0).locator('.photo-cell');
+    const after = page.locator('.photo-rail').nth(1).locator('.photo-cell');
+    await expect(before).toHaveCount(2);
+    await expect(after).toHaveCount(2);
+    await expect(before.nth(0)).toContainText('1');
+    await expect(after.nth(0)).toContainText('1');
+    // 2번 운행후는 없는 자리라 빈 칸으로 남는다(열이 밀리면 이 검사가 깨진다).
+    await expect(after.nth(1)).toHaveClass(/empty/);
+
+    // 작아야 한다 — 이 배치의 이유가 "한 줄에 작게"다. 84px 칸 기준으로 넉넉한 상한을 둔다.
+    const cell = await before.nth(0).boundingBox();
+    expect(cell.width).toBeLessThanOrEqual(120);
+    // 두 줄 전체가 한 화면에 들어와야 한다(예전에는 짝마다 한 행이라 그럴 수 없었다).
+    const rails = await page.locator('.photo-rails').boundingBox();
+    expect(rails.height).toBeLessThanOrEqual(260);
+
+    // 클릭하면 새 탭이 아니라 그 자리에서 크게 열린다. 13쌍을 새 탭으로 열면 탭이 열세 개 생긴다.
+    await before.nth(0).click();
+    const lb = page.locator('.lightbox');
+    await expect(lb).toBeVisible();
+    await expect(lb.locator('.lb-cap')).toContainText('운행전');
+    // ← → 로 넘어간다.
+    await page.keyboard.press('ArrowRight');
+    await expect(lb.locator('.lb-cap')).toContainText('2/3');
+    await page.keyboard.press('Escape');
+    await expect(lb).toBeHidden();
 
     expect(problems, `콘솔/페이지 오류: ${problems.join(' | ')}`).toEqual([]);
   });

@@ -54,7 +54,17 @@ export default function ReceiptGallery({ charges }) {
               {files.length ? (
                 <div className="receipt-shots">
                   {files.map((f, i) => (
-                    <a key={f.url} className="photo-cell" href={f.url} target="_blank" rel="noreferrer">
+                    // 확대는 탁송사진과 같은 방식(public/js/photo-lightbox.js). 묶음은
+                    // 영수증별로 나눈다 — 주유에서 세차로 넘어가면 무엇을 보는지 알 수 없다.
+                    <a
+                      key={f.url}
+                      className="photo-cell"
+                      href={f.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      data-lightbox={`receipt-${r.id}`}
+                      data-caption={`${r.charge_type} 영수증 ${i + 1}`}
+                    >
                       <img
                         src={f.url}
                         alt={`${r.charge_type} 영수증 ${i + 1}`}

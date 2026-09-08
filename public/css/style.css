@@ -287,9 +287,19 @@ form .field.full{flex-basis:100%;}
 .empty{padding:40px;text-align:center;color:var(--muted);font-size:13px;}
 .section-title{font-size:13px;font-weight:800;color:var(--navy);margin:24px 0 12px;padding:8px 10px;border-left:3px solid var(--blue);border-radius:0 var(--radius-sm) var(--radius-sm) 0;background:linear-gradient(90deg,var(--tint),transparent);letter-spacing:-.01em;}
 .detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;}
+/* 격자 칸은 내용이 아무리 넓어도 화면을 넘지 않는다.
+   격자·플렉스 항목의 기본 최소폭은 min-content라, 안에 안 줄어드는 것이 하나 있으면 칸이
+   통째로 벌어진다. 그러면 .app{overflow-x:clip}이 넘친 부분을 **잘라내고**, 스크롤도 안 되니
+   그 내용은 아예 닿을 수 없게 된다(실측 2026-09-08: 탁송사진 13번째 칸이 잘려 보이지 않았고,
+   긴 메모 줄도 오른쪽으로 사라져 있었다). min-width:0을 주면 안쪽에서 스스로 스크롤하는
+   것(.rail-strip)은 제 몫을 하고, 긴 글은 줄바꿈으로 접힌다. */
+.detail-grid > *{min-width:0;}
 @media (max-width:900px){ .detail-grid{grid-template-columns:1fr;} .app{flex-direction:column;} .sidebar{width:100%;} }
-.kv{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px dashed var(--border);font-size:13px;}
-.kv .k{color:var(--muted);}
+.kv{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px dashed var(--border);font-size:13px;}
+/* 항목 이름은 접지 않는다. 칸이 좁아지면 값 쪽이 줄바꿈해야 한다 — 이름이 "고객/사 메/모"로
+   쪼개지면 무슨 항목인지 못 읽는다(실측 2026-09-08, .detail-grid에 min-width:0을 준 뒤). */
+.kv .k{color:var(--muted);flex:0 0 auto;white-space:nowrap;}
+.kv > :last-child{min-width:0;text-align:right;overflow-wrap:anywhere;}
 
 .page-head-row{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:8px;}
 .page-head-row .page-title,.page-head-row .page-sub{margin:0;}
@@ -903,19 +913,51 @@ tr.order-flash-indigo td { --flash-bg:#e7e9fd; }
 .memo-budget-text .dropped{color:#aaa;text-decoration:line-through;}
 
 /* 운행전·운행후 짝 비교 — 같은 자리를 나란히 놓아야 무엇이 달라졌는지 보인다.
-   흠집이 언제 생겼는지가 사고 처리의 전부라, 짝을 손으로 맞추게 두면 안 된다. */
-.photo-compare{display:flex;flex-direction:column;gap:10px;}
-.photo-row{border:1px solid #ececec;border-radius:8px;padding:8px 10px;background:#fff;}
-.photo-label{font-size:13px;font-weight:600;color:#333;margin-bottom:6px;}
-.photo-pair{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+   흠집이 언제 생겼는지가 사고 처리의 전부라, 짝을 손으로 맞추게 두면 안 된다.
+
+   가로 두 줄로 놓는다(사용자 지정 2026-09-08). 예전에는 짝마다 한 행을 만들어 큰 사진 두 장을
+   넣었는데, 13쌍이면 화면이 열세 번 스크롤되고 한 장이 화면 절반을 차지했다 — 목록으로도
+   비교용으로도 못 쓴다. 줄 하나는 운행전, 줄 하나는 운행후이고 **열이 곧 짝**이다.
+   두 줄의 가로 스크롤은 함께 움직인다(views/orders/detail.ejs, CallmanerPhotos.js) —
+   따로 움직이면 열이 어긋나 짝이 깨진다. 확대는 클릭(public/js/photo-lightbox.js). */
+.photo-rails{display:flex;flex-direction:column;gap:6px;border:1px solid #ececec;
+  border-radius:8px;padding:8px 10px;background:#fff;}
+.photo-rail{display:flex;align-items:center;gap:8px;}
+.photo-rail .rail-label{flex:0 0 52px;font-size:12px;font-weight:600;color:#555;}
+/* min-width:0이 없으면 flex 항목이 내용 폭만큼 벌어져, 줄이 아니라 **페이지가** 옆으로
+   스크롤된다(실측 2026-09-08: 760px 폭에서 줄 폭이 1164px로 늘어 표 밖으로 삐져나갔다). */
+.photo-rail .rail-strip{display:flex;min-width:0;gap:6px;overflow-x:auto;padding-bottom:2px;
+  scrollbar-width:thin;-webkit-overflow-scrolling:touch;}
+/* 작게 한 줄. 순번을 위에 얹어 두 줄의 같은 열이 같은 항목임을 눈으로 확인할 수 있게 한다. */
 .photo-cell{position:relative;display:block;border-radius:6px;overflow:hidden;
   background:#f4f4f4;border:1px solid #e5e5e5;aspect-ratio:4/3;}
+.photo-rail .photo-cell{flex:0 0 auto;width:84px;cursor:zoom-in;}
 .photo-cell img{width:100%;height:100%;object-fit:cover;display:block;}
 .photo-cell .photo-phase{position:absolute;left:4px;top:4px;padding:1px 7px;border-radius:9px;
   font-size:11px;background:rgba(0,0,0,.6);color:#fff;}
+.photo-rail .photo-cell .photo-phase{left:3px;top:3px;padding:0 5px;font-size:10px;}
 /* 빠진 자리를 남긴다 — 보여야 "안 찍었다"를 알 수 있다. */
 .photo-cell.empty{display:flex;align-items:center;justify-content:center;
   border-style:dashed;color:#aaa;font-size:12px;}
+.photo-rail .photo-cell.empty{font-size:10px;text-align:center;line-height:1.2;}
+
+/* 확대 보기 — 새 탭 대신 같은 자리에 띄우고 화살표로 넘긴다(public/js/photo-lightbox.js). */
+.lightbox{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;
+  gap:8px;background:rgba(0,0,0,.82);padding:24px;}
+.lightbox[hidden]{display:none;}
+/* 콜마너가 주는 원본이 400x300이다(번호판 OCR이 "긴 변 800px 미만"으로 걸릴 만큼 작다).
+   그래서 화면을 가득 채우게 늘리면 뭉개진다 — 원본의 두 배(800px)까지만 키운다.
+   그 이상은 콜마너가 큰 사진을 주기 시작할 때 늘리면 된다. */
+.lightbox .lb-img{width:min(90vw, 800px);height:auto;max-height:calc(100dvh - 96px);
+  object-fit:contain;border-radius:6px;background:#111;}
+.lightbox button{background:rgba(255,255,255,.14);color:#fff;border:0;border-radius:8px;
+  min-width:44px;min-height:44px;font-size:22px;line-height:1;cursor:pointer;}
+.lightbox button:hover{background:rgba(255,255,255,.26);}
+.lightbox .lb-close{position:absolute;top:16px;right:16px;font-size:18px;}
+.lightbox .lb-cap{position:absolute;bottom:16px;left:0;right:0;text-align:center;
+  color:#fff;font-size:13px;text-shadow:0 1px 3px rgba(0,0,0,.8);}
+/* 확대 중에는 뒤쪽 목록이 스크롤되지 않게 한다 — 닫으면 엉뚱한 자리로 와 있다. */
+body.lb-open{overflow:hidden;}
 
 /* 실비 영수증 — 항목·금액과 사진을 붙여 놓아야 근거가 된다. 금액만 있고 사진이 어디 있는지
    모르면 청구를 다투는 자리에서 아무것도 못 한다. */

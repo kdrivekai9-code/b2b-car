@@ -165,35 +165,59 @@
         썸네일이 깨질 수 있어 onerror로 썸네일만 숨기고 링크는 남긴다. %>
     <% if (typeof callmanerPhotos !== 'undefined' && callmanerPhotos.length) { %>
       <div class="section-title">🚚 콜마너 탁송사진</div>
-      <%# 운행전·운행후를 순번으로 짝지어 나란히 놓는다. 각각 13장을 따로 늘어놓으면 같은 자리를
-          비교하려고 눈으로 세어 짝을 찾아야 한다 — 흠집이 언제 생겼는지가 사고 처리의 전부인데
-          그걸 손으로 맞추게 두면 안 된다. 짝짓기는 서버가 한다(lib/callmanerPhotos.js
-          pairByPhase) — 화면이 다시 세면 Next 화면과 갈린다. %>
+      <%# 운행전·운행후를 **가로 두 줄**로 놓는다. 줄 하나가 운행전, 줄 하나가 운행후이고
+          같은 열이 같은 항목이다 — 열이 곧 짝이라 흠집이 언제 생겼는지 눈으로 바로 잡힌다.
+          (예전에는 짝마다 한 행에 큰 사진 두 장을 넣어서, 13쌍이면 화면이 열세 번 스크롤됐다.)
+          짝짓기는 서버가 한다(lib/callmanerPhotos.js pairByPhase) — 화면이 다시 세면
+          Next 화면과 갈린다. 확대는 public/js/photo-lightbox.js가 맡는다.
+          라이트박스 묶음 순서는 문서 순서라, 여기서 운행전·운행후를 번갈아 넣지 않는 이유가
+          있다: 두 줄을 각각 훑는 것이 사람이 보는 방식이고, 짝 비교는 열로 이미 된다. %>
       <p class="page-sub" style="margin:4px 0 10px;">
-        같은 항목의 <strong>운행전 · 운행후</strong>를 나란히 놓았습니다. 총 <%= callmanerPhotos.length %>장.
+        같은 열이 <strong>같은 항목</strong>입니다(운행전 · 운행후). 총 <%= callmanerPhotos.length %>장.
+        사진을 누르면 크게 볼 수 있고, ← → 로 넘깁니다.
       </p>
-      <div class="photo-compare">
-        <% (typeof callmanerPhotoPairs !== 'undefined' ? callmanerPhotoPairs : []).forEach(function (p) { %>
-          <div class="photo-row">
-            <div class="photo-label"><%= p.label %></div>
-            <div class="photo-pair">
-              <% [['start','운행전'], ['end','운행후']].forEach(function (ph) { %>
+      <% var pairs = (typeof callmanerPhotoPairs !== 'undefined' ? callmanerPhotoPairs : []); %>
+      <div class="photo-rails" id="callmanerRails">
+        <% [['start','운행전'], ['end','운행후']].forEach(function (ph) { %>
+          <div class="photo-rail">
+            <div class="rail-label"><%= ph[1] %></div>
+            <div class="rail-strip">
+              <% pairs.forEach(function (p) { %>
                 <% var shot = p[ph[0]]; %>
                 <% if (shot) { %>
-                  <a class="photo-cell" href="<%= shot.url %>" target="_blank" rel="noopener">
+                  <a class="photo-cell" href="<%= shot.url %>" target="_blank" rel="noopener"
+                     data-lightbox="callmaner" data-caption="<%= p.label %> · <%= ph[1] %>">
                     <img src="<%= shot.url %>" alt="<%= p.label %> <%= ph[1] %>" loading="lazy"
                          onerror="this.style.display='none'">
-                    <span class="photo-phase"><%= ph[1] %></span>
+                    <span class="photo-phase"><%= p.seq %></span>
                   </a>
                 <% } else { %>
-                  <%# 빠진 자리를 남긴다 — 보여야 "안 찍었다"를 알 수 있다. %>
-                  <div class="photo-cell empty"><span><%= ph[1] %> 없음</span></div>
+                  <%# 빠진 자리를 남긴다 — 보여야 "안 찍었다"를 알 수 있고, 열도 어긋나지 않는다. %>
+                  <div class="photo-cell empty"><span><%= p.seq %><br>없음</span></div>
                 <% } %>
               <% }) %>
             </div>
           </div>
         <% }) %>
       </div>
+      <script>
+        // 두 줄을 함께 굴린다 — 따로 움직이면 열이 어긋나 짝 비교가 깨진다.
+        (function () {
+          var rails = document.getElementById('callmanerRails');
+          if (!rails) return;
+          var strips = rails.querySelectorAll('.rail-strip');
+          var syncing = false;
+          strips.forEach(function (el) {
+            el.addEventListener('scroll', function () {
+              if (syncing) return;
+              syncing = true;
+              strips.forEach(function (other) { if (other !== el) other.scrollLeft = el.scrollLeft; });
+              // 다음 프레임에 풀어야 서로를 되밀며 튀지 않는다.
+              requestAnimationFrame(function () { syncing = false; });
+            });
+          });
+        })();
+      </script>
       <p class="page-sub" style="margin:10px 0 0;">
         콜마너가 제공하는 링크를 그대로 보여줍니다 — 콜마너 쪽에서 만료되면 열리지 않을 수 있습니다.
       </p>
@@ -227,7 +251,12 @@
             <% if (files.length) { %>
               <div class="receipt-shots">
                 <% files.forEach(function (f, i) { %>
-                  <a class="photo-cell" href="<%= f.url %>" target="_blank" rel="noopener">
+                  <%# 확대는 탁송사진과 같은 방식(public/js/photo-lightbox.js). 같은 화면에서
+                      같은 모양의 썸네일이 다르게 동작하면 하나가 고장난 것으로 읽힌다.
+                      묶음은 영수증별로 나눈다 — 주유 영수증을 보다 세차 영수증으로 넘어가면
+                      무엇을 보고 있는지 알 수 없다. %>
+                  <a class="photo-cell" href="<%= f.url %>" target="_blank" rel="noopener"
+                     data-lightbox="receipt-<%= r.id %>" data-caption="<%= r.charge_type %> 영수증 <%= i + 1 %>">
                     <img src="<%= f.url %>" alt="<%= r.charge_type %> 영수증 <%= i + 1 %>" loading="lazy"
                          onerror="this.style.display='none'">
                   </a>
