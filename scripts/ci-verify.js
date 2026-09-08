@@ -143,6 +143,7 @@ const CI_CHECKS = [
   'check-next-build',
   'check-offer-agent-answer',
   'check-odometer-ocr',
+  'check-order-history-basis',
   'check-order-list-columns',
   'check-order-split',
   'check-plate-check',
@@ -151,6 +152,8 @@ const CI_CHECKS = [
   'check-receipt-ocr',
   'check-postal-receipt',
   'check-remote-area-fee',
+  'check-reserved-date-reask',
+  'check-reserved-year-guess',
   'check-shared-tabs',
   'check-system-alert',
   'check-test-data-sweep'
