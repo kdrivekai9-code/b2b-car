@@ -629,7 +629,7 @@ router.post('/:id/fare-rules', asyncHandler(async (req, res) => {
 
 // ---------------- 일일기사 요금 ----------------
 // 시간 구간 기반(지사의 premium_fare_rules와 같은 구조). 이 상품에 실제로 쓰이는 표라 이름을
-// 일일기사로 맞췄다 — 프리미엄(대리)은 요금 체계가 나오면 별도 표를 만든다.
+// 일일기사로 맞췄다 — 프리미엄(대리)은 편도 거리 기준으로 아래에 별도 표가 있다.
 router.get('/:id/daily-driver-fare-rules', asyncHandler(async (req, res) => {
   const { group, groups } = await loadGroupWithSiblings(req.params.id);
   if (!group) return res.status(404).send('법인을 찾을 수 없습니다.');
@@ -685,12 +685,91 @@ router.post('/:id/daily-driver-fare-rules', asyncHandler(async (req, res) => {
 }));
 
 // ---------------- 프리미엄(대리) 요금 ----------------
-// 요금 체계가 아직 정해지지 않아 자리만 만들어 둔다(사용자 확정). 표를 미리 만들어두면 비어 있는
-// 표가 계산에 끼어들 수 있어, 저장할 곳 자체를 두지 않았다.
+// **거리 구간 방식**이다(사용자 확정 2026-09-08) — 법인대리(프리미엄)는 편도 서비스라 탁송과
+// 같은 기준이고, 5시간 90,000원 같은 시간 기준은 위의 **일일기사** 상품이다.
+//
+// 표를 비워둘 수 있다는 것이 이 화면의 전제다: 등록된 구간이 없으면 계산이 { enabled:false }를
+// 돌려주고 오더 등록은 수동 입력, 요금 문의는 "등록되어 있지 않습니다"로 안내한다
+// (lib/branchPolicy.js calculatePremiumOnewayFare). **탁송 표로 대신 계산하지 않는다** —
+// 그러면 계약과 다른 금액이 조용히 청구된다.
 router.get('/:id/premium-fare-rules', asyncHandler(async (req, res) => {
   const { group, groups } = await loadGroupWithSiblings(req.params.id);
   if (!group) return res.status(404).send('법인을 찾을 수 없습니다.');
-  res.render('groups/premium_fare_rules', { title: '프리미엄(대리) 요금 - ' + group.name, group, groups });
+  // 마이그레이션(20260908040000) 전이면 표가 없다 — 화면이 500으로 죽지 않고 "미등록"으로
+  // 보이는 게 맞다(다른 요금 화면과 같은 처리).
+  const [tiers, branchTiers] = await Promise.all([
+    db.all('SELECT * FROM group_premium_oneway_fare_rules WHERE group_id = ? ORDER BY tier_seq', [req.params.id]).catch(() => []),
+    db.all('SELECT * FROM premium_oneway_fare_rules WHERE branch_id = ? ORDER BY tier_seq', [group.branch_id]).catch(() => []),
+  ]);
+  res.render('groups/premium_fare_rules', {
+    title: '프리미엄(대리) 요금 - ' + group.name,
+    group, groups, tiers, branchTiers,
+    saved: req.query.saved === '1',
+    copied: req.query.copied === '1',
+    error: req.query.error || null,
+  });
+}));
+
+// 지사 표를 이 법인으로 복사 — 일일기사 요금과 같은 동작이다.
+router.post('/:id/premium-fare-rules/copy', asyncHandler(async (req, res) => {
+  const base = '/groups/' + req.params.id + '/premium-fare-rules';
+  const group = await db.get('SELECT id, branch_id FROM groups_tbl WHERE id = ?', [req.params.id]);
+  if (!group) return res.status(404).send('법인을 찾을 수 없습니다.');
+  const tiers = await db.all(
+    'SELECT * FROM premium_oneway_fare_rules WHERE branch_id = ? ORDER BY tier_seq', [group.branch_id]
+  ).catch(() => []);
+  if (!tiers.length) return res.redirect(base + '?error=' + encodeURIComponent('소속 지사에 등록된 프리미엄(대리) 요금표가 없습니다.'));
+
+  await db.run('DELETE FROM group_premium_oneway_fare_rules WHERE group_id = ?', [req.params.id]);
+  for (const t of tiers) {
+    await db.run(
+      `INSERT INTO group_premium_oneway_fare_rules (group_id, tier_seq, base_distance_km, base_fare,
+        surcharge_unit_km, surcharge_fare, max_distance_km, max_fare, round_unit, round_method, note)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [req.params.id, t.tier_seq, t.base_distance_km, t.base_fare, t.surcharge_unit_km, t.surcharge_fare,
+        t.max_distance_km, t.max_fare, t.round_unit, t.round_method, t.note || null]
+    );
+  }
+  res.redirect(base + '?copied=1');
+}));
+
+router.post('/:id/premium-fare-rules', asyncHandler(async (req, res) => {
+  const base = '/groups/' + req.params.id + '/premium-fare-rules';
+  const b = (v) => [].concat(v || []);
+  const baseDist = b(req.body.base_distance_km);
+  const baseFare = b(req.body.base_fare);
+  const surUnit = b(req.body.surcharge_unit_km);
+  const surFare = b(req.body.surcharge_fare);
+  const maxDist = b(req.body.max_distance_km);
+  const maxFare = b(req.body.max_fare);
+  const roundUnit = b(req.body.round_unit);
+  const roundMethod = b(req.body.round_method);
+  const note = b(req.body.note);
+
+  try {
+    await db.run('DELETE FROM group_premium_oneway_fare_rules WHERE group_id = ?', [req.params.id]);
+    for (let i = 0; i < baseDist.length; i++) {
+      if (baseDist[i] === '' && baseFare[i] === '') continue;
+      await db.run(
+        `INSERT INTO group_premium_oneway_fare_rules (group_id, tier_seq, base_distance_km, base_fare,
+          surcharge_unit_km, surcharge_fare, max_distance_km, max_fare, round_unit, round_method, note)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [req.params.id, i + 1,
+          Number(baseDist[i]) || 0, Number(baseFare[i]) || 0,
+          // 할증단위가 0이면 계산이 Infinity가 된다(금액 ÷ 단위) — 1km로 받는다.
+          Number(surUnit[i]) || 1, Number(surFare[i]) || 0,
+          maxDist[i] ? Number(maxDist[i]) : null, maxFare[i] ? Number(maxFare[i]) : null,
+          Number(roundUnit[i]) || 1000, roundMethod[i] || 'round', (note[i] || '').trim() || null]
+      );
+    }
+  } catch (e) {
+    // 마이그레이션 전이면 표가 없다 — 저장이 조용히 삼켜지지 않게 사유를 알린다.
+    if (e && (e.code === '42P01' || /does not exist/.test(e.message || ''))) {
+      return res.redirect(base + '?error=' + encodeURIComponent('요금표가 아직 만들어지지 않았습니다. 마이그레이션(20260908040000)을 먼저 실행해주세요.'));
+    }
+    throw e;
+  }
+  res.redirect(base + '?saved=1');
 }));
 
 // ---------------- 고객 통보 ----------------

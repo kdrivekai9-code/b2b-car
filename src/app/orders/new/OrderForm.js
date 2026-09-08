@@ -445,8 +445,25 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
       const params = new URLSearchParams();
       params.set('branch_id', state.branch_id);
       params.set('distance_km', routeInfo.km.toFixed(2));
+      // 오더구분마다 요금표가 다르다(프리미엄대리는 편도 거리 전용 표) — 안 넘기면 서버가
+      // 탁송 표로 계산해서 다른 상품의 요금이 들어간다.
+      params.set('order_type', state.order_type || 'dispatch');
+      // **법인(거래처)을 반드시 넘긴다.** 요금표는 법인 → 지사 순서로 고르므로, 이 값이 없으면
+      // 법인 전용 요금표와 지점 구간요금(lib/officeZoneFare.js)이 통째로 무시된다 —
+      // 프리미엄 편도 표도 법인 쪽부터 본다. EJS 화면은 처음부터 넘기고 있었다.
+      if (state.requester_group_id) params.set('group_id', String(state.requester_group_id));
       if (state.vehicle_type.trim()) params.set('vehicle_type', state.vehicle_type.trim());
       if (state.origin_address.trim()) params.set('origin_address', state.origin_address.trim());
+      // 오지요금은 도착지 주소에서 "…리"를 찾아 판정한다(lib/branchPolicy.js isRemoteArea).
+      if (state.destination_address.trim()) params.set('destination_address', state.destination_address.trim());
+      // 지점 구간요금은 좌표로 "출발/도착이 그 지점인가"를 보고 반대편 시도·시군구로 지역을
+      // 찾는다 — 주소 문자열로 판정하면 "서울 강남구"와 "서울특별시 강남구"가 다른 곳이 된다.
+      for (const slot of ['origin', 'destination']) {
+        for (const f of ['lat', 'lon', 'sido', 'sigugun']) {
+          const v = state[`${slot}_${f}`];
+          if (v !== null && v !== undefined && String(v).trim() !== '') params.set(`${slot}_${f}`, String(v));
+        }
+      }
       const fareReservedDate = state.reservation_basis === 'delivery' && state.pickup_reserved_date ? state.pickup_reserved_date : `${state.reservedDateYear}-${state.reservedDateMonth}-${state.reservedDateDay}`;
       const fareReservedTime = state.reservation_basis === 'delivery' && state.pickup_reserved_time ? state.pickup_reserved_time : `${state.reservedTimeHour}:${state.reservedTimeMinute}`;
       if (fareReservedDate) params.set('reserved_date', fareReservedDate);
@@ -470,7 +487,10 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
       if (requestId !== fareRequestIdRef.current) return; // stale 응답 무시
 
       if (!data.enabled) {
-        setFareHint('이 지사는 구간요금표를 사용하지 않아 수동으로 입력합니다.');
+        // 왜 자동계산이 안 되는지 갈라서 말한다 — 관리자가 고칠 곳이 다르다.
+        setFareHint(data.reason === 'premium_oneway_unset'
+          ? '프리미엄(대리) 요금표가 등록되지 않아 수동으로 입력합니다. (법인/지사 설정 → 프리미엄(대리) 요금)'
+          : '이 지사는 구간요금표를 사용하지 않아 수동으로 입력합니다.');
         setFareLocked(false);
         return;
       }
@@ -485,7 +505,7 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
       } else if (data.ferryApplied && data.ferryFare != null) {
         hint = `구간요금 ${Number(data.baseFare || 0).toLocaleString('ko-KR')}원 + 도선료 ${Number(data.ferryFare || 0).toLocaleString('ko-KR')}원 = 총 ${Number(data.totalFare || data.fare || 0).toLocaleString('ko-KR')}원으로 자동 계산되었습니다.`;
       } else {
-        hint = `구간요금 설정에 따라 자동 계산되었습니다 (${routeInfo.km.toFixed(1)}km 기준). 필요 시 직접 수정할 수 있습니다.`;
+        hint = `${data.orderType === 'premium' ? '프리미엄(대리) 편도 요금표' : '구간요금 설정'}에 따라 자동 계산되었습니다 (${routeInfo.km.toFixed(1)}km 기준). 필요 시 직접 수정할 수 있습니다.`;
       }
       const locked = isClient && !data.editableByClient;
       if (locked) hint += ' (수정 불가)';
@@ -494,7 +514,7 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
     }, 250);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.branch_id, routeInfo.km, routeInfo.hasFerryLeg, JSON.stringify(routeInfo.ferrySegments), state.vehicle_type, state.origin_address, state.reservation_basis, state.pickup_reserved_date, state.pickup_reserved_time, state.reservedDateYear, state.reservedDateMonth, state.reservedDateDay, state.reservedTimeHour, state.reservedTimeMinute]);
+  }, [state.branch_id, state.order_type, state.requester_group_id, routeInfo.km, routeInfo.hasFerryLeg, JSON.stringify(routeInfo.ferrySegments), state.vehicle_type, state.origin_address, state.destination_address, state.origin_lat, state.origin_lon, state.origin_sido, state.origin_sigugun, state.destination_lat, state.destination_lon, state.destination_sido, state.destination_sigugun, state.reservation_basis, state.pickup_reserved_date, state.pickup_reserved_time, state.reservedDateYear, state.reservedDateMonth, state.reservedDateDay, state.reservedTimeHour, state.reservedTimeMinute]);
 
   const isAdmin = currentUserRole === 'admin';
   const isClient = currentUserRole === 'client';

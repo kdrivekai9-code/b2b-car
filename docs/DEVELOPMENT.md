@@ -160,6 +160,26 @@ r.lastInsertRowid  // 새 오더 id
 지사 설정을 덮습니다 — 판정은 `lib/branchPolicy.js`에 모여 있습니다. 거리·지역 할증은
 `group_office_zone_fares`(1,176행), 도선료는 `ferry_fare_rules`가 담당합니다.
 
+**상품이 셋이고 청구 기준이 다릅니다.** 표를 섞으면 계약과 다른 금액이 조용히 청구됩니다.
+
+| 오더구분 | 기준 | 지사 표 | 법인 표 | 계산 |
+|---|---|---|---|---|
+| 탁송 `dispatch` | 거리 | `fare_rules` | `group_fare_rules` | `calculateFare` |
+| 프리미엄대리 `premium` | **편도 거리** | `premium_oneway_fare_rules` | `group_premium_oneway_fare_rules` | `calculatePremiumOnewayFare` |
+| 일일기사 `daily_driver` | **이용 시간** | `premium_fare_rules` | `group_daily_driver_fare_rules` | `calculatePremiumFare` |
+
+> ⚠ **이름 함정.** `premium_fare_rules`는 이름과 달리 **일일기사** 표입니다(법인 쪽 이름이
+> `group_daily_driver_fare_rules`인 것이 증거입니다). 프리미엄대리 표는 이름에 `oneway`가
+> 들어간 쪽입니다. 이름을 바꾸려면 일일기사 청구가 멈추니 그대로 두고 함수 주석으로 갈라 뒀습니다.
+
+요금표가 비어 있으면 계산은 `{ enabled: false }`를 돌려줍니다 — **다른 상품 표로 대신 계산하지
+않습니다.** 오더 등록 화면은 수동 입력으로 바뀌고, 챗봇 요금 문의는 "등록되어 있지 않습니다"로
+안내한 뒤 상담원 연결을 제안합니다. 없는 금액을 지어내는 것보다 안 내는 편이 낫기 때문입니다.
+
+한 가지 남은 것: `/orders/fare-preview`는 `order_type`을 받아 탁송·프리미엄을 갈라 계산하지만,
+**일일기사는 아직 거리로 계산됩니다**(시간을 받는 `/orders/premium-fare-preview`가 있는데 부르는
+화면이 없습니다). 일일기사 오더를 실제로 쓰기 시작하면 여기를 먼저 이어야 합니다.
+
 ### 마이그레이션 정책
 
 > **마이그레이션은 자동 적용되지 않습니다.** 배포는 코드만 나갑니다. SQL은 사람이 Supabase에서
@@ -189,7 +209,8 @@ r.lastInsertRowid  // 새 오더 id
 | 본사 직원 / 개인 딜러 | `users.client_type`이 `hq`면 법인 전체를, `dealer`면 **자기 것만** 본다. 판정은 `lib/clientScope.js` |
 | 상담톡 | 카카오 채널 상담. 고객이 채팅으로 접수하는 경로이고 웹훅으로 들어온다 |
 | 구간 릴레이 | 한 오더를 기사 여럿이 이어 운행하는 것. `order_legs` |
-| 프리미엄 | `order_type = 'premium'`. 일반 `dispatch`와 접수 흐름·요금 규칙이 다르다 |
+| 프리미엄대리 | `order_type = 'premium'`. 법인 대리운전의 **편도** 서비스. 요금은 탁송처럼 거리 기준이지만 표가 따로다 |
+| 일일기사 | `order_type = 'daily_driver'`. 기사를 하루 단위로 쓰는 것. 요금이 **이용 시간** 기준이라 거리로는 계산되지 않는다 |
 
 ---
 

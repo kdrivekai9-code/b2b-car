@@ -163,6 +163,7 @@ const CI_CHECKS = [
   'check-proxy-named-paths',
   'check-public-base-url',
   'check-push-audience',
+  'check-premium-oneway-fare',
   'check-premium-immediate',
   'check-premium-step-questions',
   'check-receipt-ocr',

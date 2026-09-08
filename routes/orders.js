@@ -6,7 +6,7 @@ const asyncHandler = require('../middleware/asyncHandler');
 const { aiRateLimit } = require('../middleware/aiRateLimit');
 const { ORDER_STATUSES } = require('../config');
 const clientScope = require('../lib/clientScope');
-const { getEffectivePaymentMethods, getEffectiveStatuses, checkOperatingHours, calculateFareWithFerry, calculatePremiumFare, findSpecialTolls, findFareExtra } = require('../lib/branchPolicy');
+const { getEffectivePaymentMethods, getEffectiveStatuses, checkOperatingHours, calculateFareWithFerry, calculatePremiumFare, calculatePremiumOnewayFare, findSpecialTolls, findFareExtra } = require('../lib/branchPolicy');
 const { notify } = require('../lib/push');
 const { kstNow } = require('../lib/period');
 const { parseIntakeText } = require('../lib/aiIntakeParser');
@@ -1144,6 +1144,41 @@ router.get('/fare-preview', asyncHandler(async (req, res) => {
   const branchId = req.query.branch_id || null;
   const distanceKm = parseFloat(req.query.distance_km);
   if (!Number.isFinite(distanceKm)) return res.json({ enabled: false });
+
+  // **오더구분마다 다른 요금표를 본다.**
+  //
+  // 예전에는 오더구분을 안 보고 전부 탁송 거리구간표(fare_rules)로 냈다 — 프리미엄대리 오더에
+  // 탁송 요금이 그대로 들어갔다. 두 상품은 청구 기준이 다르므로(프리미엄=편도 거리 전용 표)
+  // 같은 표를 쓰면 계약과 다른 금액이 청구된다.
+  //
+  // 일일기사는 **이용 시간** 기준이라 거리로는 계산할 수 없다 — 이 엔드포인트가 다룰 수 없어
+  // 지금도 /premium-fare-preview가 따로 있다(그쪽은 hours_bracket을 받는다).
+  if (req.query.order_type === 'premium') {
+    const groupId = req.query.group_id || req.query.groupId || null;
+    const result = await calculatePremiumOnewayFare(groupId, branchId, distanceKm);
+    if (!result.enabled) {
+      // 표가 없으면 금액을 만들지 않는다 — 탁송 표로 대신 계산하면 조용히 다른 상품의 요금이
+      // 청구된다. 화면은 이 reason을 보고 "무엇을 등록해야 하는지"를 말해준다.
+      return res.json({ enabled: false, reason: 'premium_oneway_unset' });
+    }
+    // 노출·수정 권한은 상품과 무관한 거래처 정책이라 탁송과 같은 설정을 쓴다.
+    const extra = await findFareExtra(groupId, branchId).catch(() => null);
+    return res.json({
+      enabled: true,
+      orderType: 'premium',
+      fare: result.fare,
+      // 화면은 totalFare/baseFare를 읽는다 — 프리미엄은 도선료를 얹지 않으므로 같은 값이다.
+      baseFare: result.fare,
+      totalFare: result.fare,
+      ferryFare: 0,
+      ferryApplied: false,
+      specialTolls: [],
+      tierSeq: result.tierSeq,
+      fareSource: result.fareSource,
+      visibleToClient: extra ? !!extra.fare_visible_to_client : true,
+      editableByClient: extra ? !!extra.fare_editable_by_client : false,
+    });
+  }
   const beforeKm = parseFloat(req.query.before_km);
   const afterKm = parseFloat(req.query.after_km);
   const beforeMinutes = parseFloat(req.query.before_minutes);

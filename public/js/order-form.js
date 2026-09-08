@@ -1174,6 +1174,10 @@
     var params = new URLSearchParams();
     if (branchId) params.set('branch_id', branchId);
     if (Number.isFinite(totalKm)) params.set('distance_km', String(totalKm.toFixed(2)));
+    // 오더구분마다 요금표가 다르다(프리미엄대리는 편도 거리 전용 표) — 안 넘기면 서버가
+    // 탁송 표로 계산해서 다른 상품의 요금이 들어간다.
+    var orderTypeEl = document.querySelector('select[name="order_type"], input[name="order_type"]');
+    if (orderTypeEl && orderTypeEl.value) params.set('order_type', orderTypeEl.value);
     if (vehicleType) params.set('vehicle_type', vehicleType);
     if (originAddressInput && originAddressInput.value.trim()) params.set('origin_address', originAddressInput.value.trim());
     var destAddressInput = document.getElementById('destination_address');
@@ -1219,7 +1223,11 @@
       .then(function (data) {
         if (requestId !== fareRequestId) return;
         if (!data.enabled) {
-          fareCalcHint.textContent = '이 지사는 구간요금표를 사용하지 않아 수동으로 입력합니다.';
+          // 왜 자동계산이 안 되는지 갈라서 말한다 — "요금표를 사용하지 않음"과 "프리미엄
+          // 요금표가 아직 등록되지 않음"은 관리자가 고칠 곳이 다르다.
+          fareCalcHint.textContent = data.reason === 'premium_oneway_unset'
+            ? '프리미엄(대리) 요금표가 등록되지 않아 수동으로 입력합니다. (법인/지사 설정 → 프리미엄(대리) 요금)'
+            : '이 지사는 구간요금표를 사용하지 않아 수동으로 입력합니다.';
           fareCalcHint.classList.remove('calculated');
           fareAmountInput.readOnly = false;
           return;
@@ -1238,7 +1246,8 @@
         } else if (data.ferryApplied && data.ferryFare != null) {
           fareCalcHint.textContent = '구간요금 ' + Number(data.baseFare || 0).toLocaleString('ko-KR') + '원 + 도선료 ' + Number(data.ferryFare || 0).toLocaleString('ko-KR') + '원 = 총 ' + Number(data.totalFare || data.fare || 0).toLocaleString('ko-KR') + '원으로 자동 계산되었습니다.';
         } else {
-          fareCalcHint.textContent = '구간요금 설정에 따라 자동 계산되었습니다 (' + totalKm.toFixed(1) + 'km 기준). 필요 시 직접 수정할 수 있습니다.';
+          fareCalcHint.textContent = (data.orderType === 'premium' ? '프리미엄(대리) 편도 요금표' : '구간요금 설정')
+            + '에 따라 자동 계산되었습니다 (' + totalKm.toFixed(1) + 'km 기준). 필요 시 직접 수정할 수 있습니다.';
           if (ferryFareInput) ferryFareInput.value = 0;
         }
         fareCalcHint.classList.add('calculated');
