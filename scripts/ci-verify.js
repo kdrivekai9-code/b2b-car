@@ -130,6 +130,7 @@ const CI_CHECKS = [
   'check-driver-location',
   'check-form-parity',
   'check-fare-surcharge',
+  'check-intake-correction',
   'check-intake-fields-shared',
   'check-intake-summary',
   'check-intake-expiry-notice',

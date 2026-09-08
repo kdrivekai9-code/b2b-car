@@ -33,6 +33,7 @@ const { geocodeAddress } = require('../lib/geocode');
 // 나뉜 건의 출발 시각을 물을 때 쓰는 문구.
 const { buildScheduleQuestion } = require('../lib/orderSplit');
 const { needsDateReask, buildDateQuestion, applyDateAnswer, buildRetryQuestion } = require('../lib/reservationReask');
+const { applyCorrection } = require('../lib/intakeCorrection');
 const { runKakaoOrderNotifications } = require('../lib/kakaoOrderNotify');
 const kakaoOrderPhotos = require('../lib/kakaoOrderPhotos');
 const { sendOrderPhotos, isPhotoRequest, isOdometerRequest, answerOdometer, countNoPhotoAnswers } = kakaoOrderPhotos;
@@ -1001,8 +1002,26 @@ async function handleConfirmReply(session, pending, text) {
     return true;
   }
 
-  // 그 외 답변은 "수정"으로 본다 — 원문에 이어붙여 다시 판단한다(웹과 같은 규칙). 확인 상태는
-  // 지운다 — 재판단 결과가 다시 처음부터(되묻기든 확인이든) 알맞은 상태를 새로 저장한다.
+  // 그 외 답변은 "수정"이다.
+  //
+  // 탁송 접수는 이어붙이지 않고 **바뀐 항목만** 받아 얹는다(웹과 같은 규칙,
+  // lib/intakeCorrection.js). 이어붙이면 지시문이 값으로 흡수되고 먼저 나온 날짜가 그대로
+  // 이긴다 — 실사용에서 "예약일을 2026년 9월 8일로 변경해줘"가 도착지 칸에 들어갔다.
+  //
+  // 프리미엄/일일기사는 parsed 모양이 달라(orderType/tripType/declined) 이 경로를 태우지
+  // 않는다. 그쪽은 아래 기존 방식 그대로다.
+  if (pending.category !== 'premium_daily' && pending.parsed) {
+    const corrected = await applyCorrection(pending.parsed, text);
+    if (corrected.ok) {
+      await clearPendingIntake(session);
+      // raw는 원문 그대로 넘긴다 — 정정 결과는 parsed에 있고, 지시문을 raw에 남기면
+      // 나중에 재파싱될 때 그 문장이 다시 값으로 흡수된다.
+      return completeIntake(session, corrected.parsed, pending.raw, new Map());
+    }
+    // 정정으로 못 읽었으면(질문·새 접수·모델 실패) 아래 기존 경로가 받는다.
+  }
+
+  // 확인 상태는 지운다 — 재판단 결과가 다시 처음부터(되묻기든 확인이든) 알맞은 상태를 새로 저장한다.
   await clearPendingIntake(session);
   const mergedRaw = `${pending.raw}\n${text}`;
 
