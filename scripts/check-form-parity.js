@@ -27,6 +27,13 @@ function fieldNames(src) {
 // 짝지어 볼 화면들. 새 화면을 만들 때 여기 한 줄을 더하면 그때부터 갈리지 않는다.
 const PAIRS = [
   ['법인', 'views/groups/form.ejs', 'src/app/groups/_components/GroupForm.js'],
+  // 2026-09-08에 /users·/groups·/drivers를 프로덕션에서 Next로 넘기면서 함께 봤다. 이 셋은
+  // 읽기가 아니라 **쓰기** 화면이라, 칸 하나가 없으면 저장할 때 그 값이 조용히 사라진다.
+  ['사용자', 'views/users/form.ejs', 'src/app/users/_components/UserForm.js'],
+  // 기사 폼은 Next에서 신규·수정이 **각각 다른 파일**이다(공용 컴포넌트가 없다). 그래서 둘 다
+  // 같은 EJS 폼에 맞춰 본다 — 한쪽만 고치면 다른 쪽이 뒤처진다.
+  ['기사(신규)', 'views/drivers/form.ejs', 'src/app/drivers/new/page.js'],
+  ['기사(수정)', 'views/drivers/form.ejs', 'src/app/drivers/[id]/edit/page.js'],
 ];
 
 PAIRS.forEach(([label, ejsPath, nextPath]) => {
