@@ -32,6 +32,7 @@ const { previewIntakeAddresses } = require('../lib/intakeAddressPreview');
 const { geocodeAddress } = require('../lib/geocode');
 // 나뉜 건의 출발 시각을 물을 때 쓰는 문구.
 const { buildScheduleQuestion } = require('../lib/orderSplit');
+const { needsDateReask, buildDateQuestion, applyDateAnswer, buildRetryQuestion } = require('../lib/reservationReask');
 const { runKakaoOrderNotifications } = require('../lib/kakaoOrderNotify');
 const kakaoOrderPhotos = require('../lib/kakaoOrderPhotos');
 const { sendOrderPhotos, isPhotoRequest, isOdometerRequest, answerOdometer, countNoPhotoAnswers } = kakaoOrderPhotos;
@@ -1076,6 +1077,9 @@ async function tryHandleIntake(session, text) {
     // 먼저 처리해야 하는 이유는 그쪽 주석 참고), 다른 경로로 tryHandleIntake가 불릴 때도
     // 안전하게 같은 곳으로 보낸다.
     if (pending.awaiting === 'confirm') return handleConfirmReply(session, pending, text);
+    // 예약일을 다시 묻는 중 — 이 답은 보충 정보가 아니라 "날짜"다. 원문에 이어붙여 다시
+    // 파싱하면 옛 날짜 줄이 또 읽혀 같은 질문이 반복된다(lib/reservationReask.js 머리말).
+    if (pending.awaiting === 'reserved_date') return handleReservedDateReply(session, pending, text);
     // 연락처를 묻는 중이면 "1"/"2"(보기 선택) 또는 직접 입력한 번호다.
     if (pending.awaiting === 'origin_contact' || pending.awaiting === 'destination_contact') {
       return handleContactReply(session, pending, text);
@@ -1318,6 +1322,15 @@ async function completePremiumIntake(session, parsed, rawText, cache) {
     return;
   }
 
+  const reaskPremium = needsDateReask(parsed.when);
+  if (reaskPremium.ask) {
+    await savePendingState(session, {
+      raw: rawText, awaiting: 'reserved_date', category: 'premium_daily', orderType: parsed.orderType, parsed,
+    });
+    await botSay(session, buildDateQuestion(reaskPremium, parsed.when), '예약일 재확인(프리미엄/일일기사)');
+    return;
+  }
+
   // 등록 전 "네" 확인 — 웹 AI 접수와 같은 방식(위 completeIntake와 같은 이유).
   await savePendingState(session, { raw: rawText, awaiting: 'confirm', category: 'premium_daily', orderType: parsed.orderType, parsed });
   await botSay(session, `${buildPremiumPreviewMessage(parsed)}\n\n맞으면 "네" 수정하시려면 수정할 항목만 고쳐서 다시 보내주세요`, '접수 확인 대기(프리미엄/일일기사)');
@@ -1479,9 +1492,48 @@ async function completeIntake(session, parsed, rawText, cache) {
   // 등록 전 "네" 확인 — 웹 AI 접수(lib/webIntakeTurn.js finishParsed)와 같은 방식이다(사용자
   // 확정 규칙 변경: 예전에는 필드가 차는 즉시 등록하고 사후에 "잘못됐으면 알려주세요"로
   // 확인했다). 실제 등록은 registerDispatchOrder가 "네" 답을 받은 뒤에 한다.
+  // 지나간 날짜면 확인을 받기 전에 날짜부터 다시 묻는다. 밀린 날짜를 요약에 얹어 "네"를
+  // 받으면 고객은 자기가 적은 날짜가 그대로 있는 줄 안다(OID2075가 그렇게 등록됐다).
+  const reask = needsDateReask(parsed.when);
+  if (reask.ask) {
+    await savePendingState(session, { raw: rawText, awaiting: 'reserved_date', category: 'dispatch', parsed });
+    await botSay(session, buildDateQuestion(reask, parsed.when), '예약일 재확인');
+    return true;
+  }
+
   await savePendingState(session, { raw: rawText, awaiting: 'confirm', category: 'dispatch', parsed });
   await botSay(session, `${buildIntakeReply(parsed)}\n\n맞으면 "네" 수정하시려면 수정할 항목만 고쳐서 다시 보내주세요`, '접수 확인 대기');
   return true;
+}
+
+// 예약일 되묻기에 대한 답. 날짜만 갈아끼우고 확인 단계로 되돌아간다 — 원문은 손대지 않는다.
+async function handleReservedDateReply(session, pending, text) {
+  const parsed = pending.parsed;
+  if (!parsed) {
+    await clearPendingIntake(session);
+    await botSay(session, '접수 내용을 다시 확인할 수 없습니다. 처음부터 다시 알려주세요.', '확인 상태 유실');
+    return true;
+  }
+
+  const applied = applyDateAnswer(parsed.when, text);
+  if (!applied.ok) {
+    // 못 알아들었으면 상태를 유지해 한 번 더 묻는다 — 지우면 다음 답이 새 접수로 재분류돼
+    // 방금까지 다 채운 내용이 통째로 사라진다.
+    await savePendingState(session, {
+      raw: pending.raw || '', awaiting: 'reserved_date',
+      category: pending.category || 'dispatch', orderType: pending.orderType || null, parsed,
+    });
+    await botSay(session, buildRetryQuestion(applied), '예약일 재확인(재질문)');
+    return true;
+  }
+
+  parsed.when = applied.when;
+  const rawText = pending.raw || '';
+  if (pending.category === 'premium_daily') {
+    await completePremiumIntake(session, parsed, rawText, new Map());
+    return true;
+  }
+  return completeIntake(session, parsed, rawText, new Map());
 }
 
 // "네" 확인 후 실제 등록 — 예전 completeIntake의 등록 로직을 그대로 옮겼다. 확인 단계를
@@ -1771,6 +1823,11 @@ async function processBotTurn(session, text) {
   const confirmPending = await loadPendingIntake(session);
   if (confirmPending && confirmPending.awaiting === 'confirm') {
     return handleConfirmReply(session, confirmPending, text);
+  }
+  // 예약일을 다시 묻는 중이면 그 답도 여기서 받는다 — 아래 경로(배차 도우미·LLM 재분류)로
+  // 흘러가면 "1월 5일" 한 줄이 접수 답이 아니라 새 요청으로 해석될 수 있다.
+  if (confirmPending && confirmPending.awaiting === 'reserved_date') {
+    return handleReservedDateReply(session, confirmPending, text);
   }
 
   // MCP 배차 도우미(주문 등록/변경/취소)가 "네" 확인을 기다리는 중이어도 같은 이유로 스몰토크

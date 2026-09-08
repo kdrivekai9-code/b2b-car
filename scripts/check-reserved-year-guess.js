@@ -8,8 +8,10 @@
 // 그렇게 접수돼 콜마너까지 등록됐다(OID2075, 2026-09-07). 확인 문구에는 결과만 찍혀서
 // 읽는 사람은 그게 고객이 말한 값인지 우리가 민 값인지 알 수 없었다.
 //
-// 막지는 않는다(몇 달 뒤 차량을 미리 잡는 일이 실제로 있다). 대신 "네"라고 답하기 전에
-// 보이게 한다. 그 노출이 사라지면 같은 오등록이 조용히 반복되므로 여기서 못 박는다.
+// 밀린 결과가 상식 범위를 넘으면 이제 되묻는다(lib/reservationReask.js,
+// scripts/check-reserved-date-reask.js). 그래서 이 표시가 남는 경우는 **그냥 쓰는** 쪽 —
+// 12월 말의 "1/3"처럼 며칠 뒤로 밀린 건이다. 그것도 우리가 연도를 정한 것이니 밝힌다.
+// 그 노출이 사라지면 추정을 확인 없이 등록하는 상태로 되돌아가므로 여기서 못 박는다.
 require('dotenv').config();
 const { parseKakaoIntake } = require('../lib/kakaoIntakeParser');
 const summary = require('../lib/intakeSummary');

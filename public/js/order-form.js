@@ -2217,9 +2217,46 @@
   updateGeoBadges('origin');
   updateGeoBadges('destination');
 
+  // 예약일이 상식 밖이면 한 번 되묻는다. 막지는 않는다 — 몇 달 뒤 출고 예정 차량을 미리
+  // 잡는 일이 실제로 있고, 그 판단을 우리가 대신할 수는 없다.
+  //
+  // 규칙은 서버·Next 폼과 같아야 한다(lib/reservationSanity.js, src/app/orders/new/OrderForm.js).
+  // 이 확인이 Next 폼에만 있어서, 같은 화면인데 플래그에 따라 되묻기도 하고 그냥 넘어가기도
+  // 했다(2026-09-08 발견). 실측: 연도를 잘못 잡아 2027-09-08로 접수된 건이 콜마너까지
+  // 그대로 등록됐다(OID2075) — 목록에는 멀쩡히 보이니 접수된 줄 알지만 "오늘·내일 예약
+  // 콜"에는 안 잡히고 그 날짜가 올 때까지 아무도 모른다.
+  var SANITY_FAR_FUTURE_DAYS = 90;
+  var SANITY_PAST_LIMIT_DAYS = 180;
+
+  function reservedDateSanityMessage(value) {
+    var m = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!m) return null;
+    var now = new Date();
+    var today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+    var days = Math.round((Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) - today) / 86400000);
+    if (days < -SANITY_PAST_LIMIT_DAYS) {
+      return '예약일이 지난 날짜입니다(' + value + ', ' + Math.abs(days) + '일 전). 연도를 확인해주세요.';
+    }
+    if (days > SANITY_FAR_FUTURE_DAYS) {
+      return '예약일이 ' + days + '일 뒤입니다(' + value + '). 연도를 확인해주세요.';
+    }
+    return null;
+  }
+
   var orderFormEl = document.getElementById('orderForm');
   if (orderFormEl) {
     orderFormEl.addEventListener('submit', function (e) {
+      // 즉시 접수는 날짜를 사람이 고르지 않으므로 물을 것이 없다.
+      var basis = document.querySelector('input[name="reservation_basis"]:checked');
+      if (!basis || basis.value !== 'immediate') {
+        var dateEl = document.getElementById('reserved_date');
+        var sanity = reservedDateSanityMessage(dateEl ? dateEl.value : '');
+        if (sanity && !window.confirm(sanity + '\n\n이대로 접수할까요?')) {
+          e.preventDefault();
+          return;
+        }
+      }
+
       if (!pendingRegionResolutions.length) return;
       e.preventDefault();
       window.__aiIntakeWaitPendingRegions().then(function () { orderFormEl.submit(); });

@@ -2302,6 +2302,8 @@
   // 반영하고, "당일 예약이 아니거나(=평소처럼 미래 예약) 당일이라도 오전 출발"일 때만
   // 편도/왕복을 확인한다(당일 오후 이후 출발은 편도로 간주하고 바로 출발지 질문으로).
   function handlePremiumReservedDateTime(data) {
+    var premiumDatePast = reservedDateProblem(data);
+    if (premiumDatePast) return askReservedDateAgain(data, premiumDatePast);
     setField('reserved_date', data.reserved_date);
     setField('reserved_time', data.reserved_time ? roundToTenMinutes(data.reserved_time) : data.reserved_time);
     syncReservedTimeSelectsFromHidden();
@@ -2456,7 +2458,49 @@
       });
   }
 
+  // 지나간 날짜로는 접수하지 않는다 — 되묻는다.
+  //
+  // 왜: 사람이 연도를 적지 않으면 파서·Gemini가 연도를 채워 넣는다. 9월에 "07/27"이면
+  // 지난 날짜(2026-07-27)나 1년 뒤(2027-07-27)가 되는데, 둘 다 요청한 사람이 말한 값이
+  // 아니다. 그대로 확인 질문까지 가면 자기가 적은 날짜가 그대로 있는 줄 알고 "네"를 누른다
+  // (실사용: OID2075가 2027년으로 등록돼 콜마너까지 나갔다).
+  //
+  // 서버 챗봇(카카오·웹 접수턴)은 lib/reservationReask.js가 같은 판단을 한다 — 채널마다
+  // 다르게 굴면 같은 문장이 화면에 따라 등록되기도 하고 되묻기도 한다.
+  var FAR_FUTURE_DAYS = 90; // lib/reservationSanity.js와 같은 값
+  function reservedDateProblem(data) {
+    if (!data || data.reservation_immediate) return null;
+    var m = String(data.reserved_date || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!m) return null;
+    var now = new Date();
+    var today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+    var days = Math.round((Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) - today) / 86400000);
+    if (days < 0) return { days: days, past: true };
+    // 먼 미래는 막지 않는다(몇 달 뒤 출고 차량을 미리 잡는 일이 있다) — 목록의 '!' 표시가
+    // 맡는다(lib/reservationSanity.js). 여기서 되묻는 것은 지난 날짜뿐이다.
+    if (days > FAR_FUTURE_DAYS) return null;
+    return null;
+  }
+
+  // 되묻고, 폼에 들어간 값도 지운다 — 남겨두면 다음 질문에서 "이미 채워진 항목"으로 보고
+  // 건너뛴다.
+  function askReservedDateAgain(data, problem) {
+    var y = data.reserved_date.slice(0, 4), mo = Number(data.reserved_date.slice(5, 7)), d = Number(data.reserved_date.slice(8, 10));
+    setField('reserved_date', '');
+    setField('reserved_time', '');
+    data.reserved_date = null;
+    data.reserved_time = null;
+    reservedDateTimeConfirmed = false;
+    setPendingField('reserved_date');
+    var q = y + '년 ' + mo + '월 ' + d + '일은 이미 지난 날짜입니다(' + Math.abs(problem.days) + '일 전).\n'
+      + '예약일시를 다시 알려주세요. 연도까지 함께 적어주시면 정확합니다.\n(예: 내일 오후 3시 / 2027-01-05 14시)';
+    sayBot(q);
+    return { logText: q, needsAgent: false, requestedFeature: null };
+  }
+
   function handleOrderIntent(data, sourceText) {
+    var datePast = reservedDateProblem(data);
+    if (datePast) return askReservedDateAgain(data, datePast);
     var dateTimeChanged = !!(data.reserved_date || data.reserved_time);
     // 오더유형(탁송/대리/일일기사)은 대화당 한 번만 판별해 알려준다 — 이미 확정된 뒤에는
     // 후속 메시지에서 intent가 다시 와도(예: 필드 하나씩 추가 입력) 재안내하지 않는다.
@@ -2553,6 +2597,8 @@
     // premium_reserved_datetime(프리미엄) 처리와 같은 패턴으로 여기서 직접 확정하고
     // ddFields의 다음 항목(출발지 주소)으로 넘긴다.
     if (orderCategory === 'daily_driver' && pendingField === 'reserved_date') {
+      var ddDatePast = reservedDateProblem(data);
+      if (ddDatePast) return askReservedDateAgain(data, ddDatePast);
       if (!data.reserved_date && !data.reserved_time) {
         var ddDtRetryQ = '예약시간을 다시 말씀해주세요? (예: 내일 오후 3시 출발)';
         sayBot(ddDtRetryQ);
