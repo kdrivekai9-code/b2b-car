@@ -4,7 +4,11 @@ import AppShell from '../../_components/AppShell';
 import PushSettingsClient from './PushSettingsClient';
 // 통보 종류 목록·이름은 통보 모듈이 주인이다 — 화면에 따로 적으면 종류가 늘 때 갈린다
 // (EJS 화면도 routes/push.js clientEventTypes로 같은 값을 받는다).
-import { EVENT_TYPES, DEFAULT_EVENT_SETTINGS } from '../../../../lib/kakaoOrderNotify';
+// DB를 건드리지 않는 상수 모듈에서 가져온다. 예전에는 lib/kakaoOrderNotify에서 가져왔는데,
+// 그 모듈이 ../db를 require하고 db.js는 모듈 로드 시점에 던져서 next build가 실패했다
+// ("Failed to collect page data for /push/settings", 2026-09-08). 로컬에는 .env가 있어
+// 통과하고 CI에서만 드러난다.
+import { EVENT_TYPES, DEFAULT_EVENT_SETTINGS } from '../../../../lib/notifyEvents';
 
 export const dynamic = 'force-dynamic';
 export const preferredRegion = 'icn1';
