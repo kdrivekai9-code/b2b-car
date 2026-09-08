@@ -47,6 +47,29 @@ check('notifyUser는 user_id로 고른다',
 // 고객 구독이 내부 알림 대상에 들어가지 않는지는 위 역할 조건이 지킨다.
 check('고객 역할은 내부 목록에 없다', /INTERNAL_ROLES = "\('admin', 'branch_manager'\)"/.test(push) && !/client/.test((push.match(/INTERNAL_ROLES = "[^"]*"/) || [''])[0]), true);
 
+console.log('\n[고객 구독에는 내부 칸을 켜주지 않는다]');
+// 발송 쪽 역할 조건만으로도 막히지만, 데이터가 거짓말을 하는 상태를 남기면 그 조건을 잊은
+// 조회 하나가 다시 새게 만든다. 화면이 아니라 서버에서 끊는다 — 요청 본문은 만들어 보낼 수 있다.
+//
+// 왜 이 값이 켜져 있었나: 고객 화면에는 체크박스가 하나뿐이라 나머지 넷은 요소를 못 찾고
+// `? el.checked : true`로 굳어 전송된다(EJS·Next 양쪽 동일).
+check('고객이면 내부 칸을 0으로 저장한다',
+  /const isClient = req\.session\.user\.role === 'client';/.test(routes)
+  && /const internalOn = \(v\) => \(isClient \? 0 : \(v === false \? 0 : 1\)\);/.test(routes), true);
+// 오더 알림은 고객이 직접 고르는 값이라 그대로 존중한다.
+check('오더 알림 칸은 그대로 존중', /notify_order_events === false \? 0 : 1,/.test(routes), true);
+// 지사 범위 알림 대상이 아니라 지사도 매지 않는다.
+check('고객 구독에는 지사를 매지 않는다', /isClient \? null : \(branch_id \|\| null\)/.test(routes), true);
+// 화면이 넷을 true로 보내는 것 자체는 그대로 둔다(관리자 화면과 같은 코드다) — 서버가 끊는다.
+check('화면은 그대로여도 된다(서버가 끊는다)',
+  /notify_agent_call: notifyAgentCallEl \? notifyAgentCallEl\.checked : true/.test(read('views/push_settings.ejs')), true);
+
+console.log('\n[알림 끄기는 구독을 지운다]');
+// 체크 해제+저장과 다른 동작이다. 끄기는 행을 삭제하므로 어떤 알림도 오지 않는다.
+check('끄기는 DELETE다', /DELETE FROM push_subscriptions WHERE endpoint = \? AND user_id = \?/.test(routes), true);
+check('EJS 끄기 버튼이 공용 함수를 쓴다', /window\.__push\.unsubscribe\(\)/.test(read('views/push_settings.ejs')), true);
+check('Next 끄기 버튼도 같은 함수', /window\.__push\.unsubscribe\(\)/.test(read('src/app/push/settings/PushSettingsClient.js')), true);
+
 console.log('\n["켜짐" 표시가 사실인가]');
 // 구독이 있어도 켜진 칸이 하나도 없으면 알림은 안 온다. 그 판정을 서버가 한다(역할마다 기준이 다르다).
 check('서버가 effective를 준다', /effective: isEffective\(req\.session\.user, sub\)/.test(routes), true);

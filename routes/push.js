@@ -64,15 +64,32 @@ router.post('/subscribe', asyncHandler(async (req, res) => {
   ];
   const assignments = COLUMNS.slice(1).filter((c) => c !== 'endpoint')
     .map((c) => `${c}=excluded.${c}`).join(', ');
+  // 고객 구독에는 내부 알림 칸을 켜주지 않는다.
+  //
+  // 왜(실측 2026-09-08): 고객 설정 화면에는 체크박스가 하나뿐이라(내 오더 진행 알림) 나머지
+  // 넷은 화면에서 요소를 못 찾고 true로 굳어 전송된다(views/push_settings.ejs,
+  // src/app/push/settings/PushSettingsClient.js 모두 `? el.checked : true`). 그래서 고객
+  // 구독은 상담원 호출·시스템 장애·번호판 상이·기사 배정이 전부 켜짐으로 저장돼 있었다.
+  //
+  // 발송 쪽에 역할 조건을 걸어 막았지만(lib/push.js notify), 데이터가 거짓말을 하는 상태를
+  // 남겨두지 않는다 — 나중에 그 조건을 잊은 조회 하나가 다시 새게 만든다. 화면이 아니라
+  // 서버에서 끊는 이유는 요청 본문을 만들어 보낼 수 있기 때문이다.
+  const isClient = req.session.user.role === 'client';
+  const internalOn = (v) => (isClient ? 0 : (v === false ? 0 : 1));
+
   await db.run(`
     INSERT INTO push_subscriptions (${COLUMNS.join(', ')})
     VALUES (${COLUMNS.map(() => '?').join(', ')})
     ON CONFLICT (endpoint) DO UPDATE SET ${assignments}
   `, [
     req.session.user.id, endpoint, keys.p256dh, keys.auth,
-    branch_id || null, notify_order_events === false ? 0 : 1, notify_driver_assign === false ? 0 : 1,
-    notify_agent_call === false ? 0 : 1, notify_system_alert === false ? 0 : 1,
-    notify_plate_mismatch === false ? 0 : 1,
+    // 고객은 지사 범위 알림 대상이 아니라 지사도 매지 않는다.
+    isClient ? null : (branch_id || null),
+    notify_order_events === false ? 0 : 1,
+    internalOn(notify_driver_assign),
+    internalOn(notify_agent_call),
+    internalOn(notify_system_alert),
+    internalOn(notify_plate_mismatch),
   ]);
   res.json({ ok: true });
 }));
