@@ -2,7 +2,14 @@
 <div class="page-head-row">
   <div>
     <h1 class="page-title">오더 알림 설정</h1>
-    <p class="page-sub">이 브라우저(기기)에서 받을 알림 이벤트를 설정하세요. 본인이 등록/수정한 오더는 본인에게 알림이 표시되지 않습니다.</p>
+    <%# 문구가 역할마다 달라야 한다. 고객에게 "본인이 등록한 오더는 알림이 안 온다"고 적어두면
+        정확히 반대다 — 고객은 **자기 오더**의 진행을 알려고 이 화면에 온다. 그 문구는 관리자
+        기준(excludeUserId)이고, 고객용 알림은 lib/push.js notifyUser가 따로 보낸다. %>
+    <% if (currentUser.role === 'client') { %>
+      <p class="page-sub">이 브라우저(기기)에서 <strong>내 오더의 진행 알림</strong>을 받습니다. 배차·운행시작·운행완료·취소가 있을 때 상담창을 열지 않아도 알림이 뜹니다.</p>
+    <% } else { %>
+      <p class="page-sub">이 브라우저(기기)에서 받을 알림 이벤트를 설정하세요. 본인이 등록/수정한 오더는 본인에게 알림이 표시되지 않습니다.</p>
+    <% } %>
   </div>
 </div>
 
@@ -11,8 +18,15 @@
 
   <div class="section-title small">알림 받을 이벤트</div>
   <div class="row">
-    <div class="field"><label class="checkline"><input type="checkbox" id="notifyOrderEvents" checked> 오더 등록/수정 알림</label></div>
-    <div class="field"><label class="checkline"><input type="checkbox" id="notifyDriverAssign" checked> 기사 배정 알림</label></div>
+    <% if (currentUser.role === 'client') { %>
+      <%# 고객에게는 종류가 하나다. 서버는 이 값을 notify_order_events로 읽는다
+          (lib/push.js notifyUser) — 칸을 새로 만들지 않아 마이그레이션이 필요 없다.
+          기사 배정 알림은 지사 범위로 도는 관리자용이라 고객 화면에서 뺀다. %>
+      <div class="field"><label class="checkline"><input type="checkbox" id="notifyOrderEvents" checked> 내 오더 진행 알림 (배차 · 운행시작 · 운행완료 · 취소)</label></div>
+    <% } else { %>
+      <div class="field"><label class="checkline"><input type="checkbox" id="notifyOrderEvents" checked> 오더 등록/수정 알림</label></div>
+      <div class="field"><label class="checkline"><input type="checkbox" id="notifyDriverAssign" checked> 기사 배정 알림</label></div>
+    <% } %>
     <% if (currentUser.role === 'admin') { %>
     <div class="field"><label class="checkline"><input type="checkbox" id="notifyAgentCall" checked> 상담원 호출 알림 (AI 챗봇)</label></div>
     <%# 장애 알림은 기본으로 켠다 — 켜야 의미가 있는 알림이고, 이게 없으면 연동이 멈춰도 아무도 모른다. %>
@@ -122,11 +136,14 @@
 
   document.getElementById('pushSubscribeBtn').addEventListener('click', async function () {
     var notifyAgentCallEl = document.getElementById('notifyAgentCall');
+    var notifyDriverAssignEl = document.getElementById('notifyDriverAssign');
     var notifySystemAlertEl = document.getElementById('notifySystemAlert');
     var notifyPlateMismatchEl = document.getElementById('notifyPlateMismatch');
     var prefs = {
       notify_order_events: document.getElementById('notifyOrderEvents').checked,
-      notify_driver_assign: document.getElementById('notifyDriverAssign').checked,
+      // 고객 화면에는 이 체크박스가 없다(관리자용 지사 범위 알림) — 널 가드 없이 읽으면
+      // 구독 버튼이 통째로 죽는다. 관리자 전용 셋과 같은 방식으로 다룬다.
+      notify_driver_assign: notifyDriverAssignEl ? notifyDriverAssignEl.checked : true,
       notify_agent_call: notifyAgentCallEl ? notifyAgentCallEl.checked : true,
       notify_system_alert: notifySystemAlertEl ? notifySystemAlertEl.checked : true,
       notify_plate_mismatch: notifyPlateMismatchEl ? notifyPlateMismatchEl.checked : true,

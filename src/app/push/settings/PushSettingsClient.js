@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 
 export default function PushSettingsClient({ currentUser, branches }) {
   const isAdmin = currentUser && currentUser.role === 'admin';
+  const isClient = currentUser && currentUser.role === 'client';
 
   useEffect(() => {
     // legacy views/push_settings.ejs 하단 인라인 스크립트가 하던 구독상태 표시 + 켜기/끄기
@@ -33,13 +34,16 @@ export default function PushSettingsClient({ currentUser, branches }) {
       await refreshStatus();
 
       subscribeBtn.addEventListener('click', async () => {
+        const notifyDriverAssignEl = document.getElementById('notifyDriverAssign');
         const notifyAgentCallEl = document.getElementById('notifyAgentCall');
         const notifySystemAlertEl = document.getElementById('notifySystemAlert');
         const notifyPlateMismatchEl = document.getElementById('notifyPlateMismatch');
         const branchScope = document.getElementById('branchScope');
         const prefs = {
           notify_order_events: document.getElementById('notifyOrderEvents').checked,
-          notify_driver_assign: document.getElementById('notifyDriverAssign').checked,
+          // 고객 화면에는 이 체크박스가 없다(관리자용 지사 범위 알림) — 널 가드 없이 읽으면
+          // 구독 버튼이 통째로 죽는다. EJS와 같은 처리다.
+          notify_driver_assign: notifyDriverAssignEl ? notifyDriverAssignEl.checked : true,
           notify_agent_call: notifyAgentCallEl ? notifyAgentCallEl.checked : true,
           notify_system_alert: notifySystemAlertEl ? notifySystemAlertEl.checked : true,
           notify_plate_mismatch: notifyPlateMismatchEl ? notifyPlateMismatchEl.checked : true,
@@ -125,8 +129,16 @@ export default function PushSettingsClient({ currentUser, branches }) {
 
         <div className="section-title small">알림 받을 이벤트</div>
         <div className="row">
-          <div className="field"><label className="checkline"><input type="checkbox" id="notifyOrderEvents" defaultChecked /> 오더 등록/수정 알림</label></div>
-          <div className="field"><label className="checkline"><input type="checkbox" id="notifyDriverAssign" defaultChecked /> 기사 배정 알림</label></div>
+          {/* 고객에게는 종류가 하나다. 서버는 이 값을 notify_order_events로 읽는다
+              (lib/push.js notifyUser). 기사 배정 알림은 지사 범위로 도는 관리자용이라 뺀다. */}
+          {isClient ? (
+            <div className="field"><label className="checkline"><input type="checkbox" id="notifyOrderEvents" defaultChecked /> 내 오더 진행 알림 (배차 · 운행시작 · 운행완료 · 취소)</label></div>
+          ) : (
+            <>
+              <div className="field"><label className="checkline"><input type="checkbox" id="notifyOrderEvents" defaultChecked /> 오더 등록/수정 알림</label></div>
+              <div className="field"><label className="checkline"><input type="checkbox" id="notifyDriverAssign" defaultChecked /> 기사 배정 알림</label></div>
+            </>
+          )}
           {isAdmin && (
             <>
               <div className="field"><label className="checkline"><input type="checkbox" id="notifyAgentCall" defaultChecked /> 상담원 호출 알림 (AI 챗봇)</label></div>

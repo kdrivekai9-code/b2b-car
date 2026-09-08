@@ -32,12 +32,25 @@ router.get('/status', asyncHandler(async (req, res) => {
 router.post('/subscribe', asyncHandler(async (req, res) => {
   const { endpoint, keys, notify_order_events, notify_driver_assign, notify_agent_call, notify_system_alert, notify_plate_mismatch, branch_id } = req.body;
   if (!endpoint || !keys) return res.status(400).json({ error: 'invalid subscription' });
+  // 컬럼과 플레이스홀더 수를 손으로 맞추지 않는다.
+  //
+  // 2026-08-29에 notify_plate_mismatch 컬럼이 추가될 때 컬럼 목록만 늘리고 VALUES의 물음표를
+  // 안 늘려서(10개 컬럼 / 8개 물음표) 이 INSERT가 42601로 항상 실패했다 — 그날부터 **아무도
+  // 웹푸시를 구독할 수 없었다.** 알림이 안 오는 것은 조용해서, 남아 있는 구독 3건이 전부
+  // 2026-08-03 이전 것인 걸 세어보고서야 알았다.
+  //
+  // 컬럼을 배열로 두고 물음표를 그 길이에서 만든다. 다음에 알림 종류가 늘어도 한 곳만 고친다.
+  const COLUMNS = [
+    'user_id', 'endpoint', 'p256dh', 'auth', 'branch_id',
+    'notify_order_events', 'notify_driver_assign',
+    'notify_agent_call', 'notify_system_alert', 'notify_plate_mismatch',
+  ];
+  const assignments = COLUMNS.slice(1).filter((c) => c !== 'endpoint')
+    .map((c) => `${c}=excluded.${c}`).join(', ');
   await db.run(`
-    INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, branch_id, notify_order_events, notify_driver_assign, notify_agent_call, notify_system_alert, notify_plate_mismatch)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT (endpoint) DO UPDATE SET user_id=excluded.user_id, p256dh=excluded.p256dh, auth=excluded.auth,
-      branch_id=excluded.branch_id, notify_order_events=excluded.notify_order_events, notify_driver_assign=excluded.notify_driver_assign,
-      notify_agent_call=excluded.notify_agent_call, notify_system_alert=excluded.notify_system_alert, notify_plate_mismatch=excluded.notify_plate_mismatch
+    INSERT INTO push_subscriptions (${COLUMNS.join(', ')})
+    VALUES (${COLUMNS.map(() => '?').join(', ')})
+    ON CONFLICT (endpoint) DO UPDATE SET ${assignments}
   `, [
     req.session.user.id, endpoint, keys.p256dh, keys.auth,
     branch_id || null, notify_order_events === false ? 0 : 1, notify_driver_assign === false ? 0 : 1,

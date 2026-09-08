@@ -26,7 +26,16 @@ export default async function PushSettingsPage() {
       <div className="page-head-row">
         <div>
           <h1 className="page-title">오더 알림 설정</h1>
-          <p className="page-sub">이 브라우저(기기)에서 받을 알림 이벤트를 설정하세요.</p>
+          {/* 문구가 역할마다 달라야 한다 — 고객은 **자기 오더**의 진행을 알려고 이 화면에 온다.
+              EJS(views/push_settings.ejs)와 같은 문구를 쓴다. */}
+          {currentUser && currentUser.role === 'client' ? (
+            <p className="page-sub">
+              이 브라우저(기기)에서 <strong>내 오더의 진행 알림</strong>을 받습니다.
+              배차·운행시작·운행완료·취소가 있을 때 상담창을 열지 않아도 알림이 뜹니다.
+            </p>
+          ) : (
+            <p className="page-sub">이 브라우저(기기)에서 받을 알림 이벤트를 설정하세요.</p>
+          )}
         </div>
       </div>
       <PushSettingsClient currentUser={currentUser} branches={branches} />
