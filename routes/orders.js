@@ -728,6 +728,7 @@ router.get('/ai-intake/sessions', asyncHandler(async (req, res) => {
 
   const ids = pageRows.map((r) => r.id);
   let firstMessageMap = {};
+  const unreadMap = {};
   if (ids.length) {
     const placeholders = ids.map(() => '?').join(',');
     const firstMessages = await db.all(
@@ -737,6 +738,22 @@ router.get('/ai-intake/sessions', asyncHandler(async (req, res) => {
       ids
     );
     firstMessages.forEach((m) => { firstMessageMap[m.session_id] = m.message; });
+
+    // 세션별 안읽음. 세는 규칙은 routes/chat.js의 /unread.json과 **같아야 한다** —
+    // 갈리면 목록 배지들의 합과 메뉴 배지 숫자가 안 맞고, 사용자는 어느 쪽을 믿을지 모른다.
+    // 통보(system)와 상담원 답장(agent)만 센다. 봇 메시지는 고객이 그 자리에 있었던 대화다.
+    const unreadRows = await db.all(
+      `SELECT session_id, COUNT(*)::int AS count
+         FROM chat_messages
+        WHERE session_id IN (${placeholders})
+          AND sender IN ('system', 'agent') AND read_by_user_at IS NULL
+        GROUP BY 1`,
+      ids
+    ).catch((e) => {
+      console.error('최근 항목 안읽음 집계 실패(0으로 진행):', e.message);
+      return [];
+    });
+    unreadRows.forEach((m) => { unreadMap[m.session_id] = m.count; });
   }
 
   const sessions = pageRows.map((r) => ({
@@ -744,6 +761,7 @@ router.get('/ai-intake/sessions', asyncHandler(async (req, res) => {
     status: r.status,
     updatedAt: r.updated_at,
     summary: summarizeChatSession(r.draft_json, firstMessageMap[r.id]),
+    unread: unreadMap[r.id] || 0,
   }));
   res.json({ sessions, hasMore });
 }));

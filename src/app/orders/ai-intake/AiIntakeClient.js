@@ -408,6 +408,10 @@ export default function AiIntakeClient({
     if (data.status) setStatus(data.status);
     if (Array.isArray(data.messages) && data.messages.length > 0) {
       mergeServerMessages(data.messages);
+      // 이 요청이 서버에서 통보를 읽음으로 표시한다(routes/chat.js
+      // markSystemMessagesReadByUser). 배지도 같이 줄어야 한다 — 안 그러면 다 읽었는데
+      // 숫자가 남아 사용자가 또 눌러본다. 새 메시지가 실제로 왔을 때만 쏜다.
+      window.dispatchEvent(new Event('chat-unread-refresh'));
     }
   }
 
@@ -1293,10 +1297,32 @@ export default function AiIntakeClient({
     };
   }, [sessionId]);
 
+  // 안읽음 합계는 공용 스크립트(/js/chat-unread-badge.js)가 물어보고 이벤트로 알려준다.
+  // 여기서 또 fetch하면 같은 것을 두 번 묻고, 두 숫자가 어긋나는 순간이 생긴다.
+  //
+  // 제목 배지를 스크립트가 DOM에 직접 꽂지 않는 이유: 이 제목은 React가 그리는 자리라
+  // 재렌더링에 지워질 수 있다. 나브는 서버 렌더된 정적 마크업이라 스크립트가 붙여도 안전하다.
+  const [unreadTotal, setUnreadTotal] = useState(0);
+  useEffect(() => {
+    const onUnread = (e) => setUnreadTotal((e.detail && e.detail.total) || 0);
+    window.addEventListener('chat-unread', onUnread);
+    return () => window.removeEventListener('chat-unread', onUnread);
+  }, []);
+
   return (
     <div className="card ai-chat-card" style={{ height: 'auto', minHeight: 520 }}>
       <div className="ai-chat-header">
-        <span className="ai-chat-title">🤖 AI 챗봇 + 👤 상담원 채팅 (Next)</span>
+        <span className="ai-chat-title">
+          🤖 AI 챗봇 + 👤 상담원 채팅 (Next)
+          {unreadTotal > 0 && (
+            <span
+              className="unread-badge ai-chat-title-badge"
+              aria-label={`읽지 않은 알림 ${unreadTotal}건`}
+            >
+              {unreadTotal > 99 ? '99+' : String(unreadTotal)}
+            </span>
+          )}
+        </span>
         <div className={'ai-chat-connection ' + (streamOnline ? 'online' : 'offline')} aria-live="polite">
           <span className="ai-chat-connection-dot" aria-hidden="true"></span>
           <span className="ai-chat-connection-text">{streamOnline ? '실시간 연결중' : '재연결중'}</span>

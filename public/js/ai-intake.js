@@ -4464,6 +4464,16 @@
       btn.className = 'ai-chat-recent-item' + (String(s.id) === String(sessionId) ? ' active' : '');
       btn.setAttribute('role', 'button');
       btn.setAttribute('tabindex', '0');
+      // 안읽음 배지 — 요약 글 **앞**에 붙인다. 어느 세션에서 통보가 왔는지가 먼저 보여야
+      // 사용자가 그 항목을 눌러 들어간다(사용자 확정 2026-09-08).
+      if (s.unread) {
+        var badge = document.createElement('span');
+        badge.className = 'unread-badge';
+        badge.textContent = s.unread > 99 ? '99+' : String(s.unread);
+        badge.setAttribute('aria-label', '읽지 않은 알림 ' + s.unread + '건');
+        btn.appendChild(badge);
+      }
+
       var summary = document.createElement('span');
       summary.className = 'ai-chat-recent-summary';
       summary.textContent = s.summary;

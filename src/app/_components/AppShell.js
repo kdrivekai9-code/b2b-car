@@ -97,6 +97,12 @@ export default function AppShell({ currentUser, activePath, topNav = false, chil
         <Script src="/js/push.js" strategy="afterInteractive" />
         <Script src="/js/callmaner-alert.js" strategy="afterInteractive" />
         {isAdmin && <AgentPresenceScripts />}
+        {/* 안읽음 배지 — 통보가 왔다는 사실을 고객이 알 수 있게. EJS(views/partials/header.ejs)와
+            **같은 스크립트**를 싣는다. 나브는 서버 렌더된 정적 마크업이라 이 스크립트가 붙이는
+            배지가 React 재조정에 지워지지 않는다. 관리자는 별도 알림센터가 있어 필요 없다. */}
+        {currentUser && currentUser.role === 'client' && (
+          <Script src="/js/chat-unread-badge.js" strategy="afterInteractive" />
+        )}
         <div className="content">{children}</div>
       </div>
       <Script src="/js/sidebar.js" strategy="afterInteractive" />

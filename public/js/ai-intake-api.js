@@ -201,7 +201,19 @@
 
     fetchChatMessages: function (sessionId, sinceId) {
       return fetch('/chat/' + sessionId + '/messages?since=' + sinceId)
-        .then(function (res) { return res.json(); });
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+          // 이 요청이 서버에서 통보를 읽음으로 표시한다(routes/chat.js
+          // markSystemMessagesReadByUser). 배지도 같이 줄어야 한다 — 안 그러면 다 읽었는데
+          // 숫자가 남아 사용자가 또 눌러본다.
+          //
+          // 새 메시지가 실제로 왔을 때만 쏜다. 폴링마다 쏘면 배지 스크립트가 1초 간격으로
+          // 서버를 다시 묻게 된다.
+          if (data && data.messages && data.messages.length) {
+            window.dispatchEvent(new Event('chat-unread-refresh'));
+          }
+          return data;
+        });
     },
 
     deleteSessionHistory: function (sessionId) {

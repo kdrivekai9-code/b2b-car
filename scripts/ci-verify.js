@@ -118,6 +118,7 @@ const CI_CHECKS = [
   'check-address-spacing-geocode',
   'check-agent-request',
   'check-agent-idle-release',
+  'check-chat-unread-badge',
   'check-callmaner-drive-started',
   'check-callmaner-photos',
   'check-callmaner-reserved-dispatch',

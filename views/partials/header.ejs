@@ -77,6 +77,11 @@
   </aside>
   <div class="main">
     <script src="/js/push.js" defer></script>
+    <%# 안읽음 배지 — 통보가 왔다는 사실을 고객이 알 수 있게. 관리자는 별도 알림센터가 있어
+        (agent-notification-center.js) 이 배지가 필요 없다. %>
+    <% if (currentUser && currentUser.role === 'client') { %>
+      <script src="/js/chat-unread-badge.js" defer></script>
+    <% } %>
     <% if (currentUser && currentUser.role === 'admin') { %>
       <script src="/js/agent-alert-sound.js" defer></script>
       <script src="/js/agent-browser-notify.js" defer></script>

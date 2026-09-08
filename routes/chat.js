@@ -260,6 +260,20 @@ function broadcastReadReceiptAsync(sessionId, reader) {
 // 세션 단위 일괄 읽음 처리는 반드시 await해서 써야 한다 — 호출 직후 같은 요청 안에서
 // 메시지 목록을 SELECT해 응답하는 경로들이 있는데, fire-and-forget으로 두면 그 SELECT가
 // UPDATE보다 먼저 끝나버려 방금 읽음 처리한 메시지도 응답에는 '미읽음'으로 나가는 경합이 있었다.
+// 통보(system) 읽음 표시. 상담원 읽음영수증과 **일부러 나눠 둔다.**
+//
+// 아래 markAgentMessagesReadByUser는 rowCount가 0보다 크면 상담원에게 "고객이 읽었다"를
+// 브로드캐스트한다. 여기서 같이 처리하면 봇 통보를 열어본 것만으로 상담원 화면에 읽음이
+// 뜬다 — 상담원은 자기 메시지가 읽힌 줄로 안다. 그래서 이건 조용히 표시만 한다.
+async function markSystemMessagesReadByUser(sessionId) {
+  await db.run(
+    `UPDATE chat_messages
+     SET read_by_user_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS')
+     WHERE session_id = ? AND sender = 'system' AND read_by_user_at IS NULL`,
+    [sessionId]
+  ).catch((e) => console.error('통보 읽음 표시 실패(무시):', e.message));
+}
+
 async function markAgentMessagesReadByUser(sessionId) {
   const { rowCount } = await db.run(
     `UPDATE chat_messages
@@ -392,6 +406,38 @@ async function notifyWaitingSessions() {
 }
 
 // ---------------- 고객측: 세션 생성 ----------------
+// 고객 화면의 안읽음 배지.
+//
+// 무엇을 세나: **통보(system)와 상담원 답장(agent)만.** 봇 메시지는 세지 않는다 — 고객이
+// 묻고 봇이 답한 것은 그 자리에 있었던 대화이지 "놓친 소식"이 아니다. 실측으로 봇까지 세면
+// 한 계정에 620건이 잡혀(세션 60개) 숫자가 아무 뜻이 없어진다. 통보·상담원 답장만 세면
+// 6건/5세션이다.
+//
+// 숨긴 세션(user_hidden_at)은 뺀다 — 목록에 안 보이는 것에 배지가 붙으면 눌러볼 데가 없다.
+//
+// 반드시 아래 '/:sessionId/...' 와일드카드보다 먼저 등록해야 한다. 순서가 바뀌면
+// 'unread.json'이 세션 id로 해석된다(이 파일 agent-presence 주석과 같은 함정).
+router.get('/unread.json', asyncHandler(async (req, res) => {
+  const u = req.session.user;
+  if (!u) return res.status(401).json({ error: '로그인이 필요합니다.' });
+  const rows = await db.all(
+    `SELECT m.session_id AS id, COUNT(*)::int AS count
+       FROM chat_messages m
+       JOIN chat_sessions s ON s.id = m.session_id
+      WHERE s.user_id = ? AND s.user_hidden_at IS NULL
+        AND m.sender IN ('system', 'agent') AND m.read_by_user_at IS NULL
+      GROUP BY 1`,
+    [u.id]
+  ).catch((e) => {
+    console.error('안읽음 집계 실패(0으로 진행):', e.message);
+    return [];
+  });
+  const sessions = {};
+  let total = 0;
+  rows.forEach((r) => { sessions[r.id] = r.count; total += r.count; });
+  res.json({ total, sessions });
+}));
+
 router.post('/session', asyncHandler(async (req, res) => {
   const u = req.session.user;
   const recent = await db.get(
@@ -707,6 +753,7 @@ router.get('/:sessionId/stream', asyncHandler(async (req, res) => {
   if (!session) return;
 
   await markAgentMessagesReadByUser(session.id);
+  await markSystemMessagesReadByUser(session.id);
 
   sseHeaders(res);
   const streamHandle = openSessionStream(session.id, (payload) => {
@@ -722,6 +769,7 @@ router.get('/:sessionId/messages', asyncHandler(async (req, res) => {
   const session = await loadOwnedSession(req, res);
   if (!session) return;
   await markAgentMessagesReadByUser(session.id);
+  await markSystemMessagesReadByUser(session.id);
   const since = Number(req.query.since) || 0;
   const messages = await db.all('SELECT * FROM chat_messages WHERE session_id = ? AND id > ? ORDER BY id', [session.id, since]);
   res.json({ messages, status: session.status });
