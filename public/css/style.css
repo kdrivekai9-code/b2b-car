@@ -1083,3 +1083,12 @@ body.lb-open{overflow:hidden;}
 
 /* 최근 항목: 요약 글 **앞**에 붙인다(사용자 확정 — 어느 세션에서 왔는지 먼저 보인다). */
 .ai-chat-recent-item .unread-badge { margin-right: 6px; }
+
+/* 상담 관리 좌측 대화 카드: 세션 번호 앞. 같은 이유다 — 어느 대화에 새 말이 있는지가
+   먼저 보여야 그 카드를 누른다. 카드 제목이 굵은 글씨라 배지가 눌리지 않게 정렬만 잡는다. */
+.session-card-head .unread-badge { margin-right: 6px; }
+.session-card-head strong { display: inline-flex; align-items: center; min-width: 0; }
+
+/* 메뉴의 '상담 관리'에는 대기 건수 배지(nav-badge)가 이미 있다. 두 배지가 붙어 한 덩어리로
+   보이지 않게 사이를 벌린다 — 대기 건수와 안읽음은 다른 값이다. */
+#agentCallBadge + .nav-unread-badge { margin-left: 4px; }

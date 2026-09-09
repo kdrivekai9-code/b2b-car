@@ -450,6 +450,33 @@ router.get('/unread.json', asyncHandler(async (req, res) => {
   res.json({ total, sessions });
 }));
 
+// 관리자용 안읽음 — **방향이 반대다.** 고객용(/unread.json)은 "내게 온 통보·답장을 내가 안
+// 읽음"을 세고, 이쪽은 "고객이 보낸 말을 상담원이 안 읽음"을 센다. 그래서 자리도 다르다:
+// 고객 배지는 'AI 챗봇' 메뉴에, 관리자 배지는 '상담 관리' 메뉴와 좌측 대화 카드에 붙는다
+// (사용자 확정 2026-09-09).
+//
+// 대기 건수(agentCallBadge, needs_agent)와도 다른 값이다 — 대기는 "연결 요청이 떠 있다",
+// 이건 "읽지 않은 말이 있다"다. 상담원이 이미 붙어 응대 중인 세션에도 새 말이 쌓인다.
+router.get('/agent-unread.json', requireRole('admin'), asyncHandler(async (req, res) => {
+  const rows = await db.all(
+    `SELECT m.session_id AS id, COUNT(*)::int AS count
+       FROM chat_messages m
+       JOIN chat_sessions s ON s.id = m.session_id
+      WHERE m.sender = 'user' AND m.read_by_agent_at IS NULL
+        -- 종료된 대화는 뺀다 — 카드 배지(buildSessionListSessions)와 같은 규칙이어야
+        -- 메뉴 숫자와 카드 배지의 합이 맞는다.
+        AND s.status <> 'closed'
+      GROUP BY 1`
+  ).catch((e) => {
+    console.error('상담원 안읽음 집계 실패(0으로 진행):', e.message);
+    return [];
+  });
+  const sessions = {};
+  let total = 0;
+  rows.forEach((r) => { sessions[r.id] = r.count; total += r.count; });
+  res.json({ total, sessions });
+}));
+
 router.post('/session', asyncHandler(async (req, res) => {
   const u = req.session.user;
   const recent = await db.get(
@@ -835,9 +862,14 @@ async function buildSessionListVersion() {
       (SELECT count(*)::int FROM chat_sessions) AS s_count,
       (SELECT max(id) FROM chat_messages) AS m_max,
       (SELECT count(*)::int FROM chat_agent_presence
-        WHERE last_seen_at > now() - interval '${PRESENCE_STALE_SECONDS} seconds') AS agents
+        WHERE last_seen_at > now() - interval '${PRESENCE_STALE_SECONDS} seconds') AS agents,
+      -- 읽음 처리는 chat_sessions.updated_at도, max(chat_messages.id)도 안 건드린다.
+      -- 이걸 빼면 세션을 열어 다 읽어도 카드 배지가 다음 새로고침까지 남는다.
+      (SELECT count(*)::int FROM chat_messages m2
+        JOIN chat_sessions s2 ON s2.id = m2.session_id
+       WHERE m2.sender = 'user' AND m2.read_by_agent_at IS NULL AND s2.status <> 'closed') AS agent_unread
   `);
-  return [row.s_updated, row.s_count, row.m_max, row.agents].join('|');
+  return [row.s_updated, row.s_count, row.m_max, row.agents, row.agent_unread].join('|');
 }
 
 // 목록(list/card 뷰 공통)이 쓰는 세션 조회만 따로 뺐다 — Next.js Stage 1 프리뷰(list 뷰의
@@ -852,7 +884,17 @@ async function buildSessionListSessions() {
       a.name AS assigned_agent_name,
       macct.mapped_user_name, macct.mapped_branch_name, macct.mapped_group_name, macct.mapped_auto_register,
       (SELECT message FROM chat_messages WHERE session_id = cs.id ORDER BY id DESC LIMIT 1) AS last_message,
-      (SELECT COUNT(*) FROM chat_messages WHERE session_id = cs.id) AS message_count
+      (SELECT COUNT(*) FROM chat_messages WHERE session_id = cs.id) AS message_count,
+      -- 상담원이 아직 안 읽은 **고객** 메시지. 고객쪽 배지(read_by_user_at)와 반대 방향이다 —
+      -- 관리자가 봐야 할 것은 "고객이 뭘 보냈는데 내가 안 봤다"다.
+      --
+      -- **종료된 대화는 세지 않는다.** 봇이 응대한 대화의 고객 발화는 상담원이 읽을 일이
+      -- 없어 read_by_agent_at이 영구히 NULL로 남는다 — 실측 2026-09-09: 안읽음 345건이
+      -- 전부 종료 세션(140개)이었다. 그대로 세면 배지가 늘 99+에 붙박여 아무 뜻이 없다.
+      CASE WHEN cs.status = 'closed' THEN 0 ELSE (
+        SELECT COUNT(*) FROM chat_messages
+         WHERE session_id = cs.id AND sender = 'user' AND read_by_agent_at IS NULL
+      ) END::int AS agent_unread
     FROM chat_sessions cs
     LEFT JOIN users u ON u.id = cs.user_id
     LEFT JOIN users a ON a.id = cs.assigned_agent_id

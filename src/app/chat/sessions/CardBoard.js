@@ -242,7 +242,16 @@ export default function CardBoard({ initialSessions, initialOnlineAgents, curren
                 onClick={() => selectSession(s)}
               >
                 <div className="session-card-head">
-                  <strong>#{s.id} · {sessionDisplayName(s)}</strong>
+                  <strong>
+                    {/* 안읽음 배지 — EJS(views/chat/session_list.ejs)와 같은 자리·같은 규칙.
+                        이름 앞에 둬야 어느 대화에 새 말이 있는지가 먼저 보인다. */}
+                    {Number(s.agent_unread) > 0 && (
+                      <span className="unread-badge" aria-label={`읽지 않은 고객 메시지 ${s.agent_unread}건`}>
+                        {Number(s.agent_unread) > 99 ? '99+' : s.agent_unread}
+                      </span>
+                    )}
+                    #{s.id} · {sessionDisplayName(s)}
+                  </strong>
                   <span>
                     {/* 답장이 카카오로 나가는 세션인지 상담원이 바로 알아야 한다(응대 톤·속도가 다르다). */}
                     {s.channel === 'kakao' && <span className="badge amber">카카오</span>}

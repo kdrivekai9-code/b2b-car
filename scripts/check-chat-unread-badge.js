@@ -97,6 +97,40 @@ for (const [label, file] of [['EJS', 'views/partials/header.ejs'], ['Next', 'src
   check(`로그인 사용자에게 싣는다(${label})`, /currentUser\s*(&&|\))/.test(before));
 }
 
+console.log('\n[관리자는 세는 방향과 자리가 다르다]');
+// 관리자 배지는 '상담 관리' 메뉴와 상담 관리 화면 좌측 대화 카드에 붙는다(사용자 확정
+// 2026-09-09). 고객 숫자를 관리자 화면에 붙였던 적이 있는데, 그건 관리자 **본인**이 챗봇으로
+// 받은 통보를 센 것이라 상담 업무와 무관했다.
+const agentBadgeJs = read('public/js/chat-unread-badge.js');
+check('관리자는 상담 관리 메뉴를 자리로 쓴다', /a\[href="\/chat\/sessions"\]/.test(agentBadgeJs));
+check('관리자는 다른 엔드포인트를 본다', /agent-unread\.json/.test(agentBadgeJs));
+check('관리자 화면에서는 챗봇 상단 배지를 안 만든다', /isAgent \? null :/.test(agentBadgeJs));
+
+const agentRoutes = read('routes/chat.js');
+// 방향이 반대다 — 고객은 read_by_user_at, 관리자는 read_by_agent_at.
+check('관리자 집계는 고객 발화를 센다',
+  /agent-unread\.json[\s\S]{0,900}sender = 'user' AND m\.read_by_agent_at IS NULL/.test(agentRoutes));
+check('관리자 전용 라우트다', /agent-unread\.json', requireRole\('admin'\)/.test(agentRoutes));
+// 종료된 대화는 양쪽 모두 뺀다. 봇이 응대한 대화의 고객 발화는 상담원이 읽을 일이 없어
+// read_by_agent_at이 영구히 NULL이다 — 실측 2026-09-09에 안읽음 345건이 전부 종료 세션이었고,
+// 그대로 세면 배지가 늘 99+에 붙박인다. 메뉴 숫자와 카드 배지의 합이 어긋나지 않게 같은 규칙이어야 한다.
+check('메뉴 집계가 종료 대화를 뺀다',
+  /agent-unread\.json[\s\S]{0,900}s\.status <> 'closed'/.test(agentRoutes));
+check('카드 집계도 종료 대화를 뺀다',
+  /CASE WHEN cs\.status = 'closed' THEN 0[\s\S]{0,300}AS agent_unread/.test(agentRoutes));
+// 읽음 처리는 chat_sessions.updated_at도 max(message id)도 안 건드린다. 목록 버전에 안읽음이
+// 안 들어가면 세션을 열어 다 읽어도 카드 배지가 다음 새로고침까지 남는다.
+check('목록 버전이 안읽음을 포함한다',
+  /buildSessionListVersion[\s\S]{0,700}read_by_agent_at IS NULL[\s\S]{0,300}agent_unread/.test(agentRoutes));
+
+// 좌측 대화 카드 — EJS와 Next 두 벌 모두.
+for (const [label, file] of [['EJS', 'views/chat/session_list.ejs'], ['Next', 'src/app/chat/sessions/CardBoard.js']]) {
+  const src = read(file);
+  check(`카드에 안읽음 배지가 있다(${label})`, /agent_unread[\s\S]{0,300}unread-badge/.test(src));
+  check(`99+로 자른다(${label})`, /agent_unread\) > 99/.test(src));
+}
+check('카드 배지 자리를 CSS가 정한다', /\.session-card-head \.unread-badge/.test(read('public/css/style.css')));
+
 console.log('\n[모양은 한 곳에서 정한다]');
 const css = read('public/css/style.css');
 check('배지 스타일이 공용 CSS에 있다', /\.unread-badge\s*\{/.test(css));

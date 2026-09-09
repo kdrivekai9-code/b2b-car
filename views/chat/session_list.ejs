@@ -85,7 +85,13 @@
             data-assigned-agent-name="<%= s.assigned_agent_name || '' %>"
           >
             <div class="session-card-head">
-              <strong>#<%= s.id %> · <%= sessionDisplayName(s) %></strong>
+              <strong>
+                <%# 안읽음 배지 — 고객이 보낸 말을 상담원이 아직 안 읽은 건수(agent_unread).
+                    이름 **앞**에 둔다. 어느 대화에 새 말이 있는지가 먼저 보여야 그 카드를 누른다
+                    (고객 화면의 최근 항목 배지와 같은 규칙). 세션을 열면 읽음 처리되어 사라진다. %>
+                <% if (Number(s.agent_unread) > 0) { %><span class="unread-badge" aria-label="읽지 않은 고객 메시지 <%= s.agent_unread %>건"><%= Number(s.agent_unread) > 99 ? '99+' : s.agent_unread %></span><% } %>
+                #<%= s.id %> · <%= sessionDisplayName(s) %>
+              </strong>
               <span>
                 <%# 답장이 카카오로 나가는 세션인지 상담원이 바로 알아야 한다(응대 톤·속도가 다르다). %>
                 <% if (s.channel === 'kakao') { %><span class="badge amber">카카오</span><% } %>

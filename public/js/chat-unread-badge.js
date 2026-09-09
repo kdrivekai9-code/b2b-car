@@ -1,4 +1,12 @@
-// 고객 화면의 안읽음 배지 — 메뉴(AI 챗봇)와 챗봇 화면 상단.
+// 안읽음 배지 — 역할에 따라 **세는 방향과 붙는 자리가 다르다**.
+//
+//   고객·기사 등: 내게 온 통보·상담원 답장을 내가 안 읽음(/chat/unread.json)
+//                 → 'AI 챗봇' 메뉴, 챗봇 화면 상단
+//   관리자:       고객이 보낸 말을 상담원이 안 읽음(/chat/agent-unread.json)
+//                 → '상담 관리' 메뉴 (좌측 대화 카드는 서버가 그린다)
+//
+// 관리자에게 고객용 숫자를 붙였던 적이 있는데(2026-09-09 낮), 그건 관리자 **본인**이 챗봇으로
+// 받은 통보를 센 것이라 상담 업무와 상관이 없었다. 사용자 확정: 관리자 배지는 상담 관리에.
 //
 // 왜 필요한가(실사용 지적 2026-09-08): 통보는 상담창에 꽂히는데, 창을 열지 않으면 도착한
 // 줄을 모른다. 카카오는 앱 알림이 저절로 뜨는 반면 웹은 아무 표시가 없어서, 고객이 배차
@@ -10,8 +18,15 @@
   'use strict';
 
   // 이 스크립트는 모든 페이지에 실려 있다. 로그인 화면 같은 곳에서는 조용히 아무것도 안 한다.
-  var navLink = document.querySelector('a[href="/orders/ai-intake"]');
-  var titleHost = document.querySelector('.ai-chat-title');
+  //
+  // 역할은 메뉴로 가른다 — '상담 관리'는 관리자에게만 보인다(requireRole('admin')).
+  // currentUser를 스크립트로 내려보내는 통로가 없어서 DOM으로 판단한다.
+  var agentLink = document.querySelector('a[href="/chat/sessions"]');
+  var isAgent = !!agentLink;
+  var endpoint = isAgent ? '/chat/agent-unread.json' : '/chat/unread.json';
+  var navLink = isAgent ? agentLink : document.querySelector('a[href="/orders/ai-intake"]');
+  // 챗봇 화면 상단 배지는 고객 것이다 — 관리자 화면에는 이 요소가 없다.
+  var titleHost = isAgent ? null : document.querySelector('.ai-chat-title');
   if (!navLink && !titleHost) return;
 
   function setBadge(host, count, cls) {
@@ -28,11 +43,15 @@
     }
     // 세 자리가 넘으면 배지가 라벨을 밀어낸다. 정확한 수보다 "많다"는 사실이 중요하다.
     badge.textContent = count > 99 ? '99+' : String(count);
-    badge.setAttribute('aria-label', '읽지 않은 알림 ' + count + '건');
+    var what = isAgent ? '읽지 않은 고객 메시지 ' : '읽지 않은 알림 ';
+    badge.setAttribute('aria-label', what + count + '건');
+    // '상담 관리' 메뉴에는 대기 건수 배지(아이콘 위)가 이미 있다. 빨간 동그라미가 둘이라
+    // 무엇인지 알 수 없으므로 각자 설명을 붙인다 — 대기는 "연결 요청", 이건 "안 읽은 말".
+    badge.setAttribute('title', what + count + '건');
   }
 
   function refresh() {
-    fetch('/chat/unread.json', { headers: { 'X-Requested-With': 'fetch' } })
+    fetch(endpoint, { headers: { 'X-Requested-With': 'fetch' } })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (data) {
         if (!data) return;
