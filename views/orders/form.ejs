@@ -271,6 +271,16 @@
             <option value="one_way" <%= order.trip_type === 'one_way' ? 'selected' : '' %>>편도</option>
           </select>
         </div>
+        <%# 일일기사 요금은 거리가 아니라 **이 시간**으로 정해진다(premium_fare_rules /
+            group_daily_driver_fare_rules). 이 칸이 없어서 일일기사 오더도 탁송 거리표로
+            계산되고 있었다. public/js/order-form.js가 값이 바뀔 때마다 요금을 다시 낸다. %>
+        <div class="field" id="dailyDriverFields" style="display:none;">
+          <label>이용 시간 (시간)</label>
+          <input type="number" id="daily_driver_hours" name="daily_driver_hours" min="0.5" max="24" step="0.5"
+            placeholder="예: 8"
+            value="<%= order.daily_driver_hours != null ? order.daily_driver_hours : '' %>">
+          <p class="hint">요금이 이 시간으로 계산됩니다. 30분 단위로 넣을 수 있습니다.</p>
+        </div>
         <div class="field">
           <label>도착지 대기시간(분)</label>
           <input type="number" name="destination_wait_minutes" min="0" step="5"

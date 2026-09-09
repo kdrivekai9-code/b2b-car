@@ -87,6 +87,11 @@
     <% if (order.trip_type) { %>
       <div class="kv"><span class="k">이용 형태</span><span><%= tripTypeLabels[order.trip_type] || order.trip_type %></span></div>
     <% } %>
+    <%# 일일기사 요금은 이 시간으로 계산된다 — 청구 금액의 근거라 상세에 보여야 한다.
+        마이그레이션(20260909010000) 전 오더는 값이 없어 줄이 안 나온다. %>
+    <% if (order.daily_driver_hours != null) { %>
+      <div class="kv"><span class="k">이용 시간</span><span><%= order.daily_driver_hours %>시간 <span class="hint">(요금 계산 기준)</span></span></div>
+    <% } %>
     <% if (order.destination_wait_minutes != null) { %>
       <div class="kv"><span class="k">도착지 대기시간</span><span><%= order.destination_wait_minutes %>분</span></div>
     <% } %>

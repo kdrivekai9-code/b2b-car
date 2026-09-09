@@ -140,6 +140,8 @@ function initialFieldState(order, defaultBranch, mode) {
     final_destination_address_detail: order.final_destination_address_detail || '',
     destination_wait_minutes: order.destination_wait_minutes != null ? String(order.destination_wait_minutes) : '',
     reservation_hours_bracket: order.reservation_hours_bracket || '',
+    // 일일기사 이용 시간 — 이 상품의 요금은 거리가 아니라 시간으로 정해진다.
+    daily_driver_hours: order.daily_driver_hours != null ? String(order.daily_driver_hours) : '',
     sameAsMyPhone: false, sameAsOriginContact: false,
     chat_session_transition: 'agent_active',
   };
@@ -435,8 +437,18 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
   // 나오면(직선거리든 실제 경로든) 곧바로 /orders/fare-preview를 호출한다 — 지사가 구간요금표를
   // 안 쓰면 enabled:false가 와서 수동 입력으로 전환된다.
   useEffect(() => {
-    if (routeInfo.km == null || !state.branch_id) {
+    // **일일기사는 거리가 아니라 이용 시간이 입력이다.** 경로가 안 잡혀도 계산할 수 있고,
+    // 반대로 거리가 잡혀도 시간이 없으면 계산할 수 없다 — 그래서 조건이 따로다.
+    const isDailyDriver = state.order_type === 'daily_driver';
+    if (!state.branch_id || (!isDailyDriver && routeInfo.km == null)) {
       setFareHint('');
+      setFareLocked(false);
+      return;
+    }
+    if (isDailyDriver && !String(state.daily_driver_hours || '').trim()) {
+      // 시간을 아직 안 넣었으면 금액을 만들지 않는다 — 기본값을 정하면 관리자가 정한 적 없는
+      // 시간으로 청구된다. 무엇이 필요한지는 말해준다.
+      setFareHint('일일기사 요금은 이용 시간 기준입니다. 이용 시간을 입력하면 자동 계산됩니다.');
       setFareLocked(false);
       return;
     }
@@ -444,7 +456,8 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
     const timer = setTimeout(async () => {
       const params = new URLSearchParams();
       params.set('branch_id', state.branch_id);
-      params.set('distance_km', routeInfo.km.toFixed(2));
+      if (routeInfo.km != null) params.set('distance_km', routeInfo.km.toFixed(2));
+      if (isDailyDriver) params.set('hours', String(state.daily_driver_hours).trim());
       // 오더구분마다 요금표가 다르다(프리미엄대리는 편도 거리 전용 표) — 안 넘기면 서버가
       // 탁송 표로 계산해서 다른 상품의 요금이 들어간다.
       params.set('order_type', state.order_type || 'dispatch');
@@ -488,9 +501,12 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
 
       if (!data.enabled) {
         // 왜 자동계산이 안 되는지 갈라서 말한다 — 관리자가 고칠 곳이 다르다.
-        setFareHint(data.reason === 'premium_oneway_unset'
-          ? '프리미엄(대리) 요금표가 등록되지 않아 수동으로 입력합니다. (법인/지사 설정 → 프리미엄(대리) 요금)'
-          : '이 지사는 구간요금표를 사용하지 않아 수동으로 입력합니다.');
+        const REASON_HINTS = {
+          premium_oneway_unset: '프리미엄(대리) 요금표가 등록되지 않아 수동으로 입력합니다. (법인/지사 설정 → 프리미엄(대리) 요금)',
+          daily_driver_unset: '일일기사 요금표가 등록되지 않아 수동으로 입력합니다. (법인/지사 설정 → 일일기사 요금)',
+          daily_driver_hours_missing: '일일기사 요금은 이용 시간 기준입니다. 이용 시간을 입력하면 자동 계산됩니다.',
+        };
+        setFareHint(REASON_HINTS[data.reason] || '이 지사는 구간요금표를 사용하지 않아 수동으로 입력합니다.');
         setFareLocked(false);
         return;
       }
@@ -500,7 +516,14 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
       }
 
       let hint;
-      if (data.ferryNeedVehicleType) {
+      if (data.orderType === 'daily_driver') {
+        // **왜 그 금액인지 밝힌다.** 기준 시간보다 짧게 써도 기준요금이 그대로라, 설명이
+        // 없으면 과청구로 보인다(챗봇 답변도 같은 이유로 근거를 함께 말한다).
+        const won = (v) => Number(v || 0).toLocaleString('ko-KR') + '원';
+        hint = data.extraHours > 0
+          ? `일일기사 요금표로 자동 계산되었습니다 (기준 ${data.baseHours}시간 ${won(data.baseHourFare)} + 초과 ${data.extraHours}시간 × ${won(data.extraPerHour)}).`
+          : `일일기사 요금표로 자동 계산되었습니다 (기준 ${data.baseHours}시간 ${won(data.baseHourFare)}${data.hours < data.baseHours ? ' — 기준 시간 미만도 기준요금' : ''}).`;
+      } else if (data.ferryNeedVehicleType) {
         hint = `구간요금은 자동 계산되었습니다 (${routeInfo.km.toFixed(1)}km 기준). 도선료 계산을 위해 차종을 입력하세요.`;
       } else if (data.ferryApplied && data.ferryFare != null) {
         hint = `구간요금 ${Number(data.baseFare || 0).toLocaleString('ko-KR')}원 + 도선료 ${Number(data.ferryFare || 0).toLocaleString('ko-KR')}원 = 총 ${Number(data.totalFare || data.fare || 0).toLocaleString('ko-KR')}원으로 자동 계산되었습니다.`;
@@ -514,7 +537,7 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
     }, 250);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.branch_id, state.order_type, state.requester_group_id, routeInfo.km, routeInfo.hasFerryLeg, JSON.stringify(routeInfo.ferrySegments), state.vehicle_type, state.origin_address, state.destination_address, state.origin_lat, state.origin_lon, state.origin_sido, state.origin_sigugun, state.destination_lat, state.destination_lon, state.destination_sido, state.destination_sigugun, state.reservation_basis, state.pickup_reserved_date, state.pickup_reserved_time, state.reservedDateYear, state.reservedDateMonth, state.reservedDateDay, state.reservedTimeHour, state.reservedTimeMinute]);
+  }, [state.branch_id, state.order_type, state.daily_driver_hours, state.requester_group_id, routeInfo.km, routeInfo.hasFerryLeg, JSON.stringify(routeInfo.ferrySegments), state.vehicle_type, state.origin_address, state.destination_address, state.origin_lat, state.origin_lon, state.origin_sido, state.origin_sigugun, state.destination_lat, state.destination_lon, state.destination_sido, state.destination_sigugun, state.reservation_basis, state.pickup_reserved_date, state.pickup_reserved_time, state.reservedDateYear, state.reservedDateMonth, state.reservedDateDay, state.reservedTimeHour, state.reservedTimeMinute]);
 
   const isAdmin = currentUserRole === 'admin';
   const isClient = currentUserRole === 'client';
@@ -564,6 +587,7 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
     setIfFilled('final_destination_address_detail', p.final_destination_address_detail);
     if (p.destination_wait_minutes != null) setIfFilled('destination_wait_minutes', String(p.destination_wait_minutes));
     setIfFilled('reservation_hours_bracket', p.reservation_hours_bracket);
+    if (p.daily_driver_hours != null) setIfFilled('daily_driver_hours', String(p.daily_driver_hours));
 
     // 경유지 — 챗봇이 받은 주소를 폼에도 올린다.
     //
@@ -728,6 +752,9 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
     if (state.final_destination_address_detail) params.set('final_destination_address_detail', state.final_destination_address_detail);
     if (state.destination_wait_minutes) params.set('destination_wait_minutes', state.destination_wait_minutes);
     if (state.reservation_hours_bracket) params.set('reservation_hours_bracket', state.reservation_hours_bracket);
+    // 일일기사가 아니면 빈 값으로 보낸다 — 오더구분을 바꿨을 때 옛 시간이 남으면 정산에서
+    // 무엇으로 청구했는지 헷갈린다(서버도 같은 이유로 한 번 더 거른다).
+    params.set('daily_driver_hours', state.order_type === 'daily_driver' ? String(state.daily_driver_hours || '').trim() : '');
     if (chatSessionId) {
       params.set('chat_session_id', String(chatSessionId));
       params.set('chat_session_transition', state.chat_session_transition);
@@ -1139,6 +1166,14 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
                       <option value="round_trip">왕복</option>
                       <option value="one_way">편도</option>
                     </select>
+                  </div>
+                  {/* 일일기사 요금은 **이 값**으로 정해진다 — 거리가 아니다. */}
+                  <div className="field">
+                    <label>이용 시간 (시간) <span className="required-mark" aria-hidden="true">*</span></label>
+                    <input type="number" min="0.5" max="24" step="0.5" placeholder="예: 8"
+                      value={state.daily_driver_hours}
+                      onChange={(e) => setField('daily_driver_hours', e.target.value)} />
+                    <p className="hint">요금이 이 시간으로 계산됩니다. 30분 단위로 넣을 수 있습니다.</p>
                   </div>
                 </div>
               )}

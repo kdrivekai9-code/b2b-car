@@ -137,6 +137,20 @@
   function setOrderCategory(next) {
     orderCategory = next;
     if (window.__applyRoutePriorityDefaultForOrderType) window.__applyRoutePriorityDefaultForOrderType(orderCategory);
+    // **접수 폼의 오더구분도 같이 맞춘다.**
+    //
+    // 이 폼에는 order_type 칸이 아예 없었다. 그래서 일일기사·프리미엄대리 대화를 마치고
+    // 등록해도 서버는 기본값(dispatch)으로 받아 **탁송 오더가 만들어졌다** — 배지에는
+    // "(일일기사 접수)"라고 떠 있는데도 그랬다. 요금도 그래서 탁송 거리표로 계산됐다.
+    var orderTypeSelect = document.getElementById('order_type');
+    if (orderTypeSelect && orderTypeSelect.value !== orderCategory) {
+      orderTypeSelect.value = orderCategory;
+      // change 이벤트를 직접 보낸다 — order-form.js가 이 신호로 요금을 다시 낸다.
+      orderTypeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    var tripTypeBox = document.getElementById('dailyDriverTripType');
+    if (tripTypeBox) tripTypeBox.style.display = orderCategory === 'daily_driver' ? '' : 'none';
+    if (window.__toggleDailyDriverFields) window.__toggleDailyDriverFields(orderCategory);
   }
   var tripType = null; // 'round_trip' | 'one_way'
   var waypointsList = []; // { address, addressDetail, contact, waitMinutes } 배열 — 대화로 누적
@@ -3414,6 +3428,15 @@
   function submitOrderForm() {
     var form = document.getElementById('orderForm');
     if (!form) return;
+    // **대화가 정한 오더구분·이용형태를 폼에 확정해 둔다.**
+    //
+    // setOrderCategory에서도 맞추지만 여기서 한 번 더 한다 — tripType은 대화 도중 여러
+    // 지점에서 바뀌고(왕복→편도 전환 등) 그 지점마다 폼 반영을 끼워 넣으면 새 분기가
+    // 생길 때 또 빠진다. 등록 직전 한 곳에서 맞추는 편이 확실하다.
+    var orderTypeSelect = document.getElementById('order_type');
+    if (orderTypeSelect) orderTypeSelect.value = orderCategory || 'dispatch';
+    var tripTypeSelect = document.getElementById('trip_type');
+    if (tripTypeSelect) tripTypeSelect.value = (orderCategory === 'daily_driver' && tripType) ? tripType : '';
     var params = new URLSearchParams(new FormData(form));
     api.submitOrderForm(form.action, params)
       .then(function (data) {

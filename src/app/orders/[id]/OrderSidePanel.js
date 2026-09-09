@@ -121,6 +121,19 @@ function AttributionAndOrderTypeFields({ state, setField, branches, groups, isAd
           </select>
         </div>
       </div>
+      {/* 일일기사 요금은 거리가 아니라 **이 시간**으로 정해진다. 접수 화면에도 같은 칸이
+          있다(OrderForm.js) — 수정 화면에서만 없으면 등록 뒤에 시간을 고칠 수 없다. */}
+      {state.order_type === 'daily_driver' ? (
+        <div className="row">
+          <div className="field">
+            <label>이용 시간 (시간)</label>
+            <input form="order-edit-form" type="number" min="0.5" max="24" step="0.5" placeholder="예: 8"
+              value={state.daily_driver_hours || ''}
+              onChange={(e) => setField('daily_driver_hours', e.target.value)} />
+            <p className="hint">요금이 이 시간으로 계산됩니다.</p>
+          </div>
+        </div>
+      ) : null}
     </form>
   );
 }

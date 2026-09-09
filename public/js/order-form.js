@@ -1178,6 +1178,11 @@
     // 탁송 표로 계산해서 다른 상품의 요금이 들어간다.
     var orderTypeEl = document.querySelector('select[name="order_type"], input[name="order_type"]');
     if (orderTypeEl && orderTypeEl.value) params.set('order_type', orderTypeEl.value);
+    // 일일기사는 **거리가 아니라 이용 시간**으로 요금이 정해진다.
+    var hoursEl = document.getElementById('daily_driver_hours');
+    if (orderTypeEl && orderTypeEl.value === 'daily_driver' && hoursEl && String(hoursEl.value).trim()) {
+      params.set('hours', String(hoursEl.value).trim());
+    }
     if (vehicleType) params.set('vehicle_type', vehicleType);
     if (originAddressInput && originAddressInput.value.trim()) params.set('origin_address', originAddressInput.value.trim());
     var destAddressInput = document.getElementById('destination_address');
@@ -1213,7 +1218,11 @@
   }
 
   function updateFarePreview(totalKm) {
-    if (!fareAmountInput || !fareCalcHint || totalKm == null) return;
+    if (!fareAmountInput || !fareCalcHint) return;
+    var orderTypeNow = document.querySelector('select[name="order_type"], input[name="order_type"]');
+    var isDailyDriver = !!(orderTypeNow && orderTypeNow.value === 'daily_driver');
+    // 일일기사는 경로가 안 잡혀도 계산할 수 있다 — 거리를 기다리면 요금이 영영 안 나온다.
+    if (totalKm == null && !isDailyDriver) return;
     var branchInput = document.getElementById('branch_id');
     var branchId = branchInput ? branchInput.value : '';
     if (!branchId) return;
@@ -1223,11 +1232,15 @@
       .then(function (data) {
         if (requestId !== fareRequestId) return;
         if (!data.enabled) {
-          // 왜 자동계산이 안 되는지 갈라서 말한다 — "요금표를 사용하지 않음"과 "프리미엄
-          // 요금표가 아직 등록되지 않음"은 관리자가 고칠 곳이 다르다.
-          fareCalcHint.textContent = data.reason === 'premium_oneway_unset'
-            ? '프리미엄(대리) 요금표가 등록되지 않아 수동으로 입력합니다. (법인/지사 설정 → 프리미엄(대리) 요금)'
-            : '이 지사는 구간요금표를 사용하지 않아 수동으로 입력합니다.';
+          // 왜 자동계산이 안 되는지 갈라서 말한다 — 관리자가 고칠 곳이 서로 다르다.
+          var REASON_HINTS = {
+            premium_oneway_unset: '프리미엄(대리) 요금표가 등록되지 않아 수동으로 입력합니다. (법인/지사 설정 → 프리미엄(대리) 요금)',
+            daily_driver_unset: '일일기사 요금표가 등록되지 않아 수동으로 입력합니다. (법인/지사 설정 → 일일기사 요금)',
+            daily_driver_hours_missing: '일일기사 요금은 이용 시간 기준입니다. 이용 시간을 입력하면 자동 계산됩니다.'
+          };
+          fareCalcHint.textContent = REASON_HINTS[data.reason]
+            || '이 지사는 구간요금표를 사용하지 않아 수동으로 입력합니다.';
+          fareCalcHint.style.display = '';
           fareCalcHint.classList.remove('calculated');
           fareAmountInput.readOnly = false;
           return;
@@ -1241,7 +1254,14 @@
         if (changed) renderTollFare(lastTollFare);
         fareAmountInput.value = data.totalFare != null ? data.totalFare : data.fare;
         if (ferryFareInput) ferryFareInput.value = data.ferryFare != null ? data.ferryFare : 0;
-        if (data.ferryNeedVehicleType) {
+        if (data.orderType === 'daily_driver') {
+          // **왜 그 금액인지 밝힌다.** 기준 시간보다 짧게 써도 기준요금이 그대로라, 설명이
+          // 없으면 과청구로 보인다(챗봇 요금 답변도 같은 이유로 근거를 함께 말한다).
+          var won = function (v) { return Number(v || 0).toLocaleString('ko-KR') + '원'; };
+          fareCalcHint.textContent = data.extraHours > 0
+            ? '일일기사 요금표로 자동 계산되었습니다 (기준 ' + data.baseHours + '시간 ' + won(data.baseHourFare) + ' + 초과 ' + data.extraHours + '시간 × ' + won(data.extraPerHour) + ').'
+            : '일일기사 요금표로 자동 계산되었습니다 (기준 ' + data.baseHours + '시간 ' + won(data.baseHourFare) + (data.hours < data.baseHours ? ' — 기준 시간 미만도 기준요금' : '') + ').';
+        } else if (data.ferryNeedVehicleType) {
           fareCalcHint.textContent = '구간요금은 자동 계산되었습니다 (' + totalKm.toFixed(1) + 'km 기준). 도선료 계산을 위해 차종을 입력하세요.';
         } else if (data.ferryApplied && data.ferryFare != null) {
           fareCalcHint.textContent = '구간요금 ' + Number(data.baseFare || 0).toLocaleString('ko-KR') + '원 + 도선료 ' + Number(data.ferryFare || 0).toLocaleString('ko-KR') + '원 = 총 ' + Number(data.totalFare || data.fare || 0).toLocaleString('ko-KR') + '원으로 자동 계산되었습니다.';
@@ -1411,17 +1431,35 @@
   }
   window.__applyRoutePriorityDefaultForOrderType = applyRoutePriorityDefaultForOrderType;
 
+  // 일일기사일 때만 이용 형태·이용 시간을 보여준다. 챗봇 화면(ai_intake.ejs)은 대화로
+  // 오더구분이 정해지므로 ai-intake.js가 이 함수를 직접 부른다.
+  function toggleDailyDriverFields(orderType) {
+    var box = document.getElementById('dailyDriverFields');
+    if (box) box.style.display = orderType === 'daily_driver' ? '' : 'none';
+  }
+  window.__toggleDailyDriverFields = toggleDailyDriverFields;
+
+  var dailyHoursInput = document.getElementById('daily_driver_hours');
+  if (dailyHoursInput) {
+    dailyHoursInput.addEventListener('input', function () { updateFarePreview(lastRouteKm); });
+  }
+
   var orderTypeSelectEl = document.querySelector('select[name="order_type"]');
   if (orderTypeSelectEl) {
     applyRoutePriorityDefaultForOrderType(orderTypeSelectEl.value);
+    toggleDailyDriverFields(orderTypeSelectEl.value);
     orderTypeSelectEl.addEventListener('change', function () {
       applyRoutePriorityDefaultForOrderType(orderTypeSelectEl.value);
+      // 오더구분이 바뀌면 보는 요금표가 바뀐다 — 다시 계산하지 않으면 앞 상품의 금액이 남는다.
+      toggleDailyDriverFields(orderTypeSelectEl.value);
+      updateFarePreview(lastRouteKm);
     });
   } else if (routePrioritySelect) {
-    // order_type <select>가 없는 화면(ai_intake.ejs)은 대화가 시작되기 전 기본 오더유형(탁송)
+    // order_type <select>가 없는 화면은 대화가 시작되기 전 기본 오더유형(탁송)
     // 기준으로 먼저 맞춰둔다 — orderCategory가 확정되면 ai-intake.js가 다시 불러 갱신한다.
     applyRoutePriorityDefaultForOrderType('dispatch');
   }
+  if (!orderTypeSelectEl) toggleDailyDriverFields('dispatch');
 
   // 요금 미리보기가 알려준 특수구간(민자 교량 등). 톨비 표시에 덧붙인다.
   var lastSpecialTolls = [];

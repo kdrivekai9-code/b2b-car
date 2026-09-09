@@ -1144,19 +1144,69 @@ router.post('/ai-intake/classify-reply', aiRateLimit, asyncHandler(async (req, r
   }
 }));
 
-// 프리미엄/일일기사 시간 구간 기반 요금 미리보기
+// 일일기사 시간 구간 기반 요금 미리보기 — **옛 경로다. 새 화면은 /fare-preview를 쓴다.**
+//
+// 두 가지가 잘못돼 있었다:
+//   · 법인(group_id)을 안 넘겨서 **법인 전용 일일기사 요금표가 통째로 무시**됐다.
+//     요금표는 법인 → 지사 순서로 골라야 한다(다른 요금과 같은 규칙).
+//   · over_8h를 10시간으로 환산했다. 구간은 세 개뿐이라(within_4h/within_8h/over_8h)
+//     12시간을 쓴 고객도 10시간으로 청구된다 — 우리가 지어낸 숫자다.
+//
+// 그래서 실제 이용 시간을 받는 쪽(orders.daily_driver_hours)으로 옮겼고, 이 경로는 구간만
+// 아는 옛 호출부를 위해 남겨 둔다. 법인 누락만 고쳤다.
 router.get('/premium-fare-preview', requireAuth, asyncHandler(async (req, res) => {
   const branchId = req.query.branch_id || null;
+  const groupId = req.query.group_id || req.query.groupId || null;
   const hoursBracket = req.query.hours_bracket || '';
   const HOURS_MAP = { within_4h: 4, within_8h: 8, over_8h: 10 };
-  const hours = HOURS_MAP[hoursBracket];
+  const hours = Number(req.query.hours) || HOURS_MAP[hoursBracket];
   if (!hours) return res.json({ enabled: false });
-  const result = await calculatePremiumFare(branchId, hours);
+  const result = await calculatePremiumFare(branchId, hours, { groupId });
   res.json(result);
 }));
 
 router.get('/fare-preview', asyncHandler(async (req, res) => {
   const branchId = req.query.branch_id || null;
+
+  // **일일기사는 거리가 아니라 이용 시간이 입력이다** — distance_km 검사보다 앞에서 가른다.
+  //
+  // 뒤에 두면 경로가 안 잡힌 상태에서 요금이 아예 안 나온다. 실제로는 그 반대가 문제였다:
+  // 예전에는 오더구분을 보지 않아서 일일기사 오더도 **탁송 거리 구간표로** 계산됐다.
+  // 시간 구간표(premium_fare_rules / group_daily_driver_fare_rules)가 따로 있는데도 그랬다.
+  if (req.query.order_type === 'daily_driver') {
+    const groupId = req.query.group_id || req.query.groupId || null;
+    const hours = Number(req.query.hours);
+    // 시간을 안 받았으면 금액을 만들지 않는다 — 기본값을 정하면 관리자가 정한 적 없는
+    // 시간으로 청구된다. 화면은 이 reason을 보고 "시간을 입력하세요"라고 말한다.
+    if (!Number.isFinite(hours) || hours <= 0 || hours > 24) {
+      return res.json({ enabled: false, reason: 'daily_driver_hours_missing' });
+    }
+    const result = await calculatePremiumFare(branchId, hours, { groupId });
+    if (!result.enabled) return res.json({ enabled: false, reason: 'daily_driver_unset' });
+    const extraDaily = await findFareExtra(groupId, branchId).catch(() => null);
+    return res.json({
+      enabled: true,
+      orderType: 'daily_driver',
+      fare: result.fare,
+      // 화면은 totalFare/baseFare를 읽는다 — 일일기사는 도선료를 얹지 않으므로 같은 값이다.
+      baseFare: result.fare,
+      totalFare: result.fare,
+      ferryFare: 0,
+      ferryApplied: false,
+      specialTolls: [],
+      tierSeq: result.tierSeq,
+      fareSource: result.fareSource,
+      // 화면이 "왜 이 금액인지" 밝힐 수 있게 근거를 함께 준다.
+      hours,
+      baseHours: result.baseHours,
+      baseHourFare: result.baseFare,
+      extraPerHour: result.extraPerHour,
+      extraHours: result.extraHours,
+      visibleToClient: extraDaily ? !!extraDaily.fare_visible_to_client : true,
+      editableByClient: extraDaily ? !!extraDaily.fare_editable_by_client : false,
+    });
+  }
+
   const distanceKm = parseFloat(req.query.distance_km);
   if (!Number.isFinite(distanceKm)) return res.json({ enabled: false });
 
@@ -1335,7 +1385,7 @@ router.post('/', asyncHandler(async (req, res) => {
     chat_session_id, chat_session_transition,
     pickup_reserved_date, pickup_reserved_time,
     order_type, trip_type, final_destination_address, final_destination_address_detail,
-    destination_wait_minutes, reservation_hours_bracket,
+    destination_wait_minutes, reservation_hours_bracket, daily_driver_hours,
     origin_lat, origin_lon, origin_sido, origin_sigugun, origin_dong,
     destination_lat, destination_lon, destination_sido, destination_sigugun, destination_dong,
   } = req.body;
@@ -1517,6 +1567,9 @@ router.post('/', asyncHandler(async (req, res) => {
     finalDestinationAddressDetail: final_destination_address_detail || null,
     destinationWaitMinutes: destination_wait_minutes,
     reservationHoursBracket: reservation_hours_bracket,
+    // 일일기사 이용 시간 — fare_amount의 근거다. 오더구분이 일일기사가 아니면 무시한다
+    // (탁송 오더에 시간이 남아 있으면 정산에서 무엇으로 청구했는지 헷갈린다).
+    dailyDriverHours: finalOrderType === 'daily_driver' ? daily_driver_hours : null,
     originLat: origin_lat,
     originLon: origin_lon,
     originSido: origin_sido || null,
@@ -2118,6 +2171,28 @@ router.post('/:id', asyncHandler(async (req, res) => {
     req.body.destination_sido || null, req.body.destination_sigugun || null, req.body.destination_dong || null,
     req.params.id,
   ]);
+
+  // 일일기사 이용 시간 — 요금의 근거라 수정 화면에서도 바뀔 수 있어야 한다.
+  //
+  // 위 UPDATE에 끼우지 않는 이유는 두 가지다. 마이그레이션(20260909010000) 전이면 그 칸이
+  // 없어서 UPDATE 전체가 42703으로 실패하고 **오더 수정이 통째로 막힌다**(이 저장소가 다른
+  // 선택 컬럼에 쓰는 방식과 같다). 그리고 안 보낸 칸은 건드리지 않아야 한다 — 고객 화면과
+  // 상담관리 카드 폼은 이 값을 보내지 않는다.
+  if (req.body.daily_driver_hours !== undefined) {
+    const rawHours = String(req.body.daily_driver_hours || '').trim();
+    const n = Number(rawHours);
+    const nextHours = (rawHours === '' || !Number.isFinite(n) || n <= 0 || n > 24)
+      ? null
+      : Math.round(n * 100) / 100;
+    if (Number(order.daily_driver_hours || 0) !== Number(nextHours || 0)) {
+      diffs.push(`일일기사 이용 시간: ${order.daily_driver_hours || '(없음)'} → ${nextHours || '(없음)'}`);
+    }
+    await db.run('UPDATE orders SET daily_driver_hours = ? WHERE id = ?', [nextHours, req.params.id])
+      .catch((e) => {
+        if (e && e.code === '42703') return; // 마이그레이션 20260909010000 전
+        console.error('일일기사 이용 시간 저장 실패(무시):', e.message);
+      });
+  }
 
   // 기사 챗봇 전달사항의 적요1 전문 사본을 방금 저장한 값으로 맞춘다.
   //
