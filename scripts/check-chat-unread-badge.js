@@ -85,9 +85,17 @@ console.log('\n[EJS와 Next가 같이 바뀐다]');
 // 이 저장소에서 반복된 함정: 공용 화면 조각이 두 벌이라 한쪽만 고치면 채널에 따라 다르게 보인다.
 check('EJS가 배지 스크립트를 싣는다', /chat-unread-badge\.js/.test(read('views/partials/header.ejs')));
 check('Next도 같은 스크립트를 싣는다', /chat-unread-badge\.js/.test(read('src/app/_components/AppShell.js')));
-// 관리자는 별도 알림센터(agent-notification-center.js)가 있어 이 배지가 필요 없다.
-check('고객에게만 싣는다(EJS)', /role === 'client'[\s\S]{0,200}chat-unread-badge/.test(read('views/partials/header.ejs')));
-check('고객에게만 싣는다(Next)', /role === 'client'[\s\S]{0,200}chat-unread-badge/.test(read('src/app/_components/AppShell.js')));
+// 역할을 가리지 않는다. 예전엔 고객에게만 실었고("관리자는 알림센터가 있으니 필요 없다"),
+// 그 결과 관리자 본인 세션의 통보·상담원 답장이 화면 어디에도 안 나타났다(admin 6건 실측
+// 2026-09-09). 알림센터가 세는 것은 상담 **대기** 건수뿐이라 대체가 안 된다.
+// 다시 역할로 가르면 같은 구멍이 생기므로 여기서 못 박는다.
+for (const [label, file] of [['EJS', 'views/partials/header.ejs'], ['Next', 'src/app/_components/AppShell.js']]) {
+  const src = read(file);
+  // 스크립트 줄 바로 앞의 조건에 역할 비교가 끼어 있으면 잡는다.
+  const before = src.slice(Math.max(0, src.indexOf('chat-unread-badge') - 200), src.indexOf('chat-unread-badge'));
+  check(`역할로 가르지 않는다(${label})`, !/role\s*===/.test(before));
+  check(`로그인 사용자에게 싣는다(${label})`, /currentUser\s*(&&|\))/.test(before));
+}
 
 console.log('\n[모양은 한 곳에서 정한다]');
 const css = read('public/css/style.css');

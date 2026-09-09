@@ -77,9 +77,14 @@
   </aside>
   <div class="main">
     <script src="/js/push.js" defer></script>
-    <%# 안읽음 배지 — 통보가 왔다는 사실을 고객이 알 수 있게. 관리자는 별도 알림센터가 있어
-        (agent-notification-center.js) 이 배지가 필요 없다. %>
-    <% if (currentUser && currentUser.role === 'client') { %>
+    <%# 안읽음 배지 — 통보가 왔다는 사실을 알 수 있게. **로그인한 모든 역할**에 싣는다.
+        전에는 고객에게만 실었다("관리자는 알림센터가 있으니 필요 없다") — 그런데 알림센터가
+        세는 것은 상담 **대기** 건수(needs_agent)뿐이고, 관리자 본인 상담 세션에 꽂힌 통보와
+        상담원 답장은 어디에도 안 나타났다(실측 2026-09-09: admin 계정 안읽음 6건이 화면에
+        전혀 안 보였다 — 사용자 지적 "관리자화면 배지가 표시되지 않는다"의 원인).
+        세는 곳은 한 군데(routes/chat.js /unread.json)이고 역할을 안 가린다. 붙는 자리도
+        겹치지 않는다 — 이 배지는 'AI 챗봇' 링크에, 대기 건수는 '상담 관리' 링크에 붙는다. %>
+    <% if (currentUser) { %>
       <script src="/js/chat-unread-badge.js" defer></script>
     <% } %>
     <% if (currentUser && currentUser.role === 'admin') { %>
