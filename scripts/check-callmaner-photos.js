@@ -28,15 +28,17 @@ check('없는 필드면 빈 배열', pictureLinks([{ other: 'x' }]), []);
 
 console.log('[계기판 사진 인덱스]');
 check('기본값은 13', DEFAULT_ODOMETER_PHOTO_INDEX, 13);
-// 계기판 순번은 **단계마다 다르다**(운행전 13, 운행후 1) — 콜마너 촬영 순서가 운행후에는
-// 계기판을 맨 앞에 두기 때문이다(사용자 확정 2026-09-08). 단계를 안 넘기면 운행전 기준이다.
+// 계기판은 **두 단계 모두 13번**이다. 콜마너 앱의 촬영 순서는 운행완료 때 계기판이 맨
+// 앞이지만, 우리에게 넘어오는 링크 목록에서는 운행전과 똑같이 맨 뒤에 붙는다 —
+// OID2075 운행후 13장을 내려받아 확인했다(1번 전면, 5번 앞바퀴, 13번 계기판, 2026-09-09).
+// 한때 촬영 순서를 등록 순번으로 믿고 운행후를 계기판부터 적었는데, 그러면 이름이 한 칸씩
+// 밀려 전면 사진이 계기판 자리(맨 뒤)로 갔고 전면 그릴을 계기판으로 읽었다.
 check('지사 설정이 없으면 기본값(운행전)', odometerPhotoIndex({}, 'start'), 13);
-check('운행후는 1번', odometerPhotoIndex({}, 'end'), 1);
+check('운행후도 13번', odometerPhotoIndex({}, 'end'), 13);
 check('단계를 안 주면 운행전 기준', odometerPhotoIndex({}), 13);
 check('지사 설정을 쓴다', odometerPhotoIndex({ odometer_photo_index: 5 }, 'start'), 5);
-// 지사 재정의는 그 칸이 생길 때 운행후 순서가 다른 줄 몰라 **운행전 기준**으로 적혔다.
-// 운행후에 그대로 쓰면 보조석 앞바퀴를 계기판으로 읽는 버그가 돌아온다.
-check('재정의를 운행후에 쓰지 않는다', odometerPhotoIndex({ odometer_photo_index: 5 }, 'end'), 1);
+// 지사 재정의는 "우리 지사는 계기판이 N번"이라는 등록 순번에 대한 말이라 두 단계에 함께 쓴다.
+check('재정의는 운행후에도 쓴다', odometerPhotoIndex({ odometer_photo_index: 5 }, 'end'), 5);
 check('0 이하는 기본값으로 되돌린다', odometerPhotoIndex({ odometer_photo_index: 0 }, 'start'), 13);
 check('음수도 기본값', odometerPhotoIndex({ odometer_photo_index: -3 }, 'start'), 13);
 check('숫자가 아니면 기본값', odometerPhotoIndex({ odometer_photo_index: 'abc' }, 'start'), 13);

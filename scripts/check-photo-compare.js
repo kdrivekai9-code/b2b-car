@@ -17,18 +17,22 @@ function check(label, ok, detail) {
 }
 const read = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
 
-console.log('[항목 이름 — 단계마다 다르다]');
-// 콜마너 촬영 순서는 운행전과 운행후가 다르다(사용자 확정 2026-09-08): 운행후에는 계기판이
-// **맨 앞**으로 오고 나머지가 한 칸씩 밀린다. 이걸 몰라서 두 가지가 조용히 틀려 있었다 —
-// 주행거리 종료값을 보조석 앞바퀴 사진에서 읽으려 했고(그래서 전부 실패),
-// 운행전 전면과 운행후 계기판을 나란히 놓고 비교했다.
+console.log('[항목 이름 — 찍는 순서와 등록 순번은 다르다]');
+// 콜마너 앱의 **촬영 순서**는 운행완료 때 계기판이 맨 앞이다. 그런데 우리에게 넘어오는
+// **링크 목록의 순번**은 두 단계가 같다 — 계기판은 양쪽 모두 맨 뒤(13번)다.
+// 근거는 실물 대조다: OID2075 운행후 13장을 내려받아 확인했다(2026-09-09).
+//   1번 = 전면 그릴(번호판 248호9416), 5번 = 앞바퀴, 13번 = 계기판.
+//
+// 한때 촬영 순서를 등록 순번으로 믿고 운행후 표를 계기판부터 적었다. 그러면 이름이 한 칸씩
+// 밀려서 **전면 사진이 계기판 자리(맨 뒤)에** 놓였고(사용자 지적 2026-09-09), 주행거리는
+// 전면 그릴을 계기판으로 읽으려다 실패했다.
 check('운행전 1번은 전면', photos.photoLabel(1, 'start') === '1. 전면', photos.photoLabel(1, 'start'));
-check('운행후 1번은 계기판', photos.photoLabel(1, 'end') === '1. 계기판', photos.photoLabel(1, 'end'));
+check('운행후 1번도 전면', photos.photoLabel(1, 'end') === '1. 전면', photos.photoLabel(1, 'end'));
 check('운행전 13번은 계기판', photos.photoLabel(13, 'start') === '13. 계기판');
-check('운행후 13번은 보조석 앞 바퀴', photos.photoLabel(13, 'end') === '13. 보조석 앞 바퀴', photos.photoLabel(13, 'end'));
-check('운행후는 운행전보다 한 칸 밀린다',
-  [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].every((n) => photos.photoItem(n, 'start') === photos.photoItem(n + 1, 'end')));
-check('운행후 1번이 운행전 마지막', photos.photoItem(1, 'end') === photos.photoItem(13, 'start'));
+check('운행후 13번도 계기판', photos.photoLabel(13, 'end') === '13. 계기판', photos.photoLabel(13, 'end'));
+// 두 단계의 순번이 어긋나면 이름이 밀린다 — 그 밀림이 이 버그의 전부였다.
+check('두 단계 순번이 같다',
+  [1, 5, 12, 13].every((n) => photos.photoItem(n, 'start') === photos.photoItem(n, 'end')));
 // 두 단계 모두 같은 열세 항목을 찍는다 — 하나라도 빠지면 짝지을 수 없는 항목이 생긴다.
 check('두 단계의 항목 집합이 같다',
   JSON.stringify([...photos.PHOTO_ITEMS.start].sort()) === JSON.stringify([...photos.PHOTO_ITEMS.end].sort()));
@@ -40,38 +44,38 @@ console.log('\n[순번을 코드에 박지 않는다]');
 // 계기판·전면 순번을 상수로 박으면 표와 어긋나는 순간 조용히 틀린 사진을 읽는다 —
 // 주행거리 버그가 정확히 그것이었다.
 check('계기판 순번을 표에서 가져온다',
-  photos.seqOfItem('계기판', 'start') === 13 && photos.seqOfItem('계기판', 'end') === 1);
-check('전면 순번도 표에서', photos.seqOfItem('전면', 'start') === 1 && photos.seqOfItem('전면', 'end') === 2);
-// 주행거리는 단계별로 다른 자리를 봐야 한다.
-check('주행거리 자리 — 운행전 13', photos.odometerPhotoIndex({}, 'start') === 13);
-check('주행거리 자리 — 운행후 1', photos.odometerPhotoIndex({}, 'end') === 1, String(photos.odometerPhotoIndex({}, 'end')));
-// 지사 재정의는 운행전 기준으로 적힌 값이라, 운행후에 그대로 쓰면 버그가 돌아온다.
-check('지사 재정의는 운행전에만', photos.odometerPhotoIndex({ odometer_photo_index: 5 }, 'start') === 5
-  && photos.odometerPhotoIndex({ odometer_photo_index: 5 }, 'end') === 1);
+  photos.seqOfItem('계기판', 'start') === 13 && photos.seqOfItem('계기판', 'end') === 13);
+check('전면 순번도 표에서', photos.seqOfItem('전면', 'start') === 1 && photos.seqOfItem('전면', 'end') === 1);
+check('주행거리 자리 — 양쪽 13', photos.odometerPhotoIndex({}, 'start') === 13
+  && photos.odometerPhotoIndex({}, 'end') === 13, String(photos.odometerPhotoIndex({}, 'end')));
+// 지사 재정의는 "우리 지사는 계기판이 N번"이라는 등록 순번에 대한 말이라 두 단계에 함께 쓴다.
+check('지사 재정의는 양쪽에', photos.odometerPhotoIndex({ odometer_photo_index: 5 }, 'start') === 5
+  && photos.odometerPhotoIndex({ odometer_photo_index: 5 }, 'end') === 5);
 // 번호판은 운행전 전면에서 읽는다.
 check('번호판 자리는 운행전 전면', photos.platePhotoIndex({}) === photos.seqOfItem('전면', 'start'));
 check('1번이 번호판 대조가 보는 자리', photos.DEFAULT_PLATE_PHOTO_INDEX === 1);
 check('13번이 주행거리가 보는 자리(운행전)', photos.DEFAULT_ODOMETER_PHOTO_INDEX === 13);
 
 console.log('\n[짝짓기 — 순번이 아니라 항목으로]');
-// 운행전 전면(1)과 운행후 전면(2)이 한 줄이어야 한다. 순번으로 지으면 운행전 전면(1)과
-// 운행후 계기판(1)이 한 줄이 된다 — 실제로 그렇게 나가고 있었다.
+// 이름으로 짝짓는다. 지금은 두 단계 순번이 같아 순번으로 지어도 결과가 같지만, 콜마너가
+// 한쪽 순서를 바꾸면 다시 갈린다 — 그때 조용히 다른 항목끼리 비교하지 않도록 이름을 쓴다.
 const rows = [
-  { id: 1, phase: 'start', seq: 1, url: 'a' }, { id: 2, phase: 'end', seq: 2, url: 'b' },
+  { id: 1, phase: 'start', seq: 1, url: 'a' }, { id: 2, phase: 'end', seq: 1, url: 'b' },
   { id: 3, phase: 'start', seq: 3, url: 'c' },
-  { id: 4, phase: 'end', seq: 1, url: 'd' },
+  { id: 4, phase: 'end', seq: 13, url: 'd' },
 ];
 const pairs = photos.pairByPhase(rows);
 check('항목마다 한 줄', pairs.length === 3, String(pairs.length));
 // 줄 순서는 운행전 촬영 순서를 따른다(전면 → 보조석 측면 → 운전석 측면 → … → 계기판).
 check('운행전 순서대로', pairs.map((p) => p.label).join(',') === '전면,운전석 측면,계기판',
   pairs.map((p) => p.label).join(','));
-// 전면끼리 짝지어야 한다 — 운행전 1번과 운행후 **2번**이다.
+// 전면끼리 짝지어야 한다 — 양쪽 1번이다.
 check('전면끼리 짝', pairs[0].start.url === 'a' && pairs[0].end.url === 'b');
-check('단계별 순번을 함께 준다', pairs[0].startSeq === 1 && pairs[0].endSeq === 2,
+check('단계별 순번을 함께 준다', pairs[0].startSeq === 1 && pairs[0].endSeq === 1,
   `${pairs[0].startSeq}/${pairs[0].endSeq}`);
-// 계기판은 운행후 1번이다 — 순번으로 지었다면 이 자리에 전면 사진이 붙었다.
-check('계기판은 운행후 1번과 짝', pairs[2].label === '계기판' && pairs[2].end.url === 'd');
+// 전면은 첫 줄이어야 한다 — 이름이 밀렸을 때 이 사진이 맨 뒤 계기판 줄로 갔다.
+check('전면이 첫 줄', pairs[0].label === '전면', pairs[0].label);
+check('계기판은 운행후 13번과 짝', pairs[2].label === '계기판' && pairs[2].end.url === 'd');
 // 한쪽만 있는 자리도 남긴다 — 빠진 것이 보여야 "안 찍었다"를 알 수 있다.
 check('운행전만 있어도 줄이 남는다', pairs[1].start && pairs[1].end === null);
 check('운행후만 있어도 줄이 남는다', pairs[2].start === null && !!pairs[2].end);
