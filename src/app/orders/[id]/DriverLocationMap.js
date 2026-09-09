@@ -136,11 +136,15 @@ export default function DriverLocationMap({ orderId, status, initial = null }) {
       ) : (
         <>
           <p style={{ margin: '0 0 8px', fontWeight: 600 }}>
-            {bits.length ? bits.join(' · ') : '기사님이 이동 중입니다.'}
+            {data.source === 'last_known'
+              ? '마지막으로 확인된 위치입니다.'
+              : (bits.length ? bits.join(' · ') : '기사님이 이동 중입니다.')}
           </p>
-          {/* 오래된 좌표를 "지금 위치"로 보여주면 엉뚱한 곳에서 기다리게 된다. */}
+          {/* 옛 좌표를 "지금 위치"로 보여주면 엉뚱한 곳에서 기다리게 된다. 콜마너가 좌표를
+              주다 마는 구간이 있어(운행시작 뒤 빈 좌표) 이 구분이 실제로 필요하다.
+              EJS(views/orders/detail.ejs)와 같은 문구다. */}
           <p className="hint" style={{ margin: '0 0 8px' }}>
-            {data.stale && data.ageMinutes != null
+            {(data.stale || data.source === 'last_known') && data.ageMinutes != null
               ? `${data.ageMinutes}분 전에 확인된 위치입니다.`
               : '위치는 30초마다 갱신됩니다.'}
           </p>

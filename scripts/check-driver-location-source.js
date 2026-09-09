@@ -44,7 +44,9 @@ check('lat/lng를 읽는다', /Number\(rs\.lat\)/.test(cm) && /Number\(rs\.lng\)
 check('좌표가 없으면 null', /if \(!lat && !lon\) return null;/.test(cm), true);
 
 const src = read('lib/driverLocation.js');
-check('REST를 먼저 쓴다', /const xy = parseXy\(real \? /.test(src), true);
+// 변수 이름이 liveXy로 바뀌었다(마지막 확인 위치 폴백이 붙어 xy와 갈라졌다,
+// scripts/check-driver-last-fix.js). 규칙은 그대로다 — REST 좌표가 있으면 그것부터.
+check('REST를 먼저 쓴다', /const liveXy = parseXy\(real \? /.test(src), true);
 check('보간값이면 좌표를 버린다', /\(synthesized \? null : mcpXy\)/.test(src), true);
 // 가짜 위치로 낸 "5분 뒤 도착"이 가장 나쁘다.
 check('보간값이면 ETA·거리도 버린다',
@@ -53,11 +55,14 @@ check('보간값이면 ETA·거리도 버린다',
 check('두 경로를 각각 잡는다', /fetchFromCallmaner\(order\)\.catch/.test(src) && /fetchFromMcp\(order\)\.catch/.test(src), true);
 // 배차 전 NG는 오류가 아니다 — 로그를 어지럽히면 진짜 오류가 묻힌다.
 check('배차 전 거절은 조용히', /배차된 정보가 없습니다/.test(src), true);
-// 어디서 온 좌표인지 남겨야 "왜 이 위치인가"를 되짚을 수 있다.
-check('출처를 함께 돌려준다', /source: real \? 'callmaner' : \(xy \? 'mcp' : null\)/.test(src)
-  || /const source = real \? 'callmaner' : \(xy \? 'mcp' : null\);/.test(src), true);
-// TrackingDriver는 시각을 주지 않는다 — 모르면 새것이라고도, 오래됐다고도 하지 않는다.
-check('REST 좌표에는 나이를 붙이지 않는다', /stale: !real &&/.test(src) && /ageMinutes: !real &&/.test(src), true);
+// 어디서 온 좌표인지 남겨야 "왜 이 위치인가"를 되짚을 수 있다. 출처는 셋이다 —
+// callmaner(REST 실시간) / mcp(보간 아닌 예비) / last_known(우리가 남긴 마지막 좌표).
+check('출처를 함께 돌려준다', /const source = real && liveXy \? 'callmaner' :/.test(src), true);
+check('세 출처를 구분한다', /'mcp'/.test(src) && /'last_known'/.test(src), true);
+// TrackingDriver는 시각을 주지 않는다 — **지금** 그 좌표를 받았으면 나이를 말하지 않는다.
+// 반대로 마지막 좌표로 답할 때는 반드시 나이를 붙인다(scripts/check-driver-last-fix.js).
+check('REST 실시간 좌표에는 나이를 붙이지 않는다',
+  /stale: \(!real \|\| !liveXy\) &&/.test(src) && /ageMinutes: \(!real \|\| !liveXy\) &&/.test(src), true);
 
 console.log('\n[네 갈래가 모두 같은 좌표를 본다]');
 // 같은 질문에 채널마다 다른 답을 하면, 어느 쪽이 맞는지 아무도 모른다.

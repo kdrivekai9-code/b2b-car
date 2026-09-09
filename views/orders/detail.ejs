@@ -676,9 +676,13 @@
     var bits = [];
     if (d.distanceKm) bits.push('출발지까지 약 ' + d.distanceKm + 'km');
     if (d.etaMinutes) bits.push('약 ' + d.etaMinutes + '분 소요 예상');
-    // 오래된 좌표를 "지금 위치"로 보여주면 엉뚱한 곳에서 기다리게 된다.
-    textEl.textContent = (bits.length ? bits.join(' · ') : '기사님이 이동 중입니다.')
-      + (d.stale && d.ageMinutes != null ? ' (' + d.ageMinutes + '분 전 기준)' : '');
+    // 지금 좌표가 안 올 때는 마지막으로 확인된 위치를 보여준다. 그때는 **그렇다고 밝힌다** —
+    // 콜마너가 좌표를 주다 마는 구간이 있어서(운행시작 뒤 빈 좌표) 옛 점이 현재 위치로
+    // 읽히면 고객이 엉뚱한 곳에서 기다린다.
+    var head = d.source === 'last_known'
+      ? '마지막 확인 위치입니다.' : (bits.length ? bits.join(' · ') : '기사님이 이동 중입니다.');
+    textEl.textContent = head
+      + (d.ageMinutes != null && (d.stale || d.source === 'last_known') ? ' (' + d.ageMinutes + '분 전 기준)' : '');
     if (!window.kakao || !kakao.maps || !kakao.maps.Map) return;
     mapEl.style.display = '';
     var pos = new kakao.maps.LatLng(d.lat, d.lon);

@@ -135,6 +135,7 @@ const CI_CHECKS = [
   'check-driver-contact-in-answer',
   'check-driver-location-map',
   'check-driver-location-source',
+  'check-driver-last-fix',
   'check-driver-trip-steps',
   'check-driver-push',
   'check-driver-token',
