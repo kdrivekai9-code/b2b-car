@@ -161,6 +161,12 @@
   var fareProgressEl = null;
   var fareInquiryDraft = null;
   var fareInquiryPendingField = null;
+  // 일일기사 요금을 물었는데 이용 시간을 못 받아 되묻는 중인지. 서버가 그 질문을 만들 때
+  // awaitingHours로 알려준다(lib/agentAssist.js DAILY_DRIVER_HOURS_QUESTION).
+  var dailyDriverHoursPending = false;
+  // 서버(lib/agentAssist.js USE_HOURS_RE)와 **같은 낱말**이어야 한다 — 한쪽만 넓으면 화면은
+  // 시간으로 보고 보냈는데 서버는 못 읽어 답이 사라지거나, 그 반대가 된다.
+  var USE_HOURS_RE = /(\d+(?:\.\d+)?)\s*시간(?:\s*(반|(\d+)\s*분))?/;
   // 도선료 계산에 차종이 필요해 요금문의 흐름이 멈춘 경우, 다음 메시지를 그 답으로 보고 이어가기
   // 위한 대기 상태 — { origin, destination }.
   var pendingFareVehicleTypeRoute = null;
@@ -208,6 +214,7 @@
     lastWaitingStatusShown: lastWaitingStatusShown,
     lastPolledId: lastPolledId,
     fareInquiryPendingField: fareInquiryPendingField,
+    dailyDriverHoursPending: dailyDriverHoursPending,
     pendingFareVehicleTypeRoute: pendingFareVehicleTypeRoute,
     lastAnnouncedMemoText: lastAnnouncedMemoText,
     lastAnnouncedBillingMemoText: lastAnnouncedBillingMemoText,
@@ -963,8 +970,13 @@
     // 걸려 요금문의로 새고, 그러면 연락처를 아예 받지 않은 채 요금 안내만 하고 끝나버렸다
     // (실제 리포트: "탁송요청 + 출/도 연락처" 메시지가 요금문의로 처리됨).
     if (looksLikeOrderIntake(t)) return null;
-    if (/(일일\s*대리\s*기사|일일\s*대리|하루\s*대리|데일리\s*대리)/.test(t)) return 'daily_proxy';
-    if (/(대리\s*요금|대리운전|대리\s*기사)/.test(t)) return 'proxy';
+    // 대리 계열(프리미엄대리·일일기사)이면 'product'다 — **어느 상품인지는 서버가 정한다.**
+    //
+    // 예전에는 여기서 daily_proxy/proxy로 갈랐는데 낱말이 좁아서 "일일기사 8시간 요금"이
+    // 어디에도 안 걸리고 맨 아래 규칙으로 **탁송**이 됐다(그러면 출발지·도착지를 묻는다).
+    // 판정 규칙을 두 벌 두면 이런 식으로 조용히 갈린다 — 서버(lib/agentAssist.js askedProduct)가
+    // 이미 시간 유무까지 보고 편도인지 시간제인지 가르므로, 여기서는 "탁송이 아닌 것"만 알면 된다.
+    if (/(대리|프리미엄|일일\s*기사|하루\s*(종일|단위)|종일)/.test(t)) return 'product';
     // "탁송" 단어 하나만 있어도 요금문의로 보던 것을 "탁송 요금"처럼 실제로 요금을 묻는
     // 형태로만 좁힌다 — 오더접수 메시지엔 거의 항상 "탁송"이 등장하는데(서비스명이라),
     // 그 위의 신호(hasCallIntakeSignalText/looksLikeOrderIntake)가 못 잡는 오타·자연어
@@ -4219,15 +4231,56 @@
           });
         }
 
+        // 일일기사 시간을 되묻던 중이면 이번 답이 그 시간이다.
+        //
+        // 그 답("8시간이요")에는 요금 낱말이 없어서 아래 detectFareInquiryType에 안 걸린다 —
+        // 여기서 먼저 소비하지 않으면 FAQ 검색으로 새서 "관련된 답변을 찾지 못했습니다"로 끝난다.
+        //
+        // **시간처럼 보이는지는 여기서 먼저 본다**(USE_HOURS_RE). 서버에 물어보고 판단하면,
+        // 못 읽었을 때 이 자리에서 원래 흐름으로 되돌아갈 방법이 없다 — 이 아래로는 배차
+        // 도우미·서버 턴·Gemini 분류가 이어지는데 그 체인을 여기서 다시 만들 수는 없다.
+        // 다른 되묻기 처리들(handleFareVehicleTypePendingReply 등)이 동기 판정으로 되어 있는
+        // 것도 같은 이유다. 금액 계산은 그대로 서버가 한다.
+        if (dailyDriverHoursPending && USE_HOURS_RE.test(text)) {
+          dailyDriverHoursPending = false;
+          return api.fetchProductFare(text, true).then(function (data) {
+            if (!data || !data.ok || !data.text) return null;
+            dailyDriverHoursPending = !!data.awaitingHours;
+            addBubble(data.text, 'bot');
+            logBotMessage({ logText: data.text, needsAgent: false, requestedFeature: null });
+            return null;
+          });
+        }
+        // 시간이 아닌 답이 오면 되묻기는 끝난 것으로 본다 — 계속 켜 두면 한참 뒤의 "8시간"이
+        // 엉뚱하게 요금 답변으로 새어 나간다.
+        if (dailyDriverHoursPending) dailyDriverHoursPending = false;
+
         var fareType = detectFareInquiryType(text);
         if (fareType) {
-          if (fareType !== 'dispatch') {
-            var notReadyText = fareType === 'proxy'
-              ? '대리요금 문의는 현재 설계 준비 중입니다. 우선 탁송 요금 문의를 원하시면 출발지와 도착지를 알려주세요.'
-              : '일일대리기사 요금 문의는 현재 설계 준비 중입니다. 우선 탁송 요금 문의를 원하시면 출발지와 도착지를 알려주세요.';
-            addBubble(notReadyText, 'bot');
-            logBotMessage({ logText: notReadyText, needsAgent: false, requestedFeature: null });
-            return null;
+          if (fareType === 'product') {
+            // 대리·일일기사 요금도 **실제 요금표로** 답한다.
+            //
+            // 예전에는 "현재 설계 준비 중입니다"로 끝냈다. 그런데 요금표는 이미 등록돼 있었고
+            // (일일기사 premium_fare_rules / group_daily_driver_fare_rules), 카카오 채널은
+            // 같은 질문에 금액을 답하고 있었다 — 채널마다 다른 답이 나가고 있었던 것이다.
+            //
+            // 서버가 상품을 다시 판정한다(lib/agentAssist.js askedProduct) — 여기 fareType과
+            // 규칙이 조금 달라도(이쪽은 "대리 8시간"을 proxy로 본다) 서버 쪽이 시간 유무까지
+            // 보고 시간제인지 편도인지 가른다. 판정을 한 곳에 두려는 것이라 그 결과를 그대로 쓴다.
+            return api.fetchProductFare(text, false).then(function (data) {
+              if (!data || !data.ok || !data.text) {
+                // 서버가 답을 못 만들었으면(요금표 미등록 등) 상담원으로 넘긴다 — 예전처럼
+                // "준비 중"이라고만 하면 고객이 어디로 가야 할지 모른다.
+                return logBotMessage(handleUnsupportedIntent({ requestedFeature: '대리/일일기사 요금 문의' }, true)).then(function (finalText) {
+                  if (finalText) addBubble(finalText, 'bot');
+                  return null;
+                });
+              }
+              dailyDriverHoursPending = !!data.awaitingHours;
+              addBubble(data.text, 'bot');
+              logBotMessage({ logText: data.text, needsAgent: false, requestedFeature: null });
+              return null;
+            });
           }
 
           var fareParsed = extractFareInquiryRouteInfo(text);

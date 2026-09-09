@@ -56,6 +56,16 @@
       });
     },
 
+    // 일일기사 요금은 **서버가 계산한다** — 이 위젯의 요금 흐름은 거리 기준 탁송 전용이라
+    // 시간 기준 요금표를 볼 방법이 없다. 카카오 채널과 Next 화면이 이미 쓰는 계산
+    // (lib/agentAssist.js buildFareSuggestion)을 같은 엔드포인트로 부른다 — 옮겨오면
+    // 같은 계산이 세 벌이 된다.
+    fetchProductFare: function (text, awaitingHours) {
+      return postJson('/orders/ai-intake/fare-inquiry', { text: text, awaitingHours: !!awaitingHours })
+        .then(function (res) { return jsonOrEmpty(res); })
+        .catch(function () { return { ok: false }; });
+    },
+
     fetchFarePreview: function (queryString) {
       return fetch('/orders/fare-preview?' + queryString)
         .then(function (res) { return res.json(); })

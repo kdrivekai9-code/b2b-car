@@ -302,6 +302,9 @@ async function fetchJson(url, options) {
 //   "사당역에서 판교까지 탁송해주세요"        → 통과(접수)
 //   "내일 3시 사당역에서 판교로 12가1234 예약" → 통과(접수)
 const FARE_QUESTION_RE = /(요금|얼마|비용|가격|견적|단가)/;
+// 서버(lib/agentAssist.js USE_HOURS_RE) · EJS 위젯과 **같은 낱말**이어야 한다 — 한쪽만 넓으면
+// 화면은 시간으로 보고 보냈는데 서버는 못 읽어 답이 사라지거나, 그 반대가 된다.
+const USE_HOURS_RE = /(\d+(?:\.\d+)?)\s*시간(?:\s*(반|(\d+)\s*분))?/;
 
 // AI 연결 상태 문구. EJS(public/js/ai-intake.js AI_HEALTH_REASON_MESSAGES)와 같은 문장을 쓴다 —
 // 같은 상황에 화면마다 다른 말이 나오면 고객이 무엇이 문제인지 판단할 수 없다.
@@ -376,6 +379,11 @@ export default function AiIntakeClient({
   // 봇 인계 재처리 신호를 받을 때 쓸 최신 handleSend(아래에서 매 렌더 갱신).
   const handleSendRef = useRef(null);
   const troubleStreakRef = useRef(0);
+  // 일일기사 요금을 물었는데 이용 시간을 못 받아 되묻는 중인지. 서버가 그 질문을 만들 때
+  // awaitingHours로 알려준다(lib/agentAssist.js DAILY_DRIVER_HOURS_QUESTION).
+  const dailyDriverHoursPendingRef = useRef(false);
+  // 프리미엄대리·일일기사 대화가 진행 중인지 — 그 동안은 서버 턴 엔진이 대화를 맡는다.
+  const premiumTurnActiveRef = useRef(false);
   const vehicleNumberFailCountRef = useRef(0);
 
   const statusLabel = STATUS_LABEL[status] || status;
@@ -602,6 +610,10 @@ export default function AiIntakeClient({
     setDisambiguationQueue([]);
     setPreOfferState(null);
     setCollectedFields({});
+    // 대화 상태를 담은 ref도 함께 비운다 — 상태값(useState)만 지우면 프리미엄 지름길과
+    // 일일기사 시간 되묻기가 새 대화로 넘어와, 첫 메시지가 엉뚱한 흐름으로 들어간다.
+    premiumTurnActiveRef.current = false;
+    dailyDriverHoursPendingRef.current = false;
     return nextId;
   }
 
@@ -616,20 +628,70 @@ export default function AiIntakeClient({
   //
   // 답을 못 만들면 false를 돌려주고 기존 경로(FAQ → 상담원)로 넘어간다. 구간이 없는
   // "요금조회 되나요?" 같은 안내성 질문이 그 경우다.
+  // 서버 턴 엔진 호출. 서버가 답을 만들었으면 true(또는 {handled:true}).
+  //
+  // 서버가 이미 chat_messages에 답을 저장하고 SSE로 중계했다 — catchUpMessages가
+  // dedupe(seenIdsRef)로 안전하게 그 메시지를 화면에 반영한다. phase는 'collecting'에 그대로
+  // 둔다 — 확인/주소선택 상태는 이 파일의 phase가 아니라 서버의 intake_slots_json이 들고 있다.
+  async function runServerIntakeTurn(sid, text, options) {
+    const turnResult = await fetchJson('/chat/' + sid + '/intake-turn', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    }).catch(() => ({ ok: false, fallthrough: true }));
+
+    const handled = !!(turnResult && turnResult.fallthrough === false);
+    if (handled) {
+      if (turnResult.status) setStatus(turnResult.status);
+      // 서버가 이번 턴에 필수 항목을 다 채웠으면(주소 확인 대기 포함) 우측 폼도 반영한다.
+      // 이게 빠져 있으면 판단이 서버로 넘어간 뒤로 이 폼이 챗봇 파악 내용을 전혀 못
+      // 보여줬다(실사용 지적, 2026-08-11).
+      if (turnResult.intake && typeof onOrderPrefill === 'function') onOrderPrefill(turnResult.intake);
+      // 등록이 끝났거나 대화가 닫혔으면 프리미엄 지름길도 끝난다 — 안 끄면 그 다음 탁송
+      // 요청까지 서버 프리미엄 흐름으로 새어 들어간다.
+      if (turnResult.closeSession) premiumTurnActiveRef.current = false;
+      await catchUpMessages(sid);
+    }
+    if (options && options.returnResult) {
+      return { handled, classified: (turnResult && turnResult.classified) || null };
+    }
+    return handled;
+  }
+
   async function tryAnswerFare(sid, text) {
-    if (!sid || !FARE_QUESTION_RE.test(text)) return false;
+    if (!sid) return false;
+    // 일일기사 요금은 이용 시간이 입력이라, 그 시간을 되묻고 받는 턴이 하나 더 있다.
+    // 그 답("8시간이요")에는 요금 낱말이 없어서 아래 관문에 안 걸린다 — 되묻는 중이면서
+    // 시간처럼 보일 때만 통과시킨다(EJS 위젯과 같은 규칙).
+    const answeringHours = dailyDriverHoursPendingRef.current && USE_HOURS_RE.test(text);
+    if (!answeringHours && !FARE_QUESTION_RE.test(text)) {
+      // 시간이 아닌 답이 오면 되묻기는 끝난 것으로 본다 — 계속 켜 두면 한참 뒤의 "8시간"이
+      // 엉뚱하게 요금 답변으로 새어 나간다.
+      dailyDriverHoursPendingRef.current = false;
+      return false;
+    }
     try {
       const data = await fetchJson('/orders/ai-intake/fare-inquiry', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, awaitingHours: answeringHours }),
       });
-      if (!data || !data.ok || !data.text) return false;
+      if (!data || !data.ok || !data.text) {
+        dailyDriverHoursPendingRef.current = false;
+        return false;
+      }
+      // 서버가 이용 시간을 되물었으면 다음 답을 그 시간으로 받는다.
+      dailyDriverHoursPendingRef.current = !!data.awaitingHours;
       // 배차 도우미와 같은 방식으로 답을 남긴다 — 저장·중계·초안 상태가 그 함수에 모여 있다.
-      await replyWithMessage(sid, data.text, { needsAgent: false, requestedFeature: null });
+      // 요금표가 없어 상담원으로 넘겨야 하는 답이면 그 버튼까지 함께 띄운다.
+      await replyWithMessage(sid, data.text, {
+        needsAgent: !!data.offerAgent,
+        requestedFeature: data.offerAgent ? '대리/일일기사 요금 문의' : null,
+      });
       return true;
     } catch {
       // 요금 안내가 실패해도 대화는 이어져야 한다 — 기존 경로가 받는다.
+      dailyDriverHoursPendingRef.current = false;
       return false;
     }
   }
@@ -772,32 +834,32 @@ export default function AiIntakeClient({
       if (await tryDispatchAgent(sid, text)) return;
     }
 
-    // 접수 대화 판단을 서버로 옮긴 경로(Stage A, 탁송만) — 기능 플래그가 꺼져 있으면(기본값)
-    // 이 분기는 아예 실행되지 않고 지금까지와 완전히 동일하게 동작한다. 이 파일에는 프리미엄/
-    // 일일기사 카테고리 자체가 없어(orderCategory 개념이 없다) EJS 위젯과 달리 별도 제외
-    // 조건이 필요 없다 — handleCollectingPhase에 들어오는 모든 대화가 대상이다.
+    // **프리미엄대리·일일기사 대화는 서버 엔진이 맡는다 — 플래그와 무관하게.**
+    //
+    // 이 파일의 수집 흐름은 탁송 전용이다(ORDER_FIELD_IDS·PENDING_FIELD_PROMPTS 모두 탁송
+    // 필드다). 그래서 일일기사 요청이 들어와도 도착지 연락처를 묻고, 이용형태(왕복/편도)·
+    // 경유지·도착지 대기시간은 아예 묻지 않은 채 **탁송으로** 등록됐다.
+    //
+    // 그 흐름은 서버에 이미 있다(lib/webIntakeTurn.js의 startPremiumIntake/continuePremiumIntake,
+    // 필드 정의는 lib/intakeFields.js getDailyDriverFields). 그걸 React로 옮기면 같은 FSM이
+    // 세 벌이 된다 — 요금 계산에서 이미 같은 판단을 했다. 그래서 카테고리가 확정되면 그 뒤로는
+    // 서버가 대화를 이어간다.
+    //
+    // 탁송은 여기서 달라지지 않는다 — 아래 serverTurnEnabled 분기가 그대로 남아 있고, 이
+    // 지름길은 프리미엄/일일기사로 판정된 대화에서만 켜진다.
+    if (premiumTurnActiveRef.current) {
+      const handled = await runServerIntakeTurn(sid, text);
+      if (handled) return;
+      // 서버가 안 받으면(취소·만료로 그쪽 상태가 사라진 경우) 프리미엄 대화는 끝난 것이다.
+      premiumTurnActiveRef.current = false;
+    }
+
+    // 접수 대화 판단을 서버로 옮긴 경로(Stage A, 탁송) — 기능 플래그가 꺼져 있으면(기본값)
+    // 이 분기는 아예 실행되지 않고 지금까지와 완전히 동일하게 동작한다.
     let reuseClassified = null;
     if (serverTurnEnabled) {
-      const turnResult = await fetchJson('/chat/' + sid + '/intake-turn', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
-      }).catch(() => ({ ok: false, fallthrough: true }));
-
-      if (turnResult && turnResult.fallthrough === false) {
-        // 서버가 이미 chat_messages에 답을 저장하고 SSE로 중계했다 — catchUpMessages가
-        // dedupe(seenIdsRef)로 안전하게 그 메시지를 화면에 반영한다. phase는 그대로
-        // 'collecting'에 둔다 — 확인/주소선택 상태는 이 파일의 phase가 아니라 서버의
-        // intake_slots_json이 들고 있다.
-        if (turnResult.status) setStatus(turnResult.status);
-        // 서버가 이번 턴에 필수 항목을 다 채웠으면(주소 확인 대기 포함) 우측 폼도 반영한다.
-        // 이게 빠져 있으면 판단이 서버로 넘어간 뒤로 이 폼이 챗봇 파악 내용을 전혀 못
-        // 보여줬다(실사용 지적, 2026-08-11) — 클라이언트 자체 파싱 경로(아래 collectedFields
-        // 기반 분기들)만 onOrderPrefill을 부르고 있었다.
-        if (turnResult.intake && typeof onOrderPrefill === 'function') onOrderPrefill(turnResult.intake);
-        await catchUpMessages(sid);
-        return;
-      }
+      const turnResult = await runServerIntakeTurn(sid, text, { returnResult: true });
+      if (turnResult && turnResult.handled) return;
       // fallthrough — 서버가 다루지 않은 요청(faq/unsupported 등)이니 기존 경로로 넘긴다.
       // 턴 엔진이 이미 분류한 결과가 있으면 parse에 넘겨 Gemini 재분류를 아낀다(응답 지연 절반).
       reuseClassified = (turnResult && turnResult.classified) || null;
@@ -809,6 +871,23 @@ export default function AiIntakeClient({
       // sessionId는 FAQ 검색 문맥 보강(직전 사용자 질문 참고)에만 쓰인다(lib/knowledgeSearch.js).
       body: JSON.stringify({ text, pendingField: activePendingField || null, classified: reuseClassified, sessionId }),
     });
+
+    // 대리(프리미엄)·일일기사로 판정됐으면 여기서 서버 엔진에 넘긴다.
+    //
+    // 되묻는 답을 받는 중(activePendingField)에는 넘기지 않는다 — 그때의 분류는 "그 답을 못
+    // 알아들은 것"인 경우가 많아서, 진행 중인 탁송 수집이 통째로 다른 흐름으로 갈아타 버린다.
+    //
+    // 서버가 같은 문장을 한 번 더 분류한다(Gemini 호출 한 번). 그 대신 첫 문장에서 받은
+    // 이용형태·경유지·대기시간까지 프리미엄 파서가 다시 읽으므로 값이 버려지지 않는다 —
+    // parse가 돌려주는 탁송 필드 집합에는 그 항목들이 아예 없다.
+    if (!activePendingField
+      && (parseData.intent === 'proxy_order' || parseData.intent === 'daily_driver_order')) {
+      premiumTurnActiveRef.current = true;
+      if (await runServerIntakeTurn(sid, text)) return;
+      // 서버가 안 받으면(경유지 여러 개 등 범위 밖) 지름길을 끄고 기존 흐름으로 이어간다 —
+      // 지금까지와 같은 동작이다.
+      premiumTurnActiveRef.current = false;
+    }
 
     if (isAgentRequest(text) || parseData.intent === 'unsupported') {
       // 상담원 연결 전에 도우미에게 한 번 넘겨본다 — 주문 조회/변경/취소는 실제 도구로 처리할

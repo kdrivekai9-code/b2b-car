@@ -125,6 +125,7 @@ const CI_CHECKS = [
   'check-callmaner-photos',
   'check-callmaner-reserved-dispatch',
   'check-callmaner-memo',
+  'check-daily-driver',
   'check-delivery-reservation',
   'check-client-scope',
   'check-dispatch-lookup-tool',

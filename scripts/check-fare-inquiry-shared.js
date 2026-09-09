@@ -51,20 +51,31 @@ const serverRe = (assist.match(/const FARE_QUESTION_RE = (\/[^;]+\/)/) || [])[1]
 check('관문 낱말이 서버와 같다', !!clientRe && clientRe === serverRe, `Next ${clientRe} / 서버 ${serverRe}`);
 // 되묻는 중의 "얼마"는 대개 그 답의 일부다 — 거기서 새면 대화가 어긋난다.
 check('되묻는 중에는 끼어들지 않는다', /!activePendingField && await tryAnswerFare\(/.test(nextClient));
+// 아래 셋은 **tryAnswerFare 본문 안에서** 본다.
+//
+// 처음에는 함수 이름에서 몇 백 글자 안쪽이라는 창으로 봤는데, 그 함수에 일일기사 시간
+// 되묻기 처리가 붙자 창을 벗어나 세 개가 한꺼번에 깨졌다 — 코드는 멀쩡한데 길어졌다는
+// 이유로 깨지는 검사는 배포를 막는 근거가 못 된다. 함수 경계로 자른다.
+const fareFnIdx = nextClient.indexOf('async function tryAnswerFare(');
+const fareFn = nextClient.slice(fareFnIdx, nextClient.indexOf('\n  }\n', fareFnIdx) + 4);
+check('tryAnswerFare 본문을 찾았다', fareFnIdx >= 0 && fareFn.length > 200, `${fareFn.length}자`);
 // 답을 못 만들면 기존 경로(FAQ → 상담원)가 받아야 한다.
-check('답이 없으면 false로 넘긴다', /if \(!data \|\| !data\.ok \|\| !data\.text\) return false;/.test(nextClient));
-check('실패해도 대화를 막지 않는다', /tryAnswerFare[\s\S]{0,700}catch \{[\s\S]{0,200}return false;/.test(nextClient));
+check('답이 없으면 false로 넘긴다',
+  /if \(!data \|\| !data\.ok \|\| !data\.text\)[\s\S]{0,200}?return false;/.test(fareFn));
+check('실패해도 대화를 막지 않는다', /catch \{[\s\S]{0,200}return false;/.test(fareFn));
 // 답은 배차 도우미와 같은 경로로 남긴다(저장·중계·초안 상태가 거기 모여 있다).
-check('답을 replyWithMessage로 남긴다', /tryAnswerFare[\s\S]{0,800}replyWithMessage\(sid, data\.text/.test(nextClient));
+check('답을 replyWithMessage로 남긴다', /replyWithMessage\(sid, data\.text/.test(fareFn));
 
 console.log('\n[어느 상품의 요금인지 밝힌다]');
 // 실사용(2026-09-08): 금액만 답했더니 고객이 곧바로 "탁송요금이나요?"라고 되물었다 —
 // 화면이 답해야 할 것을 고객이 물어야 했다. 이 계산은 거리 기준 탁송 요금표만 본다.
 check('답변에 상품명이 있다', /탁송 예상 요금은/.test(assist));
-// 프리미엄대리는 시간 기준(premium_fare_rules base_hours)이라 출발·도착만으로는 금액이
-// 나오지 않는다. 거리를 시간으로 환산해 추정하면 우리가 만든 숫자가 되므로 하지 않는다.
-check('프리미엄 요금을 거리로 추정하지 않는다',
-  !/calculatePremiumFare/.test(assist), '시간 기준 요금을 거리로 만들면 실제 청구와 어긋난다');
+// 상품마다 입력이 다르다: 탁송·프리미엄대리는 거리, 일일기사는 이용 시간이다.
+// 시간 기준 요금을 거리로 환산해 추정하면 우리가 만든 숫자가 되고 실제 청구와 어긋난다 —
+// 그래서 그 함수에 거리를 넘기지 않는지를 본다(부르는 것 자체는 이제 맞는 동작이다).
+check('일일기사 요금을 거리로 추정하지 않는다',
+  !/calculatePremiumFare\([^)]*distanceKm/.test(assist), '일일기사는 이용 시간을 받아야 한다');
+check('프리미엄대리는 편도 거리 표로 낸다', /calculatePremiumOnewayFare\(/.test(assist));
 // 접수 후 안내(routes/kakaoConsult.js)는 상품이 이미 정해져 있어 여기서 이름을 박으면 안 된다 —
 // 그 경로는 탁송 등록에서만 불리므로 지금은 문제가 없지만, 프리미엄으로 확장되면 갈린다.
 check('접수 후 안내에는 상품명을 박지 않았다',

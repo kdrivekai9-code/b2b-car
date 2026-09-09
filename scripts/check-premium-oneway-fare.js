@@ -118,9 +118,14 @@ check('질문에서 상품을 읽는다', /function askedProduct\(/.test(assist)
 check('일일기사를 대리보다 먼저 본다',
   assist.indexOf('DAILY_DRIVER_RE.test') < assist.indexOf('PREMIUM_RE.test'));
 check('프리미엄은 편도 표로 답한다', /calculatePremiumOnewayFare\(/.test(assist));
-// 시간 기준 상품을 거리로 추정하면 실제 청구와 어긋난다.
-check('일일기사 금액을 거리로 만들지 않는다', !/calculatePremiumFare\(/.test(assist),
+// 시간 기준 상품을 **거리로** 추정하면 실제 청구와 어긋난다.
+//
+// 예전에는 "그 함수를 아예 부르지 마라"였다. 이제는 이용 시간을 받아 부르는 것이 맞는 동작이라
+// (2026-09-09 일일기사 요금 문의) 규칙을 좁혔다 — 인자로 **거리를 넘기지 않는지**를 본다.
+check('일일기사 금액을 거리로 만들지 않는다',
+  !/calculatePremiumFare\([^)]*distanceKm/.test(assist),
   '일일기사는 이용 시간을 받아야 금액이 나온다');
+check('일일기사는 이용 시간으로 계산한다', /calculatePremiumFare\(branchId, hours/.test(assist));
 check('일일기사는 등록된 표를 읽어 안내한다', /describeDailyDriverFare\(/.test(assist));
 // 숫자를 문구에 박으면 관리자가 표를 바꿔도 안내가 조용히 낡는다.
 check('안내 문구에 금액을 박지 않았다', !/90,000원|90000원/.test(assist));

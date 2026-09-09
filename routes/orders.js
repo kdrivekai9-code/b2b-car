@@ -659,12 +659,27 @@ router.post('/ai-intake/fare-inquiry', aiRateLimit, asyncHandler(async (req, res
     branchId: scope.branch_id || req.session.user.branch_id || null,
     // 법인 요금표를 먼저 본다(없으면 지사 표) — 카카오 호출부와 같은 순서다.
     groupId: scope.group_id || req.session.user.group_id || null,
+    // 직전 턴에 "몇 시간 이용하실 예정인지"를 물었으면 이번 답은 그 시간이다.
+    //
+    // 이 상태를 서버에 두지 않고 화면이 들고 있다가 되돌려준다. 답에 요금 낱말이 없어서
+    // ("8시간이요") 화면의 관문에도, 이 함수의 관문에도 안 걸리기 때문에 어느 쪽이든
+    // "방금 물어봤다"는 사실이 필요하다 — 그걸 아는 건 그 문장을 띄운 화면이다.
+    // 시간으로 못 읽으면 buildFareSuggestion이 null을 주고 기존 경로가 그대로 받는다.
+    awaitingDailyDriverHours: !!(req.body && req.body.awaitingHours),
   }).catch((e) => {
     console.error('웹 요금 안내 실패:', e.message);
     return null;
   });
   if (!draft) return res.json({ ok: false, reason: 'no_answer' });
-  res.json({ ok: true, text: draft.text, fare: draft.fare || null });
+  res.json({
+    ok: true,
+    text: draft.text,
+    fare: draft.fare || null,
+    // 화면이 다음 답을 시간으로 받게 알린다.
+    awaitingHours: !!draft.awaitingHours,
+    // 요금표가 없어 상담원으로 넘겨야 하는 경우 — 화면이 상담원 연결 버튼을 띄운다.
+    offerAgent: !!draft.offerAgent,
+  });
 }));
 
 router.post('/ai-intake/activity', asyncHandler(async (req, res) => {

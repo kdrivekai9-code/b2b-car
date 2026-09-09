@@ -533,6 +533,9 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
     [state.memo_customer, state.vehicle_number]
   );
 
+  // 챗봇이 준 경유지를 이미 폼에 올렸는지 — 같은 행을 두 번 만들지 않으려고 기억한다.
+  const prefilledWaypointRef = useRef('');
+
   // AI 챗봇 parse 결과를 폼으로 점진 반영한다. 값이 비어 있지 않은 필드만 덮어쓴다.
   // (빈 문자열로 기존 입력을 지우지 않도록 보호)
   useEffect(() => {
@@ -561,6 +564,22 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
     setIfFilled('final_destination_address_detail', p.final_destination_address_detail);
     if (p.destination_wait_minutes != null) setIfFilled('destination_wait_minutes', String(p.destination_wait_minutes));
     setIfFilled('reservation_hours_bracket', p.reservation_hours_bracket);
+
+    // 경유지 — 챗봇이 받은 주소를 폼에도 올린다.
+    //
+    // 일일기사·프리미엄대리는 경유지를 **항상** 물어본다(사용자 확정 규칙,
+    // lib/intakeFields.js getDailyDriverFields). 그런데 폼은 경유지가 고정 칸이 아니라 행을
+    // 추가하는 구조라, 여기서 만들어주지 않으면 대화로 받은 주소가 폼에서 조용히 사라진다.
+    // 같은 주소가 이미 올라와 있으면 다시 만들지 않는다(프리필은 턴마다 다시 들어온다).
+    // 이미 올린 주소는 다시 만들지 않는다. state.waypoints로 판단하면 프리필이 잇따라 들어올 때
+    // 아직 반영되지 않은 값을 보고 같은 행을 두 번 만든다 — 적용한 주소를 ref로 따로 기억한다.
+    const waypointAddress = String(p.waypoint_address || '').trim();
+    if (waypointAddress && prefilledWaypointRef.current !== waypointAddress) {
+      prefilledWaypointRef.current = waypointAddress;
+      const id = `wp-${++waypointSeq}`;
+      dispatch({ type: 'ADD_WAYPOINT', id });
+      dispatch({ type: 'SET_WAYPOINT_FIELD', id, field: 'address', value: waypointAddress });
+    }
 
     const date = String(p.reserved_date || '').trim();
     const time = String(p.reserved_time || '').trim();

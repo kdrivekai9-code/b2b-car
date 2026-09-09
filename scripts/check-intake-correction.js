@@ -37,6 +37,16 @@ function baseParsed() {
     memo: '회수서류 우편발송',
   };
 }
+// **날짜를 박아두지 않는다.** 처음에는 사고 당일 날짜(2026-09-08)를 그대로 썼는데, 하루가
+// 지나자 그 날짜가 과거가 되어 되묻기(reason:'past')에 걸렸고 검사가 CI에서 깨졌다 —
+// 코드는 그대로인데 달력이 움직여서 깨지는 검사는 배포를 막는 근거가 못 된다.
+function daysFromToday(n) {
+  const d = new Date(Date.now() + n * 86400000);
+  const kst = new Date(d.getTime() + 9 * 3600000);
+  return kst.toISOString().slice(0, 10);
+}
+const TOMORROW = daysFromToday(1);
+
 const NOTHING = {
   isCorrection: true, reservedDate: null, reservedTime: null,
   originAddress: null, originAddressDetail: null, originContact: null,
@@ -46,8 +56,8 @@ const NOTHING = {
 
 console.log('[바뀐 항목만 바뀐다]');
 {
-  const r = mergeDelta(baseParsed(), { ...NOTHING, reservedDate: '2026-09-08', reservedTime: '18:30' });
-  check('예약일이 바뀐다', r.parsed.when.date === '2026-09-08' && r.parsed.when.time === '18:30',
+  const r = mergeDelta(baseParsed(), { ...NOTHING, reservedDate: TOMORROW, reservedTime: '18:30' });
+  check('예약일이 바뀐다', r.parsed.when.date === TOMORROW && r.parsed.when.time === '18:30',
     `${r.parsed.when.date} ${r.parsed.when.time}`);
   // 이것이 사고의 핵심이다 — 날짜를 고쳐달라고 했는데 도착지가 바뀌었다.
   check('도착지는 그대로다', r.parsed.destination.address === '경기도 화성시 병점구 진안동 922-1',
@@ -86,7 +96,7 @@ console.log('\n[날짜를 새로 받으면 추정 표시를 지운다]');
 {
   const p = baseParsed();
   p.when.dateRolled = true; // 우리가 연도를 밀어서 만든 값이었다
-  const r = mergeDelta(p, { ...NOTHING, reservedDate: '2026-09-08' });
+  const r = mergeDelta(p, { ...NOTHING, reservedDate: TOMORROW });
   // 고객이 직접 말한 값이므로 "우리가 추정했다"는 표시가 남으면 안 된다 — 남으면 되묻기가
   // rolled_far로 또 걸려 같은 질문이 반복된다.
   check('dateRolled가 꺼진다', r.parsed.when.dateRolled === false);
