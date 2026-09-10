@@ -1,6 +1,7 @@
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import AppShell from '../../_components/AppShell';
+import ConfirmForm from '../../_components/ConfirmForm';
 import { fetchExpressJson } from '../../_lib/internalFetch';
 
 export const dynamic = 'force-dynamic';
@@ -54,9 +55,9 @@ export default async function KnowledgeBaseCategoriesPage() {
                   <td>{c.created_at}</td>
                   <td>
                     <a className="btn small" href={`/knowledge-base/new?category=${encodeURIComponent(c.name)}`}>질의응답 추가</a>
-                    <form style={{ display: 'inline' }} method="POST" action={`/knowledge-base/categories/${c.id}/delete`}>
+                    <ConfirmForm message="삭제하시겠습니까?" style={{ display: 'inline' }} method="POST" action={`/knowledge-base/categories/${c.id}/delete`}>
                       <button className="btn small secondary" type="submit">삭제</button>
-                    </form>
+                    </ConfirmForm>
                   </td>
                 </tr>
               ))}

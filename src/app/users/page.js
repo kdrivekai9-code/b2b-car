@@ -1,6 +1,7 @@
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import AppShell from '../_components/AppShell';
+import ConfirmForm from '../_components/ConfirmForm';
 
 export const dynamic = 'force-dynamic';
 export const preferredRegion = 'icn1';
@@ -60,9 +61,9 @@ export default async function UsersPage() {
                   <td>
                     <div className="table-actions">
                       <a className="btn small secondary" href={'/users/' + u.id + '/edit'}>수정</a>
-                      <form method="POST" action={'/users/' + u.id + '/revoke-session'} style={{ display: 'inline' }}>
+                      <ConfirmForm message="이 계정의 현재 접속을 종료할까요?" method="POST" action={'/users/' + u.id + '/revoke-session'} style={{ display: 'inline' }}>
                         <button className="btn small secondary" type="submit" disabled={!u.is_logged_in}>세션 만료</button>
-                      </form>
+                      </ConfirmForm>
                     </div>
                   </td>
                 </tr>

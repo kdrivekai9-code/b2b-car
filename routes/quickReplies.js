@@ -38,6 +38,20 @@ router.use(requireAuth, requireRole('admin'));
 
 const CATEGORIES = ['인사', '대기', '접수', '완료', '안내', '기타'];
 
+// 관리 화면(Next)이 읽는 데이터.
+//
+// 위 /data.json과 이름을 나눈 이유: 그쪽은 **채팅 입력창**이 쓰는 응답이라 활성 문구만 담고
+// 본문의 {상담원}까지 치환해서 준다. 관리 화면은 중지된 것도 원문 그대로 봐야 한다 —
+// 한 엔드포인트에 두 목적을 얹으면 한쪽을 고칠 때 다른 쪽이 조용히 바뀐다.
+router.get('/admin-data.json', asyncHandler(async (req, res) => {
+  const replies = await db.all(
+    `SELECT q.*, u.name AS created_by_name FROM quick_replies q
+     LEFT JOIN users u ON u.id = q.created_by
+     ORDER BY q.is_active DESC, q.sort_order, q.id`
+  ).catch(() => []);
+  res.json({ currentUser: req.session.user, replies, categories: CATEGORIES });
+}));
+
 router.get('/', asyncHandler(async (req, res) => {
   const replies = await db.all(
     `SELECT q.*, u.name AS created_by_name FROM quick_replies q

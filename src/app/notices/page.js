@@ -1,6 +1,7 @@
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import AppShell from '../_components/AppShell';
+import ConfirmForm from '../_components/ConfirmForm';
 
 export const dynamic = 'force-dynamic';
 export const preferredRegion = 'icn1';
@@ -53,9 +54,9 @@ export default async function NoticesPage() {
                     <td>
                       <div className="table-actions">
                         <a className="btn small secondary" href={'/notices/' + n.id + '/edit'}>수정</a>
-                        <form method="POST" action={'/notices/' + n.id + '/delete'} style={{ display: 'inline' }}>
+                        <ConfirmForm message="삭제하시겠습니까?" method="POST" action={'/notices/' + n.id + '/delete'} style={{ display: 'inline' }}>
                           <button className="btn small secondary" type="submit">삭제</button>
-                        </form>
+                        </ConfirmForm>
                       </div>
                     </td>
                   )}

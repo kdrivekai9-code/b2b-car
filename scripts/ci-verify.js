@@ -129,6 +129,7 @@ const CI_CHECKS = [
   'check-daily-driver-fare-form',
   'check-delivery-reservation',
   'check-client-scope',
+  'check-confirm-parity',
   'check-dispatch-lookup-tool',
   'check-env-example-flags',
   'check-driver-chat',

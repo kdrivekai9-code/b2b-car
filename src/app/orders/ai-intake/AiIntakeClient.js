@@ -1511,7 +1511,7 @@ export default function AiIntakeClient({
             가리키는 세션으로 갈 길이 없으면 배지가 오히려 답답하다(ChatHistoryMenu 주석). */}
         <ChatHistoryMenu sessionId={sessionId} />
         <span className="ai-chat-title">
-          🤖 AI 챗봇 + 👤 상담원 채팅 (Next)
+          🤖 AI 챗봇 + 👤 상담원 채팅
           {unreadTotal > 0 && (
             <span
               className="unread-badge ai-chat-title-badge"

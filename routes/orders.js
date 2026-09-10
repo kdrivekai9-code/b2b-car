@@ -2562,6 +2562,27 @@ router.get('/team-feed', asyncHandler(async (req, res) => {
   });
 }));
 
+// 위 화면의 Next 판(src/app/orders/team-feed) — 같은 판정을 서버에서 한 번만 한다.
+// 경로가 두 세그먼트라 프록시의 /orders/:id 블록에 걸리지 않는다(한 세그먼트만 잡는다).
+router.get('/team-feed/data.json', asyncHandler(async (req, res) => {
+  const u = req.session.user;
+  if (!u) return res.status(401).json({ error: '로그인이 필요합니다.' });
+  // 개인 딜러 차단은 화면과 같은 규칙이다 — 여기서 빠지면 주소만 알면 데이터가 다 나간다.
+  if (clientScope.isDealer(u)) return res.status(403).json({ error: '접근 권한이 없습니다.' });
+  const groupId = u.group_id || null;
+  const group = groupId
+    ? await db.get('SELECT id, name, share_activity_feed FROM groups_tbl WHERE id = ?', [groupId]).catch(() => null)
+    : null;
+  const enabled = !!(group && group.share_activity_feed);
+  res.json({
+    currentUser: u,
+    groupName: group ? group.name : null,
+    enabled,
+    activities: enabled ? await listGroupActivity(groupId, 50) : [],
+    kindLabels: ACTIVITY_KIND_LABELS,
+  });
+}));
+
 router.get('/:id', asyncHandler(async (req, res) => {
   const order = await db.get(`
     SELECT o.*, b.name AS branch_name, g.name AS group_name, pm.name AS payment_method_name, d.name AS driver_name,

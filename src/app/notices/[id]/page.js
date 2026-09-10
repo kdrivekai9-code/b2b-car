@@ -1,6 +1,7 @@
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import AppShell from '../../_components/AppShell';
+import ConfirmForm from '../../_components/ConfirmForm';
 import { fetchExpressJson } from '../../_lib/internalFetch';
 
 export const dynamic = 'force-dynamic';
@@ -33,9 +34,9 @@ export default async function NoticeDetailPage({ params }) {
           {isAdmin && (
             <>
               <a className="btn secondary" href={`/notices/${notice.id}/edit`}>수정</a>
-              <form method="POST" action={`/notices/${notice.id}/delete`} style={{ display: 'inline' }}>
+              <ConfirmForm message="삭제하시겠습니까?" method="POST" action={`/notices/${notice.id}/delete`} style={{ display: 'inline' }}>
                 <button className="btn danger" type="submit">삭제</button>
-              </form>
+              </ConfirmForm>
             </>
           )}
         </div>

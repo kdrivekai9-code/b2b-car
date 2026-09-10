@@ -32,6 +32,7 @@ const PATH_FLAGS = {
   '/inquiries': 'NEXT_STAGE1_INQUIRIES_ENABLED',
   '/orders/new': 'NEXT_STAGE2_ORDER_FORM_ENABLED',
   '/orders/ai-intake': 'NEXT_STAGE3_AI_INTAKE_ENABLED',
+  '/orders/team-feed': 'NEXT_TEAM_FEED_ENABLED',
   '/users': 'NEXT_USERS_ENABLED',
   '/users/new': 'NEXT_USERS_ENABLED',
   '/drivers': 'NEXT_DRIVERS_ENABLED',
@@ -51,6 +52,7 @@ const PATH_FLAGS = {
   '/faq': 'NEXT_FAQ_ENABLED',
   '/push/settings': 'NEXT_PUSH_SETTINGS_ENABLED',
   '/access-logs': 'NEXT_ACCESS_LOGS_ENABLED',
+  '/quick-replies': 'NEXT_QUICK_REPLIES_ENABLED',
   '/login': 'NEXT_LOGIN_ENABLED',
   '/ferry-fares': 'NEXT_FERRY_FARES_ENABLED',
 };
@@ -117,7 +119,7 @@ export function proxy(req) {
   // 'new'를 제외할 때 같은 함정을 이미 겪었는데 형제 경로를 함께 보지 않은 것이다. 앞으로
   // /orders/ 아래 이름 있는 경로를 Next로 옮길 때마다 여기에 더해야 한다 —
   // scripts/check-proxy-named-paths.js가 PATH_FLAGS와 이 목록을 대조해 잡는다.
-  const ORDERS_NAMED_PATHS = ['new', 'ai-intake'];
+  const ORDERS_NAMED_PATHS = ['new', 'ai-intake', 'team-feed'];
   const orderIdMatch = pathname.match(/^\/orders\/([^/]+)$/);
   if (orderIdMatch && ORDERS_NAMED_PATHS.indexOf(orderIdMatch[1]) < 0) {
     const isNumericId = /^\d+$/.test(orderIdMatch[1]);
@@ -175,4 +177,4 @@ export function proxy(req) {
 
 // Next's proxy bundler statically analyzes this export, so it's kept as a literal array
 // (a computed expression like Object.keys(PATH_FLAGS) may not be statically evaluable).
-export const config = { matcher: ['/', '/orders', '/inquiries', '/chat/sessions', '/chat/sessions/:id', '/chat/guide', '/orders/new', '/orders/ai-intake', '/orders/:id', '/users', '/users/new', '/users/:id/edit', '/drivers', '/drivers/new', '/drivers/:id/edit', '/groups', '/groups/new', '/groups/:id/edit', '/groups/:id/users', '/branches', '/notices', '/notices/new', '/notices/:id', '/notices/:id/edit', '/location-aliases', '/location-aliases/new', '/location-aliases/:id/edit', '/settings', '/knowledge-base', '/knowledge-base/new', '/knowledge-base/categories', '/knowledge-base/:id/edit', '/faq', '/push/settings', '/access-logs', '/login', '/ferry-fares', '/upload/:token'] };
+export const config = { matcher: ['/', '/orders', '/inquiries', '/chat/sessions', '/chat/sessions/:id', '/chat/guide', '/orders/new', '/orders/ai-intake', '/orders/team-feed', '/orders/:id', '/users', '/users/new', '/users/:id/edit', '/drivers', '/drivers/new', '/drivers/:id/edit', '/groups', '/groups/new', '/groups/:id/edit', '/groups/:id/users', '/branches', '/notices', '/notices/new', '/notices/:id', '/notices/:id/edit', '/location-aliases', '/location-aliases/new', '/location-aliases/:id/edit', '/settings', '/knowledge-base', '/knowledge-base/new', '/knowledge-base/categories', '/knowledge-base/:id/edit', '/faq', '/push/settings', '/access-logs', '/quick-replies', '/login', '/ferry-fares', '/upload/:token'] };
