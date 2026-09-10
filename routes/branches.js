@@ -120,6 +120,28 @@ branchDataRoute('operating-hours', async (req) => {
   };
 });
 
+// 고객 통보·배차지연은 전용 로더가 이미 있다(EJS 렌더와 같은 함수를 쓴다) — 값이 갈릴 자리가
+// 없도록 그대로 재사용한다.
+router.get('/:id/customer-notifications/data.json', asyncHandler(async (req, res) => {
+  const { branch, branches, events, variables } = await loadCustomerNotificationPage(req.params.id);
+  if (!branch) return res.status(404).json({ error: '지사를 찾을 수 없습니다.' });
+  res.json({
+    currentUser: req.session.user,
+    branch, branches, events, variables,
+    // 마이그레이션(20260810010000) 적용 전이면 컬럼이 없다 — 그때는 기본값을 보여준다.
+    agentIdleReleaseMinutes: branch.agent_idle_release_minutes == null
+      ? DEFAULT_AGENT_IDLE_RELEASE_MINUTES
+      : Number(branch.agent_idle_release_minutes),
+    defaultAgentIdleReleaseMinutes: DEFAULT_AGENT_IDLE_RELEASE_MINUTES,
+  });
+}));
+
+router.get('/:id/dispatch-delay/data.json', asyncHandler(async (req, res) => {
+  const { branch, branches, groups, settings } = await loadDispatchDelayPage(req.params.id);
+  if (!branch) return res.status(404).json({ error: '지사를 찾을 수 없습니다.' });
+  res.json({ currentUser: req.session.user, branch, branches, groups, settings, callTypes: DISPATCH_CALL_TYPES });
+}));
+
 // 지사 기본 정보. 계정 목록은 이 화면에서만 쓰므로 여기서 함께 읽는다.
 branchDataRoute('edit', async (req) => ({
   // 정렬은 EJS 렌더와 같아야 한다(ORDER BY id) — 다르면 플래그를 켜고 끌 때 목록 순서가
