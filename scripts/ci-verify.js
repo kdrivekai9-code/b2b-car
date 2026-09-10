@@ -130,7 +130,7 @@ const CI_CHECKS = [
   'check-delivery-reservation',
   'check-client-scope',
   'check-branch-fare-form-parity',
-  'check-branch-tabs-parity',
+  'check-settings-tabs-parity',
   'check-confirm-parity',
   'check-dispatch-lookup-tool',
   'check-env-example-flags',

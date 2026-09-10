@@ -130,6 +130,66 @@ router.post('/', asyncHandler(async (req, res) => {
   res.redirect('/groups');
 }));
 
+// ---------------- Next 화면이 읽는 데이터 ----------------
+//
+// 법인 설정 화면들은 전부 "법인 하나 + 법인 목록(탭 오른쪽 전환) + 그 화면의 값"을 본다.
+// 그 공통부를 여기 한 번만 둔다(지사의 branchDataRoute와 짝을 이룬다).
+//
+// 각 엔드포인트는 EJS 렌더와 **같은 값**을 돌려준다. 다르면 플래그를 켜고 끌 때마다 화면이
+// 달라지고, 그 차이가 어디서 왔는지 찾는 데 시간이 든다.
+function groupDataRoute(subPath, extra) {
+  router.get(`/:id/${subPath}/data.json`, asyncHandler(async (req, res) => {
+    const { group, groups } = await loadGroupWithSiblings(req.params.id);
+    if (!group) return res.status(404).json({ error: '법인을 찾을 수 없습니다.' });
+    const rest = extra ? await extra(req, { group, groups }) : {};
+    res.json({ currentUser: req.session.user, group, groups, ...rest });
+  }));
+}
+
+// 두 요금표 화면 — 법인 표가 없으면 소속 지사 표를 쓴다(폴백). 화면은 "지금 무엇이
+// 적용되고 있는지"를 밝혀야 해서 지사 표도 함께 읽는다.
+groupDataRoute('daily-driver-fare-rules', async (req, { group }) => {
+  const [tiers, branchTiers] = await Promise.all([
+    db.all('SELECT * FROM group_daily_driver_fare_rules WHERE group_id = ? ORDER BY tier_seq', [req.params.id]),
+    db.all('SELECT * FROM premium_fare_rules WHERE branch_id = ? ORDER BY tier_seq', [group.branch_id]),
+  ]);
+  return { tiers, branchTiers };
+});
+
+groupDataRoute('premium-fare-rules', async (req, { group }) => {
+  // 마이그레이션(20260908040000) 전이면 표가 없다 — "미등록"으로 보이는 게 맞다.
+  const [tiers, branchTiers] = await Promise.all([
+    db.all('SELECT * FROM group_premium_oneway_fare_rules WHERE group_id = ? ORDER BY tier_seq', [req.params.id]).catch(() => []),
+    db.all('SELECT * FROM premium_oneway_fare_rules WHERE branch_id = ? ORDER BY tier_seq', [group.branch_id]).catch(() => []),
+  ]);
+  return { tiers, branchTiers };
+});
+
+groupDataRoute('customer-notifications', async (req, { group }) => {
+  const [saved, branchSaved] = await Promise.all([
+    db.all('SELECT * FROM group_customer_notifications WHERE group_id = ?', [req.params.id]).catch(() => []),
+    db.all('SELECT * FROM branch_customer_notifications WHERE branch_id = ?', [group.branch_id]).catch(() => []),
+  ]);
+  return {
+    events: buildEventRows(saved, { inheritedRows: branchSaved }),
+    variables: kakaoOrderNotify.TEMPLATE_VARIABLES,
+    // 저장된 설정이 없으면 지사 값을 보여주는 중이다 — 화면이 그 사실을 밝혀야 한다.
+    hasOwnSettings: saved.length > 0,
+  };
+});
+
+groupDataRoute('dispatch-delay', async (req, { group }) => {
+  const setting = await db.get(
+    'SELECT * FROM dispatch_delay_settings WHERE branch_id = ? AND group_id = ?',
+    [group.branch_id, req.params.id]
+  ).catch(() => null);
+  return {
+    setting,
+    callTypes: DISPATCH_CALL_TYPES,
+    selected: setting ? String(setting.call_types || '').split(',').map((v) => v.trim()) : [],
+  };
+});
+
 router.get('/:id/edit/data.json', asyncHandler(async (req, res) => {
   // groups는 탭 줄 오른쪽의 법인 전환 선택박스가 쓴다 — 이게 없으면 다른 탭에는 있는 전환이
   // 법인정보 화면에서만 사라진다(다른 화면은 loadGroupWithSiblings로 이미 함께 넘긴다).
