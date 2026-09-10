@@ -138,6 +138,7 @@ const CI_CHECKS = [
   'check-driver-location-map',
   'check-driver-location-source',
   'check-driver-last-fix',
+  'check-callmaner-web-url',
   'check-driver-trip-steps',
   'check-driver-push',
   'check-driver-token',

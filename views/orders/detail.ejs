@@ -569,6 +569,14 @@
       <h2>📍 기사님 위치</h2>
       <div id="driverLoc" data-order-id="<%= order.id %>">
         <p class="hint" id="driverLocText">위치를 확인하는 중입니다…</p>
+        <%# 콜마너가 발급한 고객용 위치조회 링크. 배차기사 현위치 전문이 운행시작 뒤 빈 값을
+            주는 구간이 있어(문의서 5번), 그 링크가 오는 건이라면 여기서 바로 열 수 있게 한다.
+            아직 한 건도 받은 적이 없어 대개 안 보인다(문의서 6번). %>
+        <% if (order.callmaner_web_url) { %>
+          <p style="margin:0 0 8px;">
+            <a class="btn secondary small" href="<%= order.callmaner_web_url %>" target="_blank" rel="noopener">🔗 콜마너 위치조회 열기</a>
+          </p>
+        <% } %>
         <%# 세로를 1.5배로(280 → 420px, 사용자 지정) — 지도가 납작해서 어디로 가는 중인지
             가늠하기 어려웠다. Next 화면도 같은 값이다. %>
         <div id="driverLocMap" style="width:100%;height:420px;background:#e9ecef;border-radius:4px;display:none;"></div>

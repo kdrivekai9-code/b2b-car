@@ -30,7 +30,7 @@ const REASON_TEXT = {
 // 여기서 넓게 잡으면 완료된 오더마다 쓸데없이 MCP를 두드린다.
 const TRACKABLE = new Set(['기사배정', '운행시작']);
 
-export default function DriverLocationMap({ orderId, status, initial = null }) {
+export default function DriverLocationMap({ orderId, status, initial = null, webUrl = null }) {
   // 서버가 처음 값을 함께 내려준다(page.js) — 그래야 첫 화면부터 사실을 말한다. 이게 없으면
   // 클라이언트가 붙기 전까지 "위치를 확인하는 중입니다…"만 떠 있고, 클라이언트가 못 붙는
   // 상황에서는 그 문구가 영원히 남는다(실측 2026-09-08: 그 상태를 "위치가 안 나온다"로 봤다).
@@ -129,6 +129,14 @@ export default function DriverLocationMap({ orderId, status, initial = null }) {
     <div className="card">
       <div className="section-title">📍 기사님 위치</div>
 
+      {/* 콜마너가 발급한 고객용 위치조회 링크. 배차기사 현위치 전문이 운행시작 뒤 빈 값을
+          주는 구간이 있어(문의서 5번), 그 링크가 오는 건이라면 여기서 바로 연다.
+          아직 한 건도 받은 적이 없어 대개 안 보인다. EJS(views/orders/detail.ejs)도 같다. */}
+      {webUrl && (
+        <p style={{ margin: '0 0 8px' }}>
+          <a className="btn secondary small" href={webUrl} target="_blank" rel="noopener noreferrer">🔗 콜마너 위치조회 열기</a>
+        </p>
+      )}
       {!data ? (
         <p className="hint">위치를 확인하는 중입니다…</p>
       ) : !data.available ? (

@@ -1,0 +1,14 @@
+-- 콜마너가 발급하는 고객용 위치조회 링크.
+--
+-- 콜마너는 고객에게 이런 주소를 전달해 위치를 보여준다고 한다(사용자 확인 2026-09-10):
+--   https://www.cd1.kr/cust-web/reception/?supplierId=S-12345&callToken=<44자 토큰>
+-- supplierId는 우리 providerId(B100-12345-AP12345)의 지사 번호로 만들 수 있지만 callToken은
+-- 불투명한 값이라 유추할 수 없다 — 콜마너가 오더별로 줘야 한다.
+--
+-- 받을 자리는 이미 응답에 둘 있다: 접수 응답의 rs.web_url(코드가 읽고는 있었는데 아무도
+-- 쓰지 않아 버려지고 있었다)과 OrderHistory 각 행의 receipt_url. 실측 2026-09-10 기준 이력
+-- 31건 전부 빈 문자열이라 아직 한 번도 온 적이 없다 — 콜마너 쪽 설정이 필요한 것으로 보이고
+-- 문의서 6번으로 물어뒀다. 그래도 오는 순간 잡아두려고 칸을 먼저 만든다.
+--
+-- 배차기사 현위치 전문(TrackingDriver)이 운행시작 뒤 빈 값을 주는 문제의 우회로이기도 하다.
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS callmaner_web_url text;

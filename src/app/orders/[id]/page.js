@@ -109,7 +109,7 @@ export default async function OrderDetailPage({ params }) {
         {/* 첫 값은 서버가 함께 내려준다(data.json의 driverLocation) — 클라이언트가 붙기 전에도
             사실을 말한다. 예전에는 첫 화면이 항상 "위치를 확인하는 중입니다…"였고, 클라이언트가
             못 붙는 상황에서는 그 문구가 영원히 남아 "위치가 안 나온다"로 보였다. */}
-        <DriverLocationMap orderId={id} status={data.order.status} initial={data.driverLocation || null} />
+        <DriverLocationMap orderId={id} status={data.order.status} initial={data.driverLocation || null} webUrl={data.order.callmaner_web_url || null} />
 
         {data.canViewPhotos && (
           <div className="card">

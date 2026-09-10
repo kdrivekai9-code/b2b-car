@@ -9,6 +9,7 @@ const asyncHandler = require('../middleware/asyncHandler');
 const callmaner = require('../lib/callmaner');
 const callmanerPhotos = require('../lib/callmanerPhotos');
 const driverLocation = require('../lib/driverLocation');
+const callmanerRegister = require('../lib/callmanerRegister');
 const photoAvailability = require('../lib/photoAvailability');
 const odometerOcr = require('../lib/odometerOcr');
 const plateOcr = require('../lib/plateOcr');
@@ -416,6 +417,14 @@ async function syncOrdersByConfSlip(branch) {
       { wk_name: info.wkInfo, conf_slip: order.callmaner_conf_slip },
       info.status === '배차' ? '02' : null
     ).catch((e) => console.error(`기사정보 동기화 실패 (conf_slip=${order.callmaner_conf_slip}):`, e.message));
+
+    // 콜마너가 고객용 위치조회 링크를 이력에 실어주면 잡아둔다(rs.data[].receipt_url).
+    // 실측 2026-09-10 기준 우리 접수건 31건 전부 빈 문자열이지만, 콜마너 쪽 설정이 켜지면
+    // 그 순간부터 값이 온다 — 그때 코드를 고치러 오지 않아도 되게 미리 받아둔다.
+    if (info.receiptUrl && info.receiptUrl !== order.callmaner_web_url) {
+      await callmanerRegister.saveCallmanerWebUrl(order.id, info.receiptUrl)
+        .catch((e) => console.error(`콜마너 위치조회 링크 저장 실패 (oid=${order.oid}):`, e.message));
+    }
 
     // 기사 위치를 매분 한 번 모아둔다. 아래에 "바뀐 게 없으면 continue"가 있어 **그 앞에**
     // 둔다 — 위치는 상태가 안 바뀌어도 계속 움직인다.
