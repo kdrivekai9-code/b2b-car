@@ -47,6 +47,28 @@ cronRouter.get('/cron/check', checkCronAuth, asyncHandler(async (req, res) => {
 
 // 실제로 알림이 나갔는지 확인하는 화면. 이게 없으면 "장애였는데 알림이 왔었나?"를 되짚지 못해
 // 이 장치 자체를 믿을 수 없다.
+// 위 화면의 Next 판(src/app/alerts)이 읽는다 — 같은 조회를 한 번만 두려고 함수로 뺐다.
+async function loadAlertsPageData() {
+  const [logs, states, cfg] = await Promise.all([
+    db.all('SELECT * FROM system_alert_log ORDER BY id DESC LIMIT 100').catch(() => null),
+    db.all('SELECT * FROM system_alert_state ORDER BY last_sent_at DESC').catch(() => []),
+    systemAlert.loadSettings(),
+  ]);
+  return {
+    logs: logs || [],
+    // 표가 없으면(마이그레이션 전) 빈 목록으로 뜨는 대신 이유를 밝힌다.
+    migrationMissing: logs === null,
+    states: states || [],
+    cfg,
+    settingFields: SETTING_FIELDS.map((f) => ({ ...f, value: cfg[f.name] })),
+    syncLimit: Number(process.env.CALLMANER_SYNC_ORDER_LIMIT || 500),
+  };
+}
+
+router.get('/data.json', requireAuth, requireRole('admin'), asyncHandler(async (req, res) => {
+  res.json({ currentUser: req.session.user, ...(await loadAlertsPageData()) });
+}));
+
 router.get('/', requireAuth, requireRole('admin'), asyncHandler(async (req, res) => {
   const [logs, states, cfg] = await Promise.all([
     db.all('SELECT * FROM system_alert_log ORDER BY id DESC LIMIT 100').catch(() => null),

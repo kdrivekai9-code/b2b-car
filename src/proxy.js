@@ -54,6 +54,10 @@ const PATH_FLAGS = {
   '/access-logs': 'NEXT_ACCESS_LOGS_ENABLED',
   '/quick-replies': 'NEXT_QUICK_REPLIES_ENABLED',
   '/my/photos': 'NEXT_MY_PHOTOS_ENABLED',
+  '/alerts': 'NEXT_ALERTS_ENABLED',
+  '/integration-errors': 'NEXT_INTEGRATION_ERRORS_ENABLED',
+  '/vehicle-models': 'NEXT_VEHICLE_MODELS_ENABLED',
+  '/kakao-accounts': 'NEXT_KAKAO_ACCOUNTS_ENABLED',
   '/login': 'NEXT_LOGIN_ENABLED',
   '/ferry-fares': 'NEXT_FERRY_FARES_ENABLED',
 };
@@ -201,4 +205,4 @@ export function proxy(req) {
 
 // Next's proxy bundler statically analyzes this export, so it's kept as a literal array
 // (a computed expression like Object.keys(PATH_FLAGS) may not be statically evaluable).
-export const config = { matcher: ['/', '/orders', '/inquiries', '/inquiries/:id', '/chat/sessions', '/chat/sessions/:id', '/chat/guide', '/orders/new', '/orders/ai-intake', '/orders/team-feed', '/orders/:id', '/users', '/users/new', '/users/:id/edit', '/drivers', '/drivers/new', '/drivers/:id/edit', '/groups', '/groups/new', '/groups/:id/edit', '/groups/:id/users', '/branches', '/notices', '/notices/new', '/notices/:id', '/notices/:id/edit', '/location-aliases', '/location-aliases/new', '/location-aliases/:id/edit', '/settings', '/knowledge-base', '/knowledge-base/new', '/knowledge-base/categories', '/knowledge-base/:id/edit', '/faq', '/push/settings', '/access-logs', '/quick-replies', '/my/photos', '/my/photos/:id', '/login', '/ferry-fares', '/upload/:token'] };
+export const config = { matcher: ['/', '/orders', '/inquiries', '/inquiries/:id', '/chat/sessions', '/chat/sessions/:id', '/chat/guide', '/orders/new', '/orders/ai-intake', '/orders/team-feed', '/orders/:id', '/users', '/users/new', '/users/:id/edit', '/drivers', '/drivers/new', '/drivers/:id/edit', '/groups', '/groups/new', '/groups/:id/edit', '/groups/:id/users', '/branches', '/notices', '/notices/new', '/notices/:id', '/notices/:id/edit', '/location-aliases', '/location-aliases/new', '/location-aliases/:id/edit', '/settings', '/knowledge-base', '/knowledge-base/new', '/knowledge-base/categories', '/knowledge-base/:id/edit', '/faq', '/push/settings', '/access-logs', '/quick-replies', '/my/photos', '/my/photos/:id', '/alerts', '/integration-errors', '/vehicle-models', '/kakao-accounts', '/login', '/ferry-fares', '/upload/:token'] };

@@ -1,0 +1,192 @@
+// 장애 알림 — views/alerts/index.ejs의 Next 판.
+//
+// 감시 기준 저장·테스트 발송은 순수 HTML form이 Express로 POST한다. 읽기와 폼뿐이라
+// 서버 컴포넌트 하나로 끝난다.
+import { headers } from 'next/headers';
+import { redirect } from 'next/navigation';
+import AppShell from '../_components/AppShell';
+
+export const dynamic = 'force-dynamic';
+export const preferredRegion = 'icn1';
+export const maxDuration = 30;
+
+// 환경변수라 이 화면에서 못 바꾸는 값들 — 어디서 바꾸는지 함께 적어야 헤매지 않는다.
+const ENV_ROWS = [
+  ['CALLMANER_SYNC_ORDER_LIMIT', '500', '1분에 상태를 확인할 오더 수'],
+  ['CALLMANER_SYNC_CONCURRENCY', '10', '동시 호출 수 — 상한을 올리면 이것도 같이 올려야 시간이 줄어듭니다'],
+  ['CALLMANER_SYNC_TIME_BUDGET_MS', '45000', '한 회차 제한 시간. 넘기면 남은 오더는 다음 회차로 미룹니다'],
+  ['CALLMANER_SYNC_LOOKBACK_DAYS', '3', '며칠 전 접수 건까지 확인할지'],
+];
+
+const kst = (v) => (v ? new Date(v).toLocaleString('ko-KR') : '-');
+
+export default async function AlertsPage({ searchParams }) {
+  const sp = (await searchParams) || {};
+  const hdrs = await headers();
+  const host = hdrs.get('host');
+  const proto = hdrs.get('x-forwarded-proto') || 'https';
+
+  const res = await fetch(`${proto}://${host}/alerts/data.json`, {
+    headers: { cookie: hdrs.get('cookie') || '', 'X-Requested-With': 'fetch' },
+    cache: 'no-store',
+  });
+  if (res.status === 401 || res.status === 403) redirect('/login');
+  if (!res.ok) throw new Error('장애 알림 정보를 불러오지 못했습니다 (' + res.status + ')');
+
+  const { currentUser, logs, migrationMissing, states, cfg, settingFields, syncLimit } = await res.json();
+
+  return (
+    <AppShell currentUser={currentUser} activePath="/alerts">
+      <div className="page-head-row">
+        <div>
+          <h1 className="page-title">장애 알림</h1>
+          <p className="page-sub">
+            연동 오류가 몰아치거나 콜마너 동기화가 밀리면 <b>웹푸시</b>로 알립니다.
+            로그에 쌓이기만 하고 아무도 모르는 상태를 없애기 위한 장치입니다.
+          </p>
+        </div>
+        <div className="page-head-actions">
+          <a className="btn secondary" href="/alerts/dry-run" target="_blank" rel="noreferrer">지금 걸리는 것 보기</a>
+          <form method="POST" action="/alerts/test" style={{ display: 'inline' }}>
+            <button className="btn" type="submit">테스트 알림 보내기</button>
+          </form>
+        </div>
+      </div>
+
+      {sp.saved === '1' && <div className="toast">저장되었습니다. 다음 점검(최대 5분)부터 적용됩니다.</div>}
+      {sp.error && <div className="alert error">{sp.error}</div>}
+      {sp.tested === '1' && (
+        <div className="toast">테스트 알림을 보냈습니다. 폰에 안 오면 <a href="/push/settings">알림 설정</a>을 확인하세요.</div>
+      )}
+      {migrationMissing && (
+        <div className="alert error">알림 표가 아직 없습니다. 마이그레이션(20260829020000)을 실행해주세요.</div>
+      )}
+
+      <div className="card">
+        <div className="section-title">⚙️ 감시 기준</div>
+        <div className="table-wrap">
+          <table className="table">
+            <tbody>
+              <tr>
+                <td style={{ width: '34%' }}><b>연동 오류 급증</b></td>
+                <td>{cfg.errorWindowMin}분 안에 같은 곳에서 <b>{cfg.errorThreshold}건</b> 이상</td>
+              </tr>
+              <tr>
+                <td><b>동기화 백로그</b></td>
+                <td>
+                  진행 중 오더가 1분 배치 상한(<b>{syncLimit}건</b>)의 <b>{cfg.backlogPercent}%</b> 이상
+                  <div className="page-sub">넘치는 만큼 오더 확인이 다음 차례로 밀려 배차 감지·고객 통보가 늦어집니다.</div>
+                </td>
+              </tr>
+              <tr>
+                <td><b>동기화 시간 초과</b></td>
+                <td>
+                  한 회차를 제한 시간 안에 못 끝낸 일이 {cfg.errorWindowMin}분 안에 <b>{cfg.timeBudgetThreshold}회</b> 이상
+                  <div className="page-sub">건수가 아니라 <b>속도</b> 문제입니다 — 콜마너 응답이 느려지면 오더가 적어도 걸립니다.</div>
+                </td>
+              </tr>
+              <tr>
+                <td><b>동기화 정지</b></td>
+                <td>
+                  진행 중 오더가 있는데 <b>{cfg.stalledMin}분</b>간 상태 갱신 0건
+                  <div className="page-sub">2026-08-19~24에 7일간 통보가 멈췄던 사고가 이 경우입니다.</div>
+                </td>
+              </tr>
+              <tr>
+                <td><b>재알림 간격</b></td>
+                <td><b>{cfg.cooldownMin}분</b> (같은 장애 반복 알림 방지 · 규모가 2배로 뛰면 즉시 재알림)</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        {/* 임계는 장애 중에 조정하고 싶은 값이다 — 환경변수로 두면 배포를 기다려야 해서
+            app_settings(DB)에 넣고 여기서 바로 고친다. */}
+        <form method="POST" action="/alerts/settings">
+          <div className="row">
+            {settingFields.map((f) => (
+              <div className="field" key={f.key}>
+                <label>{f.label}</label>
+                <input type="number" name={f.key} defaultValue={f.value} min={f.min} max={f.max} required />
+                <p className="page-sub">{f.min}~{f.max}</p>
+              </div>
+            ))}
+          </div>
+          <button className="btn" type="submit">감시 기준 저장</button>
+          <p className="page-sub">
+            저장하면 <b>즉시</b> 반영됩니다(재배포 불필요). 아래 배치 설정과 달리 이 값들은 DB에 있습니다.
+          </p>
+        </form>
+      </div>
+
+      <div className="card">
+        <div className="section-title">🔧 동기화 배치 설정 (환경변수)</div>
+        <p className="page-sub" style={{ marginTop: -4 }}>
+          아래 값은 <b>환경변수</b>라 이 화면에서 못 바꿉니다.
+          운영은 <b>Vercel → Settings → Environment Variables</b>에서 바꾸고 <b>재배포</b>해야 반영됩니다.
+          로컬은 프로젝트 루트 <code>.env</code>를 고치고 서버를 재시작하면 됩니다.
+        </p>
+        <div className="table-wrap">
+          <table className="table">
+            <thead><tr><th style={{ width: '44%' }}>환경변수</th><th style={{ width: 110 }}>기본값</th><th>뜻</th></tr></thead>
+            <tbody>
+              {ENV_ROWS.map(([name, def, desc]) => (
+                <tr key={name}><td><code>{name}</code></td><td>{def}</td><td>{desc}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="page-sub">
+          현재 적용값: 상한 <b>{syncLimit}건</b>.
+          미뤄진 오더는 버려지지 않습니다 — 다음 회차에 <b>가장 오래 확인 안 된 순서</b>로 맨 앞에 옵니다.
+        </p>
+      </div>
+
+      {states.length > 0 && (
+        <div className="card">
+          <div className="section-title">🔴 지금 알림 중인 장애 ({states.length}건)</div>
+          <p className="page-sub" style={{ marginTop: -4 }}>해소되면 자동으로 목록에서 사라집니다.</p>
+          <div className="table-wrap">
+            <table className="table">
+              <thead><tr><th style={{ width: '30%' }}>항목</th><th>내용</th><th style={{ width: 90 }}>규모</th><th style={{ width: 80 }}>발송</th><th style={{ width: 170 }}>마지막 발송</th></tr></thead>
+              <tbody>
+                {states.map((s) => (
+                  <tr key={s.alert_key}>
+                    <td><code>{s.alert_key}</code></td>
+                    <td>{s.last_title || '-'}</td>
+                    <td>{s.last_value}</td>
+                    <td>{s.send_count}회</td>
+                    <td className="page-sub">{kst(s.last_sent_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      <div className="card">
+        <div className="section-title">📜 발송 이력 (최근 {logs.length}건)</div>
+        {!logs.length ? (
+          <p className="page-sub">아직 발송된 알림이 없습니다. 장애가 없었다는 뜻입니다 — 정상입니다.</p>
+        ) : (
+          <div className="table-wrap">
+            <table className="table">
+              <thead><tr><th style={{ width: 170 }}>시각</th><th style={{ width: '26%' }}>제목</th><th>내용</th><th style={{ width: 90 }}>수신자</th></tr></thead>
+              <tbody>
+                {logs.map((l) => (
+                  <tr key={l.id}>
+                    <td className="page-sub">{kst(l.created_at)}</td>
+                    <td>{l.title}</td>
+                    <td className="page-sub">{l.body}</td>
+                    {/* 수신자 0명이면 알림이 아무에게도 안 간 것이다 — 장애보다 이쪽이 더 급하다. */}
+                    <td>{l.sent_to}명{!l.sent_to && <> <span className="badge red">수신자 없음</span></>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </AppShell>
+  );
+}

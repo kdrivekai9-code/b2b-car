@@ -22,6 +22,52 @@ router.use(requireAuth, requireRole('admin', 'branch_manager'));
 
 const PAGE_SIZE = 200;
 
+// 화면이 그리는 데 필요한 것을 한 번에 모은다 — EJS 렌더와 Next(GET /vehicle-models/data.json)가
+// 같은 값을 보게 하려고 함수로 뺐다. 두 벌이면 사전 목록이 한쪽에서만 낡는다.
+async function loadVehicleModelsPageData(query) {
+  const q = String(query.q || '').trim();
+  const rows = await db.all(
+    q
+      ? `SELECT * FROM vehicle_models WHERE name ILIKE ? ORDER BY name LIMIT ${PAGE_SIZE}`
+      : `SELECT * FROM vehicle_models ORDER BY name LIMIT ${PAGE_SIZE}`,
+    q ? [`%${q}%`] : []
+  ).catch(() => null);
+
+  const addedKeywords = await db.all(
+    'SELECT * FROM vehicle_class_keywords ORDER BY kind, word'
+  ).catch(() => []);
+
+  return {
+    rows: rows || [],
+    // 테이블이 없으면(마이그레이션 전) 화면이 빈 목록으로 뜨는 대신 이유를 밝힌다.
+    migrationMissing: rows === null,
+    q,
+    // 입력 중인 이름이 어떻게 판정될지 미리 보여준다 — 등록 전에 틀린 걸 알 수 있다.
+    preview: query.preview ? classifyToFields(query.preview) : null,
+    previewName: query.preview || '',
+    // 이미 자동 인식되는 이름을 등록하려 했을 때의 안내.
+    dup: query.dup
+      ? { name: query.dup, reason: query.dupReason || '', summary: query.dupSummary || '' }
+      : null,
+    // 코드에 박아둔 자동 판정 사전. 화면에 안 보여주면 관리자는 등록한 몇 건만 보고
+    // "이것만 할증이 붙는다"고 읽는다(실사용 지적 2026-08-28).
+    dictionaries: [
+      { key: 'import_brand', label: '수입 브랜드', words: IMPORT_BRANDS },
+      { key: 'import_model', label: '수입 모델명(브랜드 없이 쓰는 이름)', words: IMPORT_MODELS },
+      { key: 'ev', label: '전기차', words: EV_KEYWORDS },
+      { key: 'large', label: '대형 · 화물', words: LARGE_KEYWORDS },
+      // 국산 사전은 할증을 붙이는 목록이 아니라 수입 판정을 **막는** 목록이다(르노삼성 등).
+      { key: 'domestic', label: '국산(수입 판정에서 제외)', words: DOMESTIC_BRANDS },
+    ],
+    addedKeywords,
+    keywordKinds: KEYWORD_KINDS.map((k) => ({ key: k, label: KIND_LABELS[k] })),
+  };
+}
+
+router.get('/data.json', asyncHandler(async (req, res) => {
+  res.json({ currentUser: req.session.user, ...(await loadVehicleModelsPageData(req.query)) });
+}));
+
 router.get('/', asyncHandler(async (req, res) => {
   const q = String(req.query.q || '').trim();
   const rows = await db.all(

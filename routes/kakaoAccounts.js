@@ -52,6 +52,11 @@ async function loadPageData() {
   return { accounts, branches, groups, users, paymentMethods, recentSessions };
 }
 
+// 위 화면의 Next 판(src/app/kakao-accounts)이 읽는다.
+router.get('/data.json', asyncHandler(async (req, res) => {
+  res.json({ currentUser: req.session.user, ...(await loadPageData()) });
+}));
+
 router.get('/', asyncHandler(async (req, res) => {
   const data = await loadPageData();
   res.render('kakao_accounts/index', {

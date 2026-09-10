@@ -70,6 +70,10 @@ router.get('/data.json', asyncHandler(async (req, res) => {
   const data = await loadPageData(String(req.query.range || '24h'), limit);
   res.json({
     currentUser: req.session.user,
+    // 기간 선택지와 현재 limit — Next 화면이 필터를 그리는 데 쓴다. 목록을 화면에 박아두면
+    // 여기 RANGE_OPTIONS를 고칠 때 화면만 옛 목록으로 남는다.
+    rangeOptions: RANGE_OPTIONS,
+    limit,
     range: data.range,
     summary: data.summary,
     unified: data.unified,
