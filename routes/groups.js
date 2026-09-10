@@ -1575,6 +1575,14 @@ async function loadOfficeFarePage(groupId) {
   return { group, groups, offices, zonesByOffice };
 }
 
+// EJS 렌더가 쓰는 로더를 그대로 재사용한다 — 지점마다 요금 줄을 따로 읽는 이유가 있어서다
+// (한 번에 조인하면 요금이 하나도 없는 지점이 목록에서 사라진다).
+router.get('/:id/office-fares/data.json', asyncHandler(async (req, res) => {
+  const page = await loadOfficeFarePage(req.params.id);
+  if (!page.group) return res.status(404).json({ error: '법인을 찾을 수 없습니다.' });
+  res.json({ currentUser: req.session.user, ...page });
+}));
+
 router.get('/:id/office-fares', asyncHandler(async (req, res) => {
   const page = await loadOfficeFarePage(req.params.id);
   if (!page.group) return res.status(404).send('법인을 찾을 수 없습니다.');
