@@ -120,6 +120,36 @@ branchDataRoute('operating-hours', async (req) => {
   };
 });
 
+// 탁송 요금 — 화면이 가장 크다(할증·부대비용·특수구간까지 한 화면에 있다).
+// 조회를 함수로 빼서 EJS 렌더와 이 엔드포인트가 **같은 값**을 보게 한다.
+async function loadBranchFareRulesData(id) {
+  const [tiers, extraRow, placeRules, tollRules] = await Promise.all([
+    db.all('SELECT * FROM fare_rules WHERE branch_id = ? ORDER BY tier_seq', [id]),
+    db.get('SELECT * FROM fare_extra_settings WHERE branch_id = ?', [id]),
+    // 마이그레이션(20260828010000) 전이면 테이블이 없다 — 화면은 빈 목록으로 뜬다.
+    db.all('SELECT keyword, fee FROM fare_place_surcharges WHERE branch_id = ? ORDER BY seq, id', [id]).catch(() => []),
+    db.all('SELECT name, fee FROM fare_special_tolls WHERE branch_id = ? ORDER BY seq, id', [id]).catch(() => []),
+  ]);
+  const extra = extraRow || {};
+  const largeCar = await loadLargeCarFeeView('branch', id);
+  return {
+    tiers,
+    extra,
+    // 오더구분별 대기·취소요금 칸 정의. 화면에 필드명을 또 적으면 컬럼이 늘 때 한쪽만 바뀐다.
+    orderTypeFeeGroups: tripFees.ORDER_TYPE_FEE_GROUPS,
+    placeRules: placeRules || [],
+    tollRules: tollRules || [],
+    extraCostItems: fareSurcharge.extraCostStates(extra),
+    specialTollPresets: fareSurcharge.SPECIAL_TOLL_PRESETS,
+    extraCostModes: fareSurcharge.EXTRA_COST_MODES,
+    surchargeMin: fareSurcharge.SURCHARGE_FEE_MIN,
+    surchargeMax: fareSurcharge.SURCHARGE_FEE_MAX,
+    ...largeCar,
+  };
+}
+
+branchDataRoute('fare-rules', async (req) => loadBranchFareRulesData(req.params.id));
+
 // 고객 통보·배차지연은 전용 로더가 이미 있다(EJS 렌더와 같은 함수를 쓴다) — 값이 갈릴 자리가
 // 없도록 그대로 재사용한다.
 router.get('/:id/customer-notifications/data.json', asyncHandler(async (req, res) => {
