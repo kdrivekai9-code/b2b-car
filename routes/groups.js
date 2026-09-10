@@ -165,6 +165,28 @@ groupDataRoute('premium-fare-rules', async (req, { group }) => {
   return { tiers, branchTiers };
 });
 
+groupDataRoute('accounts', async (req) => {
+  const [users, branches] = await Promise.all([
+    // 정렬·컬럼을 EJS 렌더와 같게 유지한다 — 다르면 플래그를 켜고 끌 때 목록이 달라 보인다.
+    db.all(`
+      SELECT u.*, b.name AS branch_name, g.name AS group_name
+      FROM users u
+      LEFT JOIN branches b ON b.id = u.branch_id
+      LEFT JOIN groups_tbl g ON g.id = u.group_id
+      WHERE u.group_id = ?
+      ORDER BY u.status = 'active' DESC, u.id DESC
+    `, [req.params.id]),
+    db.all('SELECT id, name FROM branches ORDER BY id'),
+  ]);
+  return {
+    users,
+    branches,
+    // 수정 중인 계정은 주소창의 ?edit=로 정해진다(EJS와 같다).
+    editing: users.find((u) => String(u.id) === String(req.query.edit)) || null,
+    clientTypes: clientScope.CLIENT_TYPES,
+  };
+});
+
 groupDataRoute('customer-notifications', async (req, { group }) => {
   const [saved, branchSaved] = await Promise.all([
     db.all('SELECT * FROM group_customer_notifications WHERE group_id = ?', [req.params.id]).catch(() => []),
@@ -505,6 +527,22 @@ async function loadGroupFarePage(groupId) {
     ...largeCar,
   };
 }
+
+// 화면이 가장 크다(지점 구간요금 안내 + 거리 구간표 + 부가요금 + 할증·부대비용).
+// EJS 렌더가 쓰는 로더를 그대로 재사용한다 — 질의를 새로 쓰면 값이 갈릴 자리가 생긴다.
+router.get('/:id/fare-rules/data.json', asyncHandler(async (req, res) => {
+  const page = await loadGroupFarePage(req.params.id);
+  if (!page.group) return res.status(404).json({ error: '법인을 찾을 수 없습니다.' });
+  res.json({
+    currentUser: req.session.user,
+    ...page,
+    orderTypeFeeGroups: tripFees.ORDER_TYPE_FEE_GROUPS,
+    remoteAreaFeeMin: REMOTE_AREA_FEE_MIN,
+    remoteAreaFeeMax: REMOTE_AREA_FEE_MAX,
+    surchargeMin: fareSurcharge.SURCHARGE_FEE_MIN,
+    surchargeMax: fareSurcharge.SURCHARGE_FEE_MAX,
+  });
+}));
 
 router.get('/:id/fare-rules', asyncHandler(async (req, res) => {
   const page = await loadGroupFarePage(req.params.id);

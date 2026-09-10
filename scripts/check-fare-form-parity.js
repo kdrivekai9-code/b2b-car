@@ -1,4 +1,4 @@
-// 지사 탁송 요금 화면의 **폼 칸 이름**이 EJS와 Next에서 같은지 본다.
+// 지사·법인 탁송 요금 화면의 **폼 칸 이름**이 EJS와 Next에서 같은지 본다.
 //
 // 무엇을 막나: 이 화면은 한 폼에 수십 칸이 들어 있고, 저장 라우트는 안 온 칸을 "비웠다"로
 // 다룬다. 그래서 이식하면서 칸 하나를 빠뜨리면 **그 화면으로 저장할 때마다 그 설정이 조용히
@@ -55,16 +55,16 @@ function nextLiteralNames(files) {
   return out;
 }
 
-const EJS_FILES = [
-  'views/branches/fare_rules.ejs',
-  'views/partials/fare_surcharge_settings.ejs',
-  'views/partials/order_type_trip_fees.ejs',
-];
-const NEXT_FILES = [
-  'src/app/branches/[id]/fare-rules/page.js',
+// 지사·법인이 같은 파티셜 둘을 공유한다 — 화면별로 한 쌍씩 대조한다.
+const SHARED_EJS = ['views/partials/fare_surcharge_settings.ejs', 'views/partials/order_type_trip_fees.ejs'];
+const SHARED_NEXT = [
   'src/app/_components/FareSurchargeSettings.js',
   'src/app/_components/OrderTypeTripFees.js',
   'src/app/branches/_components/DistanceTierTable.js',
+];
+const SCREENS = [
+  { label: '지사', ejs: ['views/branches/fare_rules.ejs', ...SHARED_EJS], next: ['src/app/branches/[id]/fare-rules/page.js', ...SHARED_NEXT] },
+  { label: '법인', ejs: ['views/groups/fare_rules.ejs', ...SHARED_EJS], next: ['src/app/groups/[id]/fare-rules/page.js', ...SHARED_NEXT] },
 ];
 
 console.log('[부품이 제자리에 있다]');
@@ -77,23 +77,23 @@ for (const [label, f] of [['할증·부대비용', 'src/app/_components/FareSurc
     `${f}가 없다 — 지사 전용 폴더로 옮기면 법인 화면이 사본을 만들게 된다`);
 }
 
-const ejs = ejsNames(EJS_FILES);
-const nextLiteral = nextLiteralNames(NEXT_FILES);
+for (const screen of SCREENS) {
+  const ejs = ejsNames(screen.ejs);
+  console.log(`\n[${screen.label} 탁송 요금 폼의 칸이 두 화면에서 같다]`);
+  check(`${screen.label}: EJS 칸을 읽었다`, ejs.size > 10, `${ejs.size}개`);
 
-console.log('\n[탁송 요금 폼의 칸이 두 화면에서 같다]');
-check('EJS 칸을 읽었다', ejs.size > 10, `${ejs.size}개`);
+  const missing = [...ejs].filter((n) => !nextHasName(screen.next, n));
+  check(`${screen.label}: EJS에 있는 칸이 Next에도 다 있다`, missing.length === 0,
+    `빠진 칸: ${missing.join(', ')}\n       저장하면 이 설정이 지워진다(라우트가 안 온 칸을 비웠다로 다룬다)`);
 
-const missing = [...ejs].filter((n) => !nextHasName(NEXT_FILES, n));
-check('EJS에 있는 칸이 Next에도 다 있다', missing.length === 0,
-  `빠진 칸: ${missing.join(', ')}\n       저장하면 이 설정이 지워진다(라우트가 안 온 칸을 비웠다로 다룬다)`);
-
-// 이 화면에 직접 적힌 칸 중 EJS에 없는 것 — 저장 라우트가 모르는 값을 보내게 된다.
-//
-// 구간표 부품(DistanceTierTable)은 화면마다 켜는 열이 다르다(비고는 프리미엄 편도 요금
-// 화면에서만 켠다) — 그 파일의 칸까지 세면 이 화면에 나오지도 않는 열을 잡는다.
-const extra = [...nextLiteralNames(NEXT_FILES.filter((f) => !/DistanceTierTable/.test(f)))]
-  .filter((n) => !ejs.has(n));
-check('Next에만 있는 칸이 없다', extra.length === 0, extra.join(', '));
+  // 이 화면에 직접 적힌 칸 중 EJS에 없는 것 — 저장 라우트가 모르는 값을 보내게 된다.
+  //
+  // 구간표 부품(DistanceTierTable)은 화면마다 켜는 열이 다르다(비고는 프리미엄 편도 요금
+  // 화면에서만 켠다) — 그 파일의 칸까지 세면 이 화면에 나오지도 않는 열을 잡는다.
+  const extra = [...nextLiteralNames(screen.next.filter((f) => !/DistanceTierTable/.test(f)))]
+    .filter((n) => !ejs.has(n));
+  check(`${screen.label}: Next에만 있는 칸이 없다`, extra.length === 0, extra.join(', '));
+}
 
 console.log('\n[오더구분별 요금 칸은 서버 상수에서 온다]');
 // 화면에 필드명을 또 적으면 컬럼이 늘 때 한쪽만 바뀐다.
