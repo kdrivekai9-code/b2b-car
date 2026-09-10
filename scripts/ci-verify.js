@@ -131,6 +131,7 @@ const CI_CHECKS = [
   'check-client-scope',
   'check-fare-form-parity',
   'check-settings-tabs-parity',
+  'check-settlement-parity',
   'check-confirm-parity',
   'check-dispatch-lookup-tool',
   'check-env-example-flags',

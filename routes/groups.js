@@ -1527,6 +1527,29 @@ router.get('/:id/settlement/print', asyncHandler(async (req, res) => {
   });
 }));
 
+// 정산 화면의 Next 판이 읽는다. **판정을 여기서 한 번만 한다** — 개인 딜러 차단과 딜러
+// 지정은 금액이 나오는 화면의 접근 통제라, 화면 쪽에 두면 두 곳이 갈릴 수 있다.
+router.get('/:id/settlement/data.json', asyncHandler(async (req, res) => {
+  const { group, groups } = await loadGroupWithSiblings(req.params.id);
+  if (!group) return res.status(404).json({ error: '법인을 찾을 수 없습니다.' });
+  const month = settlementMonth(req.query.month);
+  const me = req.session.user;
+  const meIsDealer = clientScope.isDealer(me);
+  // 자기 법인이 아니면 아예 막는다 — 목록만 좁히는 것으로는 부족하다(금액이 나오는 화면이다).
+  if (me.role === 'client' && Number(me.group_id) !== Number(req.params.id)) {
+    return res.status(403).json({ error: '접근 권한이 없습니다.' });
+  }
+  const viewDealerId = meIsDealer ? me.id : (Number(req.query.dealer) || null);
+  const data = await loadSettlement(req.params.id, month, viewDealerId);
+  res.json({
+    currentUser: me,
+    group, groups, month,
+    extraChargeTypes: extraCharges.EXTRA_CHARGE_TYPES,
+    meIsDealer, viewDealerId,
+    ...data,
+  });
+}));
+
 router.get('/:id/settlement', asyncHandler(async (req, res) => {
   const { group, groups } = await loadGroupWithSiblings(req.params.id);
   if (!group) return res.status(404).send('법인을 찾을 수 없습니다.');
