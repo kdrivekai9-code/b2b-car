@@ -46,6 +46,32 @@ router.get('/', asyncHandler(async (req, res) => {
   });
 }));
 
+// 위 목록의 Next 판(src/app/my/photos)이 읽는다.
+router.get('/data.json', asyncHandler(async (req, res) => {
+  const me = req.session.user;
+  if (!me.group_id) return res.status(403).json({ error: '접근 권한이 없습니다.' });
+  res.json({
+    currentUser: me,
+    rows: await photoDelivery.listForClient(scopeOf(me)),
+    meIsDealer: clientScope.isDealer(me),
+  });
+}));
+
+// 상세의 Next 판(src/app/my/photos/[id]). 두 세그먼트라 위 '/:id'에 걸리지 않는다.
+//
+// 열람 불가(reason:'not_allowed')는 **200으로 돌려준다** — EJS는 403 상태로 같은 화면을
+// 그렸는데, 그러면 Next 쪽에서 "권한 없음"과 구분이 안 돼 로그인으로 튕긴다. 상태가 아니라
+// reason으로 판단하게 두고, 화면이 그 사유를 그대로 보여준다.
+router.get('/:id/data.json', asyncHandler(async (req, res) => {
+  const me = req.session.user;
+  if (!me.group_id) return res.status(403).json({ error: '접근 권한이 없습니다.' });
+  const orderId = Number(req.params.id);
+  if (!Number.isInteger(orderId) || orderId <= 0) return res.status(404).json({ error: '오더를 찾을 수 없습니다.' });
+  const detail = await photoDelivery.detailForClient(orderId, scopeOf(me));
+  if (!detail.order) return res.status(404).json({ error: '오더를 찾을 수 없거나 접근 권한이 없습니다.' });
+  res.json({ currentUser: me, ...detail });
+}));
+
 router.get('/:id', asyncHandler(async (req, res) => {
   const me = req.session.user;
   if (!me.group_id) return res.status(403).render('403', { title: '접근 권한 없음' });

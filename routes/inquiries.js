@@ -208,6 +208,30 @@ router.get('/:id', requireRole('admin', 'branch_manager'), asyncHandler(async (r
   });
 }));
 
+// 위 상세 화면의 Next 판(src/app/inquiries/[id])이 읽는다.
+//
+// 목록의 /data.json은 라우터 앞쪽에 둬야 하지만(그건 '/:id'와 같은 한 세그먼트라 순서가
+// 뒤집히면 "data.json"이 문의 id로 읽힌다) 이건 두 세그먼트라 '/:id'에 걸리지 않는다.
+router.get('/:id/data.json', requireRole('admin', 'branch_manager'), asyncHandler(async (req, res) => {
+  const inquiry = await loadInquiryWithScope(req.params.id, req);
+  if (!inquiry) return res.status(404).json({ error: '문의를 찾을 수 없습니다.' });
+  const detail = await db.get(
+    `SELECT i.*, u.name AS user_name, b.name AS branch_name, g.name AS corporation_name, o.oid AS converted_oid
+     FROM inquiries i
+     LEFT JOIN users u ON u.id = i.user_id
+     LEFT JOIN branches b ON b.id = i.branch_id
+     LEFT JOIN groups_tbl g ON g.id = i.requester_group_id
+     LEFT JOIN orders o ON o.id = i.converted_order_id
+     WHERE i.id = ?`,
+    [req.params.id]
+  );
+  res.json({
+    currentUser: req.session.user,
+    inquiry: detail,
+    ferryLegs: parseFerryLegsJson(detail && detail.ferry_legs_json),
+  });
+}));
+
 router.post('/:id/status', requireRole('admin', 'branch_manager'), asyncHandler(async (req, res) => {
   const inquiry = await loadInquiryWithScope(req.params.id, req);
   if (!inquiry) return res.status(404).send('문의를 찾을 수 없습니다.');

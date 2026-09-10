@@ -53,6 +53,7 @@ const PATH_FLAGS = {
   '/push/settings': 'NEXT_PUSH_SETTINGS_ENABLED',
   '/access-logs': 'NEXT_ACCESS_LOGS_ENABLED',
   '/quick-replies': 'NEXT_QUICK_REPLIES_ENABLED',
+  '/my/photos': 'NEXT_MY_PHOTOS_ENABLED',
   '/login': 'NEXT_LOGIN_ENABLED',
   '/ferry-fares': 'NEXT_FERRY_FARES_ENABLED',
 };
@@ -141,6 +142,29 @@ export function proxy(req) {
 
   // 엔티티별 :id/edit, :id/users — 끝에 고정 세그먼트가 붙어 있어 /new 등 형제 정적
   // 경로와 겹칠 일이 없으므로 숫자 여부만 확인한다.
+  // /inquiries/:id(문의 상세) — /notices/:id와 같은 이유로 숫자 한 세그먼트만 대상이다.
+  // 형제 정적 경로(/inquiries/data.json)가 id로 읽히면 안 된다.
+  const inquiryIdMatch = pathname.match(/^\/inquiries\/([^/]+)$/);
+  if (inquiryIdMatch) {
+    const isNumericId = /^\d+$/.test(inquiryIdMatch[1]);
+    if (isNumericId && process.env.NEXT_INQUIRY_DETAIL_ENABLED === 'true') {
+      return NextResponse.next();
+    }
+    return toExpress(req);
+  }
+
+  // /my/photos/:id(고객 사진 상세) — 숫자 한 세그먼트만. 형제 경로(/my/photos/data.json,
+  // /my/photos/:id/download.zip)가 id로 읽히면 안 된다. download.zip은 두 세그먼트라 애초에
+  // 이 패턴에 안 걸리고, 압축 응답이라 Next로 보내서도 안 된다.
+  const myPhotoMatch = pathname.match(/^\/my\/photos\/([^/]+)$/);
+  if (myPhotoMatch) {
+    const isNumericId = /^\d+$/.test(myPhotoMatch[1]);
+    if (isNumericId && process.env.NEXT_MY_PHOTOS_ENABLED === 'true') {
+      return NextResponse.next();
+    }
+    return toExpress(req);
+  }
+
   const idSuffixRoutes = [
     { re: /^\/location-aliases\/(\d+)\/edit$/, flag: 'NEXT_LOCATION_ALIASES_ENABLED' },
     { re: /^\/drivers\/(\d+)\/edit$/, flag: 'NEXT_DRIVERS_ENABLED' },
@@ -177,4 +201,4 @@ export function proxy(req) {
 
 // Next's proxy bundler statically analyzes this export, so it's kept as a literal array
 // (a computed expression like Object.keys(PATH_FLAGS) may not be statically evaluable).
-export const config = { matcher: ['/', '/orders', '/inquiries', '/chat/sessions', '/chat/sessions/:id', '/chat/guide', '/orders/new', '/orders/ai-intake', '/orders/team-feed', '/orders/:id', '/users', '/users/new', '/users/:id/edit', '/drivers', '/drivers/new', '/drivers/:id/edit', '/groups', '/groups/new', '/groups/:id/edit', '/groups/:id/users', '/branches', '/notices', '/notices/new', '/notices/:id', '/notices/:id/edit', '/location-aliases', '/location-aliases/new', '/location-aliases/:id/edit', '/settings', '/knowledge-base', '/knowledge-base/new', '/knowledge-base/categories', '/knowledge-base/:id/edit', '/faq', '/push/settings', '/access-logs', '/quick-replies', '/login', '/ferry-fares', '/upload/:token'] };
+export const config = { matcher: ['/', '/orders', '/inquiries', '/inquiries/:id', '/chat/sessions', '/chat/sessions/:id', '/chat/guide', '/orders/new', '/orders/ai-intake', '/orders/team-feed', '/orders/:id', '/users', '/users/new', '/users/:id/edit', '/drivers', '/drivers/new', '/drivers/:id/edit', '/groups', '/groups/new', '/groups/:id/edit', '/groups/:id/users', '/branches', '/notices', '/notices/new', '/notices/:id', '/notices/:id/edit', '/location-aliases', '/location-aliases/new', '/location-aliases/:id/edit', '/settings', '/knowledge-base', '/knowledge-base/new', '/knowledge-base/categories', '/knowledge-base/:id/edit', '/faq', '/push/settings', '/access-logs', '/quick-replies', '/my/photos', '/my/photos/:id', '/login', '/ferry-fares', '/upload/:token'] };
