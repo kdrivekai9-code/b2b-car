@@ -40,6 +40,7 @@ const PATH_FLAGS = {
   '/groups': 'NEXT_GROUPS_ENABLED',
   '/groups/new': 'NEXT_GROUPS_ENABLED',
   '/branches': 'NEXT_BRANCHES_ENABLED',
+  '/branches/new': 'NEXT_BRANCHES_ENABLED',
   '/notices': 'NEXT_NOTICES_ENABLED',
   '/notices/new': 'NEXT_NOTICES_ENABLED',
   '/chat/guide': 'NEXT_CHAT_GUIDE_ENABLED',
@@ -52,6 +53,7 @@ const PATH_FLAGS = {
   '/faq': 'NEXT_FAQ_ENABLED',
   '/push/settings': 'NEXT_PUSH_SETTINGS_ENABLED',
   '/access-logs': 'NEXT_ACCESS_LOGS_ENABLED',
+  '/my/settlement': 'NEXT_MY_SETTLEMENT_ENABLED',
   '/quick-replies': 'NEXT_QUICK_REPLIES_ENABLED',
   '/my/photos': 'NEXT_MY_PHOTOS_ENABLED',
   '/alerts': 'NEXT_ALERTS_ENABLED',
@@ -211,4 +213,4 @@ export function proxy(req) {
 
 // Next's proxy bundler statically analyzes this export, so it's kept as a literal array
 // (a computed expression like Object.keys(PATH_FLAGS) may not be statically evaluable).
-export const config = { matcher: ['/', '/orders', '/inquiries', '/inquiries/:id', '/chat/sessions', '/chat/sessions/:id', '/chat/guide', '/orders/new', '/orders/ai-intake', '/orders/team-feed', '/orders/:id', '/users', '/users/new', '/users/:id/edit', '/drivers', '/drivers/new', '/drivers/:id/edit', '/groups', '/groups/new', '/groups/:id/edit', '/groups/:id/users', '/groups/:id/accounts', '/groups/:id/fare-rules', '/groups/:id/office-fares', '/groups/:id/settlement', '/groups/:id/daily-driver-fare-rules', '/groups/:id/premium-fare-rules', '/groups/:id/customer-notifications', '/groups/:id/dispatch-delay', '/branches', '/branches/:id/edit', '/branches/:id/payment-methods', '/branches/:id/operating-hours', '/branches/:id/order-status', '/branches/:id/photo-settings', '/branches/:id/extra-settings', '/branches/:id/callmaner', '/branches/:id/premium-fare-rules', '/branches/:id/premium-oneway-fare-rules', '/branches/:id/dispatch-fare-rules', '/branches/:id/dispatch-delay', '/branches/:id/customer-notifications', '/branches/:id/fare-rules', '/notices', '/notices/new', '/notices/:id', '/notices/:id/edit', '/location-aliases', '/location-aliases/new', '/location-aliases/:id/edit', '/settings', '/knowledge-base', '/knowledge-base/new', '/knowledge-base/categories', '/knowledge-base/:id/edit', '/faq', '/push/settings', '/access-logs', '/quick-replies', '/my/photos', '/my/photos/:id', '/alerts', '/integration-errors', '/vehicle-models', '/kakao-accounts', '/login', '/ferry-fares', '/upload/:token'] };
+export const config = { matcher: ['/', '/orders', '/inquiries', '/inquiries/:id', '/chat/sessions', '/chat/sessions/:id', '/chat/guide', '/orders/new', '/orders/ai-intake', '/orders/team-feed', '/orders/:id', '/users', '/users/new', '/users/:id/edit', '/drivers', '/drivers/new', '/drivers/:id/edit', '/groups', '/groups/new', '/groups/:id/edit', '/groups/:id/users', '/groups/:id/accounts', '/groups/:id/fare-rules', '/groups/:id/office-fares', '/groups/:id/settlement', '/groups/:id/daily-driver-fare-rules', '/groups/:id/premium-fare-rules', '/groups/:id/customer-notifications', '/groups/:id/dispatch-delay', '/branches', '/branches/new', '/branches/:id/edit', '/branches/:id/payment-methods', '/branches/:id/operating-hours', '/branches/:id/order-status', '/branches/:id/photo-settings', '/branches/:id/extra-settings', '/branches/:id/callmaner', '/branches/:id/premium-fare-rules', '/branches/:id/premium-oneway-fare-rules', '/branches/:id/dispatch-fare-rules', '/branches/:id/dispatch-delay', '/branches/:id/customer-notifications', '/branches/:id/fare-rules', '/notices', '/notices/new', '/notices/:id', '/notices/:id/edit', '/location-aliases', '/location-aliases/new', '/location-aliases/:id/edit', '/settings', '/knowledge-base', '/knowledge-base/new', '/knowledge-base/categories', '/knowledge-base/:id/edit', '/faq', '/push/settings', '/access-logs', '/quick-replies', '/my/photos', '/my/photos/:id', '/my/settlement', '/alerts', '/integration-errors', '/vehicle-models', '/kakao-accounts', '/login', '/ferry-fares', '/upload/:token'] };

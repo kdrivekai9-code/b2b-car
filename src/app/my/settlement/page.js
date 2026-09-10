@@ -1,0 +1,59 @@
+// 정산내역(고객용) — /my/settlement. views/groups/settlement.ejs를 clientView로 렌더하던 것의 Next 판.
+//
+// 관리자 화면과 **같은 본문 부품**을 쓴다. 다른 것은 둘뿐이다:
+//   · 탭 줄이 없다 — 법인 설정 탭은 관리자용이고, 고객은 자기 정산만 본다.
+//   · 법인을 주소창이 아니라 로그인 계정에서 정한다(남의 법인을 열 수 없다).
+import { headers } from 'next/headers';
+import { redirect } from 'next/navigation';
+import AppShell from '../../_components/AppShell';
+import SettlementView from '../../_components/settlement/SettlementView';
+
+export const dynamic = 'force-dynamic';
+export const preferredRegion = 'icn1';
+export const maxDuration = 30;
+
+export default async function MySettlementPage({ searchParams }) {
+  const sp = (await searchParams) || {};
+  const hdrs = await headers();
+  const host = hdrs.get('host');
+  const proto = hdrs.get('x-forwarded-proto') || 'https';
+
+  const qs = new URLSearchParams(sp).toString();
+  const res = await fetch(`${proto}://${host}/my/settlement/data.json${qs ? '?' + qs : ''}`, {
+    headers: { cookie: hdrs.get('cookie') || '', 'X-Requested-With': 'fetch' },
+    cache: 'no-store',
+  });
+  if (res.status === 401) redirect('/login');
+  if (res.status === 403) {
+    return (
+      <AppShell currentUser={null} activePath="/my/settlement">
+        <div className="card"><p className="page-sub" style={{ margin: 0 }}>접근 권한이 없습니다.</p></div>
+      </AppShell>
+    );
+  }
+  if (!res.ok) throw new Error('정산내역을 불러오지 못했습니다 (' + res.status + ')');
+
+  const data = await res.json();
+  const { currentUser, group, month, surchargeMode } = data;
+
+  return (
+    <AppShell currentUser={currentUser} activePath="/my/settlement">
+      <div className="page-head-row">
+        <div>
+          <h1 className="page-title">{group.name} · 정산내역</h1>
+          <p className="page-sub">
+            완료된 오더를 <b>완료일 기준</b>으로 묶었습니다. 금액은 업체별 계약 요금입니다(배차 요금 아님).
+            {' '}할증 표시는 <b>{surchargeMode === 'itemized' ? '별도 줄(항목별)' : '운행요금 포함'}</b> 방식입니다.
+          </p>
+        </div>
+        {/* **엑셀·인쇄 버튼을 두지 않는다.**
+            EJS 화면은 이 자리에 세 버튼(엑셀·정산내역서·개별청구서)을 두고 있었는데, 전부
+            /groups/:id/... 경로를 가리킨다. 그런데 그 라우터는 통째로 requireRole('admin')이라
+            **고객이 누르면 403이다**(2026-09-10 확인). 눌리는데 안 되는 버튼은 "고장"으로
+            읽히므로 그대로 옮기지 않았다.
+            고객에게 정산서를 내려받게 할지는 접근 권한을 바꾸는 결정이라 따로 정해야 한다. */}
+      </div>
+      <SettlementView data={data} sp={sp} />
+    </AppShell>
+  );
+}

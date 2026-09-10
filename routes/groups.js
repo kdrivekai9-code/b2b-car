@@ -1883,6 +1883,35 @@ router.get('/:id/office-fares/sample', asyncHandler(async (req, res) => {
 const myRouter = express.Router();
 myRouter.use(requireAuth, requireRole('client'));
 
+// 위 화면의 Next 판(src/app/my/settlement)이 읽는다 — 관리자용과 **같은 계산**을 쓰되
+// 법인은 로그인 계정에서 정한다(주소창으로 남의 법인을 열 수 없다).
+myRouter.get('/data.json', asyncHandler(async (req, res) => {
+  const me = req.session.user;
+  if (!me.group_id) return res.status(403).json({ error: '접근 권한이 없습니다.' });
+  const group = await db.get(`
+    SELECT g.*, b.name AS branch_name FROM groups_tbl g
+      LEFT JOIN branches b ON b.id = g.branch_id WHERE g.id = ?`, [me.group_id]);
+  if (!group) return res.status(404).json({ error: '법인을 찾을 수 없습니다.' });
+
+  const month = settlementMonth(req.query.month);
+  const meIsDealer = clientScope.isDealer(me);
+  // 본사 직원이 특정 딜러만 골라 보는 것도 허용한다 — 딜러에게 정산서를 전달할 때 쓴다.
+  const viewDealerId = meIsDealer ? me.id : (Number(req.query.dealer) || null);
+  const data = await loadSettlement(me.group_id, month, viewDealerId);
+  res.json({
+    currentUser: me,
+    group,
+    // 법인 전환 선택박스는 띄우지 않는다 — 자기 법인 하나뿐이다.
+    groups: [],
+    month,
+    extraChargeTypes: extraCharges.EXTRA_CHARGE_TYPES,
+    meIsDealer, viewDealerId,
+    // 관리자 화면과 같은 부품을 쓰되, 탭 줄과 관리자 전용 동작은 이 표시로 가린다.
+    clientView: true,
+    ...data,
+  });
+}));
+
 myRouter.get('/', asyncHandler(async (req, res) => {
   const me = req.session.user;
   if (!me.group_id) return res.status(403).render('403', { title: '접근 권한 없음' });

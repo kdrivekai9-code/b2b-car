@@ -37,10 +37,27 @@ router.get('/new', asyncHandler(async (req, res) => {
 
 router.post('/', asyncHandler(async (req, res) => {
   const { name, code, main_phone, address, contact_name, contact_phone } = req.body;
+  // 입금계좌도 함께 받는다.
+  //
+  // 등록 폼에는 이 세 칸이 처음부터 있었는데 여기서 읽지 않아 **입력해도 조용히 버려졌다**
+  // (2026-09-10 발견). 정산서·청구서에 찍히는 값이라, 비어 있으면 받는 쪽이 어디로 입금할지
+  // 몰라 따로 물어야 한다. 수정 화면(POST /:id)은 처음부터 저장하고 있었다.
+  const bank = (v) => String(v || '').trim() || null;
   await db.run(
-    `INSERT INTO branches (name, code, main_phone, address, contact_name, contact_phone, status) VALUES (?, ?, ?, ?, ?, ?, 'active')`,
-    [name, code, main_phone, address, contact_name, contact_phone]
-  );
+    `INSERT INTO branches (name, code, main_phone, address, contact_name, contact_phone,
+                           bank_name, bank_account, bank_holder, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`,
+    [name, code, main_phone, address, contact_name, contact_phone,
+      bank(req.body.bank_name), bank(req.body.bank_account), bank(req.body.bank_holder)]
+  ).catch(async (e) => {
+    // 마이그레이션 전이면 계좌 컬럼이 없다 — 지사 등록 자체가 막히면 안 된다.
+    if (!(e && e.code === '42703')) throw e;
+    console.error('지사 등록: 계좌 컬럼 없음 — 계좌 없이 등록:', e.message);
+    await db.run(
+      `INSERT INTO branches (name, code, main_phone, address, contact_name, contact_phone, status) VALUES (?, ?, ?, ?, ?, ?, 'active')`,
+      [name, code, main_phone, address, contact_name, contact_phone]
+    );
+  });
   res.redirect('/branches');
 }));
 

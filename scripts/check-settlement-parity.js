@@ -27,9 +27,15 @@ function check(name, ok, detail) {
 }
 
 const ejs = read('views/groups/settlement.ejs');
-const next = read('src/app/groups/[id]/settlement/page.js')
-  + read('src/app/groups/[id]/settlement/SettlementActions.js')
-  + read('src/app/_components/VehicleClassBadge.js');
+// 본문은 관리자용·고객용이 함께 쓰는 부품에 있다 — 화면 파일만 보면 전부 "빠졌다"로 나온다.
+const NEXT_FILES = [
+  'src/app/_components/settlement/SettlementView.js',
+  'src/app/_components/settlement/SettlementActions.js',
+  'src/app/_components/VehicleClassBadge.js',
+  'src/app/groups/[id]/settlement/page.js',
+  'src/app/my/settlement/page.js',
+];
+const next = NEXT_FILES.map(read).join('\n');
 
 console.log('[정산 화면이 있다]');
 check('EJS를 읽었다', ejs.length > 1000, `${ejs.length}자`);
@@ -112,7 +118,22 @@ const dataRoute = routes.slice(routes.indexOf("router.get('/:id/settlement/data.
 check('남의 법인 정산을 막는다', /Number\(me\.group_id\) !== Number\(req\.params\.id\)/.test(dataRoute));
 check('개인 딜러는 본인 것만 본다', /meIsDealer \? me\.id :/.test(dataRoute));
 // 화면 쪽에서 다시 판정하면 두 곳이 갈린다.
-check('화면이 권한을 다시 판정하지 않는다', !/isDealer\(/.test(read('src/app/groups/[id]/settlement/page.js')));
+check('화면이 권한을 다시 판정하지 않는다', !/isDealer\(/.test(next));
+
+console.log('\n[관리자용·고객용이 본문을 공유한다]');
+// 두 화면은 같은 뷰다(EJS도 settlement.ejs 하나였다). 복사해두면 금액 표시를 고칠 때
+// 한쪽만 바뀌고, 그건 곧 청구서가 갈리는 것이다.
+check('본문 부품이 있다', fs.existsSync(path.join(ROOT, 'src/app/_components/settlement/SettlementView.js')));
+for (const [label, f] of [['관리자용', 'src/app/groups/[id]/settlement/page.js'], ['고객용', 'src/app/my/settlement/page.js']]) {
+  check(`${label} 화면이 그 부품을 쓴다`, /SettlementView/.test(read(f)));
+  // 본문을 자기 파일에 다시 그리기 시작하면 갈린다.
+  check(`${label} 화면에 본문 사본이 없다`, !/금액 통계/.test(read(f)));
+}
+// 고객 화면에서 /groups/... 경로 버튼을 그리면 403이 난다(그 라우터는 admin 전용이다).
+const my = read('src/app/my/settlement/page.js');
+check('고객 화면에 엑셀·인쇄 버튼이 없다', !/ExcelLink|PrintButton/.test(my),
+  '/groups/:id/settlement/excel·print는 requireRole(admin)이라 고객이 누르면 403이다');
+check('개별청구서도 고객 화면에서는 감춘다', /!clientView && <IndividualPrintButton/.test(next));
 
 console.log('\n[조회 중인 달을 잃지 않는다]');
 // 안 보내면 저장·처리 후 이번 달로 튕겨 보던 정산서를 잃는다.
