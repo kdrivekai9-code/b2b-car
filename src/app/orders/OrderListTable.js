@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+// 상태 배지 색은 한 곳에서만 정한다 — 이 파일이 사본을 들고 있었고 '예약'이 빠져 있었다.
+import { STATUS_COLORS } from '../_lib/statusColors';
 
 // public/js/order-list-columns.js를 React로 이식 — 서버에 저장하지 않고 이 브라우저
 // (localStorage)에만 저장한다는 계약과 저장 키(STORAGE_KEY/WIDTH_KEY/DENSITY_KEY)를
@@ -14,12 +16,6 @@ import { useRouter } from 'next/navigation';
 // fetch로 데이터를 직접 다시 받는 대신 router.refresh()로 부모 서버 컴포넌트(page.js)의
 // /orders/data.json 재조회를 트리거한다 — 필터/페이지네이션은 URL에 이미 있으니 그대로
 // 유지되고, 이 컴포넌트의 클라이언트 상태(컬럼/정렬/펼침 등)는 리마운트 없이 보존된다.
-
-const STATUS_COLORS = {
-  '오더등록': 'gray', '대기': 'gray', '대기(확인중)': 'amber', '접수': 'blue',
-  '접수(배차중)': 'blue', '기사배정': 'amber', '운행시작': 'teal', '문의': 'purple', '사고': 'red',
-  '과태료': 'red', '취소요청': 'red', '취소': 'dark', '완료': 'green',
-};
 
 function formatMoney(n) {
   return (Number(n) || 0).toLocaleString('ko-KR') + '원';

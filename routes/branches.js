@@ -44,6 +44,58 @@ router.post('/', asyncHandler(async (req, res) => {
   res.redirect('/branches');
 }));
 
+// ---------------- Next 화면이 읽는 데이터 ----------------
+//
+// 지사 설정은 화면이 열셋이고 전부 "지사 하나 + 지사 목록(탭의 전환 select) + 그 화면의 값"을
+// 본다. 그 공통부를 여기 한 번만 둔다 — 화면마다 같은 두 질의를 다시 쓰면 한 곳을 고칠 때
+// 나머지가 남는다.
+//
+// 각 엔드포인트는 EJS 렌더와 **같은 값**을 돌려준다. 다르면 플래그를 켜고 끌 때마다 화면이
+// 달라지고, 그 차이가 어디서 왔는지 찾는 데 시간이 든다.
+async function loadBranchShell(id) {
+  const [branch, branches] = await Promise.all([
+    db.get('SELECT * FROM branches WHERE id = ?', [id]),
+    db.all('SELECT id, name FROM branches ORDER BY id'),
+  ]);
+  return { branch, branches };
+}
+
+// 화면별 데이터를 얹어 돌려주는 공통 처리 — 지사가 없으면 404를 한 곳에서 낸다.
+function branchDataRoute(subPath, extra) {
+  router.get(`/:id/${subPath}/data.json`, asyncHandler(async (req, res) => {
+    const shell = await loadBranchShell(req.params.id);
+    if (!shell.branch) return res.status(404).json({ error: '지사를 찾을 수 없습니다.' });
+    const rest = extra ? await extra(req, shell) : {};
+    res.json({ currentUser: req.session.user, ...shell, ...rest });
+  }));
+}
+
+branchDataRoute('payment-methods', async (req) => {
+  const [allMethods, enabled] = await Promise.all([
+    db.all('SELECT * FROM payment_methods WHERE is_active = 1 ORDER BY id'),
+    db.all('SELECT payment_method_id, is_default FROM branch_payment_methods WHERE branch_id = ?', [req.params.id]),
+  ]);
+  // enabledMap은 EJS와 같은 모양이다: 값이 1이면 기본값, 0이면 노출만.
+  const enabledMap = {};
+  enabled.forEach((e) => { enabledMap[e.payment_method_id] = e.is_default; });
+  return { allMethods, enabledMap };
+});
+
+branchDataRoute('order-status', async (req) => ({
+  statuses: await getEffectiveStatuses(req.params.id),
+}));
+
+branchDataRoute('photo-settings', async (req) => ({
+  settings: (await db.get('SELECT * FROM branch_photo_settings WHERE branch_id = ?', [req.params.id])) || {},
+}));
+
+branchDataRoute('extra-settings', async (req) => ({
+  settings: (await db.get('SELECT * FROM branch_photo_settings WHERE branch_id = ?', [req.params.id])) || {},
+}));
+
+// 콜마너 연동은 branches 행에 값이 있어 얹을 것이 없다.
+branchDataRoute('callmaner', null);
+
 router.get('/:id/edit', asyncHandler(async (req, res) => {
   const branch = await db.get('SELECT * FROM branches WHERE id = ?', [req.params.id]);
   if (!branch) return res.status(404).send('지사를 찾을 수 없습니다.');

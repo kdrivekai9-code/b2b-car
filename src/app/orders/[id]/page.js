@@ -1,4 +1,6 @@
 import { headers } from 'next/headers';
+// 상태 배지 색은 한 곳에서만 정한다 — 이 파일도 사본을 들고 있었고 '예약'이 빠져 있었다.
+import { STATUS_COLORS } from '../../_lib/statusColors';
 import CallmanerPhotos from './CallmanerPhotos';
 import ReceiptGallery from './ReceiptGallery';
 import DriverLocationMap from './DriverLocationMap';
@@ -22,12 +24,6 @@ import OdometerSummary from './OdometerSummary';
 export const dynamic = 'force-dynamic';
 export const preferredRegion = 'icn1';
 export const maxDuration = 30;
-
-const STATUS_COLORS = {
-  '오더등록': 'gray', '대기': 'gray', '대기(확인중)': 'amber', '접수': 'blue',
-  '접수(배차중)': 'blue', '기사배정': 'amber', '운행시작': 'teal', '문의': 'purple', '사고': 'red',
-  '과태료': 'red', '취소요청': 'red', '취소': 'dark', '완료': 'green',
-};
 
 export default async function OrderDetailPage({ params }) {
   const { id } = await params;
