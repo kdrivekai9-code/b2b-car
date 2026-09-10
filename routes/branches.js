@@ -96,6 +96,40 @@ branchDataRoute('extra-settings', async (req) => ({
 // 콜마너 연동은 branches 행에 값이 있어 얹을 것이 없다.
 branchDataRoute('callmaner', null);
 
+branchDataRoute('premium-oneway-fare-rules', async (req) => ({
+  // 마이그레이션(20260908040000) 전이면 표가 없다 — 화면이 죽지 않고 "미등록"으로 보인다.
+  tiers: await db.all('SELECT * FROM premium_oneway_fare_rules WHERE branch_id = ? ORDER BY tier_seq', [req.params.id]).catch(() => []),
+}));
+
+branchDataRoute('dispatch-fare-rules', async (req) => ({
+  tiers: await db.all('SELECT * FROM branch_dispatch_fare_rules WHERE branch_id = ? ORDER BY tier_seq', [req.params.id]).catch(() => []),
+}));
+
+branchDataRoute('operating-hours', async (req) => {
+  const [rows, exceptions] = await Promise.all([
+    db.all('SELECT * FROM operating_hours WHERE branch_id = ?', [req.params.id]),
+    db.all('SELECT * FROM operating_hour_exceptions WHERE branch_id = ? ORDER BY date', [req.params.id]),
+  ]);
+  return {
+    // 평일/주말 두 줄만 쓴다 — 화면도 그 둘만 그린다(EJS와 같은 모양).
+    hours: {
+      weekday: rows.find((r) => r.day_type === 'weekday') || {},
+      weekend: rows.find((r) => r.day_type === 'weekend') || {},
+    },
+    exceptions,
+  };
+});
+
+// 지사 기본 정보. 계정 목록은 이 화면에서만 쓰므로 여기서 함께 읽는다.
+branchDataRoute('edit', async (req) => ({
+  // 정렬은 EJS 렌더와 같아야 한다(ORDER BY id) — 다르면 플래그를 켜고 끌 때 목록 순서가
+  // 바뀌어 "왜 갑자기 순서가 다르지"가 된다.
+  accountUsers: await db.all(
+    'SELECT id, name, login_id, role, status FROM users WHERE branch_id = ? ORDER BY id',
+    [req.params.id]
+  ).catch(() => []),
+}));
+
 router.get('/:id/edit', asyncHandler(async (req, res) => {
   const branch = await db.get('SELECT * FROM branches WHERE id = ?', [req.params.id]);
   if (!branch) return res.status(404).send('지사를 찾을 수 없습니다.');
