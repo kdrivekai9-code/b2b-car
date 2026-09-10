@@ -8,6 +8,7 @@ const tripFees = require('../lib/tripFees');
 const asyncHandler = require('../middleware/asyncHandler');
 const callmaner = require('../lib/callmaner');
 const callmanerPhotos = require('../lib/callmanerPhotos');
+const driverLocation = require('../lib/driverLocation');
 const photoAvailability = require('../lib/photoAvailability');
 const odometerOcr = require('../lib/odometerOcr');
 const plateOcr = require('../lib/plateOcr');
@@ -415,6 +416,15 @@ async function syncOrdersByConfSlip(branch) {
       { wk_name: info.wkInfo, conf_slip: order.callmaner_conf_slip },
       info.status === '배차' ? '02' : null
     ).catch((e) => console.error(`기사정보 동기화 실패 (conf_slip=${order.callmaner_conf_slip}):`, e.message));
+
+    // 기사 위치를 매분 한 번 모아둔다. 아래에 "바뀐 게 없으면 continue"가 있어 **그 앞에**
+    // 둔다 — 위치는 상태가 안 바뀌어도 계속 움직인다.
+    //
+    // 이걸 붙인 이유(OID2211): 좌표는 지금까지 누가 화면을 열고 있을 때만 조회돼서, 위치가
+    // 언제부터 안 오는지 아무도 몰랐다. 콜마너는 운행완료까지 수집한다는데 실제 응답은
+    // rc=00에 빈 rs다 — 물으려면 "몇 시까지는 왔고 몇 시부터 비었다"는 기록이 있어야 한다.
+    await driverLocation.collectFix(branch, order)
+      .catch((e) => console.error(`기사 위치 수집 실패 (oid=${order.oid}):`, e.message));
 
     const resolvedStatus = resolveLocalStatus(info);
     // 되돌림(운행시작 → 기사배정)은 매핑 결과를 버린다 — 콜마너 쪽 표기(callmaner_status)만

@@ -50,6 +50,19 @@ console.log('\n[시각을 KST로 읽는다]');
 check('시간대 없는 값을 KST로 본다', /- 9 \* 3600 \* 1000/.test(lib));
 check('시간대가 붙어 있으면 그대로 믿는다', /\[Zz\]\|\[\+-\]/.test(lib));
 
+console.log('\n[화면과 무관하게 모아둔다]');
+// 좌표는 예전엔 누가 화면을 열고 있을 때만 조회됐다. 그래서 "언제부터 위치가 안 오는지"를
+// 아무도 몰랐고, 콜마너에 물을 근거가 우리한테 없었다(사용자 확인 2026-09-10: 기사 앱은
+// 켜져 있었고 콜마너는 운행완료까지 수집한다 — 그렇다면 이 전문만 비는 것이다).
+check('크론이 좌표를 모은다', /driverLocation\.collectFix\(branch, order\)/.test(read('routes/callmanerSync.js')));
+// 상태가 안 바뀌면 아래에서 continue한다 — 그 앞이어야 매분 돈다.
+const sync = read('routes/callmanerSync.js');
+check('상태 비교 continue보다 앞이다',
+  sync.indexOf('collectFix') < sync.indexOf("if (info.status === order.callmaner_status"));
+check('끊기면 시각을 남긴다', /tracking_driver_empty/.test(lib));
+// 매분 남기면 연동오류 목록이 이 한 건으로 덮인다.
+check('끊김 기록은 창을 좁게 잡는다', /LOST_LOG_WINDOW_MS/.test(lib) && /age <= LOST_LOG_WINDOW_MS/.test(lib));
+
 console.log('\n[옛 위치라고 밝힌다 — 화면 세 곳]');
 // 오더상세(EJS/Next)와 고객 추적 링크. 한쪽만 고치면 채널에 따라 다르게 보인다.
 for (const [label, file] of [
