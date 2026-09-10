@@ -29,7 +29,7 @@ const { splitTypeAndPlate } = require('../lib/vehicleInfo');
 const callmaner = require('../lib/callmaner');
 // 콜마너 오더접수는 카카오 상담톡 자동 접수(lib/kakaoIntakeService.js)도 같은 함수를 타야 해서
 // lib/callmanerRegister.js로 옮겼다 — 여기서는 그대로 가져다 쓴다.
-const { registerOrderWithCallmaner, tryUpdateWithErrorCodeColumn } = require('../lib/callmanerRegister');
+const { registerOrderWithCallmaner, tryUpdateWithErrorCodeColumn, saveCallmanerWebUrl } = require('../lib/callmanerRegister');
 const { maybeUpgradePremiumToDaily } = require('../lib/premiumUpgrade');
 // 오더 저장은 세 경로(웹·문의전환·카카오)가 같은 구현을 쓴다.
 const { createOrder } = require('../lib/orderCreate');
@@ -2836,7 +2836,13 @@ async function updateOrderWithCallmaner(orderId, branchId) {
       // 다시 조사하지 말고 이 기록을 근거로 삼는다. 의심되면 콜마너 화면을 봐야 한다.
       reserved_date: order.reserved_date, reserved_time: order.reserved_time,
     };
-    await callmaner.orderModify(orderForCallmaner, branchRow, paymentMethodRow && paymentMethodRow.name, waypointRows, order.callmaner_conf_slip);
+    const modified = await callmaner.orderModify(orderForCallmaner, branchRow, paymentMethodRow && paymentMethodRow.name, waypointRows, order.callmaner_conf_slip);
+    // 고객용 위치조회 링크가 수정 응답에도 오면 여기서 채운다. 접수 때 받은 링크를 우리가
+    // 버리던 시절(2026-09-10 이전)에 등록된 오더는 이 값이 없어서, 수정이 유일한 기회다.
+    if (modified && modified.webUrl) {
+      await saveCallmanerWebUrl(order.id, modified.webUrl)
+        .catch((e) => console.error('콜마너 위치조회 링크 저장 실패:', e.message));
+    }
     await tryUpdateWithErrorCodeColumn(
       `UPDATE orders SET callmaner_synced_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS'),
        callmaner_last_error = NULL, callmaner_last_error_code = NULL WHERE id = ?`,

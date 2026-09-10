@@ -9,9 +9,12 @@
 // `receipt_url`. 그런데 `web_url`은 **읽고서 아무도 쓰지 않아 버려지고 있었고**(lib/callmaner.js가
 // webUrl로 돌려주는데 호출부가 무시), `receipt_url`은 아예 파싱하지 않았다.
 //
-// 지금은 둘 다 값이 안 온다(실측 2026-09-10: 이력 31건 전부 빈 문자열, 문의서 6번). 그래서
-// 이 검사는 "값이 있다"가 아니라 **"오면 잡는다"**를 지킨다 — 콜마너 설정이 켜지는 날
-// 코드를 고치러 다시 오지 않아도 되게.
+// `web_url`은 **실제로 온다**(2026-09-10 시험 접수로 확인):
+//   [콜마너 접수] 응답 필드: reg_cslip, reg_date, web_url
+//   https://www.cd1.kr/cust-web/callDetail?supplierId=S-12345&callToken=…&callSource=U
+// 즉 링크는 처음부터 오고 있었고 우리가 저장하지 않아 버렸다. 그 시절에 등록된 오더는
+// 링크가 없어서, 수정(OrderModify) 응답에서도 받도록 해뒀다 — 그게 소급의 유일한 기회다.
+// `receipt_url`(OrderHistory)은 아직 31건 전부 빈 문자열이다(문의서 6번).
 require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
@@ -39,6 +42,13 @@ check('처음 받으면 로그를 남긴다', /고객용 위치조회 링크 수
 
 const sync = read('routes/callmanerSync.js');
 check('이력에서 온 링크도 저장한다', /info\.receiptUrl && info\.receiptUrl !== order\.callmaner_web_url/.test(sync));
+
+console.log('\n[수정 응답에서도 받는다 — 기존 오더의 유일한 기회]');
+const cm2 = read('lib/callmaner.js');
+check('수정 응답의 web_url을 돌려준다', /OrderModify[\s\S]{0,600}webUrl: rs\.web_url/.test(cm2));
+check('수정 응답 필드를 로그로 남긴다', /\[콜마너 수정\] 응답 필드/.test(cm2));
+check('접수 응답 필드도 로그로 남긴다', /\[콜마너 접수\] 응답 필드/.test(cm2));
+check('수정 라우트가 저장한다', /modified && modified\.webUrl[\s\S]{0,200}saveCallmanerWebUrl\(order\.id/.test(read('routes/orders.js')));
 
 console.log('\n[칸과 화면]');
 const mig = 'supabase/migrations/20260910010000_add_callmaner_web_url.sql';
