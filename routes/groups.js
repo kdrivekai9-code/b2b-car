@@ -1313,14 +1313,26 @@ async function loadSettlement(groupId, month, dealerUserId = null) {
 // 갈릴 수 있는데, 정산에서 그건 가장 나쁜 종류의 버그다.
 //
 // exceljs는 이미 요금표 업로드에 쓰고 있어 의존성이 늘지 않는다.
-router.get('/:id/settlement/excel', asyncHandler(async (req, res) => {
-  const group = await db.get(`
-    SELECT g.*, b.name AS branch_name FROM groups_tbl g
-      LEFT JOIN branches b ON b.id = g.branch_id WHERE g.id = ?`, [req.params.id]);
-  if (!group) return res.status(404).send('법인을 찾을 수 없습니다.');
+// 정산서에 찍을 지사 정보(발행 주체·입금계좌)까지 함께 읽는다.
+const SETTLEMENT_PRINT_GROUP_SQL = `
+  SELECT g.*, b.name AS branch_name, b.main_phone AS branch_phone,
+         b.address AS branch_address, b.contact_name AS branch_contact,
+         b.bank_name, b.bank_account, b.bank_holder
+    FROM groups_tbl g LEFT JOIN branches b ON b.id = g.branch_id
+   WHERE g.id = ?`;
 
-  const month = settlementMonth(req.query.month);
-  const data = await loadSettlement(req.params.id, month);
+// 발행일은 KST 기준이다 — 서버가 UTC라 그대로 찍으면 자정 전후로 하루가 어긋난다.
+function issuedOnKst() {
+  const now = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-${String(now.getUTCDate()).padStart(2, '0')}`;
+}
+
+// ---------------- 정산서 내보내기 (엑셀 · 인쇄 · 건별 청구서) ----------------
+//
+// 관리자 경로(/groups/:id/settlement/...)와 고객 경로(/my/settlement/...)가 **같은 함수**를
+// 쓴다. 정산서는 청구 문서라, 두 벌로 두면 한쪽만 고쳐 같은 달의 서류가 서로 달라진다.
+// 다른 것은 "어느 법인의, 누구 범위를 뽑느냐"뿐이고 그건 호출부가 정한다.
+async function writeSettlementExcel(res, { group, month, data }) {
   const itemized = data.surchargeMode === 'itemized';
 
   const ExcelJS = require('exceljs');
@@ -1396,6 +1408,15 @@ router.get('/:id/settlement/excel', asyncHandler(async (req, res) => {
     `attachment; filename="settlement_${month}.xlsx"; filename*=UTF-8''${encodeURIComponent(filename)}`);
   await wb.xlsx.write(res);
   res.end();
+}
+
+router.get('/:id/settlement/excel', asyncHandler(async (req, res) => {
+  const group = await db.get(`
+    SELECT g.*, b.name AS branch_name FROM groups_tbl g
+      LEFT JOIN branches b ON b.id = g.branch_id WHERE g.id = ?`, [req.params.id]);
+  if (!group) return res.status(404).send('법인을 찾을 수 없습니다.');
+  const month = settlementMonth(req.query.month);
+  await writeSettlementExcel(res, { group, month, data: await loadSettlement(req.params.id, month) });
 }));
 
 // 정산완료 처리 — 사용자 확정: "정산완료"와 "결재완료"는 같은 것이다. 상태는 하나만 둔다.
@@ -1469,32 +1490,33 @@ router.post('/:id/settlement/surcharge-mode', asyncHandler(async (req, res) => {
 //
 // 한 문서에 여러 장을 담는다 — 건마다 창을 열게 하면 열 건이면 열 번 뽑아야 한다.
 // 인쇄할 때 건마다 페이지가 나뉜다.
-router.get('/:id/settlement/individual-print', asyncHandler(async (req, res) => {
-  const group = await db.get(`
-    SELECT g.*, b.name AS branch_name, b.main_phone AS branch_phone,
-           b.bank_name, b.bank_account, b.bank_holder
-      FROM groups_tbl g LEFT JOIN branches b ON b.id = g.branch_id
-     WHERE g.id = ?`, [req.params.id]);
-  if (!group) return res.status(404).send('법인을 찾을 수 없습니다.');
-  const month = settlementMonth(req.query.month);
-  const data = await loadSettlement(req.params.id, month);
-
+function renderIndividualPrint(res, { group, month, data, ids, issuedBy }) {
   // 고른 줄만 뽑는다. 안 고르면 그 달의 개별정산 전부 — 월말에 한꺼번에 뽑는 흐름이 자연스럽다.
-  const picked = String(req.query.ids || '').split(',').map((v) => v.trim()).filter(Boolean);
+  const picked = String(ids || '').split(',').map((v) => v.trim()).filter(Boolean);
   const items = data.extras.filter((e) => {
     // 도선료처럼 오더에서 파생된 줄은 별도 청구서 대상이 아니다 — 운행요금과 함께 청구된다.
     if (e.derived) return false;
     if (picked.length) return picked.includes(String(e.id));
     return e.settleMode === 'individual';
   });
-
-  const now = new Date(Date.now() + 9 * 60 * 60 * 1000);
   res.render('groups/settlement_individual_print', {
     group,
     month,
     items,
     total: items.reduce((a, e) => a + (Number(e.amount) || 0), 0),
-    issuedOn: `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-${String(now.getUTCDate()).padStart(2, '0')}`,
+    issuedOn: issuedOnKst(),
+    issuedBy: issuedBy || '',
+  });
+}
+
+router.get('/:id/settlement/individual-print', asyncHandler(async (req, res) => {
+  const group = await db.get(SETTLEMENT_PRINT_GROUP_SQL, [req.params.id]);
+  if (!group) return res.status(404).send('법인을 찾을 수 없습니다.');
+  const month = settlementMonth(req.query.month);
+  renderIndividualPrint(res, {
+    group, month,
+    data: await loadSettlement(req.params.id, month),
+    ids: req.query.ids,
     issuedBy: (req.session.user && req.session.user.name) || '',
   });
 }));
@@ -1505,25 +1527,25 @@ router.get('/:id/settlement/individual-print', asyncHandler(async (req, res) => 
 // 있고, 헤더/사이드바 없이 종이 한 장으로 떨어져야 한다. 그래서 공용 레이아웃을 쓰지 않는다.
 //
 // 새 창으로 연다(사용자 지시) — 목록을 보던 화면을 잃지 않고 인쇄만 하고 닫을 수 있어야 한다.
-router.get('/:id/settlement/print', asyncHandler(async (req, res) => {
-  const group = await db.get(`
-    SELECT g.*, b.name AS branch_name, b.main_phone AS branch_phone,
-           b.address AS branch_address, b.contact_name AS branch_contact,
-           b.bank_name, b.bank_account, b.bank_holder
-      FROM groups_tbl g LEFT JOIN branches b ON b.id = g.branch_id
-     WHERE g.id = ?`, [req.params.id]);
-  if (!group) return res.status(404).send('법인을 찾을 수 없습니다.');
-  const month = settlementMonth(req.query.month);
-  const data = await loadSettlement(req.params.id, month);
-
-  const now = new Date(Date.now() + 9 * 60 * 60 * 1000); // 발행일은 KST
+function renderSettlementPrint(res, { group, month, data, issuedBy }) {
   res.render('groups/settlement_print', {
     group,
     month,
-    issuedOn: `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-${String(now.getUTCDate()).padStart(2, '0')}`,
-    issuedBy: (req.session.user && req.session.user.name) || '',
+    issuedOn: issuedOnKst(),
+    issuedBy: issuedBy || '',
     extraChargeTypes: extraCharges.EXTRA_CHARGE_TYPES,
     ...data,
+  });
+}
+
+router.get('/:id/settlement/print', asyncHandler(async (req, res) => {
+  const group = await db.get(SETTLEMENT_PRINT_GROUP_SQL, [req.params.id]);
+  if (!group) return res.status(404).send('법인을 찾을 수 없습니다.');
+  const month = settlementMonth(req.query.month);
+  renderSettlementPrint(res, {
+    group, month,
+    data: await loadSettlement(req.params.id, month),
+    issuedBy: (req.session.user && req.session.user.name) || '',
   });
 }));
 
@@ -1885,6 +1907,46 @@ myRouter.use(requireAuth, requireRole('client'));
 
 // 위 화면의 Next 판(src/app/my/settlement)이 읽는다 — 관리자용과 **같은 계산**을 쓰되
 // 법인은 로그인 계정에서 정한다(주소창으로 남의 법인을 열 수 없다).
+// ---------------- 고객용 정산서 내보내기 ----------------
+//
+// 관리자 경로(/groups/:id/settlement/...)와 **같은 생성 함수**를 쓴다 — 정산서는 청구
+// 문서라 두 벌로 두면 같은 달의 서류가 서로 달라진다.
+//
+// 왜 따로 여나(2026-09-11 사용자 요청): 고객 화면에도 엑셀·인쇄·건별 청구서가 필요하다.
+// 그런데 /groups/* 라우터는 통째로 requireRole('admin')이라, EJS 화면이 그 경로로 걸어둔
+// 버튼 셋은 **고객이 누르면 403이었다**. 화면에만 있고 동작하지 않던 것을 실제로 열어준다.
+//
+// 범위는 여기서 정한다: 법인은 주소창이 아니라 로그인 계정에서 오고(남의 법인을 뽑을 수
+// 없다), 개인 딜러는 본인이 접수한 건만 담긴다(화면과 같은 규칙).
+async function loadMySettlement(req) {
+  const me = req.session.user;
+  if (!me.group_id) return { error: 403 };
+  const group = await db.get(SETTLEMENT_PRINT_GROUP_SQL, [me.group_id]);
+  if (!group) return { error: 404 };
+  const month = settlementMonth(req.query.month);
+  // 본사 직원은 특정 딜러만 골라 뽑을 수 있다 — 딜러에게 정산서를 전달할 때 쓴다.
+  const viewDealerId = clientScope.isDealer(me) ? me.id : (Number(req.query.dealer) || null);
+  return { me, group, month, data: await loadSettlement(me.group_id, month, viewDealerId) };
+}
+
+myRouter.get('/excel', asyncHandler(async (req, res) => {
+  const ctx = await loadMySettlement(req);
+  if (ctx.error) return res.status(ctx.error).send(ctx.error === 403 ? '접근 권한이 없습니다.' : '법인을 찾을 수 없습니다.');
+  await writeSettlementExcel(res, ctx);
+}));
+
+myRouter.get('/print', asyncHandler(async (req, res) => {
+  const ctx = await loadMySettlement(req);
+  if (ctx.error) return res.status(ctx.error).send(ctx.error === 403 ? '접근 권한이 없습니다.' : '법인을 찾을 수 없습니다.');
+  renderSettlementPrint(res, { ...ctx, issuedBy: ctx.me.name || '' });
+}));
+
+myRouter.get('/individual-print', asyncHandler(async (req, res) => {
+  const ctx = await loadMySettlement(req);
+  if (ctx.error) return res.status(ctx.error).send(ctx.error === 403 ? '접근 권한이 없습니다.' : '법인을 찾을 수 없습니다.');
+  renderIndividualPrint(res, { ...ctx, ids: req.query.ids, issuedBy: ctx.me.name || '' });
+}));
+
 myRouter.get('/data.json', asyncHandler(async (req, res) => {
   const me = req.session.user;
   if (!me.group_id) return res.status(403).json({ error: '접근 권한이 없습니다.' });

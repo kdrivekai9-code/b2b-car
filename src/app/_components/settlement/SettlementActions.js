@@ -43,26 +43,28 @@ export function MonthPicker({ month, months }) {
 
 // 엑셀·인쇄 — 누르는 순간의 월을 읽는다. 월 입력만 바꾸고 조회를 누르지 않은 상태에서
 // 눌러도 화면에 보이는 달이 나가야 한다(안 그러면 이번 달이 인쇄돼 엉뚱한 서류가 나간다).
-export function ExcelLink({ groupId, month }) {
+// 내보내기 경로의 앞부분. 관리자는 /groups/:id/settlement, 고객은 /my/settlement다 —
+// 고객이 /groups/... 를 부르면 403이므로(그 라우터는 admin 전용) 화면이 자기 경로를 넘긴다.
+export function ExcelLink({ base, month }) {
   return (
-    <a className="btn secondary" href={`/groups/${groupId}/settlement/excel?month=${encodeURIComponent(month)}`}
+    <a className="btn secondary" href={`${base}/excel?month=${encodeURIComponent(month)}`}
       onClick={(e) => {
-        e.currentTarget.href = `/groups/${groupId}/settlement/excel?month=${encodeURIComponent(readMonth(month))}`;
+        e.currentTarget.href = `${base}/excel?month=${encodeURIComponent(readMonth(month))}`;
       }}>⬇ 엑셀 다운로드</a>
   );
 }
 
-export function PrintButton({ groupId, month }) {
+export function PrintButton({ base, month }) {
   return (
     <button type="button" className="btn"
       onClick={() => window.open(
-        `/groups/${groupId}/settlement/print?month=${encodeURIComponent(readMonth(month))}`,
+        `${base}/print?month=${encodeURIComponent(readMonth(month))}`,
         'settlementPrint', 'width=900,height=1000,scrollbars=yes'
       )}>📄 정산내역서 출력</button>
   );
 }
 
-export function IndividualPrintButton({ groupId, month }) {
+export function IndividualPrintButton({ base, month }) {
   return (
     <button type="button" className="btn secondary"
       onClick={() => {
@@ -70,8 +72,7 @@ export function IndividualPrintButton({ groupId, month }) {
         // 전부를 뽑게 한다 — 매번 전부 체크하게 하면 쓰기 번거롭다.
         const ids = Array.from(document.querySelectorAll('input[name="extra_id"]:checked')).map((cb) => cb.value);
         const qs = 'month=' + encodeURIComponent(readMonth(month)) + (ids.length ? '&ids=' + encodeURIComponent(ids.join(',')) : '');
-        window.open(`/groups/${groupId}/settlement/individual-print?${qs}`,
-          'individualPrint', 'width=900,height=1000,scrollbars=yes');
+        window.open(`${base}/individual-print?${qs}`, 'individualPrint', 'width=900,height=1000,scrollbars=yes');
       }}>📄 개별정산 건별 청구서</button>
   );
 }

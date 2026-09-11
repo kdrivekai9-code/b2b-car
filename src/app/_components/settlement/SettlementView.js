@@ -10,11 +10,11 @@ import { SelectAllCheckbox, MonthPicker, IndividualPrintButton } from './Settlem
 const won = (n) => (Number(n) || 0).toLocaleString('ko-KR') + '원';
 const joinAddr = (a, d) => [a, d].filter(Boolean).join(' ') || '-';
 
-export default function SettlementView({ data, sp }) {
+export default function SettlementView({ data, sp, base }) {
   const {
     group, month, months, items, extras, summary, extraSummary,
     surchargeMode, surchargeByLabel, grandTotal, settlementGroups,
-    extraChargeTypes, meIsDealer, viewDealerId, clientView,
+    extraChargeTypes, meIsDealer, viewDealerId,
   } = data;
 
   return (
@@ -372,9 +372,7 @@ export default function SettlementView({ data, sp }) {
             <button className="btn" type="submit" form="settleForm" name="action" value="settle">선택 항목 정산완료</button>
             {/* 잘못 누른 것을 되돌릴 길이 없으면 아무도 안 쓴다. */}
             <button className="btn secondary" type="submit" form="settleForm" name="action" value="unsettle">선택 항목 미정산으로</button>
-            {/* 개별청구서도 /groups/:id/... 경로라 고객 화면에서는 403이 된다 — 안 그린다.
-                (EJS는 그려두고 있었다, 2026-09-10 확인) */}
-            {!clientView && <IndividualPrintButton groupId={group.id} month={month} />}
+            <IndividualPrintButton base={base} month={month} />
           </div>
           <p className="page-sub" style={{ marginBottom: 0 }}>
             건별 청구서는 <b>기타 정산 중 개별정산 항목</b>만 뽑습니다({extraSummary.byMode.individual.count}건).

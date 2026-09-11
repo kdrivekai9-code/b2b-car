@@ -129,11 +129,33 @@ for (const [label, f] of [['관리자용', 'src/app/groups/[id]/settlement/page.
   // 본문을 자기 파일에 다시 그리기 시작하면 갈린다.
   check(`${label} 화면에 본문 사본이 없다`, !/금액 통계/.test(read(f)));
 }
-// 고객 화면에서 /groups/... 경로 버튼을 그리면 403이 난다(그 라우터는 admin 전용이다).
+// **고객 화면은 /my/settlement 경로를 써야 한다.**
+//
+// EJS 화면은 이 버튼들을 /groups/:id/... 로 걸어뒀는데 그 라우터는 통째로
+// requireRole('admin')이라 고객이 누르면 403이었다(2026-09-10 확인). 2026-09-11에 고객 전용
+// 경로를 열었으므로, 화면이 그쪽을 가리키는지 본다 — 다시 /groups/... 로 바뀌면 조용히
+// 403으로 되돌아간다.
 const my = read('src/app/my/settlement/page.js');
-check('고객 화면에 엑셀·인쇄 버튼이 없다', !/ExcelLink|PrintButton/.test(my),
-  '/groups/:id/settlement/excel·print는 requireRole(admin)이라 고객이 누르면 403이다');
-check('개별청구서도 고객 화면에서는 감춘다', /!clientView && <IndividualPrintButton/.test(next));
+check('고객 화면에 내보내기 버튼이 있다', /ExcelLink|PrintButton/.test(my));
+check('고객 화면이 /my/settlement 경로를 쓴다', /base="\/my\/settlement"/.test(my));
+// 주석에는 그 경로를 설명하려고 적어둔 자리가 있다 — **코드 줄만 본다**(주석을 근거로 삼는
+// 실수를 이 저장소에서 이미 두 번 했다).
+const myCode = my.split('\n').filter((l) => !/^\s*(\/\/|\{\/\*|\*)/.test(l)).join('\n');
+check('고객 화면이 /groups 경로를 쓰지 않는다', !/href=|base=|window\.open\(/.test(myCode) || !/['"`]\/groups\//.test(myCode),
+  '그 경로는 admin 전용이라 고객이 누르면 403이다');
+
+console.log('\n[내보내기 생성 코드가 한 벌이다]');
+// 정산서는 청구 문서다 — 두 벌로 두면 같은 달의 서류가 서로 달라진다.
+for (const [label, fn] of [['엑셀', 'writeSettlementExcel'], ['정산내역서', 'renderSettlementPrint'], ['건별 청구서', 'renderIndividualPrint']]) {
+  const uses = (routes.match(new RegExp(`\\b${fn}\\(`, 'g')) || []).length;
+  // 정의 1 + 관리자 호출 1 + 고객 호출 1 = 3
+  check(`${label}: 관리자·고객이 같은 함수를 쓴다`, uses >= 3, `${fn} 등장 ${uses}회`);
+}
+// 고객 경로의 범위는 서버가 정해야 한다 — 주소창의 법인 id를 믿으면 남의 정산서가 나간다.
+const myRoutes = routes.slice(routes.indexOf('async function loadMySettlement'));
+check('고객 경로가 법인을 로그인 계정에서 정한다', /me\.group_id/.test(myRoutes)
+  && !/req\.params\.id/.test(myRoutes.slice(0, myRoutes.indexOf('myRouter.get(\'/data.json\'')) || ''));
+check('고객 경로가 개인 딜러 범위를 지킨다', /clientScope\.isDealer\(me\) \? me\.id/.test(myRoutes));
 
 console.log('\n[조회 중인 달을 잃지 않는다]');
 // 안 보내면 저장·처리 후 이번 달로 튕겨 보던 정산서를 잃는다.

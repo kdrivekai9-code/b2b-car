@@ -31,11 +31,11 @@ export default async function GroupSettlementPage({ params, searchParams }) {
         actions={<>
           {/* 새 창으로 연다(사용자 지시) — 목록을 보던 화면을 잃지 않고 인쇄만 하고 닫을 수
               있어야 한다. 엑셀은 인쇄 앞에 둔다(사용자 지시). */}
-          <ExcelLink groupId={group.id} month={month} />
-          <PrintButton groupId={group.id} month={month} />
+          <ExcelLink base={`/groups/${group.id}/settlement`} month={month} />
+          <PrintButton base={`/groups/${group.id}/settlement`} month={month} />
         </>}
       >
-        <SettlementView data={data} sp={sp} />
+        <SettlementView data={data} sp={sp} base={`/groups/${group.id}/settlement`} />
       </GroupSettingsShell>
     </AppShell>
   );

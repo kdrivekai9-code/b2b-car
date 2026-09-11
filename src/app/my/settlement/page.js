@@ -7,6 +7,7 @@ import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import AppShell from '../../_components/AppShell';
 import SettlementView from '../../_components/settlement/SettlementView';
+import { ExcelLink, PrintButton } from '../../_components/settlement/SettlementActions';
 
 export const dynamic = 'force-dynamic';
 export const preferredRegion = 'icn1';
@@ -46,14 +47,17 @@ export default async function MySettlementPage({ searchParams }) {
             {' '}할증 표시는 <b>{surchargeMode === 'itemized' ? '별도 줄(항목별)' : '운행요금 포함'}</b> 방식입니다.
           </p>
         </div>
-        {/* **엑셀·인쇄 버튼을 두지 않는다.**
-            EJS 화면은 이 자리에 세 버튼(엑셀·정산내역서·개별청구서)을 두고 있었는데, 전부
-            /groups/:id/... 경로를 가리킨다. 그런데 그 라우터는 통째로 requireRole('admin')이라
-            **고객이 누르면 403이다**(2026-09-10 확인). 눌리는데 안 되는 버튼은 "고장"으로
-            읽히므로 그대로 옮기지 않았다.
-            고객에게 정산서를 내려받게 할지는 접근 권한을 바꾸는 결정이라 따로 정해야 한다. */}
+        <div className="page-head-actions">
+          {/* **고객 전용 경로를 쓴다.** EJS 화면은 이 버튼들을 /groups/:id/... 로 걸어뒀는데
+              그 라우터는 통째로 requireRole('admin')이라 고객이 누르면 403이었다(2026-09-10
+              확인). 2026-09-11 사용자 요청으로 /my/settlement/{excel,print,individual-print}를
+              열었다 — 생성 코드는 관리자와 **같은 함수**이고, 범위(법인·딜러)만 서버가
+              로그인 계정에서 정한다. */}
+          <ExcelLink base="/my/settlement" month={month} />
+          <PrintButton base="/my/settlement" month={month} />
+        </div>
       </div>
-      <SettlementView data={data} sp={sp} />
+      <SettlementView data={data} sp={sp} base="/my/settlement" />
     </AppShell>
   );
 }
