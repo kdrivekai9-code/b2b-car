@@ -159,6 +159,7 @@ const CI_CHECKS = [
   'check-mcp-followup-guard',
   'check-memo-extra-costs',
   'check-memo-budget',
+  'check-named-route-shadowing',
   'check-next-page-imports',
   'check-next-build',
   'check-offer-agent-answer',

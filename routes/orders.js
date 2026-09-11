@@ -1842,6 +1842,35 @@ router.get('/:id/driver-location.json', asyncHandler(async (req, res) => {
 // 새 React 상세페이지의 관리자 패널(OrderDetailAdminPanels.js)에도 그대로 실어준다 —
 // 그 패널이 재사용하는 기존 라우트(/:id/status, /:id/driver, /:id/legs/drivers)가
 // 기대하는 것과 동일한 선택지 데이터다.
+// 위 화면의 Next 판(src/app/orders/team-feed) — 같은 판정을 서버에서 한 번만 한다.
+//
+// **'/:id/data.json'보다 먼저 등록해야 한다.** 처음에 '/:id' 바로 앞에 뒀는데, 그것만으로는
+// 부족했다 — `/team-feed/data.json`이 `/:id/data.json`에 id="team-feed"로 먼저 잡혀 오더
+// 조회가 터졌고, 화면은 "오류가 발생했습니다"만 보여줬다(프로덕션은 서버 컴포넌트의 실제
+// 메시지를 감춘다 — React #441).
+//
+// 이 저장소는 바로 위에서 같은 함정을 이미 적어뒀다("/team-feed는 /:id보다 먼저 등록해야
+// 한다"). 그때는 한 세그먼트만 생각했는데, **`/:id/무엇이든`도 똑같이 가로챈다.**
+// scripts/check-named-route-shadowing.js가 이 대조를 지킨다.
+router.get('/team-feed/data.json', asyncHandler(async (req, res) => {
+  const u = req.session.user;
+  if (!u) return res.status(401).json({ error: '로그인이 필요합니다.' });
+  // 개인 딜러 차단은 화면과 같은 규칙이다 — 여기서 빠지면 주소만 알면 데이터가 다 나간다.
+  if (clientScope.isDealer(u)) return res.status(403).json({ error: '접근 권한이 없습니다.' });
+  const groupId = u.group_id || null;
+  const group = groupId
+    ? await db.get('SELECT id, name, share_activity_feed FROM groups_tbl WHERE id = ?', [groupId]).catch(() => null)
+    : null;
+  const enabled = !!(group && group.share_activity_feed);
+  res.json({
+    currentUser: u,
+    groupName: group ? group.name : null,
+    enabled,
+    activities: enabled ? await listGroupActivity(groupId, 50) : [],
+    kindLabels: ACTIVITY_KIND_LABELS,
+  });
+}));
+
 router.get('/:id/data.json', asyncHandler(async (req, res) => {
   const order = await loadOrderForView(req, res);
   if (!order) return res.json({ error: '오더를 찾을 수 없거나 접근 권한이 없습니다.' });
@@ -2558,27 +2587,6 @@ router.get('/team-feed', asyncHandler(async (req, res) => {
   const activities = enabled ? await listGroupActivity(groupId, 50) : [];
   res.render('orders/team_feed', {
     title: '팀 접수 현황 안내', groupName: group ? group.name : null, enabled, activities,
-    kindLabels: ACTIVITY_KIND_LABELS,
-  });
-}));
-
-// 위 화면의 Next 판(src/app/orders/team-feed) — 같은 판정을 서버에서 한 번만 한다.
-// 경로가 두 세그먼트라 프록시의 /orders/:id 블록에 걸리지 않는다(한 세그먼트만 잡는다).
-router.get('/team-feed/data.json', asyncHandler(async (req, res) => {
-  const u = req.session.user;
-  if (!u) return res.status(401).json({ error: '로그인이 필요합니다.' });
-  // 개인 딜러 차단은 화면과 같은 규칙이다 — 여기서 빠지면 주소만 알면 데이터가 다 나간다.
-  if (clientScope.isDealer(u)) return res.status(403).json({ error: '접근 권한이 없습니다.' });
-  const groupId = u.group_id || null;
-  const group = groupId
-    ? await db.get('SELECT id, name, share_activity_feed FROM groups_tbl WHERE id = ?', [groupId]).catch(() => null)
-    : null;
-  const enabled = !!(group && group.share_activity_feed);
-  res.json({
-    currentUser: u,
-    groupName: group ? group.name : null,
-    enabled,
-    activities: enabled ? await listGroupActivity(groupId, 50) : [],
     kindLabels: ACTIVITY_KIND_LABELS,
   });
 }));
