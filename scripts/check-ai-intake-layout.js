@@ -27,6 +27,7 @@ function check(name, ok, detail) {
 }
 
 const workspace = read('src/app/orders/ai-intake/AiIntakeWorkspace.js');
+const client = read('src/app/orders/ai-intake/AiIntakeClient.js');
 const page = read('src/app/orders/ai-intake/page.js');
 const css = read('public/css/style.css');
 
@@ -69,6 +70,16 @@ console.log('\n[이관 중 붙여둔 자기점검 카드가 고객 화면에 남
 for (const junk of ['MIGRATION PREVIEW', 'RESTORE SNAPSHOT', 'MIGRATION STATUS', 'Next.js 단계 전환', 'NEXT_STAGE3_AI_INTAKE_ENABLED']) {
   check(`"${junk}"가 없다`, !page.includes(junk), '고객에게 보이는 화면이다');
 }
+// 대화 카드 안에도 진단 줄이 하나 있었다(2026-09-11 지적): 세션 ID / 상태 / 복원 Draft /
+// Phase. 이관 중 내부 상태를 눈으로 보려고 붙인 것이고 EJS에는 대응물이 아예 없다.
+// 고객에게 "Phase: 정보 수집"은 뜻을 알 수 없는 말이다.
+for (const junk of ['세션 ID:', '복원 Draft:', 'Phase: <b>', '상태: <b>']) {
+  check(`대화 카드에 "${junk}"가 없다`, !client.includes(junk), '이관 중 진단용으로 붙인 줄이다');
+}
+// 상태 이름표(봇 응대중 등)는 그 줄에만 쓰였다 — 되살아나면 줄도 같이 돌아온 것이다.
+check('상태 이름표 상수가 남아 있지 않다',
+  !/const STATUS_LABEL = \{[^}]*봇 응대중/.test(client));
+
 // EJS와 같은 머리말이어야 한다 — 한쪽에만 부제가 붙으면 되돌릴 때 화면이 달라 보인다.
 const ejs = read('views/orders/ai_intake.ejs');
 check('제목이 EJS와 같다', /<h1 className="page-title">AI 챗봇<\/h1>/.test(page)

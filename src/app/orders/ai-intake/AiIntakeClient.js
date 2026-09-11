@@ -4,20 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ChatHistoryMenu from './ChatHistoryMenu';
 import { renderChatText } from './formatChatText';
 
-const STATUS_LABEL = {
-  bot: '봇 응대중',
-  needs_agent: '상담원 대기',
-  agent_active: '상담원 응대중',
-  closed: '종료',
-};
-
-const STATUS_BADGE = {
-  bot: 'gray',
-  needs_agent: 'red',
-  agent_active: 'blue',
-  closed: 'dark',
-};
-
 const ORDER_FIELD_IDS = [
   'reserved_date',
   'reserved_time',
@@ -385,22 +371,6 @@ export default function AiIntakeClient({
   // 프리미엄대리·일일기사 대화가 진행 중인지 — 그 동안은 서버 턴 엔진이 대화를 맡는다.
   const premiumTurnActiveRef = useRef(false);
   const vehicleNumberFailCountRef = useRef(0);
-
-  const statusLabel = STATUS_LABEL[status] || status;
-  const badgeClass = STATUS_BADGE[status] || 'gray';
-  const hasDraft = !!initialDraft;
-
-  const phaseLabel = phase === 'confirming'
-    ? '등록 확인'
-    : phase === 'choose_field'
-      ? '수정 항목 선택'
-      : phase === 'choose_address_candidate'
-        ? '주소 후보 선택'
-        : phase === 'offer_agent'
-          ? '상담원 연결 제안'
-      : pendingField
-        ? ('재입력: ' + pendingField)
-        : '정보 수집';
 
   const canSend = useMemo(() => {
     return !isSending && input.trim().length > 0;
@@ -1539,13 +1509,6 @@ export default function AiIntakeClient({
             {aiHealth.state === 'online' && !streamOnline ? ' · 재연결중' : ''}
           </span>
         </div>
-      </div>
-
-      <div className="session-meta" style={{ marginBottom: 10 }}>
-        <span>세션 ID: <b>{sessionId || '새 세션'}</b></span>
-        <span>상태: <b><span className={'badge ' + badgeClass}>{statusLabel}</span></b></span>
-        <span>복원 Draft: <b>{hasDraft ? '있음' : '없음'}</b></span>
-        <span>Phase: <b>{phaseLabel}</b></span>
       </div>
 
       <div className="ai-chat-messages" style={{ minHeight: 340, maxHeight: 480 }}>
