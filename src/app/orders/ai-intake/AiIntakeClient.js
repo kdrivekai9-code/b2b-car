@@ -117,6 +117,16 @@ function buildOrderSummary(parseData) {
   return ['입력 내용을 오더 접수로 인식했습니다.', ...fields, '필요한 정보를 더 말씀해주시면 계속 보완하겠습니다.'].join('\n');
 }
 
+// 서버가 내려주는 예약 기준. 판별 자체는 서버(lib/reservationBasis.js)가 하고 여기서는
+// 읽기만 한다 — 같은 판단을 클라이언트에서 또 하면 채널마다 답이 갈린다.
+// reservation_immediate는 예전부터 있던 형태라 같이 받는다(EJS 챗봇이 그 값을 쓴다).
+function reservationBasisOf(parseData) {
+  if (!parseData || typeof parseData !== 'object') return null;
+  if (parseData.reservation_immediate) return 'immediate';
+  const basis = String(parseData.reservation_basis || '').trim();
+  return (basis === 'immediate' || basis === 'pickup' || basis === 'delivery') ? basis : null;
+}
+
 function isOrderIntent(parseData) {
   if (!parseData || typeof parseData !== 'object') return false;
   return !['faq', 'greeting', 'unsupported'].includes(parseData.intent);
@@ -616,6 +626,7 @@ export default function AiIntakeClient({
       // 서버가 이번 턴에 필수 항목을 다 채웠으면(주소 확인 대기 포함) 우측 폼도 반영한다.
       // 이게 빠져 있으면 판단이 서버로 넘어간 뒤로 이 폼이 챗봇 파악 내용을 전혀 못
       // 보여줬다(실사용 지적, 2026-08-11).
+      // turnResult.intake는 toIntakeFields가 만든다 — 즉시면 reservation_basis가 들어 있다.
       if (turnResult.intake && typeof onOrderPrefill === 'function') onOrderPrefill(turnResult.intake);
       // 등록이 끝났거나 대화가 닫혔으면 프리미엄 지름길도 끝난다 — 안 끄면 그 다음 탁송
       // 요청까지 서버 프리미엄 흐름으로 새어 들어간다.
@@ -940,7 +951,13 @@ export default function AiIntakeClient({
     noteProgress();
 
     if (typeof onOrderPrefill === 'function') {
-      onOrderPrefill(mergedFields);
+      // 예약 기준(즉시/픽업/도착)은 수집 항목이 아니라 폼의 라디오라 collectedFields에 섞지
+      // 않는다 — 섞으면 확인 요약과 draft에 뜻 모를 줄이 하나 늘어난다. 폼에만 따로 얹는다.
+      // 이게 빠져 있어서 "일시 : 07/27 즉시"로 접수하면 챗봇은 "즉시로 예약을 확인했습니다"
+      // 라고 답하는데 우측 폼은 픽업 기준 그대로였다(2026-09-11 지적).
+      onOrderPrefill(reservationBasisOf(parseData)
+        ? { ...mergedFields, reservation_basis: reservationBasisOf(parseData) }
+        : mergedFields);
     }
 
     const confirmText = buildOrderSummary(mergedFields) + '\n\n위 내용으로 등록할까요? (네 / 수정)';

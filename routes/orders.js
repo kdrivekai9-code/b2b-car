@@ -22,6 +22,7 @@ const { buildFareSuggestion } = require('../lib/agentAssist');
 const memoExtraCosts = require('../lib/memoExtraCosts');
 const postalReceipt = require('../lib/postalReceipt');
 const reservationSanity = require('../lib/reservationSanity');
+const { resolveReservationBasis } = require('../lib/reservationBasis');
 const { trimToConversationDay } = require('../lib/chatHistoryWindow');
 // 인사·자기소개 응답은 카카오 상담톡(routes/kakaoConsult.js)과 같은 규칙을 써야 해서 공용 모듈로 뺐다.
 const { isGreeting, getSmalltalkMessage } = require('../lib/smallTalk');
@@ -1005,6 +1006,11 @@ router.post('/ai-intake/parse', aiRateLimit, asyncHandler(async (req, res) => {
         reserved_date: `${now.getUTCFullYear()}-${pad(now.getUTCMonth() + 1)}-${pad(now.getUTCDate())}`,
         reserved_time: `${pad(now.getUTCHours())}:${pad(now.getUTCMinutes())}`,
         reservation_immediate: true,
+        // 우측 접수 폼의 "즉시" 라디오를 켜는 값. 예전에는 reservation_immediate만 내려주고
+        // 그걸 라디오로 옮기는 일을 EJS 클라이언트가 했는데(public/js/ai-intake.js
+        // applyImmediateReservationBasis), Next 판에는 그 단계가 없어 챗봇은 "즉시로
+        // 확인했습니다"라고 답하고 폼은 픽업 기준에 머물렀다(2026-09-11 지적).
+        reservation_basis: 'immediate',
         seemsFrustrated: false,
       });
     }
@@ -1117,6 +1123,12 @@ router.post('/ai-intake/parse', aiRateLimit, asyncHandler(async (req, res) => {
     // 화면의 "즉시" 라디오를 자동 체크하도록 알려준다.
     fields.reservation_immediate = true;
   }
+
+  // 예약 기준(즉시 / 픽업 / 도착)을 폼이 쓰는 값 그대로 내려준다. 판별은
+  // lib/reservationBasis.js 한 곳에 있다 — 채널마다 따로 판단하면 같은 문장에 다른 라디오가
+  // 켜진다. 못 알아보면 아무것도 안 실어서 폼 기본값(픽업 기준)에 그대로 둔다.
+  const reservationBasis = resolveReservationBasis({ immediate: !!fields.reservation_immediate, text });
+  if (reservationBasis) fields.reservation_basis = reservationBasis;
 
   res.json({ intent, ...fields, seemsFrustrated });
 }));

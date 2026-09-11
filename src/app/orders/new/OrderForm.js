@@ -587,6 +587,13 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
     setIfFilled('final_destination_address_detail', p.final_destination_address_detail);
     if (p.destination_wait_minutes != null) setIfFilled('destination_wait_minutes', String(p.destination_wait_minutes));
     setIfFilled('reservation_hours_bracket', p.reservation_hours_bracket);
+    // 예약 기준 라디오(즉시 / 픽업 기준 / 도착 기준). 챗봇이 "즉시"를 읽었는데 이 줄이 없어서
+    // 폼은 픽업 기준에 머물렀다(2026-09-11 지적). 값은 서버가 정한다(lib/reservationBasis.js).
+    // SET_FIELD가 reservation_basis_touched를 세우므로, 뒤에 오더구분이 바뀌어도 챗봇이 읽은
+    // 기준을 덮어쓰지 않는다. 즉시면 아래 effect가 날짜·시각을 지금으로 맞추고 잠근다.
+    if (p.reservation_basis === 'immediate' || p.reservation_basis === 'pickup' || p.reservation_basis === 'delivery') {
+      setIfFilled('reservation_basis', p.reservation_basis);
+    }
     if (p.daily_driver_hours != null) setIfFilled('daily_driver_hours', String(p.daily_driver_hours));
 
     // 경유지 — 챗봇이 받은 주소를 폼에도 올린다.

@@ -118,6 +118,7 @@ const CI_CHECKS = [
   'check-address-spacing-geocode',
   'check-ai-intake-liveness',
   'check-ai-intake-layout',
+  'check-reservation-basis',
   'check-agent-request',
   'check-agent-idle-release',
   'check-chat-unread-badge',
