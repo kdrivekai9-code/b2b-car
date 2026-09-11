@@ -170,6 +170,7 @@ const CI_CHECKS = [
   'check-order-split',
   'check-plate-check',
   'check-proxy-named-paths',
+  'check-row-click-parity',
   'check-status-colors-parity',
   'check-public-base-url',
   'check-push-audience',

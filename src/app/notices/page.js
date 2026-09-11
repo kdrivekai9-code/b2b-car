@@ -1,6 +1,7 @@
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import AppShell from '../_components/AppShell';
+import ClickableRow from '../_components/ClickableRow';
 import ConfirmForm from '../_components/ConfirmForm';
 
 export const dynamic = 'force-dynamic';
@@ -46,7 +47,9 @@ export default async function NoticesPage() {
                 <tr><td colSpan={isAdmin ? 4 : 3} className="empty">등록된 공지사항이 없습니다.</td></tr>
               )}
               {notices.map((n) => (
-                <tr key={n.id}>
+                // 행 전체를 눌러 상세로 간다(EJS와 같다) — 수정·삭제 버튼 위의 클릭은
+                // ClickableRow가 가로채지 않는다.
+                <ClickableRow key={n.id} href={'/notices/' + n.id}>
                   <td><a href={'/notices/' + n.id}>{n.title}</a></td>
                   <td>{n.author_name || '-'}</td>
                   <td>{n.created_at ? String(n.created_at).slice(0, 10) : '-'}</td>
@@ -60,7 +63,7 @@ export default async function NoticesPage() {
                       </div>
                     </td>
                   )}
-                </tr>
+                </ClickableRow>
               ))}
             </tbody>
           </table>

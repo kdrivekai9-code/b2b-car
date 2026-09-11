@@ -1,6 +1,7 @@
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import AppShell from '../_components/AppShell';
+import ClickableRow from '../_components/ClickableRow';
 
 // Stage 1 slice: reproduces routes/inquiries.js + views/inquiries/list.ejs behavior
 // (same data, same auth/scoping via /inquiries/data.json) as a React page.
@@ -93,7 +94,7 @@ export default async function InquiriesListPage({ searchParams }) {
                   ? i.inquiry_text.slice(0, 40) + '…'
                   : (i.inquiry_text || '-');
                 return (
-                  <tr key={i.id} style={{ cursor: 'pointer' }}>
+                  <ClickableRow key={i.id} href={`/inquiries/${i.id}`}>
                     <td><a href={`/inquiries/${i.id}`}>{i.id}</a></td>
                     <td>{i.status}</td>
                     <td>{i.category}</td>
@@ -103,7 +104,7 @@ export default async function InquiriesListPage({ searchParams }) {
                     <td><span className={`badge ${i.has_ferry_leg ? 'red' : 'green'}`}>{i.has_ferry_leg ? '필요' : '없음'}</span></td>
                     <td>{summary}</td>
                     <td>{i.created_at}</td>
-                  </tr>
+                  </ClickableRow>
                 );
               })}
             </tbody>
