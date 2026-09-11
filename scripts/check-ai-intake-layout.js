@@ -80,6 +80,28 @@ for (const junk of ['세션 ID:', '복원 Draft:', 'Phase: <b>', '상태: <b>'])
 check('상태 이름표 상수가 남아 있지 않다',
   !/const STATUS_LABEL = \{[^}]*봇 응대중/.test(client));
 
+console.log('\n["새 채팅"이 정말 새 대화로 간다]');
+// 이식하면서 한 줄이 빠졌다(2026-09-11 실측): Next의 새 채팅은 같은 주소로 이동만 해서
+// 서버가 열려 있는 세션을 그대로 복원했다 — 버튼을 눌러도 하던 대화 그대로고, 확인
+// 단계에 있었다면 다음에 붙여넣는 접수 문장이 "등록할까요?"의 답으로 처리된다.
+// 그 상태로는 파싱조차 하지 않아 우측 폼이 통째로 비어 보인다.
+const menu = read('src/app/orders/ai-intake/ChatHistoryMenu.js');
+// **버튼에 무엇이 매달려 있는지**를 본다. 파일 어딘가에 닫는 코드가 있는지만 보면,
+// 닫는 함수를 남겨둔 채 버튼만 예전처럼 되돌려도 통과한다(되돌림 시험에서 실제로 샜다).
+const newChatIdx = menu.indexOf('🆕');
+const buttonBlock = newChatIdx >= 0 ? menu.slice(Math.max(0, newChatIdx - 320), newChatIdx) : '';
+const handler = (buttonBlock.match(/onClick=\{([A-Za-z0-9_]+)\}/) || [])[1];
+check('새 채팅 버튼이 처리 함수를 부른다', !!handler,
+  `버튼에 매달린 것: ${buttonBlock.replace(/\s+/g, ' ').slice(-90)}`);
+check('그 함수가 이동 전에 지금 대화를 닫는다',
+  !!handler && new RegExp(`${handler} = useCallback\\(async[\\s\\S]{0,900}?closeSession: true`).test(menu),
+  'EJS(public/js/ai-intake.js newChatBtn)는 closeChatSession을 먼저 부른다');
+check('닫은 뒤에 이동한다',
+  /closeSession: true[\s\S]{0,400}?window\.location\.href = '\/orders\/ai-intake'/.test(menu));
+// 못 닫았다고 버튼이 먹통이 되면 더 나쁘다.
+check('닫기가 실패해도 이동한다', /catch \{[^}]*\}\n\s*\}\n\s*window\.location\.href/.test(menu));
+check('EJS도 그대로다', /closeChatSession\(sessionId\)/.test(read('public/js/ai-intake.js')));
+
 // EJS와 같은 머리말이어야 한다 — 한쪽에만 부제가 붙으면 되돌릴 때 화면이 달라 보인다.
 const ejs = read('views/orders/ai_intake.ejs');
 check('제목이 EJS와 같다', /<h1 className="page-title">AI 챗봇<\/h1>/.test(page)

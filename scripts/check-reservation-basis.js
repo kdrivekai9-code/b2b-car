@@ -81,7 +81,19 @@ check('알 수 없는 값은 버린다',
 check('수집 항목에 섞지 않는다',
   !/ORDER_FIELD_IDS = \[[^\]]*reservation_basis/.test(client),
   '수집 항목에 넣으면 확인 요약에 그대로 나온다');
-check('폼 프리필에만 얹는다', /\{ \.\.\.mergedFields, reservation_basis:/.test(client));
+// 프리필 호출부가 아홉 곳이라 한 곳에만 얹으면 나머지에서 조용히 빠진다 — 실측에서
+// 파싱이 덜 된 접수가 되묻기 경로로 프리필되며 기준이 빠졌다(2026-09-11). 한 함수로 모은다.
+check('프리필을 한 함수로 모았다', /function pushPrefill\(fields\)/.test(client));
+check('그 함수가 기준을 얹는다',
+  /function pushPrefill\(fields\) \{[\s\S]{0,400}?reservation_basis: basis/.test(client));
+const directCalls = (client.match(/onOrderPrefill\(/g) || []).length;
+check('직접 부르는 곳이 그 함수 안 하나뿐이다', directCalls === 1,
+  `${directCalls}곳 — 래퍼를 건너뛰면 그 경로만 기준이 빠진다`);
+// 파싱 직후 한 번 읽어 기억한다. 되묻기 답변엔 기준이 없으므로 매번 다시 읽으면 지워진다.
+check('파싱 직후 기억한다', /rememberReservationBasis\(parseData\);/.test(client));
+check('서버 턴 결과에서도 기억한다', /rememberReservationBasis\(turnResult\.intake\)/.test(client));
+// 새 대화에서 안 비우면 앞 대화의 기준이 다음 접수까지 따라간다.
+check('새 대화에서 비운다', /reservationBasisRef\.current = null;/.test(client));
 
 console.log('\n[폼이 라디오를 켠다]');
 check('프리필이 예약 기준을 반영한다',

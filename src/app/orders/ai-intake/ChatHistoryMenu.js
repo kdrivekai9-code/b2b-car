@@ -20,6 +20,30 @@ export default function ChatHistoryMenu({ sessionId }) {
   const [loading, setLoading] = useState(false);
   const [loadedOnce, setLoadedOnce] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [startingNew, setStartingNew] = useState(false);
+
+  // "새 채팅"은 **지금 대화를 닫고** 나서 이동해야 한다.
+  //
+  // 닫지 않고 같은 주소로 이동만 하면 서버가 열려 있는 세션을 그대로 복원한다 — 버튼을
+  // 눌러도 화면이 하던 대화 그대로고, 확인 단계에 있었다면 다음에 붙여넣는 접수 문장이
+  // "등록할까요?"의 답으로 처리된다(실측 2026-09-11: 접수 문장을 넣었더니 파싱조차 하지
+  // 않고 '등록하려면 "네"…'로 답했다). EJS(public/js/ai-intake.js newChatBtn)는 예전부터
+  // closeChatSession을 먼저 부르고 있었고, 이식하면서 그 한 줄이 빠졌다.
+  //
+  // 닫기가 실패해도 이동은 한다 — 못 닫았다고 버튼이 먹통이 되면 더 나쁘다.
+  const startNewChat = useCallback(async () => {
+    setStartingNew(true);
+    if (sessionId) {
+      try {
+        await fetch('/chat/' + sessionId + '/bot-message', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'fetch' },
+          body: JSON.stringify({ closeSession: true }),
+        });
+      } catch { /* 이동은 그대로 진행한다 */ }
+    }
+    window.location.href = '/orders/ai-intake';
+  }, [sessionId]);
   const [query, setQuery] = useState('');
   const wrapRef = useRef(null);
   // 커서는 렌더링에 쓰지 않는다 — 상태로 두면 로드 중에 바뀌어 같은 페이지를 두 번 받는다.
@@ -120,7 +144,8 @@ export default function ChatHistoryMenu({ sessionId }) {
           <button
             type="button"
             className="ai-chat-menu-item"
-            onClick={() => { window.location.href = '/orders/ai-intake'; }}
+            disabled={startingNew}
+            onClick={startNewChat}
           >
             🆕 <span>새 채팅</span>
           </button>

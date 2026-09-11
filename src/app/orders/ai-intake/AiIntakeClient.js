@@ -382,6 +382,28 @@ export default function AiIntakeClient({
   const premiumTurnActiveRef = useRef(false);
   const vehicleNumberFailCountRef = useRef(0);
 
+  // 예약 기준(즉시 / 픽업 / 도착)은 한 번 읽으면 그 대화 내내 들고 간다 — 되묻기 답변처럼
+  // 기준이 안 적힌 문장이 뒤따를 때 폼의 라디오를 도로 되돌리면 안 된다. 새 대화에서 비운다.
+  const reservationBasisRef = useRef(null);
+
+  function rememberReservationBasis(source) {
+    const basis = reservationBasisOf(source);
+    if (basis) reservationBasisRef.current = basis;
+    return reservationBasisRef.current;
+  }
+
+  // 폼 프리필은 **반드시 이 함수를 거친다.**
+  //
+  // 호출부가 아홉 곳이다(되묻기 중간 반영, 주소 후보 선택, 메모 갱신, 서버 턴, 확인 단계 …).
+  // 처음에는 확인 단계 한 곳에만 예약 기준을 얹었는데, 그러면 **파싱이 덜 된 접수**는 확인
+  // 단계까지 못 가고 되묻기 경로로 프리필되므로 기준이 조용히 빠진다 — 실측에서 챗봇은
+  // "즉시"로 읽었는데 폼은 픽업 기준 그대로였다(2026-09-11). 한 군데로 모은 이유다.
+  function pushPrefill(fields) {
+    if (typeof onOrderPrefill !== 'function') return;
+    const basis = reservationBasisRef.current;
+    onOrderPrefill(basis ? { ...fields, reservation_basis: basis } : fields);
+  }
+
   const canSend = useMemo(() => {
     return !isSending && input.trim().length > 0;
   }, [input, isSending]);
@@ -594,6 +616,7 @@ export default function AiIntakeClient({
     // 일일기사 시간 되묻기가 새 대화로 넘어와, 첫 메시지가 엉뚱한 흐름으로 들어간다.
     premiumTurnActiveRef.current = false;
     dailyDriverHoursPendingRef.current = false;
+    reservationBasisRef.current = null;
     return nextId;
   }
 
@@ -627,7 +650,7 @@ export default function AiIntakeClient({
       // 이게 빠져 있으면 판단이 서버로 넘어간 뒤로 이 폼이 챗봇 파악 내용을 전혀 못
       // 보여줬다(실사용 지적, 2026-08-11).
       // turnResult.intake는 toIntakeFields가 만든다 — 즉시면 reservation_basis가 들어 있다.
-      if (turnResult.intake && typeof onOrderPrefill === 'function') onOrderPrefill(turnResult.intake);
+      if (turnResult.intake) { rememberReservationBasis(turnResult.intake); pushPrefill(turnResult.intake); }
       // 등록이 끝났거나 대화가 닫혔으면 프리미엄 지름길도 끝난다 — 안 끄면 그 다음 탁송
       // 요청까지 서버 프리미엄 흐름으로 새어 들어간다.
       if (turnResult.closeSession) premiumTurnActiveRef.current = false;
@@ -690,7 +713,7 @@ export default function AiIntakeClient({
         setPendingField(null);
         setPhase('confirming');
         noteProgress();
-        if (typeof onOrderPrefill === 'function') onOrderPrefill(nextFields);
+        pushPrefill(nextFields);
         const msg = '연락처를 ' + directPhone + '(으)로 확인했습니다.\n\n'
           + buildOrderSummary(nextFields)
           + '\n\n위 내용으로 등록할까요? (네 / 수정)';
@@ -715,9 +738,7 @@ export default function AiIntakeClient({
         setPendingField(null);
         setPhase('confirming');
         noteProgress();
-        if (typeof onOrderPrefill === 'function') {
-          onOrderPrefill({ ...nextFields, __clearFields: ['vehicle_number'] });
-        }
+        pushPrefill({ ...nextFields, __clearFields: ['vehicle_number'] });
         const msg = '차량번호는 출발지에서 다시 확인하겠습니다.\n\n' + buildOrderSummary(nextFields) + '\n\n위 내용으로 등록할까요? (네 / 수정)';
         await replyWithMessage(sid, msg, {
           needsAgent: false,
@@ -737,7 +758,7 @@ export default function AiIntakeClient({
         setPendingField(null);
         setPhase('confirming');
         noteProgress();
-        if (typeof onOrderPrefill === 'function') onOrderPrefill(nextFields);
+        pushPrefill(nextFields);
         const msg = '차량번호는 ' + compact + '(으)로 확인했습니다.\n\n' + buildOrderSummary(nextFields) + '\n\n위 내용으로 등록할까요? (네 / 수정)';
         await replyWithMessage(sid, msg, {
           needsAgent: false,
@@ -758,9 +779,7 @@ export default function AiIntakeClient({
         setCollectedFields(nextFields);
         setPendingField(null);
         setPhase('confirming');
-        if (typeof onOrderPrefill === 'function') {
-          onOrderPrefill({ ...nextFields, __clearFields: ['vehicle_number'] });
-        }
+        pushPrefill({ ...nextFields, __clearFields: ['vehicle_number'] });
         const failMsg = '차량번호 형식을 확인하기 어려워 등록하지 않았습니다.\n\n' + buildOrderSummary(nextFields) + '\n\n위 내용으로 등록할까요? (네 / 수정)';
         await replyWithMessage(sid, failMsg, {
           needsAgent: false,
@@ -790,10 +809,8 @@ export default function AiIntakeClient({
       setPendingField(null);
       setPhase('confirming');
       noteProgress();
-      if (typeof onOrderPrefill === 'function') {
-        if (nextMemo) onOrderPrefill(nextFields);
-        else onOrderPrefill({ ...nextFields, __clearFields: ['memo_customer'] });
-      }
+      if (nextMemo) pushPrefill(nextFields);
+      else pushPrefill({ ...nextFields, __clearFields: ['memo_customer'] });
       const msg = (nextMemo ? ('요청사항을 반영했습니다.\n\n') : '') + buildOrderSummary(nextFields) + '\n\n위 내용으로 등록할까요? (네 / 수정)';
       await replyWithMessage(sid, msg, {
         needsAgent: false,
@@ -852,6 +869,10 @@ export default function AiIntakeClient({
       // sessionId는 FAQ 검색 문맥 보강(직전 사용자 질문 참고)에만 쓰인다(lib/knowledgeSearch.js).
       body: JSON.stringify({ text, pendingField: activePendingField || null, classified: reuseClassified, sessionId }),
     });
+
+    // 예약 기준은 여기서 한 번 읽어 기억해 둔다. 아래 흐름은 분기가 많아(되묻기 / 주소 후보
+    // 선택 / 확인 단계) 프리필 지점이 여러 곳인데, 기준은 어느 쪽으로 가든 같은 값이다.
+    rememberReservationBasis(parseData);
 
     // 대리(프리미엄)·일일기사로 판정됐으면 여기서 서버 엔진에 넘긴다.
     //
@@ -950,15 +971,9 @@ export default function AiIntakeClient({
     setPhase('confirming');
     noteProgress();
 
-    if (typeof onOrderPrefill === 'function') {
-      // 예약 기준(즉시/픽업/도착)은 수집 항목이 아니라 폼의 라디오라 collectedFields에 섞지
-      // 않는다 — 섞으면 확인 요약과 draft에 뜻 모를 줄이 하나 늘어난다. 폼에만 따로 얹는다.
-      // 이게 빠져 있어서 "일시 : 07/27 즉시"로 접수하면 챗봇은 "즉시로 예약을 확인했습니다"
-      // 라고 답하는데 우측 폼은 픽업 기준 그대로였다(2026-09-11 지적).
-      onOrderPrefill(reservationBasisOf(parseData)
-        ? { ...mergedFields, reservation_basis: reservationBasisOf(parseData) }
-        : mergedFields);
-    }
+    // 예약 기준은 수집 항목이 아니라 폼의 라디오라 collectedFields에 섞지 않는다 — 섞으면
+    // 확인 요약과 draft에 뜻 모를 줄이 하나 늘어난다. pushPrefill이 폼에만 따로 얹는다.
+    pushPrefill(mergedFields);
 
     const confirmText = buildOrderSummary(mergedFields) + '\n\n위 내용으로 등록할까요? (네 / 수정)';
     await replyWithMessage(sid, confirmText, {
@@ -1149,7 +1164,7 @@ export default function AiIntakeClient({
 
     const nextFields = mergeOrderFields(collectedFields, { [dis.fieldId]: picked.value || picked.label });
     setCollectedFields(nextFields);
-    if (typeof onOrderPrefill === 'function') onOrderPrefill(nextFields);
+    pushPrefill(nextFields);
 
     if (disambiguationQueue.length > 0) {
       const next = disambiguationQueue[0];
