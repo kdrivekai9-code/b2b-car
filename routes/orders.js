@@ -2,6 +2,7 @@ const express = require('express');
 const db = require('../db');
 const { requireAuth, requireRole, scopeFilter, getSessionProblem, keepSessionAlive } = require('../middleware/auth');
 const asyncHandler = require('../middleware/asyncHandler');
+const { recordInquiry } = require('../lib/inquiryRecord');
 // Gemini를 부르는 경로는 사용량을 제한한다(middleware/aiRateLimit.js의 주석 참조).
 const { aiRateLimit } = require('../middleware/aiRateLimit');
 const { ORDER_STATUSES } = require('../config');
@@ -671,10 +672,44 @@ router.post('/ai-intake/fare-inquiry', aiRateLimit, asyncHandler(async (req, res
     return null;
   });
   if (!draft) return res.json({ ok: false, reason: 'no_answer' });
+
+  // **문의 기록을 여기서 남긴다.**
+  //
+  // 지금까지는 EJS 챗봇이 별도로 POST /inquiries를 불러 만들었다. Next 챗봇에는 그 호출이
+  // 없어서, 화면을 Next로 켜는 순간 요금 문의 기록이 통째로 끊긴다 — 문의 관리 화면이 비고
+  // 통계도 멈춘다. 금액·거리·도선 여부가 이미 여기 다 있으므로 화면이 되돌려 보내는 왕복
+  // 없이 서버가 남긴다. 실패해도 안내는 그대로 나간다(lib/inquiryRecord.js).
+  //
+  // 되묻는 답("8시간이요")에는 기록을 만들지 않는다 — 같은 문의가 두 건으로 쪼개진다.
+  let inquiryId = null;
+  if (!(req.body && req.body.awaitingHours)) {
+    const f = draft.fare || {};
+    inquiryId = await recordInquiry({
+      user: req.session.user,
+      branchId: scope.branch_id || req.session.user.branch_id || null,
+      groupId: scope.group_id || req.session.user.group_id || null,
+      chatSessionId: req.body && req.body.sessionId,
+      category: 'fare',
+      inquiryText: text,
+      originText: f.from || null,
+      destinationText: f.to || null,
+      resolvedOrigin: f.from || null,
+      resolvedDestination: f.to || null,
+      estimatedDistanceKm: f.distanceKm,
+      estimatedFare: f.total,
+      fareSource: f.fareSource,
+      estimatedFerryFare: f.ferryFare,
+      hasFerryLeg: f.hasFerryLeg,
+    });
+  }
+
   res.json({
     ok: true,
     text: draft.text,
     fare: draft.fare || null,
+    // 화면이 이어서 값을 갱신할 수 있게 돌려준다(지금은 쓰는 곳이 없지만, EJS의
+    // updateInquiryEstimate와 같은 자리를 열어둔다).
+    inquiryId,
     // 화면이 다음 답을 시간으로 받게 알린다.
     awaitingHours: !!draft.awaitingHours,
     // 요금표가 없어 상담원으로 넘겨야 하는 경우 — 화면이 상담원 연결 버튼을 띄운다.

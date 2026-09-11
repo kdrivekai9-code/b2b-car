@@ -148,6 +148,7 @@ const CI_CHECKS = [
   'check-form-parity',
   'check-fare-inquiry-shared',
   'check-fare-surcharge',
+  'check-inquiry-record',
   'check-intake-correction',
   'check-intake-fields-shared',
   'check-intake-summary',

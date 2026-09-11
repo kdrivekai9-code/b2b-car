@@ -3,6 +3,7 @@ const db = require('../db');
 const { pool } = require('../db');
 const { requireAuth, requireRole, scopeFilter } = require('../middleware/auth');
 const asyncHandler = require('../middleware/asyncHandler');
+const { recordInquiry } = require('../lib/inquiryRecord');
 const { kstNow } = require('../lib/period');
 const { createOrder } = require('../lib/orderCreate');
 
@@ -60,39 +61,29 @@ router.post('/', asyncHandler(async (req, res) => {
   const finalBranchId = scope.branch_id || req.body.branch_id || user.branch_id || null;
   const finalGroupId = scope.group_id || req.body.requester_group_id || user.group_id || null;
 
-  const inserted = await db.run(
-    `INSERT INTO inquiries (
-      chat_session_id, user_id, branch_id, requester_group_id,
-      category, status, inquiry_text,
-      origin_text, destination_text, vehicle_type,
-      resolved_origin, resolved_destination,
-      estimated_distance_km, estimated_fare, fare_source,
-      estimated_ferry_fare,
-      has_ferry_leg, ferry_legs_json
-    ) VALUES (?, ?, ?, ?, ?, 'new', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    RETURNING id`,
-    [
-      req.body.chat_session_id || null,
-      user.id,
-      finalBranchId,
-      finalGroupId,
-      finalCategory,
-      inquiryText,
-      req.body.origin_text || null,
-      req.body.destination_text || null,
-      req.body.vehicle_type || null,
-      req.body.resolved_origin || null,
-      req.body.resolved_destination || null,
-      req.body.estimated_distance_km ? Number(req.body.estimated_distance_km) : null,
-      req.body.estimated_fare ? Number(req.body.estimated_fare) : null,
-      req.body.fare_source || null,
-      req.body.estimated_ferry_fare ? Number(req.body.estimated_ferry_fare) : null,
-      req.body.has_ferry_leg ? true : false,
-      req.body.ferry_legs_json || null,
-    ]
-  );
-
-  res.json({ id: Number(inserted.lastInsertRowid) });
+  // 삽입은 lib/inquiryRecord.js 한 곳에 있다 — Next 챗봇도 같은 함수로 남긴다(두 벌이면
+  // 한쪽에만 칸이 생겨 문의 관리 화면에서 값이 비어 보인다).
+  const id = await recordInquiry({
+    user,
+    branchId: finalBranchId,
+    groupId: finalGroupId,
+    chatSessionId: req.body.chat_session_id,
+    category: finalCategory,
+    inquiryText,
+    originText: req.body.origin_text,
+    destinationText: req.body.destination_text,
+    vehicleType: req.body.vehicle_type,
+    resolvedOrigin: req.body.resolved_origin,
+    resolvedDestination: req.body.resolved_destination,
+    estimatedDistanceKm: req.body.estimated_distance_km,
+    estimatedFare: req.body.estimated_fare,
+    fareSource: req.body.fare_source,
+    estimatedFerryFare: req.body.estimated_ferry_fare,
+    hasFerryLeg: req.body.has_ferry_leg,
+    ferryLegsJson: req.body.ferry_legs_json,
+  });
+  if (!id) return res.status(500).json({ error: '문의를 저장하지 못했습니다.' });
+  res.json({ id });
 }));
 
 router.post('/:id/estimate', asyncHandler(async (req, res) => {
