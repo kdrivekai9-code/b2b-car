@@ -38,6 +38,21 @@ const TARGETS = [
   ['/ferry-fares', 'NEXT_FERRY_FARES_ENABLED'],
   ['/push/settings', 'NEXT_PUSH_SETTINGS_ENABLED'],
   ['/access-logs', 'NEXT_ACCESS_LOGS_ENABLED'],
+  // 2026-09-10~11 이관분. :id가 들어가는 경로는 숫자 하나를 넣어 찍는다 — 프록시는 쿠키를
+  // 보지 않으므로 그 id의 데이터가 실제로 있든 없든 판정은 같다.
+  ['/orders/team-feed', 'NEXT_TEAM_FEED_ENABLED'],
+  ['/quick-replies', 'NEXT_QUICK_REPLIES_ENABLED'],
+  ['/inquiries/1', 'NEXT_INQUIRY_DETAIL_ENABLED'],
+  ['/my/photos', 'NEXT_MY_PHOTOS_ENABLED'],
+  ['/my/settlement', 'NEXT_MY_SETTLEMENT_ENABLED'],
+  ['/alerts', 'NEXT_ALERTS_ENABLED'],
+  ['/integration-errors', 'NEXT_INTEGRATION_ERRORS_ENABLED'],
+  ['/vehicle-models', 'NEXT_VEHICLE_MODELS_ENABLED'],
+  ['/kakao-accounts', 'NEXT_KAKAO_ACCOUNTS_ENABLED'],
+  ['/branches/new', 'NEXT_BRANCHES_ENABLED'],
+  // 지사·법인 설정은 플래그 하나가 여러 화면을 함께 켠다 — 대표 경로 둘만 찍는다.
+  ['/branches/1/fare-rules', 'NEXT_BRANCH_SETTINGS_ENABLED'],
+  ['/groups/1/settlement', 'NEXT_GROUP_SETTINGS_ENABLED'],
 ];
 
 async function probe(path) {
