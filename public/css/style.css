@@ -415,6 +415,32 @@ textarea.single-line-textarea{min-height:36px;height:36px;padding:8px 10px;resiz
 
 @media (max-width:1300px){ .ai-intake-grid{grid-template-columns:1fr;} }
 
+/* Next 판 AI 챗봇 화면 — 좌: 대화, 우: 접수 폼.
+   EJS(.ai-intake-grid)는 세 칸(대화 | 접수내용 | 요금·지도)인데 Next는 /orders/new의
+   오더 폼(.order-form)을 통째로 재사용한다. 그 폼이 요금·지도 칸을 이미 품고 있어서
+   여기서는 두 칸이다 — 세 칸짜리 .ai-intake-grid를 그대로 쓰면 셋째 칸이 빈다.
+
+   2026-09-11 지적: 대화가 위, 접수 폼이 아래로 세로로 쌓여 있었다(래퍼가 없었다). */
+.ai-intake-workspace-order{margin-top:16px;}
+
+@media (min-width:1301px){
+  .ai-intake-workspace{display:grid;grid-template-columns:minmax(300px,0.8fr) minmax(0,2.6fr);gap:18px;align-items:stretch;}
+  /* stretch여야 대화 칸이 행 높이만큼 늘어나 position:sticky가 움직일 자리가 생긴다
+     (start면 제자리에 굳는다). .ai-chat-card의 height:720px는 그대로 유지된다. */
+  .ai-intake-workspace > .ai-chat-card{margin-bottom:0;align-self:start;position:sticky;top:12px;}
+  .ai-intake-workspace > *{min-width:0;min-height:0;}
+  .ai-intake-workspace-order{margin-top:0;min-width:0;}
+  /* 오더 폼의 세 칸은 최소폭이 350+320+300px이라 좁아진 칸에서 가로로 넘친다.
+     좁은 화면 규칙(max-width:1250px)과 같은 모양 — 두 칸 + 지도는 아래 전폭 — 으로 둔다. */
+  .ai-intake-workspace .order-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr);}
+  .ai-intake-workspace .order-map-panel{grid-column:1 / -1;position:static;}
+}
+/* 아주 넓은 화면에서는 폼도 원래대로 세 칸이 들어간다. */
+@media (min-width:1800px){
+  .ai-intake-workspace .order-grid{grid-template-columns:minmax(0,1.12fr) minmax(0,1fr) minmax(0,.9fr);}
+  .ai-intake-workspace .order-map-panel{grid-column:auto;position:sticky;top:20px;}
+}
+
 .ai-intake-section{background:#fafbfd;border:1px solid var(--border);border-radius:var(--radius);padding:10px 14px 6px;margin-bottom:10px;}
 .ai-intake-section .section-title{margin-top:0;}
 .ai-intake-section:last-child{margin-bottom:0;}

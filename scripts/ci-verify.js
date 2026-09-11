@@ -117,6 +117,7 @@ const CI_CHECKS = [
   'check-automation-accounts',
   'check-address-spacing-geocode',
   'check-ai-intake-liveness',
+  'check-ai-intake-layout',
   'check-agent-request',
   'check-agent-idle-release',
   'check-chat-unread-badge',
