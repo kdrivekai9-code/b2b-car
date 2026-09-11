@@ -37,6 +37,22 @@ const VEHICLE_NUMBER_SKIP_RE = /(다음|없음|미정|모름|나중|패스|skip)
 const ADDITIONAL_REQUEST_NONE_RE = /^(없음|없어요|없습니다|없다|없어)$/i;
 const NEW_ORDER_WHILE_WAITING_RE = /(탁송|접수|예약|대리|일일\s?기사|오더|출발|도착|경유|요금|주소)/;
 
+// 탁송 필수 항목 — **서버가 정답을 갖고 있다**(GET /orders/ai-intake/fields.json →
+// lib/intakeFields.js DISPATCH_FIELDS). 여기 목록은 그 응답을 못 받았을 때의 폴백이다.
+//
+// 왜 서버에서 받나: 항목이 늘거나 순서가 바뀔 때 화면마다 따로 고치면 채널에 따라 묻는
+// 항목이 갈린다. EJS 챗봇(public/js/ai-intake.js loadFieldDefinitions)은 예전부터 이걸
+// 받아 쓰는데, Next로 옮기면서 그 호출과 **되묻기 자체가** 빠져 있었다 —
+// 실측(2026-09-11): 주소·연락처 넷이 빈 채로 파싱됐는데 묻지 않고 바로 "등록할까요?"로 갔다.
+const FALLBACK_REQUIRED_FIELDS = [
+  { id: 'reserved_date', label: '예약일시', question: '예약시간을 말씀해주세요? (예: 내일오후 3시출발, 23일 2시 도착)' },
+  { id: 'origin_address', label: '출발지 주소', question: '출발지 주소를 말씀해주세요.' },
+  { id: 'origin_contact', label: '출발지 연락처', question: '출발지 연락처를 말씀해주세요.' },
+  { id: 'vehicle_number', label: '차량번호', question: '차량번호를 말씀해주세요.' },
+  { id: 'destination_address', label: '도착지 주소', question: '도착지 주소를 말씀해주세요.' },
+  { id: 'destination_contact', label: '도착지 연락처', question: '도착지 연락처를 말씀해주세요.' },
+];
+
 const PENDING_FIELD_PROMPTS = {
   origin_address: '출발지 주소를 다시 입력해주세요. 예: 판교역 1번출구',
   origin_contact: '출발지 연락처를 다시 입력해주세요. 예: 010-1234-5678',
@@ -314,6 +330,7 @@ const AI_HEALTH_REASON_MESSAGES = {
 };
 const AI_HEALTH_POLL_INTERVAL_MS = 60000;
 // 입력할 때마다 서버를 부르지 않는다 — 15초에 한 번으로 묶는다(EJS와 같은 값).
+const SUMMARY_FETCH_TIMEOUT_MS = 2000;
 const AI_ACTIVITY_PING_INTERVAL_MS = 15000;
 
 export default function AiIntakeClient({
@@ -322,6 +339,7 @@ export default function AiIntakeClient({
   initialDraft,
   defaultGreeting,
   onOrderPrefill,
+  myPhone,
   serverTurnEnabled,
 }) {
   const initialDraftState = initialDraft && typeof initialDraft === 'object' ? initialDraft : null;
@@ -386,10 +404,89 @@ export default function AiIntakeClient({
   // 기준이 안 적힌 문장이 뒤따를 때 폼의 라디오를 도로 되돌리면 안 된다. 새 대화에서 비운다.
   const reservationBasisRef = useRef(null);
 
+  // 필수 항목 정의를 서버에서 받는다. 실패하면 폴백 목록 그대로 쓴다 — 못 받았다고 접수가
+  // 멈추면 안 된다(EJS loadFieldDefinitions와 같은 정책).
+  const [requiredFields, setRequiredFields] = useState(FALLBACK_REQUIRED_FIELDS);
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/orders/ai-intake/fields.json', { headers: { Accept: 'application/json', 'X-Requested-With': 'fetch' } })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (cancelled || !data || !Array.isArray(data.fields) || !data.fields.length) return;
+        setRequiredFields(data.fields);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  // 빠른 응답 칩 — 연락처를 되물을 때 한 번 눌러 답하게 한다.
+  //
+  // 이식에서 빠져 있었다(EJS: public/js/ai-intake.js renderQuickReplies + .ai-quick-replies).
+  // 지금은 더 중요해졌다: /orders/ai-intake/parse가 되묻기 답변으로 온 **맨 연락처·주소를
+  // 못 알아듣는다**(양 채널 공통, 실측 2026-09-11 — 3턴이면 상담원 연결로 밀린다). 칩은
+  // 그 경로를 아예 타지 않고 값을 그대로 넣으므로 가장 흔한 두 경우를 그냥 넘긴다.
+  const quickReplies = (() => {
+    if (phase !== 'collecting' || !pendingField) return [];
+    if (pendingField === 'origin_contact' && myPhone) {
+      return [{ label: `요청자(본인) 연락처와 동일 (${myPhone})`, value: myPhone }];
+    }
+    if (pendingField === 'destination_contact' && collectedFields.origin_contact) {
+      return [{ label: `출발지 연락처와 동일 (${collectedFields.origin_contact})`, value: collectedFields.origin_contact }];
+    }
+    return [];
+  })();
+
+  // 아직 안 채워진 첫 필수 항목. 선택 항목(optional)은 건너뛴다.
+  function firstMissingField(values) {
+    for (const field of requiredFields) {
+      if (field.optional) continue;
+      const v = values ? values[field.id] : null;
+      if (v === undefined || v === null || String(v).trim() === '') return field;
+    }
+    return null;
+  }
+
   function rememberReservationBasis(source) {
     const basis = reservationBasisOf(source);
     if (basis) reservationBasisRef.current = basis;
     return reservationBasisRef.current;
+  }
+
+  // 확인 요약은 **서버가 만든다**(POST /orders/ai-intake/summary.json → lib/intakeSummary.js).
+  //
+  // 그 모듈은 카카오 등록 후 통보·상담원 초안·EJS 챗봇이 이미 같이 쓴다. 여기서 따로 만들면
+  // 네 번째 사본이 된다 — 이 저장소는 그 실수를 이미 했고(옵션(주유·서류)이 카카오 요약에만
+  // 들어갔다) 그래서 lib/intakeSummary.js로 모았다. 이식하면서 그 호출이 빠져 있었다.
+  //
+  // 실측으로 확인한 차이(2026-09-11):
+  //   · 즉시 요청이 "2026-09-11 14:24"로 찍혔다 — 공용 모듈은 "즉시"로 보여준다. 고객이
+  //     밝힌 건 "즉시"인데 구체 시각이 보이면 그 시각을 콕 집어 요청한 것처럼 읽힌다
+  //     (사용자 확정 규칙 2026-08-13).
+  //   · 경유지·기사전달사항(memo_customer)·업체전달사항(memo_billing)이 통째로 빠졌다.
+  //
+  // 느리거나 실패하면 아래 로컬 계산으로 넘어간다. 이 시점엔 이미 phase가 confirming이라
+  // 요약이 늦게 뜨면 "네"라는 답이 먼저 올 수 있어 시간 제한을 둔다(EJS와 같은 2초).
+  async function orderSummaryText(fields) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), SUMMARY_FETCH_TIMEOUT_MS);
+      const res = await fetch('/orders/ai-intake/summary.json', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'fetch' },
+        body: JSON.stringify({
+          ...fields,
+          // 폼의 라디오와 같은 값을 보낸다 — 이게 있어야 "즉시"로 찍힌다.
+          reservation_immediate: reservationBasisRef.current === 'immediate',
+        }),
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.text) return data.text;
+      }
+    } catch { /* 접수를 멈추지 않는다 — 아래 로컬 계산으로 간다 */ }
+    return buildOrderSummary(fields);
   }
 
   // 폼 프리필은 **반드시 이 함수를 거친다.**
@@ -715,7 +812,7 @@ export default function AiIntakeClient({
         noteProgress();
         pushPrefill(nextFields);
         const msg = '연락처를 ' + directPhone + '(으)로 확인했습니다.\n\n'
-          + buildOrderSummary(nextFields)
+          + await orderSummaryText(nextFields)
           + '\n\n위 내용으로 등록할까요? (네 / 수정)';
         await replyWithMessage(sid, msg, {
           needsAgent: false,
@@ -739,7 +836,7 @@ export default function AiIntakeClient({
         setPhase('confirming');
         noteProgress();
         pushPrefill({ ...nextFields, __clearFields: ['vehicle_number'] });
-        const msg = '차량번호는 출발지에서 다시 확인하겠습니다.\n\n' + buildOrderSummary(nextFields) + '\n\n위 내용으로 등록할까요? (네 / 수정)';
+        const msg = '차량번호는 출발지에서 다시 확인하겠습니다.\n\n' + await orderSummaryText(nextFields) + '\n\n위 내용으로 등록할까요? (네 / 수정)';
         await replyWithMessage(sid, msg, {
           needsAgent: false,
           requestedFeature: null,
@@ -759,7 +856,7 @@ export default function AiIntakeClient({
         setPhase('confirming');
         noteProgress();
         pushPrefill(nextFields);
-        const msg = '차량번호는 ' + compact + '(으)로 확인했습니다.\n\n' + buildOrderSummary(nextFields) + '\n\n위 내용으로 등록할까요? (네 / 수정)';
+        const msg = '차량번호는 ' + compact + '(으)로 확인했습니다.\n\n' + await orderSummaryText(nextFields) + '\n\n위 내용으로 등록할까요? (네 / 수정)';
         await replyWithMessage(sid, msg, {
           needsAgent: false,
           requestedFeature: null,
@@ -780,7 +877,7 @@ export default function AiIntakeClient({
         setPendingField(null);
         setPhase('confirming');
         pushPrefill({ ...nextFields, __clearFields: ['vehicle_number'] });
-        const failMsg = '차량번호 형식을 확인하기 어려워 등록하지 않았습니다.\n\n' + buildOrderSummary(nextFields) + '\n\n위 내용으로 등록할까요? (네 / 수정)';
+        const failMsg = '차량번호 형식을 확인하기 어려워 등록하지 않았습니다.\n\n' + await orderSummaryText(nextFields) + '\n\n위 내용으로 등록할까요? (네 / 수정)';
         await replyWithMessage(sid, failMsg, {
           needsAgent: false,
           requestedFeature: null,
@@ -811,7 +908,7 @@ export default function AiIntakeClient({
       noteProgress();
       if (nextMemo) pushPrefill(nextFields);
       else pushPrefill({ ...nextFields, __clearFields: ['memo_customer'] });
-      const msg = (nextMemo ? ('요청사항을 반영했습니다.\n\n') : '') + buildOrderSummary(nextFields) + '\n\n위 내용으로 등록할까요? (네 / 수정)';
+      const msg = (nextMemo ? ('요청사항을 반영했습니다.\n\n') : '') + await orderSummaryText(nextFields) + '\n\n위 내용으로 등록할까요? (네 / 수정)';
       await replyWithMessage(sid, msg, {
         needsAgent: false,
         requestedFeature: null,
@@ -968,14 +1065,42 @@ export default function AiIntakeClient({
 
     setPendingDisambiguation(null);
     setDisambiguationQueue([]);
-    setPhase('confirming');
-    noteProgress();
 
     // 예약 기준은 수집 항목이 아니라 폼의 라디오라 collectedFields에 섞지 않는다 — 섞으면
     // 확인 요약과 draft에 뜻 모를 줄이 하나 늘어난다. pushPrefill이 폼에만 따로 얹는다.
+    // 아래 되묻기로 빠지더라도 여기까지 받은 값은 폼에 올려둔다.
     pushPrefill(mergedFields);
 
-    const confirmText = buildOrderSummary(mergedFields) + '\n\n위 내용으로 등록할까요? (네 / 수정)';
+    // 필수 항목이 비어 있으면 확인 단계로 가지 않고 하나씩 묻는다.
+    //
+    // 이게 없어서 파싱이 실패한 항목까지 그대로 "등록할까요?"로 넘어갔다 — 고객은 "네"라고
+    // 답했는데 폼은 필수값이 비어 저장이 막힌다(실측 2026-09-11: 주소·연락처 넷이 빈 채로
+    // 확인 단계까지 갔다). 항목과 순서는 서버가 정한다(requiredFields).
+    const missing = firstMissingField(mergedFields);
+    if (missing) {
+      setPhase('collecting');
+      setPendingField(missing.id);
+      noteProgress();
+      await replyWithMessage(sid, missing.question || (missing.label + '를 말씀해주세요.'), {
+        needsAgent: false,
+        requestedFeature: null,
+        draftState: {
+          source: 'next-ai-intake-client',
+          phase: 'collecting',
+          pendingField: missing.id,
+          fields: mergedFields,
+          pendingDisambiguation: null,
+          disambiguationQueue: [],
+          preOfferState,
+        },
+      });
+      return;
+    }
+
+    setPhase('confirming');
+    noteProgress();
+
+    const confirmText = await orderSummaryText(mergedFields) + '\n\n위 내용으로 등록할까요? (네 / 수정)';
     await replyWithMessage(sid, confirmText, {
       needsAgent: false,
       requestedFeature: null,
@@ -1086,7 +1211,7 @@ export default function AiIntakeClient({
       }
       if (classified.action === 'none') {
         setPhase('confirming');
-        const confirmText = buildOrderSummary(collectedFields) + '\n\n위 내용으로 등록할까요? (네 / 수정)';
+        const confirmText = await orderSummaryText(collectedFields) + '\n\n위 내용으로 등록할까요? (네 / 수정)';
         await replyWithMessage(sid, confirmText, {
           needsAgent: false,
           requestedFeature: null,
@@ -1125,7 +1250,7 @@ export default function AiIntakeClient({
       setPendingDisambiguation(null);
       setDisambiguationQueue([]);
       setPhase('confirming');
-      const fallbackConfirm = buildOrderSummary(collectedFields) + '\n\n위 내용으로 등록할까요? (네 / 수정)';
+      const fallbackConfirm = await orderSummaryText(collectedFields) + '\n\n위 내용으로 등록할까요? (네 / 수정)';
       await replyWithMessage(sid, fallbackConfirm, {
         needsAgent: false,
         requestedFeature: null,
@@ -1192,7 +1317,7 @@ export default function AiIntakeClient({
     setDisambiguationQueue([]);
     setPhase('confirming');
     noteProgress();
-    const confirmText = `${dis.label}는 '${picked.label}'로 확인했습니다.\n\n${buildOrderSummary(nextFields)}\n\n위 내용으로 등록할까요? (네 / 수정)`;
+    const confirmText = `${dis.label}는 '${picked.label}'로 확인했습니다.\n\n${await orderSummaryText(nextFields)}\n\n위 내용으로 등록할까요? (네 / 수정)`;
     await replyWithMessage(sid, confirmText, {
       needsAgent: false,
       requestedFeature: null,
@@ -1562,6 +1687,23 @@ export default function AiIntakeClient({
       </div>
 
       {error && <div className="chat-inline-error" style={{ marginBottom: 8 }}>{error}</div>}
+
+      {/* 빠른 응답 칩 — EJS와 같은 자리(입력줄 바로 위), 같은 클래스를 쓴다. */}
+      {quickReplies.length > 0 && (
+        <div className="ai-quick-replies">
+          {quickReplies.map((chip) => (
+            <button
+              key={chip.value}
+              type="button"
+              className="ai-quick-reply-chip"
+              disabled={isSending}
+              onClick={() => handleSend(chip.value)}
+            >
+              📱 {chip.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="ai-chat-input-row">
         <textarea

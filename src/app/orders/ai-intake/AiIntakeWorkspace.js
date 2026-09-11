@@ -38,6 +38,8 @@ export default function AiIntakeWorkspace({
   // 그대로 세로로 쌓인다(폼이 두 칸이라 좁은 화면에서 옆에 붙이면 가로로 넘친다).
   return (
     <div className="ai-intake-workspace">
+      {/* myPhone: 연락처 되묻기의 빠른 응답 칩("요청자(본인) 연락처와 동일")에 쓴다.
+          EJS는 폼의 data-my-phone에서 읽는다(views/orders/ai_intake.ejs). */}
       <AiIntakeClient
         initialSession={initialSession}
         initialMessages={initialMessages}
@@ -45,6 +47,7 @@ export default function AiIntakeWorkspace({
         defaultGreeting="오더접수 내용을 붙여넣거나, 궁금하신 점을 질문해주세요."
         onOrderPrefill={(parsed) => setPrefill(parsed || null)}
         serverTurnEnabled={serverTurnEnabled}
+        myPhone={initData.currentUserPhone || ''}
       />
 
       <div className="ai-intake-workspace-order">
