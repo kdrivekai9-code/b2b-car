@@ -102,6 +102,27 @@ check('닫은 뒤에 이동한다',
 check('닫기가 실패해도 이동한다', /catch \{[^}]*\}\n\s*\}\n\s*window\.location\.href/.test(menu));
 check('EJS도 그대로다', /closeChatSession\(sessionId\)/.test(read('public/js/ai-intake.js')));
 
+// 햄버거 메뉴 패널은 **헤더 폭**을 써야 한다.
+//
+// 실사용 지적(2026-09-14): 고객 화면에서 햄버거를 누르면 대화 리스트가 깨졌다 — 메뉴가
+// 한 글자씩 세로로 접힌 채 대화창을 덮었다(실측: 폭 18px / 높이 420px).
+//
+// .ai-chat-menu-panel은 left:0;right:0이라 폭을 **위치 기준 조상**에서 가져온다
+// (public/css/style.css). EJS는 패널을 .ai-chat-header(position:relative)의 직계 자식으로
+// 둬서 헤더 폭을 쓰는데, Next는 버튼과 패널을 position:relative 래퍼로 감싸는 바람에 그
+// 래퍼(=햄버거 아이콘 폭)가 기준이 됐다.
+//
+// 화면은 멀쩡히 뜨고 오류도 안 나므로 이 검사가 아니면 되돌아가도 모른다.
+const wrapMatch = menu.match(/<div ref=\{wrapRef\}([^>]*)>/);
+check('메뉴 래퍼가 있다', !!wrapMatch);
+check('래퍼를 위치 기준으로 삼지 않는다',
+  !!wrapMatch && !/position:\s*'relative'/.test(wrapMatch[1]),
+  '래퍼에 position:relative를 주면 패널 폭이 햄버거 아이콘 폭(18px)으로 찌그러진다');
+// 기준이 되는 쪽(헤더)과 폭을 정하는 규칙은 EJS와 공용이다 — 한쪽이 바뀌면 같이 깨진다.
+// css는 위에서 이미 읽어뒀다.
+check('패널이 조상 폭을 쓴다(CSS 전제)', /\.ai-chat-menu-panel\{[^}]*left:0;right:0/.test(css));
+check('헤더가 위치 기준이다(CSS 전제)', /\.ai-chat-header\{position:relative/.test(css));
+
 // EJS와 같은 머리말이어야 한다 — 한쪽에만 부제가 붙으면 되돌릴 때 화면이 달라 보인다.
 const ejs = read('views/orders/ai_intake.ejs');
 check('제목이 EJS와 같다', /<h1 className="page-title">AI 챗봇<\/h1>/.test(page)

@@ -128,7 +128,15 @@ export default function ChatHistoryMenu({ sessionId }) {
   }
 
   return (
-    <div ref={wrapRef} style={{ position: 'relative' }}>
+    // **position:relative를 두지 않는다.** 패널 CSS가 left:0;right:0이라 폭을 위치 기준
+    // 조상에서 가져오는데(public/css/style.css .ai-chat-menu-panel), 이 래퍼를 기준으로 삼으면
+    // 햄버거 아이콘 폭(18px)이 그대로 패널 폭이 된다 — 메뉴가 한 글자씩 세로로 접혀 대화창을
+    // 덮었다(실측 2026-09-14: 폭 18px / 높이 420px).
+    //
+    // EJS는 패널을 .ai-chat-header(position:relative)의 직계 자식으로 두어 헤더 폭을 쓴다
+    // (views/orders/ai_intake.ejs). 기준을 비워 두면 여기서도 같은 헤더를 기준으로 잡는다.
+    // 래퍼 자체는 그대로 둔다 — 바깥 클릭 감지(wrapRef)가 DOM 포함관계로 동작하기 때문이다.
+    <div ref={wrapRef}>
       <button
         type="button"
         className="ai-chat-menu-btn"
