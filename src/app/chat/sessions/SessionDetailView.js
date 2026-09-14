@@ -102,6 +102,10 @@ export default function SessionDetailView({ initialSession, mappedAccount, agent
         </div>
       </div>
 
+      {/* 두 칸(대화 | 접수 마무리) — EJS(views/chat/session_detail.ejs)와 같은 .chat-workspace-grid를
+          쓴다. 이식할 때 감싸는 칸과 둘째 칸이 통째로 빠져서, 상담원이 이 화면에서 접수로 가는
+          길을 잃었다(머리말의 "AI 접수 화면"은 챗봇 화면이라 가리키는 곳이 다르다). */}
+      <div className="chat-workspace-grid">
       <section className="card chat-workspace-chat">
         <div className="session-meta">
           <span>요청 기능: <b>{session.requested_feature || '-'}</b></span>
@@ -143,6 +147,17 @@ export default function SessionDetailView({ initialSession, mappedAccount, agent
           )}
         />
       </section>
+
+      {/* 접수 마무리는 상담관리 카드 보기로 옮겨졌다 — 여기서는 그리로 가는 길만 알려준다.
+          문구와 링크를 EJS와 같게 맞춘다(한쪽만 바뀌면 화면에 따라 다른 곳으로 간다). */}
+      <section className="card chat-workspace-order">
+        <div className="chat-order-head">
+          <h2>접수 마무리</h2>
+          <p className="page-sub">접수 마무리 섹션은 상담관리 화면(카드 보기)으로 이동되었습니다.</p>
+          <a className="btn" href="/chat/sessions?view=card">상담관리에서 접수하기</a>
+        </div>
+      </section>
+      </div>
     </>
   );
 }

@@ -4,6 +4,27 @@ export const dynamic = 'force-dynamic';
 export const preferredRegion = 'icn1';
 export const maxDuration = 30;
 
+// 탭 제목에 오더번호를 넣는다 — EJS(routes/photoUpload.js의 render title)와 같은 형식이다.
+// 기사는 구간마다 링크를 따로 받아 탭을 여러 개 열어두는데, 전부 "B2B-CAR"이면 어느 탭이
+// 어느 오더인지 구분할 수 없다. 잘못된 링크일 때의 문구도 EJS와 같게 맞춘다.
+export async function generateMetadata({ params }) {
+  const { token } = await params;
+  const hdrs = await headers();
+  const host = hdrs.get('host');
+  const proto = hdrs.get('x-forwarded-proto') || 'https';
+  try {
+    const res = await fetch(`${proto}://${host}/upload/${encodeURIComponent(token)}/data.json`, {
+      headers: { 'X-Requested-With': 'fetch' },
+      cache: 'no-store',
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.order && data.order.oid) return { title: `기사 사진 업로드 - ${data.order.oid}` };
+    }
+  } catch { /* 제목 때문에 화면이 안 뜨면 안 된다 */ }
+  return { title: '잘못된 링크' };
+}
+
 export default async function PhotoUploadPage({ params }) {
   const { token } = await params;
   const hdrs = await headers();

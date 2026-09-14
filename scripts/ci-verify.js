@@ -123,6 +123,8 @@ const CI_CHECKS = [
   'check-ai-intake-immediate-draft',
   'check-order-reservation-basis',
   'check-pending-field-answer',
+  'check-reservation-year-guess',
+  'check-chat-detail-parity',
   'check-agent-request',
   'check-agent-idle-release',
   'check-chat-unread-badge',

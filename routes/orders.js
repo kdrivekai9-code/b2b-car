@@ -24,6 +24,7 @@ const postalReceipt = require('../lib/postalReceipt');
 const reservationSanity = require('../lib/reservationSanity');
 const { resolveReservationBasis } = require('../lib/reservationBasis');
 const { readPendingFieldAnswer } = require('../lib/pendingFieldAnswer');
+const { reservedYearGuessed } = require('../lib/reservationYearGuess');
 const { trimToConversationDay } = require('../lib/chatHistoryWindow');
 // 인사·자기소개 응답은 카카오 상담톡(routes/kakaoConsult.js)과 같은 규칙을 써야 해서 공용 모듈로 뺐다.
 const { isGreeting, getSmalltalkMessage } = require('../lib/smallTalk');
@@ -603,6 +604,10 @@ router.post('/ai-intake/summary.json', aiRateLimit, asyncHandler(async (req, res
     reservedDate: b.reserved_date,
     reservedTime: b.reserved_time,
     immediate: !!b.reservation_immediate,
+    // 연도를 우리가 추정했으면 확인 문구에 함께 밝힌다(lib/intakeSummary.js rolledNote).
+    // 값은 /ai-intake/parse가 정해서 내려주고 화면이 그대로 돌려준다 — reservation_immediate와
+    // 같은 흐름이다. 이 줄이 없어서 웹 챗봇에만 경고가 안 떴다.
+    reservedYearGuessed: !!b.reservation_year_guessed,
     origin: { address: b.origin_address, detail: b.origin_detail_address, contact: b.origin_contact },
     destination: { address: b.destination_address, detail: b.destination_detail_address, contact: b.destination_contact },
     waypoints: Array.isArray(b.waypoints) ? b.waypoints : [],
@@ -1152,6 +1157,14 @@ router.post('/ai-intake/parse', aiRateLimit, asyncHandler(async (req, res) => {
   // 켜진다. 못 알아보면 아무것도 안 실어서 폼 기본값(픽업 기준)에 그대로 둔다.
   const reservationBasis = resolveReservationBasis({ immediate: !!fields.reservation_immediate, text });
   if (reservationBasis) fields.reservation_basis = reservationBasis;
+
+  // 연도를 안 적었는데 우리가 내년으로 민 경우를 알려준다 — 확인 문구에 그 사실을 밝혀야
+  // 고객이 "네"라고 답하기 전에 볼 수 있다(lib/reservationYearGuess.js에 경위가 있다).
+  // 카카오 경로는 파서의 when.dateRolled로 이미 나오는데, 이 웹 경로는 Gemini가 연도까지
+  // 정해서 내려주므로 "밀었다"는 신호가 없어 빠져 있었다.
+  if (!fields.reservation_immediate && reservedYearGuessed(text, fields.reserved_date)) {
+    fields.reservation_year_guessed = true;
+  }
 
   res.json({ intent, ...fields, seemsFrustrated });
 }));

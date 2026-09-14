@@ -411,6 +411,13 @@ export default function AiIntakeClient({
     initialDraftState && initialDraftState.reservationBasis ? initialDraftState.reservationBasis : null
   );
 
+  // 연도를 우리가 추정했는지(= "07/27"처럼 연도 없이 적었는데 내년으로 밀린 경우).
+  // 예약 기준과 같은 이유로 대화 내내 들고 가고 draft에서 되살린다 — 되묻기 답변에는 날짜가
+  // 없으니 매번 다시 읽으면 지워지고, 새로고침 한 번이면 경고가 조용히 사라진다.
+  const reservationYearGuessedRef = useRef(
+    !!(initialDraftState && initialDraftState.reservationYearGuessed)
+  );
+
   // 필수 항목 정의를 서버에서 받는다. 실패하면 폴백 목록 그대로 쓴다 — 못 받았다고 접수가
   // 멈추면 안 된다(EJS loadFieldDefinitions와 같은 정책).
   const [requiredFields, setRequiredFields] = useState(FALLBACK_REQUIRED_FIELDS);
@@ -508,6 +515,8 @@ export default function AiIntakeClient({
   function rememberReservationBasis(source) {
     const basis = reservationBasisOf(source);
     if (basis) reservationBasisRef.current = basis;
+    // 연도 추정 여부도 여기서 같이 받는다 — 판단은 서버가 한다(lib/reservationYearGuess.js).
+    if (source && source.reservation_year_guessed) reservationYearGuessedRef.current = true;
     return reservationBasisRef.current;
   }
 
@@ -536,6 +545,8 @@ export default function AiIntakeClient({
           ...fields,
           // 폼의 라디오와 같은 값을 보낸다 — 이게 있어야 "즉시"로 찍힌다.
           reservation_immediate: reservationBasisRef.current === 'immediate',
+          // 연도를 우리가 밀었으면 "(연도를 안 적으셔서 내년으로 봤습니다)"가 붙는다.
+          reservation_year_guessed: reservationYearGuessedRef.current,
         }),
         signal: controller.signal,
       });
@@ -627,7 +638,14 @@ export default function AiIntakeClient({
     // 길은 이 함수 하나뿐이다. collectedFields에 섞지 않는 이유는 pushPrefill 주석과 같다 —
     // 수집 항목이 아니라 폼의 라디오라, 섞으면 확인 요약과 draft에 뜻 모를 줄이 하나 는다.
     const body = payload && payload.draftState
-      ? { ...payload, draftState: { ...payload.draftState, reservationBasis: reservationBasisRef.current || null } }
+      ? {
+        ...payload,
+        draftState: {
+          ...payload.draftState,
+          reservationBasis: reservationBasisRef.current || null,
+          reservationYearGuessed: reservationYearGuessedRef.current,
+        },
+      }
       : payload;
     const botSaved = await fetchJson('/chat/' + sid + '/bot-message', {
       method: 'POST',
@@ -780,6 +798,7 @@ export default function AiIntakeClient({
     premiumTurnActiveRef.current = false;
     dailyDriverHoursPendingRef.current = false;
     reservationBasisRef.current = null;
+    reservationYearGuessedRef.current = false;
     declinedFieldsRef.current = new Set();
     return nextId;
   }

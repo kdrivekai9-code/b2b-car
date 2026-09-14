@@ -125,6 +125,23 @@
   // {orderId, oid, at}로 채우고 resetOrderIntakeState()로 상태를 전부 지운다 — 이 시각으로부터
   // POST_SUBMIT_APPEND_WINDOW_MS 안에 오더접수 의도가 아닌 메시지가 오면 새 오더로 취급하지
   // 않고 방금 그 오더에 추가요청으로 붙인다(appendAdditionalRequestToLastOrder).
+  // 연도를 우리가 추정했는지(= "07/27"처럼 연도 없이 적었는데 내년으로 밀린 경우).
+  // 서버(/orders/ai-intake/parse)가 판단해 내려주고, 확인 요약을 만들 때 그대로 돌려준다 —
+  // 그래야 "(연도를 안 적으셔서 내년으로 봤습니다)"가 붙는다(lib/intakeSummary.js).
+  // 되묻기 답변에는 날짜가 없으니 턴마다 다시 읽으면 지워진다. draft에도 함께 저장한다.
+  var reservationYearGuessed = false;
+
+  // /orders/ai-intake/parse 응답은 전부 이 함수를 거친다.
+  //
+  // 부르는 자리가 넷이라 각자 값을 꺼내면 한 곳만 빠져도 조용히 사라진다 — 예약 기준에서
+  // 정확히 그렇게 당했다(프리필 호출부 아홉 곳 중 한 곳에만 얹어서 나머지에서 빠졌다).
+  function parseTextRemembering(text, hintField, classified, sid) {
+    return api.parseText(text, hintField, classified, sid).then(function (data) {
+      if (data && data.reservation_year_guessed) reservationYearGuessed = true;
+      return data;
+    });
+  }
+
   var lastSubmittedOrder = null;
   var POST_SUBMIT_APPEND_WINDOW_MS = 30 * 60 * 1000;
 
@@ -2029,6 +2046,9 @@
       // DRAFT_FIELD_IDS와 별개로 저장한다 — 이게 없으면 상담관리 카드뷰에서 이 세션을 열었을 때
       // 도착지 인도시간 기준으로 판별했던 결과가 이어지지 않고 기본값(픽업 기준)으로 되돌아간다.
       reservationBasis: isImmediateReservationBasisChecked() ? 'immediate' : (isDeliveryReservationBasis() ? 'delivery' : 'pickup'),
+      // 연도 추정 여부는 폼 어디에도 없는 값이라(서버 판단) 직접 저장해야 새로고침 후에도
+      // 확인 문구에 경고가 계속 붙는다.
+      reservationYearGuessed: reservationYearGuessed,
       // 배차 주문 도우미가 확인을 기다리는 중이면 새로고침/재진입 후에도 그 답("네")을 도우미가
       // 받아야 한다 — 확인 대기 자체는 서버(chat_sessions.mcp_pending_json)에 있고, 이 플래그는
       // 클라이언트가 그 답을 어디로 보낼지 판단하는 용도다.
@@ -2046,6 +2066,7 @@
     if (window.__updateVehicleTypeRequirement) window.__updateVehicleTypeRequirement();
     syncReservedTimeSelectsFromHidden();
     syncReservedDateSelectsFromHidden();
+    reservationYearGuessed = !!draft.reservationYearGuessed;
     if (draft.reservationBasis === 'immediate') {
       applyImmediateReservationBasis();
     } else if (draft.reservationBasis === 'delivery') {
@@ -2132,6 +2153,7 @@
       memo_customer: val('memo_customer'),
       memo_billing: val('memo_billing'),
       reservation_immediate: isImmediateReservationBasisChecked(),
+      reservation_year_guessed: reservationYearGuessed,
     };
   }
 
@@ -3645,7 +3667,7 @@
     // 찾으면 바로 적용하고, 못 찾을 때만(예: "출발지" 한 마디만 온 경우) 재입력을 요청한다.
     if (field.type === 'address' || field.type === 'vehicle' || field.type === 'datetime') {
       showThinkingBubble();
-      return api.parseText(text, field.id, null, sessionId)
+      return parseTextRemembering(text, field.id, null, sessionId)
         .then(function (data) {
           hideThinkingBubble();
           var hasOrderIntent = data && isOrderIntent(data.intent);
@@ -4336,7 +4358,7 @@
             if (handledByAgent) return null;
             showThinkingBubble();
             var fallbackHint = pendingField || (getNextMissingField() || {}).id || null;
-            return api.parseText(text, fallbackHint, null, sessionId);
+            return parseTextRemembering(text, fallbackHint, null, sessionId);
           });
         }
 
@@ -4367,10 +4389,10 @@
             // fallthrough — 서버가 다루지 않은 요청(faq/unsupported/proxy_order/daily_driver_order
             // 등)이니 지금까지와 동일한 경로로 넘긴다. 턴 엔진이 이미 분류한 결과가 있으면 함께
             // 넘겨 parse가 Gemini를 다시 태우지 않게 한다(응답 지연 절반).
-            return api.parseText(text, hintField, turnResult && turnResult.classified, sessionId);
+            return parseTextRemembering(text, hintField, turnResult && turnResult.classified, sessionId);
           });
         }
-        return api.parseText(text, hintField, null, sessionId);
+        return parseTextRemembering(text, hintField, null, sessionId);
       })
       .then(function (data) {
         hideThinkingBubble();
