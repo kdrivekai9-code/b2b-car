@@ -126,6 +126,7 @@ const CI_CHECKS = [
   'check-pending-field-answer',
   'check-reservation-year-guess',
   'check-chat-detail-parity',
+  'check-reservation-basis-saved',
   'check-agent-request',
   'check-agent-idle-release',
   'check-chat-unread-badge',

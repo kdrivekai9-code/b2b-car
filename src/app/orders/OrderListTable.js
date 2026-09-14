@@ -138,7 +138,18 @@ function cellValue(o, key) {
       }
       return o.driver_name ? (o.driver_name + (o.driver_phone ? ` (${o.driver_phone})` : '')) : '미배정';
     }
-    case 'reserved_at': return `${o.reserved_date} ${o.reserved_time}`;
+    // 즉시 접수는 "즉시"로 보여준다.
+    //
+    // 즉시 요청도 reserved_date/reserved_time에는 접수 시각이 채워진다(그 칸을 비워둘 수
+    // 없다). 그래서 이 칸만 보면 고객이 그 시각을 콕 집어 예약한 것처럼 읽힌다 — 즉시 배차
+    // 대상인데 예약 건으로 보이는 것이라, 실제 시각과 정반대의 운영 판단을 부른다.
+    // 확인 문구도 같은 이유로 "즉시"로 보여준다(lib/intakeSummary.js, 사용자 확정 2026-08-13).
+    //
+    // 기준이 null인 오더는 예전 그대로 시각을 보여준다 — 컬럼이 생기기 전에 쌓인 건이라
+    // 즉시였는지 알 수 없고, 모르는 것을 "즉시"로 단정하면 안 된다.
+    // 정확한 시각은 툴팁과 오더 상세에 그대로 남는다.
+    case 'reserved_at':
+      return o.reservation_basis === 'immediate' ? '즉시' : `${o.reserved_date} ${o.reserved_time}`;
     case 'payment_method': return o.payment_method_name || '-';
     case 'fare': return formatMoney(o.fare_amount);
     // 배차 요금은 요금표를 등록한 지사에서만 채워진다 — 없으면 0원이 아니라 "-"다.
@@ -501,6 +512,13 @@ export default function OrderListTable({ orders, filters, statusSummary, current
                     </td>
                   );
                   if (key === 'status') return <td key={key} data-column={key}><span className={`badge ${STATUS_COLORS[o.status] || 'gray'}`}>{o.status}</span></td>;
+                  // 즉시 건은 칸에 "즉시"만 보이므로 툴팁에 실제 접수 시각을 남긴다 —
+                  // 배차 담당자가 "언제 들어온 건인지"를 여기서 바로 볼 수 있어야 한다.
+                  if (key === 'reserved_at' && o.reservation_basis === 'immediate') {
+                    return (
+                      <td key={key} data-column={key} title={`즉시 접수 (${o.reserved_date} ${o.reserved_time})`}>{value}</td>
+                    );
+                  }
                   return <td key={key} data-column={key} title={typeof value === 'string' ? value : undefined}>{value}</td>;
                 })}
               </tr>

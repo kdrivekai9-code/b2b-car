@@ -148,7 +148,15 @@
             <% if (o.plate_check_status === 'mismatch') { %><span class="badge red" title="사진 인식: <%= o.plate_recognized || '-' %>">상이</span><% } %>
           </td>
           <td data-column="driver" data-label="기사정보" title="<%= driverLabel %>"><%= driverLabel %></td>
+          <%# 즉시 접수는 "즉시"로 보여준다 — 즉시 요청도 reserved_date/time에는 접수 시각이
+              채워져서, 이 칸만 보면 그 시각을 콕 집어 예약한 것처럼 읽힌다. 기준이 null인
+              오더(컬럼 생기기 전)는 예전 그대로 시각을 보여준다. 실제 시각은 툴팁에 남긴다.
+              Next 쪽(src/app/orders/OrderListTable.js)과 같은 규칙이다. %>
+          <% if (o.reservation_basis === 'immediate') { %>
+          <td data-column="reserved_at" data-label="예약일시" title="즉시 접수 (<%= o.reserved_date %> <%= o.reserved_time %>)">즉시</td>
+          <% } else { %>
           <td data-column="reserved_at" data-label="예약일시" title="<%= o.reserved_date %> <%= o.reserved_time %>"><%= o.reserved_date %> <%= o.reserved_time %></td>
+          <% } %>
           <td data-column="payment_method" data-label="결제방식" title="<%= o.payment_method_name || '-' %>"><%= o.payment_method_name || '-' %></td>
           <td data-column="fare" data-label="요금"><%= formatMoney(o.fare_amount) %></td>
           <%# 배차 요금이 없는 오더(요금표 미등록 지사, 콜마너 미등록)는 0원이 아니라 미정이다.
