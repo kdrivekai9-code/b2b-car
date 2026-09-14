@@ -120,6 +120,7 @@ const CI_CHECKS = [
   'check-ai-intake-layout',
   'check-ai-intake-parity',
   'check-reservation-basis',
+  'check-pending-field-answer',
   'check-agent-request',
   'check-agent-idle-release',
   'check-chat-unread-badge',

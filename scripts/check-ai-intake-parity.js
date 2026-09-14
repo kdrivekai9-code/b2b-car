@@ -77,8 +77,16 @@ check('fields.json을 부른다', /\/orders\/ai-intake\/fields\.json/.test(clien
 check('폴백 목록이 있다', /FALLBACK_REQUIRED_FIELDS = \[/.test(client));
 check('빠진 항목을 찾는다', /function firstMissingField\(values\)/.test(client));
 // 이게 없으면 필수값이 빈 채로 "등록할까요?"까지 간다(2026-09-11 실측).
+//
+// 처음에는 파싱 흐름 안의 호출부 한 줄을 그대로 박아뒀는데, 값을 받는 자리가 여럿이라
+// (연락처·차량번호 셋·요청사항·주소 후보 선택) 그 판단을 advanceAfterValue 한 곳으로
+// 모으자 이 검사가 깨졌다 — 코드는 더 맞아졌는데 검사만 옛 모양을 붙잡고 있었다.
+// 그래서 **고리 두 개**로 본다: 파싱 흐름이 그 함수에 넘기는지, 그 함수가 확인 단계보다
+// 먼저 빈 항목을 묻는지. 둘 중 하나만 끊겨도 필수값이 빈 채로 넘어간다.
+check('파싱 흐름이 다음 걸음을 그 함수에 맡긴다',
+  /await advanceAfterValue\(sid, mergedFields\);/.test(client));
 check('확인 단계 전에 되묻는다',
-  /const missing = firstMissingField\(mergedFields\);[\s\S]{0,600}?setPendingField\(missing\.id\)/.test(client));
+  /async function advanceAfterValue[\s\S]{0,900}?const missing = firstMissingField\(nextFields\);[\s\S]{0,400}?setPendingField\(missing\.id\)/.test(client));
 check('서버가 준 질문 문구를 쓴다', /missing\.question \|\|/.test(client));
 // 선택 항목까지 물으면 대화가 늘어진다.
 check('선택 항목은 건너뛴다', /if \(field\.optional\) continue;/.test(client));

@@ -436,14 +436,66 @@ export default function AiIntakeClient({
     return [];
   })();
 
-  // 아직 안 채워진 첫 필수 항목. 선택 항목(optional)은 건너뛴다.
+  // 고객이 "모른다/나중에"로 넘긴 항목. 다시 묻지 않는다.
+  //
+  // 없으면 무한 반복이 된다: 차량번호를 "출발지에서 확인"으로 넘기면 그 칸이 빈 채로 남는데,
+  // 아래 되묻기 사슬이 빈 필수 항목을 보고 **같은 질문을 또** 던진다. 새 대화에서 비운다.
+  const declinedFieldsRef = useRef(new Set());
+
+  // 아직 안 채워진 첫 필수 항목. 선택 항목(optional)과 고객이 넘긴 항목은 건너뛴다.
   function firstMissingField(values) {
     for (const field of requiredFields) {
       if (field.optional) continue;
+      if (declinedFieldsRef.current.has(field.id)) continue;
       const v = values ? values[field.id] : null;
       if (v === undefined || v === null || String(v).trim() === '') return field;
     }
     return null;
+  }
+
+  // 값을 하나 받은 뒤의 다음 걸음 — **한 곳에 모은다.**
+  //
+  // 아직 빈 필수 항목이 있으면 그걸 묻고, 없으면 확인 단계로 간다. 이게 없어서 되묻기
+  // 사슬이 한 칸에서 끊겼다(실측 2026-09-13): 출발지 주소·연락처를 받고는 도착지를 묻지
+  // 않고 바로 "등록할까요?"로 갔다. 고객은 "네"라고 답하는데 폼은 도착지가 비어 저장이
+  // 막힌다. 받는 자리가 다섯 곳이라(연락처·차량번호 셋·요청사항) 각자 확인 단계로 가던 것을
+  // 여기로 모았다 — 한 곳에만 고치면 나머지 넷에서 조용히 빠진다.
+  // 값을 받은 뒤의 draft에는 주소 후보 선택이 남아 있으면 안 된다.
+  //
+  // makeDraftState는 React 상태(pendingDisambiguation·disambiguationQueue)를 그대로 읽는데,
+  // 부르는 쪽이 바로 앞줄에서 setPendingDisambiguation(null)을 했어도 그 값은 아직 반영되지
+  // 않는다(상태 갱신은 다음 렌더에 반영된다). 그대로 저장하면 복원했을 때 "1번/2번을
+  // 골라주세요"에 멈춰 있는 대화가 된다. 그래서 여기서 명시적으로 비운다.
+  const CLEARED_DISAMBIGUATION = { pendingDisambiguation: null, disambiguationQueue: [] };
+
+  async function advanceAfterValue(sid, nextFields, options = {}) {
+    const prefix = options.prefix || '';
+    pushPrefill(options.prefill || nextFields);
+
+    const missing = firstMissingField(nextFields);
+    if (missing) {
+      setPendingField(missing.id);
+      setPhase('collecting');
+      noteProgress();
+      const question = missing.question || (missing.label + '를 말씀해주세요.');
+      await replyWithMessage(sid, (prefix ? prefix + '\n\n' : '') + question, {
+        needsAgent: false,
+        requestedFeature: null,
+        draftState: makeDraftState({ phase: 'collecting', pendingField: missing.id, fields: nextFields, ...CLEARED_DISAMBIGUATION }),
+      });
+      return;
+    }
+
+    setPendingField(null);
+    setPhase('confirming');
+    noteProgress();
+    const msg = (prefix ? prefix + '\n\n' : '')
+      + await orderSummaryText(nextFields) + '\n\n위 내용으로 등록할까요? (네 / 수정)';
+    await replyWithMessage(sid, msg, {
+      needsAgent: false,
+      requestedFeature: null,
+      draftState: makeDraftState({ phase: 'confirming', pendingField: null, fields: nextFields, ...CLEARED_DISAMBIGUATION }),
+    });
   }
 
   function rememberReservationBasis(source) {
@@ -714,6 +766,7 @@ export default function AiIntakeClient({
     premiumTurnActiveRef.current = false;
     dailyDriverHoursPendingRef.current = false;
     reservationBasisRef.current = null;
+    declinedFieldsRef.current = new Set();
     return nextId;
   }
 
@@ -807,21 +860,8 @@ export default function AiIntakeClient({
       if (directPhone) {
         const nextFields = mergeOrderFields(collectedFields, { [activePendingField]: directPhone });
         setCollectedFields(nextFields);
-        setPendingField(null);
-        setPhase('confirming');
-        noteProgress();
-        pushPrefill(nextFields);
-        const msg = '연락처를 ' + directPhone + '(으)로 확인했습니다.\n\n'
-          + await orderSummaryText(nextFields)
-          + '\n\n위 내용으로 등록할까요? (네 / 수정)';
-        await replyWithMessage(sid, msg, {
-          needsAgent: false,
-          requestedFeature: null,
-          draftState: makeDraftState({
-            phase: 'confirming',
-            pendingField: null,
-            fields: nextFields,
-          }),
+        await advanceAfterValue(sid, nextFields, {
+          prefix: '연락처를 ' + directPhone + '(으)로 확인했습니다.',
         });
         return;
       }
@@ -832,19 +872,11 @@ export default function AiIntakeClient({
       if (VEHICLE_NUMBER_SKIP_RE.test(compact)) {
         const nextFields = mergeOrderFields(collectedFields, { vehicle_number: '' });
         setCollectedFields(nextFields);
-        setPendingField(null);
-        setPhase('confirming');
-        noteProgress();
-        pushPrefill({ ...nextFields, __clearFields: ['vehicle_number'] });
-        const msg = '차량번호는 출발지에서 다시 확인하겠습니다.\n\n' + await orderSummaryText(nextFields) + '\n\n위 내용으로 등록할까요? (네 / 수정)';
-        await replyWithMessage(sid, msg, {
-          needsAgent: false,
-          requestedFeature: null,
-          draftState: makeDraftState({
-            phase: 'confirming',
-            pendingField: null,
-            fields: nextFields,
-          }),
+        // 고객이 넘긴 항목이다 — 기억해두지 않으면 아래 사슬이 같은 질문을 또 던진다.
+        declinedFieldsRef.current.add('vehicle_number');
+        await advanceAfterValue(sid, nextFields, {
+          prefix: '차량번호는 출발지에서 다시 확인하겠습니다.',
+          prefill: { ...nextFields, __clearFields: ['vehicle_number'] },
         });
         return;
       }
@@ -852,19 +884,8 @@ export default function AiIntakeClient({
       if (VEHICLE_NUMBER_RE.test(compact)) {
         const nextFields = mergeOrderFields(collectedFields, { vehicle_number: compact });
         setCollectedFields(nextFields);
-        setPendingField(null);
-        setPhase('confirming');
-        noteProgress();
-        pushPrefill(nextFields);
-        const msg = '차량번호는 ' + compact + '(으)로 확인했습니다.\n\n' + await orderSummaryText(nextFields) + '\n\n위 내용으로 등록할까요? (네 / 수정)';
-        await replyWithMessage(sid, msg, {
-          needsAgent: false,
-          requestedFeature: null,
-          draftState: makeDraftState({
-            phase: 'confirming',
-            pendingField: null,
-            fields: nextFields,
-          }),
+        await advanceAfterValue(sid, nextFields, {
+          prefix: '차량번호는 ' + compact + '(으)로 확인했습니다.',
         });
         return;
       }
@@ -874,18 +895,11 @@ export default function AiIntakeClient({
         vehicleNumberFailCountRef.current = 0;
         const nextFields = mergeOrderFields(collectedFields, { vehicle_number: '' });
         setCollectedFields(nextFields);
-        setPendingField(null);
-        setPhase('confirming');
-        pushPrefill({ ...nextFields, __clearFields: ['vehicle_number'] });
-        const failMsg = '차량번호 형식을 확인하기 어려워 등록하지 않았습니다.\n\n' + await orderSummaryText(nextFields) + '\n\n위 내용으로 등록할까요? (네 / 수정)';
-        await replyWithMessage(sid, failMsg, {
-          needsAgent: false,
-          requestedFeature: null,
-          draftState: makeDraftState({
-            phase: 'confirming',
-            pendingField: null,
-            fields: nextFields,
-          }),
+        // 두 번 못 알아들었으면 더 묻지 않는다 — 그대로 두면 같은 질문이 무한히 돈다.
+        declinedFieldsRef.current.add('vehicle_number');
+        await advanceAfterValue(sid, nextFields, {
+          prefix: '차량번호 형식을 확인하기 어려워 등록하지 않았습니다.',
+          prefill: { ...nextFields, __clearFields: ['vehicle_number'] },
         });
         return;
       }
@@ -903,20 +917,9 @@ export default function AiIntakeClient({
       const nextMemo = ADDITIONAL_REQUEST_NONE_RE.test(trimmed) ? '' : trimmed;
       const nextFields = mergeOrderFields(collectedFields, { memo_customer: nextMemo });
       setCollectedFields(nextFields);
-      setPendingField(null);
-      setPhase('confirming');
-      noteProgress();
-      if (nextMemo) pushPrefill(nextFields);
-      else pushPrefill({ ...nextFields, __clearFields: ['memo_customer'] });
-      const msg = (nextMemo ? ('요청사항을 반영했습니다.\n\n') : '') + await orderSummaryText(nextFields) + '\n\n위 내용으로 등록할까요? (네 / 수정)';
-      await replyWithMessage(sid, msg, {
-        needsAgent: false,
-        requestedFeature: null,
-        draftState: makeDraftState({
-          phase: 'confirming',
-          pendingField: null,
-          fields: nextFields,
-        }),
+      await advanceAfterValue(sid, nextFields, {
+        prefix: nextMemo ? '요청사항을 반영했습니다.' : '',
+        prefill: nextMemo ? nextFields : { ...nextFields, __clearFields: ['memo_customer'] },
       });
       return;
     }
@@ -1066,54 +1069,13 @@ export default function AiIntakeClient({
     setPendingDisambiguation(null);
     setDisambiguationQueue([]);
 
-    // 예약 기준은 수집 항목이 아니라 폼의 라디오라 collectedFields에 섞지 않는다 — 섞으면
-    // 확인 요약과 draft에 뜻 모를 줄이 하나 늘어난다. pushPrefill이 폼에만 따로 얹는다.
-    // 아래 되묻기로 빠지더라도 여기까지 받은 값은 폼에 올려둔다.
-    pushPrefill(mergedFields);
-
-    // 필수 항목이 비어 있으면 확인 단계로 가지 않고 하나씩 묻는다.
+    // 다음 걸음은 advanceAfterValue가 정한다 — 빈 필수 항목이 있으면 그걸 묻고, 없으면 확인
+    // 단계로 간다. 폼 프리필(예약 기준 포함)도 그 안에서 한다.
     //
     // 이게 없어서 파싱이 실패한 항목까지 그대로 "등록할까요?"로 넘어갔다 — 고객은 "네"라고
     // 답했는데 폼은 필수값이 비어 저장이 막힌다(실측 2026-09-11: 주소·연락처 넷이 빈 채로
     // 확인 단계까지 갔다). 항목과 순서는 서버가 정한다(requiredFields).
-    const missing = firstMissingField(mergedFields);
-    if (missing) {
-      setPhase('collecting');
-      setPendingField(missing.id);
-      noteProgress();
-      await replyWithMessage(sid, missing.question || (missing.label + '를 말씀해주세요.'), {
-        needsAgent: false,
-        requestedFeature: null,
-        draftState: {
-          source: 'next-ai-intake-client',
-          phase: 'collecting',
-          pendingField: missing.id,
-          fields: mergedFields,
-          pendingDisambiguation: null,
-          disambiguationQueue: [],
-          preOfferState,
-        },
-      });
-      return;
-    }
-
-    setPhase('confirming');
-    noteProgress();
-
-    const confirmText = await orderSummaryText(mergedFields) + '\n\n위 내용으로 등록할까요? (네 / 수정)';
-    await replyWithMessage(sid, confirmText, {
-      needsAgent: false,
-      requestedFeature: null,
-      draftState: {
-        source: 'next-ai-intake-client',
-        phase: 'confirming',
-        pendingField: null,
-        fields: mergedFields,
-        pendingDisambiguation: null,
-        disambiguationQueue: [],
-        preOfferState,
-      },
-    });
+    await advanceAfterValue(sid, mergedFields);
   }
 
   async function handleConfirmingPhase(sid, text) {
@@ -1315,21 +1277,9 @@ export default function AiIntakeClient({
 
     setPendingDisambiguation(null);
     setDisambiguationQueue([]);
-    setPhase('confirming');
-    noteProgress();
-    const confirmText = `${dis.label}는 '${picked.label}'로 확인했습니다.\n\n${await orderSummaryText(nextFields)}\n\n위 내용으로 등록할까요? (네 / 수정)`;
-    await replyWithMessage(sid, confirmText, {
-      needsAgent: false,
-      requestedFeature: null,
-      draftState: {
-        source: 'next-ai-intake-client',
-        phase: 'confirming',
-        pendingField: null,
-        fields: nextFields,
-        pendingDisambiguation: null,
-        disambiguationQueue: [],
-        preOfferState,
-      },
+    // 후보를 고른 것도 값을 하나 받은 것이다 — 남은 필수 항목이 있으면 이어서 묻는다.
+    await advanceAfterValue(sid, nextFields, {
+      prefix: `${dis.label}는 '${picked.label}'로 확인했습니다.`,
     });
   }
 

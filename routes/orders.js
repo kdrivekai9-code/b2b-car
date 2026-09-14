@@ -23,6 +23,7 @@ const memoExtraCosts = require('../lib/memoExtraCosts');
 const postalReceipt = require('../lib/postalReceipt');
 const reservationSanity = require('../lib/reservationSanity');
 const { resolveReservationBasis } = require('../lib/reservationBasis');
+const { readPendingFieldAnswer } = require('../lib/pendingFieldAnswer');
 const { trimToConversationDay } = require('../lib/chatHistoryWindow');
 // 인사·자기소개 응답은 카카오 상담톡(routes/kakaoConsult.js)과 같은 규칙을 써야 해서 공용 모듈로 뺐다.
 const { isGreeting, getSmalltalkMessage } = require('../lib/smallTalk');
@@ -1087,11 +1088,33 @@ router.post('/ai-intake/parse', aiRateLimit, asyncHandler(async (req, res) => {
   }
 
   const fields = geminiResult ? normalizeGeminiOrderFields(geminiResult) : parseIntakeText(text);
+
+  // 되묻는 질문에 온 답이 비어 있으면 pendingField로 직접 읽는다(lib/pendingFieldAnswer.js).
+  //
+  // 두 경우를 같이 막는다:
+  //   · Gemini 호출이 실패해 위에서 parseIntakeText로 내려온 경우 — 그 파서는 pendingField를
+  //     **인자로 받지도 않아서** 맨 주소·연락처 한 줄에서 아무것도 못 뽑는다.
+  //   · 모델이 붙어 있는데도 그 값을 안 실어 보낸 경우(같은 입력에도 회차마다 갈린다).
+  // 어느 쪽이든 고객 눈에는 "답했는데 또 묻는다"로 똑같이 보이고, 3턴이면 상담원 연결로
+  // 밀렸다(실측 2026-09-13, EJS·Next 양쪽 동일).
+  //
+  // **덮어쓰지 않는다** — 모델이 제대로 뽑았으면 그 값이 이긴다.
+  const pendingAnswer = readPendingFieldAnswer(pendingField, text);
+  if (pendingAnswer && !String(fields[pendingAnswer.field] || '').trim()) {
+    fields[pendingAnswer.field] = pendingAnswer.value;
+  }
+
   const fallbackIntent = (geminiResult && ORDER_INTENTS.has(geminiResult.intent)) ? geminiResult.intent : 'dispatch_order';
   // intent 판정은 원래 fields(예약일시 유무)를 그대로 봐야 한다 — 아래 "즉시" 채우기보다
   // 반드시 먼저 실행해서, 예약없는 즉시 대리 요청(proxy_order)이 예약 있는 건으로 오분류되지
   // 않게 한다.
-  const intent = classifyOrderIntentByRule(text, fields) || fallbackIntent;
+  // 되묻는 중에는 규칙 분류를 적용하지 않는다.
+  //
+  // classifyOrderIntentByRule은 "예약일시가 없으면 대리(proxy_order)"로 본다. 그런데 되묻기
+  // 답변은 값 하나뿐이라 **예약일시가 없는 게 당연하다** — 그래서 "010-1111-2222" 같은 답이
+  // 전부 proxy_order로 뒤집혔다(실측). 그 규칙은 새로 들어온 문장을 가르려고 만든 것이고,
+  // 지금은 무엇을 물었는지 우리가 알고 있으니 모델 판단(fallbackIntent)을 그대로 쓴다.
+  const intent = (pendingField ? null : classifyOrderIntentByRule(text, fields)) || fallbackIntent;
 
   // 예약일시가 아예 없으면 현재 시각으로 조용히 채우지 않고 챗봇이 직접 물어보게 한다(정책
   // 유지 — 예전에는 "지금 바로 보내는 차량"으로 임의 가정했는데, 사용자가 실제로 정한 적
