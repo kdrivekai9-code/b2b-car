@@ -119,6 +119,7 @@ const CI_CHECKS = [
   'check-ai-intake-liveness',
   'check-ai-intake-layout',
   'check-faq-answer-compose',
+  'check-vertex-retry',
   'check-ai-intake-parity',
   'check-reservation-basis',
   'check-ai-intake-immediate-draft',
