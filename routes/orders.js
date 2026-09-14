@@ -1549,6 +1549,13 @@ router.post('/', asyncHandler(async (req, res) => {
     returnReservedDate: String(req.body.return_reserved_date || '').trim() || null,
     returnReservedTime: String(req.body.return_reserved_time || '').trim() || null,
   });
+  // 예약 기준 라디오(즉시 / 픽업 / 도착). EJS 폼은 예전부터 보냈고 Next 폼도 이제 보낸다.
+  // 안 보낸 경로(옛 클라이언트·API 직접 호출)는 null로 두고 예전처럼 예약으로 본다.
+  const requestedReservationBasis = ['immediate', 'pickup', 'delivery']
+    .includes(String(req.body.reservation_basis || '').trim())
+    ? String(req.body.reservation_basis).trim()
+    : null;
+
   const splitGroupId = splitPlan.parts.length > 1
     ? `sg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
     : null;
@@ -1619,6 +1626,13 @@ router.post('/', asyncHandler(async (req, res) => {
     // 나뉜 건은 그 구간의 출발 일시를 쓴다. 나뉘지 않았으면 원래 값 그대로다.
     reservedDate: part.reservedDate || effectiveReservedDate,
     reservedTime: part.reservedTime || effectiveReservedTime,
+    // 예약 기준. 콜마너로 예약시각을 실어 보낼지 이 값이 가른다(lib/callmaner.js).
+    //
+    // **구간이 나뉜 건은 뒷 구간에 물려주지 않는다.** 나뉜 구간은 앞 구간이 끝나는 시각에
+    // 맞춰 출발 일시가 따로 정해지므로(part.reservedDate) 그건 예약이 맞다 — 즉시로 표시하면
+    // 그 시각이 콜마너로 안 넘어가 뒷 구간이 지금 배차 대상이 된다. 자기 시각을 따로 받은
+    // 구간은 기준을 비워 예전대로 예약으로 나가게 둔다.
+    reservationBasis: part.reservedDate ? null : requestedReservationBasis,
     paymentMethodId: payment_method_id || null,
     fareAmount: fare_amount,
     ferryFareAmount: ferry_fare_amount,
@@ -2323,6 +2337,23 @@ router.post('/:id', asyncHandler(async (req, res) => {
       if (e && e.code === '42703') return; // 마이그레이션 20260907010000 전
       console.error('도착지 인도시각 저장 실패(오더 수정은 완료):', e.message);
     });
+  }
+
+  // 예약 기준도 함께 맞춘다. 콜마너로 예약시각을 실어 보낼지 이 값이 가르므로(lib/callmaner.js),
+  // 즉시 건을 나중에 예약으로 고쳤는데 기준이 'immediate'로 남아 있으면 그 시각이 영영 안 나간다.
+  //
+  // **안 보낸 것과 비운 것을 구분한다**(위 keepIfAbsent 주석과 같은 이유). 상담관리 카드 폼은
+  // 이 칸을 안 보내는데, 안 온 것을 빈 값으로 취급하면 접수 때 확인한 기준이 수정 한 번에
+  // null로 덮이고 즉시 건이 조용히 예약으로 되돌아간다.
+  if (req.body.reservation_basis !== undefined) {
+    const basis = ['immediate', 'pickup', 'delivery'].includes(String(req.body.reservation_basis || '').trim())
+      ? String(req.body.reservation_basis).trim()
+      : null;
+    await db.run('UPDATE orders SET reservation_basis = ? WHERE id = ?', [basis, req.params.id])
+      .catch((e) => {
+        if (e && e.code === '42703') return; // 마이그레이션 20260914030000 전
+        console.error('예약 기준 저장 실패(오더 수정은 완료):', e.message);
+      });
   }
 
   // 기사 전달사항을 사람이 고쳤으면 접수 때 만들어둔 요약은 그 내용이 아니다. 비워서 콜마너가

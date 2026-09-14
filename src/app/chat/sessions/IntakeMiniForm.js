@@ -430,6 +430,10 @@ export default function IntakeMiniForm({ chatSessionId, branches, groups, paymen
     params.set('reserved_time', reservedTime);
     params.set('pickup_reserved_date', state.pickup_reserved_date || reservedDate);
     params.set('pickup_reserved_time', state.pickup_reserved_time || reservedTime);
+    // 예약 기준 라디오 — 이 폼은 위에 라디오를 그려두고도 저장할 때 안 보내고 있었다. 그래서
+    // 여기서 "즉시"를 골라도 오더에는 남지 않았고, 콜마너로는 예약시각이 실려 나갔다.
+    // 오더 수정일 때도 반드시 보내야 한다 — 안 보내면 서버가 기존 값을 그대로 둔다.
+    params.set('reservation_basis', state.reservation_basis);
     params.set('payment_method_id', state.payment_method_id);
     params.set('fare_amount', state.fare_amount);
     params.set('memo_customer', state.memo_customer);

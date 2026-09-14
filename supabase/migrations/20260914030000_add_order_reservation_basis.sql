@@ -1,0 +1,20 @@
+-- 예약 기준(즉시 / 출발지 픽업시간 / 도착지 인도시간)을 오더에 남긴다.
+--
+-- 왜 필요한가(사용자 지시 2026-09-14): "즉시"로 접수한 건이 콜마너에 **예약 건으로** 넘어간다.
+-- 콜마너 오더접수 전문은 reservation_time이 실려 있으면 그 시각의 예약으로 잡는데
+-- (lib/callmaner.js buildOrderPayload), 우리는 즉시여도 reserved_date/reserved_time에 "지금
+-- 시각"을 채워 저장하므로 그 칸이 항상 채워져 나갔다. 즉시 배차돼야 할 건이 지금 시각 예약으로
+-- 잡히고, 기사 앱에도 예약으로 보인다.
+--
+-- 화면에는 라디오가 예전부터 있었지만 **저장되지 않았다**. 즉시와 픽업 기준은 둘 다
+-- reserved_date/reserved_time만 남겨서, 등록이 끝나면 어느 쪽이었는지 알 방법이 없었다.
+-- 그래서 콜마너로 나갈 때도 구분할 근거가 없다 — 이 컬럼이 그 근거다.
+--
+-- 도착 기준('delivery')도 같이 담는다. 그 값은 delivery_reserved_date/time을 채울지 가르는
+-- 기준이기도 한데(routes/orders.js deliveryReservedFrom), 지금까지 요청 본문에만 있고 저장되지
+-- 않아 오더를 다시 열었을 때 어느 기준으로 접수한 건인지 되살릴 수 없었다.
+--
+-- 값: 'immediate' | 'pickup' | 'delivery' | NULL(기존 오더 — 예전처럼 예약으로 본다).
+-- NULL을 기본으로 두는 게 중요하다. 이미 쌓인 오더를 'pickup'으로 일괄 채우면 "확인된 기준"과
+-- "모르는 것"을 구분할 수 없게 된다.
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS reservation_basis text;

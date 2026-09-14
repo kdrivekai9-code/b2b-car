@@ -746,6 +746,13 @@ export default function OrderForm({ initialData, chatSessionId, mode = 'create',
     params.set('reserved_time', reservedTime);
     params.set('pickup_reserved_date', pickupDate);
     params.set('pickup_reserved_time', pickupTime);
+    // 예약 기준 라디오. EJS 폼은 예전부터 보냈는데(views/orders/form.ejs의 value="immediate")
+    // 이 폼만 안 보내고 있었다 — 서버는 그 칸이 **안 온 것**과 **빈 것**을 구분한다.
+    // 두 가지가 이 한 줄에 걸려 있었다:
+    //   · 즉시 건이 콜마너에 예약시각과 함께 넘어갔다(lib/callmaner.js buildOrderPayload)
+    //   · 도착 기준일 때 고객이 말한 인도 시각이 저장되지 않았다
+    //     (routes/orders.js deliveryReservedFrom는 이 값이 'delivery'일 때만 남긴다)
+    params.set('reservation_basis', state.reservation_basis);
     params.set('payment_method_id', state.payment_method_id);
     params.set('fare_amount', state.fare_amount);
     params.set('ferry_fare_amount', String(state.ferry_fare_amount || 0));
