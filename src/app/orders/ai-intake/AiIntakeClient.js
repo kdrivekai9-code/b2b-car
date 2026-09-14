@@ -402,7 +402,14 @@ export default function AiIntakeClient({
 
   // 예약 기준(즉시 / 픽업 / 도착)은 한 번 읽으면 그 대화 내내 들고 간다 — 되묻기 답변처럼
   // 기준이 안 적힌 문장이 뒤따를 때 폼의 라디오를 도로 되돌리면 안 된다. 새 대화에서 비운다.
-  const reservationBasisRef = useRef(null);
+  //
+  // 페이지를 다시 열면 draft에서 되살린다(saveBotTurn이 실어 보낸다). 이 ref가 메모리에만
+  // 있어서, 새로고침 한 번이면 "즉시"가 조용히 사라지고 폼이 픽업 기준으로 돌아갔다 —
+  // 그런데 시각 칸에는 그때 채워진 구체 시각이 그대로 남아 있어 비어 보이지도 않는다.
+  // 그대로 "오더 등록"을 누르면 즉시 요청이 그 시각 예약 오더가 된다(실측 2026-09-14).
+  const reservationBasisRef = useRef(
+    initialDraftState && initialDraftState.reservationBasis ? initialDraftState.reservationBasis : null
+  );
 
   // 필수 항목 정의를 서버에서 받는다. 실패하면 폴백 목록 그대로 쓴다 — 못 받았다고 접수가
   // 멈추면 안 된다(EJS loadFieldDefinitions와 같은 정책).
@@ -615,10 +622,17 @@ export default function AiIntakeClient({
   }
 
   async function saveBotTurn(sid, payload) {
+    // 예약 기준은 **여기서 한 번에** 얹는다. draftState를 만드는 자리가 여덟 곳이라
+    // (makeDraftState + 직접 만든 리터럴들) 한 곳만 빠져도 조용히 사라지는데, 서버로 나가는
+    // 길은 이 함수 하나뿐이다. collectedFields에 섞지 않는 이유는 pushPrefill 주석과 같다 —
+    // 수집 항목이 아니라 폼의 라디오라, 섞으면 확인 요약과 draft에 뜻 모를 줄이 하나 는다.
+    const body = payload && payload.draftState
+      ? { ...payload, draftState: { ...payload.draftState, reservationBasis: reservationBasisRef.current || null } }
+      : payload;
     const botSaved = await fetchJson('/chat/' + sid + '/bot-message', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(body),
     });
     if (botSaved.status) setStatus(botSaved.status);
     await catchUpMessages(sid);

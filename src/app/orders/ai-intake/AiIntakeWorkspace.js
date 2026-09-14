@@ -4,10 +4,22 @@ import { useMemo, useState } from 'react';
 import AiIntakeClient from './AiIntakeClient';
 import OrderForm from '../new/OrderForm';
 
+// 새로고침·재진입 때 폼을 draft로 되채운다.
+//
+// 예약 기준은 fields(collectedFields)가 아니라 draft **바로 아래**에 있다 — 수집 항목이
+// 아니라 폼의 라디오라 일부러 섞지 않는다(AiIntakeClient의 pushPrefill·saveBotTurn 주석).
+// 그래서 이 목록에서 빠져 있었고, 새로고침 한 번이면 "즉시"가 픽업 기준으로 되돌아갔다.
+// 조용히 틀리는 종류다: 시각 칸에는 즉시일 때 채워진 구체 시각이 그대로 남아 있어 비어
+// 보이지 않고, 그대로 "오더 등록"을 누르면 즉시 요청이 그 시각 예약 오더가 된다
+// (실측 2026-09-14 — 대화에는 "일시 : 즉시"가 그대로 남아 있는데 폼만 픽업 기준이었다).
 function toDraftPrefill(initialDraft) {
   const fields = (initialDraft && initialDraft.fields) || null;
   if (!fields || typeof fields !== 'object') return null;
+  const basis = initialDraft.reservationBasis;
   return {
+    ...(basis === 'immediate' || basis === 'pickup' || basis === 'delivery'
+      ? { reservation_basis: basis }
+      : {}),
     origin_address: fields.origin_address || '',
     origin_detail_address: fields.origin_detail_address || '',
     origin_contact: fields.origin_contact || '',
