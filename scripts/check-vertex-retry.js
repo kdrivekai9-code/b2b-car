@@ -107,6 +107,24 @@ async function main() {
   // 예산이 없으면 한 번 25초 타임아웃 × 3회로 75초를 기다리게 된다 — 실패보다 나쁘다.
   check('전체 예산이 있다', vertex.RETRY_BUDGET_MS > 0 && vertex.RETRY_BUDGET_MS <= 20000);
 
+  console.log('\n[엔드포인트 주소 — global은 호스트 모양이 다르다]');
+  // GOOGLE_CLOUD_LOCATION=global만 넣고 호스트를 안 고치면 global-aiplatform.googleapis.com
+  // 이라는 없는 주소를 부른다. 구글이 JSON이 아니라 HTML 404를 돌려줘서 "응답에 텍스트가
+  // 없습니다"처럼 엉뚱한 오류로 보이기 때문에, 원인을 찾는 데 시간이 걸린다.
+  check('리전은 호스트에 리전명이 붙는다',
+    vertex.modelUrl('asia-northeast3', 'p', 'm', 'generateContent')
+      === 'https://asia-northeast3-aiplatform.googleapis.com/v1/projects/p/locations/asia-northeast3/publishers/google/models/m:generateContent');
+  check('global은 리전명을 안 붙인다',
+    vertex.modelUrl('global', 'p', 'm', 'generateContent')
+      === 'https://aiplatform.googleapis.com/v1/projects/p/locations/global/publishers/google/models/m:generateContent');
+  check('global-aiplatform 같은 주소를 만들지 않는다',
+    !vertex.modelUrl('global', 'p', 'm', 'predict').includes('global-aiplatform'));
+  // 주석은 빼고 센다 — 위 설명에도 같은 주소가 적혀 있다.
+  const code = src.split('\n').filter((ln) => !ln.trim().startsWith('//')).join('\n');
+  const hostLines = code.split('\n').filter((ln) => ln.includes('aiplatform.googleapis.com'));
+  check('주소를 한 곳에서만 만든다', hostLines.length === 1,
+    `조립하는 줄 ${hostLines.length}개 — modelUrl 밖에서 만들면 global 전환이 한쪽만 적용된다`);
+
   console.log(failed ? `\n${failed}건 실패` : '\n모두 통과');
   process.exit(failed ? 1 : 0);
 }
