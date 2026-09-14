@@ -35,6 +35,16 @@
           addBubble('죄송합니다, 관련된 답변을 찾지 못했습니다. 상담원에게 문의해주세요.', 'bot');
           return;
         }
+        // 서버가 정리해 준 답이 있으면 그걸 한 덩어리로 보여준다(lib/knowledgeAnswer.js).
+        // 어느 지식 항목을 근거로 했는지 함께 밝힌다 — 고객이 근거를 볼 수 있어야 하고,
+        // 잘못된 안내가 나갔을 때 어느 항목을 고쳐야 하는지 우리가 찾을 수 있어야 한다.
+        if (data.answer) {
+          var sources = (data.sources || []).filter(Boolean);
+          addBubble(data.answer + (sources.length ? '\n\n참고한 항목: ' + sources.join(', ') : ''), 'bot');
+          return;
+        }
+        // 정리에 실패했거나(모델 장애·지연) 준 항목만으로 답이 안 되는 경우 — 예전 그대로
+        // 원문을 보여준다. 찾은 것이 있는데 아무것도 안 보여주는 편이 더 나쁘다.
         data.matches.forEach((m) => {
           addBubble('[' + m.category + '] ' + m.answer, 'bot');
         });
