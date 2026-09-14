@@ -107,6 +107,45 @@ async function main() {
   // 예산이 없으면 한 번 25초 타임아웃 × 3회로 75초를 기다리게 된다 — 실패보다 나쁘다.
   check('전체 예산이 있다', vertex.RETRY_BUDGET_MS > 0 && vertex.RETRY_BUDGET_MS <= 20000);
 
+  console.log('\n[실패분만 다른 리전으로 넘긴다]');
+  // 평상시엔 지정 리전에 머물고 거절당한 건만 폴백으로 넘긴다 — 그래야 국외로 나가는 것이
+  // "안 그랬으면 실패했을 요청"으로 한정된다. 실측(서울 유지 + 실패분만 global, 30회):
+  //   서울에서 그대로 성공 24 / 서울 거절 → global 성공 6 / 끝내 실패 0
+  {
+    waits.length = 0;
+    const seen = [];
+    const f = async (u) => { seen.push(u); return seen.length === 1 ? resp(429, '{}') : resp(200, '{"ok":true}'); };
+    const res = await vertex.callVertex('https://seoul', {}, 1000, '시험 호출 실패',
+      { doFetch: f, sleepFn: noSleep, random: () => 1, fallbackUrl: 'https://global' });
+    check('첫 거절에서 폴백 주소로 간다', res.status === 200 && seen[1] === 'https://global', JSON.stringify(seen));
+    // 다른 리전은 다른 공유 용량이라 같은 곳이 밀린다고 기다릴 이유가 없다.
+    check('폴백으로 넘길 때는 기다리지 않는다', waits.length === 0, `대기 ${JSON.stringify(waits)}`);
+  }
+  {
+    waits.length = 0;
+    const seen = [];
+    const f = async (u) => { seen.push(u); return seen.length <= 2 ? resp(429, '{}') : resp(200, '{"ok":true}'); };
+    const res = await vertex.callVertex('https://seoul', {}, 1000, '시험 호출 실패',
+      { doFetch: f, sleepFn: noSleep, random: () => 1, fallbackUrl: 'https://global' });
+    check('폴백도 거절하면 기존 재시도로 넘어간다', res.status === 200 && seen.length === 3);
+    check('그때는 기다렸다 다시 부른다', waits.length === 1 && waits[0] > 0);
+  }
+  {
+    const seen = [];
+    const f = async (u) => { seen.push(u); return resp(403, '{}'); };
+    await vertex.callVertex('https://seoul', {}, 1000, '시험 호출 실패',
+      { doFetch: f, sleepFn: noSleep, fallbackUrl: 'https://global' }).catch(() => {});
+    // 권한·형식 오류는 리전을 바꿔도 똑같이 거절당한다.
+    check('4xx는 폴백으로 넘기지 않는다', seen.length === 1, `호출 ${seen.length}회`);
+  }
+  check('폴백 리전은 환경변수로 정한다', /VERTEX_FALLBACK_LOCATION/.test(read('lib/vertexAi.js')));
+  {
+    const before = process.env.VERTEX_FALLBACK_LOCATION;
+    delete process.env.VERTEX_FALLBACK_LOCATION;
+    check('안 정했으면 꺼져 있다', vertex.fallbackLocation() === '');
+    if (before !== undefined) process.env.VERTEX_FALLBACK_LOCATION = before;
+  }
+
   console.log('\n[엔드포인트 주소 — global은 호스트 모양이 다르다]');
   // GOOGLE_CLOUD_LOCATION=global만 넣고 호스트를 안 고치면 global-aiplatform.googleapis.com
   // 이라는 없는 주소를 부른다. 구글이 JSON이 아니라 HTML 404를 돌려줘서 "응답에 텍스트가
