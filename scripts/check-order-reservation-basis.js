@@ -90,10 +90,18 @@ async function main() {
 
   console.log('\n[접수·수정 경로]');
   check('등록 시 요청 본문에서 읽는다', /requestedReservationBasis/.test(orders));
-  // 나뉜 건(구간 릴레이)의 뒷 구간은 자기 출발 시각이 따로 있다 — 즉시로 표시하면 그 시각이
+  // 나뉜 건(구간 릴레이)은 각 구간의 출발 시각이 따로 정해진다 — 즉시로 표시하면 그 시각이
   // 콜마너로 안 넘어가 지금 배차 대상이 된다.
-  check('나뉜 구간에는 물려주지 않는다',
-    /reservationBasis: part\.reservedDate \? null : requestedReservationBasis/.test(orders));
+  //
+  // **part.reservedDate로 가르면 안 된다.** splitIntake는 나뉘지 않은 건도 parts:[{...data}]로
+  // 돌려줘서 그 칸이 항상 채워져 있고, 그러면 기준이 늘 null이 되어 이 기능 전체가 죽는다.
+  // 처음에 그렇게 짰다가 실제 등록(OID2216)에서 잡았다 — 이 검사는 그때 통과했으므로,
+  // 정규식만으로는 못 잡는 종류라는 뜻이기도 하다.
+  check('나뉜 건에는 붙이지 않는다',
+    /reservationBasis: splitPlan\.parts\.length === 1 \? requestedReservationBasis : null/.test(orders));
+  check('part.reservedDate로 가르지 않는다',
+    !/reservationBasis: part\.reservedDate/.test(orders),
+    '나뉘지 않은 건도 그 칸이 채워져 있어 기준이 늘 null이 된다');
   // 상담관리 카드 폼처럼 이 칸을 안 보내는 화면이 있다 — 안 온 것을 빈 값으로 덮으면 접수 때
   // 확인한 기준이 수정 한 번에 사라진다.
   check('수정 시 안 보낸 값은 건드리지 않는다',

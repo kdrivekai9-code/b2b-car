@@ -1628,11 +1628,15 @@ router.post('/', asyncHandler(async (req, res) => {
     reservedTime: part.reservedTime || effectiveReservedTime,
     // 예약 기준. 콜마너로 예약시각을 실어 보낼지 이 값이 가른다(lib/callmaner.js).
     //
-    // **구간이 나뉜 건은 뒷 구간에 물려주지 않는다.** 나뉜 구간은 앞 구간이 끝나는 시각에
-    // 맞춰 출발 일시가 따로 정해지므로(part.reservedDate) 그건 예약이 맞다 — 즉시로 표시하면
-    // 그 시각이 콜마너로 안 넘어가 뒷 구간이 지금 배차 대상이 된다. 자기 시각을 따로 받은
-    // 구간은 기준을 비워 예전대로 예약으로 나가게 둔다.
-    reservationBasis: part.reservedDate ? null : requestedReservationBasis,
+    // **나뉜 건에는 붙이지 않는다.** 구간 릴레이는 각 구간의 출발 일시가 앞 구간이 끝나는
+    // 시각에 맞춰 따로 정해지므로 전부 예약이 맞다 — 즉시로 표시하면 그 시각이 콜마너로 안
+    // 넘어가 뒷 구간까지 지금 배차 대상이 된다.
+    //
+    // 판단은 **나뉘었는지**로 한다(parts.length). part.reservedDate가 비었는지로 가르면 안
+    // 된다 — splitIntake는 나뉘지 않은 건도 parts:[{...data}]로 돌려줘서 그 칸이 항상 채워져
+    // 있고, 그러면 기준이 늘 null이 된다(실측으로 잡았다: 폼은 immediate를 보냈는데 저장된
+    // 오더 OID2216의 기준이 비어 있었다).
+    reservationBasis: splitPlan.parts.length === 1 ? requestedReservationBasis : null,
     paymentMethodId: payment_method_id || null,
     fareAmount: fare_amount,
     ferryFareAmount: ferry_fare_amount,
