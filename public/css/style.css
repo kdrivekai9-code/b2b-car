@@ -426,7 +426,8 @@ textarea.single-line-textarea{min-height:36px;height:36px;padding:8px 10px;resiz
 @media (min-width:1301px){
   .ai-intake-workspace{display:grid;grid-template-columns:minmax(300px,0.8fr) minmax(0,2.6fr);gap:18px;align-items:stretch;}
   /* stretch여야 대화 칸이 행 높이만큼 늘어나 position:sticky가 움직일 자리가 생긴다
-     (start면 제자리에 굳는다). .ai-chat-card의 height:720px는 그대로 유지된다. */
+     (start면 제자리에 굳는다). 대화 칸의 높이는 AiIntakeClient가 인라인으로 정한다 —
+     여기 .ai-chat-card{height:720px}가 아니라 그쪽이 실제로 먹는 값이다. */
   .ai-intake-workspace > .ai-chat-card{margin-bottom:0;align-self:start;position:sticky;top:12px;}
   .ai-intake-workspace > *{min-width:0;min-height:0;}
   .ai-intake-workspace-order{margin-top:0;min-width:0;}

@@ -1614,8 +1614,14 @@ export default function AiIntakeClient({
     return () => window.removeEventListener('chat-unread', onUnread);
   }, []);
 
+  // 대화 칸 높이 — 이관하면서 EJS(.ai-chat-card height:720px / 넓은 화면은 100vh-120px)보다
+  // 작아져 있었다(실사용 지적 2026-09-17). 세로를 1.5배로 올린다: 카드 520→780, 대화 영역
+  // 340→510 / 480→720. 여기 인라인 값이 style.css의 height:720px를 덮는다.
+  //
+  // min()으로 화면 높이에 걸어두는 이유: 이 카드는 sticky(top:12px)라 뷰포트보다 커지면
+  // 아래쪽 입력줄이 화면 밖에 고정돼 영영 보이지 않는다. 노트북(뷰포트 ~750px)에서 바로 난다.
   return (
-    <div className="card ai-chat-card" style={{ height: 'auto', minHeight: 520 }}>
+    <div className="card ai-chat-card" style={{ height: 'auto', minHeight: 'min(780px, calc(100vh - 24px))' }}>
       <div className="ai-chat-header">
         {/* 햄버거 메뉴(새 채팅 / 검색 / 최근 항목) — EJS에만 있던 것을 이식했다. 배지가
             가리키는 세션으로 갈 길이 없으면 배지가 오히려 답답하다(ChatHistoryMenu 주석). */}
@@ -1651,7 +1657,9 @@ export default function AiIntakeClient({
         </div>
       </div>
 
-      <div className="ai-chat-messages" style={{ minHeight: 340, maxHeight: 480 }}>
+      {/* 카드 높이에서 머리말·빠른응답·입력줄·패딩이 약 200px를 쓴다 — 그만큼 빼야 카드가
+          뷰포트 안에 남는다. */}
+      <div className="ai-chat-messages" style={{ minHeight: 'min(510px, calc(100vh - 200px))', maxHeight: 'min(720px, calc(100vh - 200px))' }}>
         {messages.map((message) => {
           const bubbleClass =
             message.sender === 'user'
