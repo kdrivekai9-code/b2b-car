@@ -131,6 +131,7 @@ const CI_CHECKS = [
   'check-kakao-send-retry',
   'check-integration-error-folding',
   'check-alert-recovery',
+  'check-agent-unread-visibility',
   'check-agent-request',
   'check-agent-idle-release',
   'check-chat-unread-badge',

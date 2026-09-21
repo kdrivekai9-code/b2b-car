@@ -378,16 +378,6 @@ function markSingleMessageReadByUserAsync(messageId, sessionId) {
     .catch((e) => console.error('고객 단건 읽음 처리 실패:', e.message));
 }
 
-function markSingleMessageReadByAgentAsync(messageId, sessionId) {
-  db.run(
-    `UPDATE chat_messages
-     SET read_by_agent_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS')
-     WHERE id = ? AND sender = 'user' AND read_by_agent_at IS NULL`,
-    [messageId]
-  ).then(({ rowCount }) => { if (rowCount > 0) broadcastReadReceiptAsync(sessionId, 'agent'); })
-    .catch((e) => console.error('상담원 단건 읽음 처리 실패:', e.message));
-}
-
 async function getNeedsAgentCount() {
   const row = await db.get(`SELECT COUNT(*) AS cnt FROM chat_sessions WHERE status = 'needs_agent'`);
   return Number(row.cnt);
@@ -1792,11 +1782,22 @@ router.get('/sessions/:id/stream', requireRole('admin'), asyncHandler(async (req
   const session = await db.get('SELECT id FROM chat_sessions WHERE id = ?', [req.params.id]);
   if (!session) return res.status(404).end();
 
-  await markUserMessagesReadByAgent(session.id);
-
+  // **연결됐다고 읽은 것이 아니다.**
+  //
+  // 예전에는 여기서 세션의 고객 메시지를 전부 읽음 처리하고, 아래 중계에서 도착하는 메시지도
+  // 즉시 읽음으로 바꿨다. 그런데 이 스트림은 카드 보기가 **첫 카드를 자동 선택**하면서 열린다
+  // (src/app/chat/sessions/CardBoard.js, public/js/chat-session-cards.js). 목록 1위는 가장
+  // 활발한 대화라, 그 고객의 질문은 사람이 보든 말든 도착 1초 만에 읽음이 됐다.
+  //
+  // 실측(2026-09-21, 세션 735): 오늘 고객 발화 5건이 전부 보낸 지 1초 안에 읽음 처리됐다
+  // (13:57:17 → 13:57:18). 그래서 안읽음 배지가 영영 안 떴고, 상담원은 새 질문이 온 줄
+  // 몰랐다 — "카카오로 질문했는데 상담관리에 안 보인다"는 지적이 이것이다.
+  //
+  // 읽음은 사람이 한 일에만 붙인다. 세션을 고르면 /sessions/:id/messages가 읽음 처리하고,
+  // 보고 있는 중에 새 메시지가 오면 화면이 POST /sessions/:id/read로 알려준다 — 그때는
+  // 탭이 실제로 보이는 상태인지 화면이 확인하고 부른다.
   sseHeaders(res);
   const streamHandle = openSessionStream(session.id, (payload) => {
-    if (payload && payload.sender === 'user' && payload.id) markSingleMessageReadByAgentAsync(payload.id, session.id);
     res.write(`data: ${JSON.stringify(payload)}\n\n`);
   }, (receipt) => {
     // 상대측(고객 또는 다른 탭의 상담원)이 방금 읽음 처리를 했다는 신호 — 이미 렌더링된
@@ -1807,9 +1808,25 @@ router.get('/sessions/:id/stream', requireRole('admin'), asyncHandler(async (req
   req.on('close', () => { clearInterval(keepAlive); closeChannel(streamHandle); });
 }));
 
+// ---------------- 관리자: 지금 보고 있다(명시적 읽음) ----------------
+// 화면이 "이 세션을 열어둔 채 탭이 보이는 상태"일 때만 부른다. 서버는 연결 여부로 짐작하지
+// 않는다 — 그 짐작이 안읽음 배지를 무력화했다(위 stream 주석 참고).
+router.post('/sessions/:id/read', requireRole('admin'), asyncHandler(async (req, res) => {
+  const session = await db.get('SELECT id FROM chat_sessions WHERE id = ?', [req.params.id]);
+  if (!session) return res.status(404).json({ ok: false });
+  await markUserMessagesReadByAgent(session.id);
+  res.json({ ok: true });
+}));
+
 // ---------------- 관리자: 세션 상세 재연결 시 유실 메시지 보충용 ----------------
 router.get('/sessions/:id/poll', requireRole('admin'), asyncHandler(async (req, res) => {
-  await markUserMessagesReadByAgent(req.params.id);
+  // **여기서도 읽음 처리하지 않는다.**
+  //
+  // 이건 유실 메시지를 메우는 따라잡기 조회일 뿐이다. 7초마다 도는데 이게 읽음까지 하면,
+  // 상담관리를 띄워둔 사람이 아무도 안 보고 있어도 자동 선택된 첫 세션의 배지가 계속 지워진다
+  // — 스트림에서 걷어낸 것과 같은 문제가 조금 느리게 재현될 뿐이다.
+  // 읽음은 POST /sessions/:id/read(화면이 보이는 상태에서만 부른다)와 세션을 직접 고를 때
+  // 부르는 /sessions/:id/messages에만 맡긴다.
   const since = Number(req.query.since) || 0;
   const messages = await db.all('SELECT * FROM chat_messages WHERE session_id = ? AND id > ? ORDER BY id', [req.params.id, since]);
   const session = await db.get('SELECT status FROM chat_sessions WHERE id = ?', [req.params.id]);

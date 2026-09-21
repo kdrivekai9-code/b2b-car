@@ -296,6 +296,20 @@ export default function SessionViewer({
     });
   }
 
+  // 읽음은 사람이 한 일에만 붙인다 — 서버는 연결 여부로 짐작하지 않는다(routes/chat.js).
+  function markRead(id) {
+    fetch(`/chat/sessions/${id}/read`, { method: 'POST', headers: { 'X-Requested-With': 'fetch' } })
+      .catch(() => {});
+  }
+
+  // 뒤에 깔아둔 탭을 다시 열었을 때 — 그때 비로소 사람이 본 것이다.
+  useEffect(() => {
+    if (!sessionId) return undefined;
+    const onVisible = () => { if (document.visibilityState === 'visible') markRead(sessionId); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [sessionId]);
+
   function openStream(id) {
     if (streamRef.current) { streamRef.current.close(); streamRef.current = null; }
     if (!window.EventSource) return;
@@ -319,6 +333,12 @@ export default function SessionViewer({
       knownMessageIdsRef.current.add(payload.id);
       setMessages((prev) => [...prev, payload]);
       requestAnimationFrame(scrollToBottom);
+      // 고객 발화는 **탭이 실제로 보일 때만** 읽음으로 알린다.
+      //
+      // 예전에는 서버가 스트림 중계에서 곧바로 읽음 처리했는데, 이 스트림은 카드 보기가 첫
+      // 카드를 자동 선택하면서 열린다 — 사람이 자리에 없어도, 탭이 뒤에 깔려 있어도 질문이
+      // 도착 1초 만에 읽음이 됐다(실측 2026-09-21). 그래서 안읽음 배지가 영영 안 떴다.
+      if (payload.sender === 'user' && document.visibilityState === 'visible') markRead(id);
       // 고객이 AI 접수 챗봇에서 계속 답변하면 chat_sessions.draft_json이 갱신되는데, 접수
       // 마무리 패널(IntakeMiniForm)은 세션 선택 시 한 번만 불러오므로 새 메시지가 올 때마다
       // 호출부(CardBoard)가 draft를 다시 조회해 반영할 수 있도록 신호를 준다.

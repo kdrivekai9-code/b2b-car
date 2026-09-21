@@ -777,6 +777,14 @@
   function openStream(sessionId) {
     closeStream();
     if (!window.EventSource) return;
+    // 뒤에 깔아둔 탭을 다시 열었을 때 — 그때 비로소 사람이 본 것이다.
+    if (!visibilityBound) {
+      visibilityBound = true;
+      document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState === 'visible' && currentSessionId) markSessionRead(currentSessionId);
+      });
+    }
+    currentSessionId = sessionId;
     stream = new EventSource('/chat/sessions/' + sessionId + '/stream');
     stream.onmessage = function (e) {
       try {
@@ -789,10 +797,27 @@
         if (!rememberMessage(payload)) return;
         messagesEl.insertAdjacentHTML('beforeend', messageBubbleHtml(payload));
         messagesEl.scrollTop = messagesEl.scrollHeight;
+        // 고객 발화는 **탭이 실제로 보일 때만** 읽음으로 알린다.
+        //
+        // 예전에는 서버가 스트림 중계에서 곧바로 읽음 처리했는데, 이 스트림은 카드 보기가
+        // 첫 카드를 자동 선택하면서 열린다 — 사람이 자리에 없어도, 탭이 뒤에 깔려 있어도
+        // 질문이 도착 1초 만에 읽음이 됐다(실측 2026-09-21). 안읽음 배지가 영영 안 떴다.
+        // Next 판(src/app/chat/sessions/SessionViewer.js)과 같은 규칙이다.
+        if (payload.sender === 'user' && document.visibilityState === 'visible') markSessionRead(sessionId);
       } catch (err) {
         // noop
       }
     };
+  }
+
+  // 읽음은 사람이 한 일에만 붙인다 — 서버는 연결 여부로 짐작하지 않는다(routes/chat.js).
+  var visibilityBound = false;
+  var currentSessionId = null;
+  function markSessionRead(sessionId) {
+    if (!sessionId || !window.fetch) return;
+    fetch('/chat/sessions/' + sessionId + '/read', {
+      method: 'POST', headers: { 'X-Requested-With': 'fetch' },
+    }).catch(function () { /* 읽음 표시 실패가 대화를 막으면 안 된다 */ });
   }
 
   function fetchMessages(sessionId, options) {
