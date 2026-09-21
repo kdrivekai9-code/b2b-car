@@ -476,16 +476,109 @@ function withBotLabel(text) {
 // 답장(routes/chat.js deliverAgentReply)도 같은 방식이다 — chat_messages에는 원문만 남기고,
 // 카카오로 나가는 텍스트에만 "상담원 : 이름"을 붙인다.
 async function botSay(session, text, label) {
-  await insertMessage(session.id, 'bot', text);
-  return sendAndLog(session, text, label);
+  const stored = await insertMessage(session.id, 'bot', text);
+  // 발신이 실패하면 이 행을 다시 보낼 대상으로 남긴다(아래 sendAndLog).
+  return sendAndLog(session, text, label, stored && stored.id);
+}
+
+// ---------------- 미발송 재전송 큐 ----------------
+//
+// 봇 답변은 chat_messages에 이미 저장된다. 못 나간 것은 **배달**뿐이라 새 표를 만들지 않고
+// 그 행에 상태만 붙인다(마이그레이션 20260921050000).
+//
+// 한도: 이만큼 시도하고도 못 보내면 포기하고 사람이 보게 남긴다. 매분 도니까 10회면
+// 약 10분이다 — 그보다 늦게 닿는 답은 고객에게 이미 맥락이 없다.
+const KAKAO_RESEND_MAX_ATTEMPTS = 10;
+// 한 회차에 너무 많이 붙잡지 않는다(크론은 다른 일도 한다). 밀리면 다음 분에 이어서 한다.
+const KAKAO_RESEND_BATCH = 20;
+
+async function markSendPending(messageId, error) {
+  await db.run(
+    `UPDATE chat_messages
+        SET kakao_send_state = 'pending',
+            kakao_send_attempts = kakao_send_attempts + 1,
+            kakao_send_last_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS'),
+            kakao_send_error = ?
+      WHERE id = ?`,
+    [String(error || '').slice(0, 500), messageId]
+  ).catch((e) => {
+    if (e && e.code === '42703') return; // 마이그레이션 전 — 예전처럼 로그만 남는다
+    console.error('카카오 미발송 표시 실패:', e.message);
+  });
+}
+
+// 매분 크론이 부른다. 못 나간 봇 말풍선을 다시 보낸다.
+async function resendPendingKakaoMessages() {
+  let rows;
+  try {
+    rows = await db.all(
+      `SELECT m.id, m.message, m.kakao_send_attempts,
+              s.id AS session_id, s.kakao_service_key, s.kakao_user_key, s.kakao_event_key, s.status
+         FROM chat_messages m
+         JOIN chat_sessions s ON s.id = m.session_id
+        WHERE m.kakao_send_state = 'pending'
+        ORDER BY m.id
+        LIMIT ${KAKAO_RESEND_BATCH}`
+    );
+  } catch (e) {
+    if (e && e.code === '42703') return { pending: 0, sent: 0, gaveUp: 0, skipped: 'migration_missing' };
+    throw e;
+  }
+
+  let sent = 0;
+  let gaveUp = 0;
+  for (const row of rows) {
+    // 대화가 이미 닫혔으면 보내지 않는다 — 끝난 상담에 뒤늦게 봇 답이 튀어나오면
+    // 고객에게는 맥락 없는 말이 된다.
+    if (row.status === 'closed') {
+      await db.run(`UPDATE chat_messages SET kakao_send_state = 'failed' WHERE id = ?`, [row.id]).catch(() => {});
+      gaveUp += 1;
+      continue;
+    }
+    const result = await kakaoConsult.sendMessage(row, withBotLabel(row.message));
+    if (result.ok) {
+      await db.run(
+        `UPDATE chat_messages SET kakao_send_state = 'sent',
+                kakao_send_last_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS')
+          WHERE id = ?`,
+        [row.id]
+      ).catch(() => {});
+      sent += 1;
+      continue;
+    }
+    const attempts = Number(row.kakao_send_attempts || 0) + 1;
+    const done = attempts >= KAKAO_RESEND_MAX_ATTEMPTS;
+    await db.run(
+      `UPDATE chat_messages SET kakao_send_state = ?, kakao_send_attempts = ?,
+              kakao_send_last_at = to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS'),
+              kakao_send_error = ?
+        WHERE id = ?`,
+      [done ? 'failed' : 'pending', attempts, String(result.error || '').slice(0, 500), row.id]
+    ).catch(() => {});
+    if (done) {
+      gaveUp += 1;
+      // 포기한 것은 반드시 사람이 보게 남긴다 — 고객은 끝내 답을 못 받았다.
+      logIntegrationErrorAsync({
+        source: 'kakao', operation: 'send_giveup', refType: 'chat_session', refId: row.session_id,
+        message: `${KAKAO_RESEND_MAX_ATTEMPTS}회 재전송 실패 — 고객에게 전달되지 않았다: ${result.error}`,
+        context: { messageId: row.id, textHead: String(row.message || '').slice(0, 60) },
+      });
+    }
+  }
+  return { pending: rows.length, sent, gaveUp };
 }
 
 // 발신 실패는 고객에게는 보이지 않으니(카카오로 안 나간 채 우리 쪽 로그만 남는 상태) 반드시
 // 로그를 남겨야 운영 중 "봇이 답장을 안 한다"는 문의가 왔을 때 원인을 바로 알 수 있다.
-async function sendAndLog(session, text, label) {
+async function sendAndLog(session, text, label, messageId) {
   // 발신 직전에만 라벨을 붙인다 — botSay든 이 함수를 직접 부르는 호출부(인계 안내 등)든
   // 저장 텍스트는 항상 원문 그대로이므로, 여기서 한 번만 붙이면 모든 경로가 같은 라벨을 단다.
   const result = await kakaoConsult.sendMessage(session, withBotLabel(text));
+  if (!result.ok && messageId) {
+    // **다시 보낼 것으로 남긴다.** 그 자리 재시도(0.6초·1.8초)로 못 건진 경우다 — 회복까지
+    // 수 분이 걸리기도 해서(실측 09-21: 2분) 매분 크론이 이어받는다.
+    await markSendPending(messageId, result.error);
+  }
   if (!result.ok) {
     // 발신 실패는 고객 화면에만 안 보일 뿐 우리 대화창에는 봇 답변이 남아 정상처럼 보인다 —
     // 반드시 기록해야 "봇이 답을 안 한다"는 문의가 왔을 때 원인을 바로 찾을 수 있다.
@@ -2382,7 +2475,11 @@ router.get('/cron/order-notifications', asyncHandler(async (req, res) => {
   if (req.get('Authorization') !== `Bearer ${secret}`) return res.status(401).json({ error: 'Unauthorized' });
 
   const result = await runKakaoOrderNotifications();
-  res.json(result);
+  // 못 나간 봇 말풍선을 다시 보낸다 — 같은 매분 크론에 얹는다(크론을 새로 만들 이유가 없고,
+  // 둘 다 "카카오로 내보내는 일"이라 한자리에 있는 편이 읽기도 쉽다).
+  const resend = await resendPendingKakaoMessages()
+    .catch((e) => { console.error('카카오 미발송 재전송 실패:', e.message); return { error: e.message }; });
+  res.json({ ...result, resend });
 }));
 
 module.exports = router;
@@ -2398,6 +2495,8 @@ module.exports.announceOrderReceiptWithRouteFare = announceOrderReceiptWithRoute
 // 상담원 응대 중 초안 생성 — 실패가 console.error로만 남아 화면에는 아무 표시가 없다.
 // 실제로 16일간 초안이 0건이었는데 아무도 몰랐다(2026-08-24 발견). 검사에서 직접 부를 수 있게 노출한다.
 module.exports.createAgentSuggestion = createAgentSuggestion;
+// 미발송 재전송 — 크론을 띄우지 않고 검사에서 직접 부를 수 있게 노출한다.
+module.exports.resendPendingKakaoMessages = resendPendingKakaoMessages;
 // 도우미 대화 중의 답을 새 접수로 오인하는지 — 분류 결과만 있으면 판정할 수 있어 노출한다
 // (scripts/check-mcp-followup-guard.js).
 module.exports.hasIntakeSubstance = hasIntakeSubstance;
