@@ -130,7 +130,13 @@ export default async function IntegrationErrorsPage({ searchParams }) {
               <td>{repeated ? <span className="badge amber">{r.repeat_count}회</span> : 1}</td>
               <td>{r.source}</td><td>{r.operation}</td>
               <td>{r.ref_id ? `${r.ref_type} ${r.ref_id}` : '-'}</td>
-              <td>{r.error_code ? `[${r.error_code}] ` : ''}{r.message}</td>
+              {/* 복구 줄은 실패와 구분해 그린다 — 안 그러면 다 끝난 장애가 빨간 줄로 남아
+                  아직 진행 중인 것처럼 읽힌다(lib/systemAlert.js clearResolved가 남긴다). */}
+              <td>
+                {r.error_code === 'RECOVERED'
+                  ? <><span className="badge green">복구</span> {r.message}</>
+                  : <>{r.error_code ? `[${r.error_code}] ` : ''}{r.message}</>}
+              </td>
             </tr>
           );
         }}
