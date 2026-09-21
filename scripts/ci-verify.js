@@ -128,6 +128,7 @@ const CI_CHECKS = [
   'check-reservation-year-guess',
   'check-chat-detail-parity',
   'check-reservation-basis-saved',
+  'check-kakao-send-retry',
   'check-agent-request',
   'check-agent-idle-release',
   'check-chat-unread-badge',
