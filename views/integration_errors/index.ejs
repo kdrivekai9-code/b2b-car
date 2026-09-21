@@ -62,11 +62,21 @@
     <p class="page-sub" style="margin:0">기록 없음</p>
   <% } else { %>
     <table class="table">
-      <thead><tr><th style="width:150px">발생시각</th><th style="width:90px">연동</th><th style="width:130px">동작</th><th style="width:110px">대상</th><th>내용</th></tr></thead>
+      <thead><tr><th style="width:150px">발생시각</th><th style="width:60px">횟수</th><th style="width:90px">연동</th><th style="width:130px">동작</th><th style="width:110px">대상</th><th>내용</th></tr></thead>
       <tbody>
+        <%# 같은 오류가 이어지면 한 줄로 접힌다(lib/integrationLog.js). 그래서 시각은 "처음 ~ 마지막"이고
+            횟수가 따로 뜬다 — 접힌 줄을 한 번 난 것으로 읽으면 장애 규모를 놓친다.
+            Next 판(src/app/integration-errors/page.js)과 같은 규칙이다. %>
         <% unified.rows.forEach(function (r) { %>
+          <% var repeated = Number(r.repeat_count || 1) > 1; %>
           <tr>
-            <td><%= r.created_at %></td>
+            <td>
+              <%= r.created_at %>
+              <% if (repeated && r.last_seen_at && r.last_seen_at !== r.created_at) { %>
+                <div class="page-sub" style="margin:0;font-size:12px">~ <%= String(r.last_seen_at).slice(11) %></div>
+              <% } %>
+            </td>
+            <td><% if (repeated) { %><span class="badge amber"><%= r.repeat_count %>회</span><% } else { %>1<% } %></td>
             <td><%= r.source %></td>
             <td><%= r.operation %></td>
             <td><%= r.ref_id ? (r.ref_type + ' ' + r.ref_id) : '-' %></td>

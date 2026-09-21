@@ -113,14 +113,27 @@ export default async function IntegrationErrorsPage({ searchParams }) {
         title="🧾 통합 오류 로그 (integration_errors)"
         sub="상태동기화 크론 실패, 카카오 발신 실패, MCP 도구 예외처럼 다른 표에 남지 않는 실패입니다."
         section={unified}
-        head={<tr><th style={{ width: 150 }}>발생시각</th><th style={{ width: 90 }}>연동</th><th style={{ width: 130 }}>동작</th><th style={{ width: 110 }}>대상</th><th>내용</th></tr>}
-        row={(r, i) => (
-          <tr key={i}>
-            <td>{r.created_at}</td><td>{r.source}</td><td>{r.operation}</td>
-            <td>{r.ref_id ? `${r.ref_type} ${r.ref_id}` : '-'}</td>
-            <td>{r.error_code ? `[${r.error_code}] ` : ''}{r.message}</td>
-          </tr>
-        )}
+        head={<tr><th style={{ width: 150 }}>발생시각</th><th style={{ width: 60 }}>횟수</th><th style={{ width: 90 }}>연동</th><th style={{ width: 130 }}>동작</th><th style={{ width: 110 }}>대상</th><th>내용</th></tr>}
+        /* 같은 오류가 이어지면 한 줄로 접힌다(lib/integrationLog.js). 시각은 "처음 ~ 마지막"이고
+           횟수가 따로 뜬다 — 접힌 줄을 한 번 난 것으로 읽으면 장애 규모를 놓친다.
+           EJS 판(views/integration_errors/index.ejs)과 같은 규칙이다. */
+        row={(r, i) => {
+          const repeated = Number(r.repeat_count || 1) > 1;
+          return (
+            <tr key={i}>
+              <td>
+                {r.created_at}
+                {repeated && r.last_seen_at && r.last_seen_at !== r.created_at && (
+                  <div className="page-sub" style={{ margin: 0, fontSize: 12 }}>~ {String(r.last_seen_at).slice(11)}</div>
+                )}
+              </td>
+              <td>{repeated ? <span className="badge amber">{r.repeat_count}회</span> : 1}</td>
+              <td>{r.source}</td><td>{r.operation}</td>
+              <td>{r.ref_id ? `${r.ref_type} ${r.ref_id}` : '-'}</td>
+              <td>{r.error_code ? `[${r.error_code}] ` : ''}{r.message}</td>
+            </tr>
+          );
+        }}
       />
 
       <Section

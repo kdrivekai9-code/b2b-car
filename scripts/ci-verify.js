@@ -129,6 +129,7 @@ const CI_CHECKS = [
   'check-chat-detail-parity',
   'check-reservation-basis-saved',
   'check-kakao-send-retry',
+  'check-integration-error-folding',
   'check-agent-request',
   'check-agent-idle-release',
   'check-chat-unread-badge',

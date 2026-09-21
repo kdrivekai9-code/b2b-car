@@ -33,12 +33,18 @@ async function loadPageData(rangeKey, limit) {
   const since = `to_char((now() at time zone 'Asia/Seoul') - interval '${range.interval}', 'YYYY-MM-DD HH24:MI:SS')`;
 
   const [summary, unified, callmaner, mcp, kakao] = await Promise.all([
-    safeAll(`SELECT source, operation, count(*) AS cnt, max(created_at) AS last
+    // 줄 수가 아니라 **발생 횟수**를 센다 — 같은 오류가 접혀 한 줄이 되었으므로(repeat_count)
+    // count(*)로 세면 장애 규모가 실제보다 작아 보인다. 마지막 시각도 last_seen_at을 본다.
+    safeAll(`SELECT source, operation, sum(repeat_count) AS cnt,
+                    max(coalesce(last_seen_at, created_at)) AS last
              FROM integration_errors WHERE created_at >= ${since}
-             GROUP BY source, operation ORDER BY count(*) DESC`),
-    safeAll(`SELECT created_at, source, operation, ref_type, ref_id, error_code, message
+             GROUP BY source, operation ORDER BY sum(repeat_count) DESC`),
+    // 접힌 줄은 "처음 난 시각(created_at) ~ 마지막 시각(last_seen_at), N회"로 읽는다.
+    // 정렬은 마지막 시각 기준이다 — 계속 나고 있는 오류가 위로 와야 한다.
+    safeAll(`SELECT created_at, source, operation, ref_type, ref_id, error_code, message,
+                    repeat_count, coalesce(last_seen_at, created_at) AS last_seen_at
              FROM integration_errors WHERE created_at >= ${since}
-             ORDER BY id DESC LIMIT ${limit}`),
+             ORDER BY coalesce(last_seen_at, created_at) DESC, id DESC LIMIT ${limit}`),
     safeAll(`SELECT id, oid, callmaner_last_error_code AS code, callmaner_last_error AS err, created_at
              FROM orders WHERE callmaner_last_error IS NOT NULL AND created_at >= ${since}
              ORDER BY id DESC LIMIT ${limit}`),
